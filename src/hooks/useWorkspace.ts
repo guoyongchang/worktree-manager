@@ -1,0 +1,230 @@
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import type {
+  WorkspaceRef,
+  WorkspaceConfig,
+  WorktreeListItem,
+  MainWorkspaceStatus,
+  CreateProjectRequest,
+  WorktreeArchiveStatus,
+  EditorType,
+} from '../types';
+
+export interface UseWorkspaceReturn {
+  workspaces: WorkspaceRef[];
+  currentWorkspace: WorkspaceRef | null;
+  config: WorkspaceConfig | null;
+  worktrees: WorktreeListItem[];
+  mainWorkspace: MainWorkspaceStatus | null;
+  configPath: string;
+  loading: boolean;
+  error: string | null;
+  setError: (error: string | null) => void;
+  loadWorkspaces: () => Promise<void>;
+  loadData: () => Promise<void>;
+  switchWorkspace: (path: string) => Promise<void>;
+  addWorkspace: (name: string, path: string) => Promise<void>;
+  createWorkspace: (name: string, path: string) => Promise<void>;
+  removeWorkspace: (path: string) => Promise<void>;
+  createWorktree: (name: string, projects: CreateProjectRequest[]) => Promise<void>;
+  cloneProject: (project: {
+    name: string;
+    repo_url: string;
+    base_branch: string;
+    test_branch: string;
+    merge_strategy: string;
+    linked_folders: string[];
+  }) => Promise<void>;
+  archiveWorktree: (name: string) => Promise<void>;
+  restoreWorktree: (name: string) => Promise<void>;
+  checkWorktreeStatus: (name: string) => Promise<WorktreeArchiveStatus>;
+  openInEditor: (path: string, editor: EditorType) => Promise<void>;
+  openInTerminal: (path: string) => Promise<void>;
+  switchBranch: (projectPath: string, branch: string) => Promise<void>;
+  saveConfig: (config: WorkspaceConfig) => Promise<void>;
+}
+
+export function useWorkspace(): UseWorkspaceReturn {
+  const [workspaces, setWorkspaces] = useState<WorkspaceRef[]>([]);
+  const [currentWorkspace, setCurrentWorkspace] = useState<WorkspaceRef | null>(null);
+  const [config, setConfig] = useState<WorkspaceConfig | null>(null);
+  const [worktrees, setWorktrees] = useState<WorktreeListItem[]>([]);
+  const [mainWorkspace, setMainWorkspace] = useState<MainWorkspaceStatus | null>(null);
+  const [configPath, setConfigPath] = useState<string>('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const initialLoadDone = useRef(false);
+
+  const loadWorkspaces = useCallback(async () => {
+    try {
+      const [wsList, current] = await Promise.all([
+        invoke<WorkspaceRef[]>("list_workspaces"),
+        invoke<WorkspaceRef | null>("get_current_workspace"),
+      ]);
+      setWorkspaces(wsList);
+      setCurrentWorkspace(current);
+    } catch (e) {
+      setError(String(e));
+    }
+  }, []);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [cfg, wts, main, path] = await Promise.all([
+        invoke<WorkspaceConfig>("get_workspace_config"),
+        invoke<WorktreeListItem[]>("list_worktrees", { includeArchived: true }),
+        invoke<MainWorkspaceStatus>("get_main_workspace_status"),
+        invoke<string>("get_config_path_info"),
+      ]);
+      setConfig(cfg);
+      setWorktrees(wts);
+      setMainWorkspace(main);
+      setConfigPath(path);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (initialLoadDone.current) return;
+    initialLoadDone.current = true;
+    loadWorkspaces().then(() => loadData());
+  }, [loadWorkspaces, loadData]);
+
+  const switchWorkspace = useCallback(async (path: string) => {
+    try {
+      await invoke("switch_workspace", { path });
+      await loadWorkspaces();
+      await loadData();
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [loadWorkspaces, loadData]);
+
+  const addWorkspace = useCallback(async (name: string, path: string) => {
+    try {
+      await invoke("add_workspace", { name, path });
+      await loadWorkspaces();
+      await loadData();
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [loadWorkspaces, loadData]);
+
+  const createWorkspace = useCallback(async (name: string, path: string) => {
+    try {
+      await invoke("create_workspace", { name, path });
+      await loadWorkspaces();
+      await loadData();
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [loadWorkspaces, loadData]);
+
+  const removeWorkspace = useCallback(async (path: string) => {
+    try {
+      await invoke("remove_workspace", { path });
+      await loadWorkspaces();
+      await loadData();
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [loadWorkspaces, loadData]);
+
+  const createWorktree = useCallback(async (name: string, projects: CreateProjectRequest[]) => {
+    await invoke("create_worktree", { request: { name, projects } });
+    await loadData();
+  }, [loadData]);
+
+  const cloneProject = useCallback(async (project: {
+    name: string;
+    repo_url: string;
+    base_branch: string;
+    test_branch: string;
+    merge_strategy: string;
+    linked_folders: string[];
+  }) => {
+    await invoke("clone_project", { request: project });
+    await loadData();
+  }, [loadData]);
+
+  const archiveWorktree = useCallback(async (name: string) => {
+    await invoke("archive_worktree", { name });
+    await loadData();
+  }, [loadData]);
+
+  const restoreWorktree = useCallback(async (name: string) => {
+    try {
+      await invoke("restore_worktree", { name });
+      await loadData();
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [loadData]);
+
+  const checkWorktreeStatus = useCallback(async (name: string): Promise<WorktreeArchiveStatus> => {
+    return invoke<WorktreeArchiveStatus>("check_worktree_status", { name });
+  }, []);
+
+  const openInEditor = useCallback(async (path: string, editor: EditorType) => {
+    try {
+      await invoke("open_in_editor", { request: { path, editor } });
+    } catch (e) {
+      setError(String(e));
+    }
+  }, []);
+
+  const openInTerminal = useCallback(async (path: string) => {
+    try {
+      await invoke("open_in_terminal", { path });
+    } catch (e) {
+      console.error("Failed to open in Terminal:", e);
+    }
+  }, []);
+
+  const switchBranch = useCallback(async (projectPath: string, branch: string) => {
+    try {
+      await invoke("switch_branch", { request: { project_path: projectPath, branch } });
+      await loadData();
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [loadData]);
+
+  const saveConfig = useCallback(async (newConfig: WorkspaceConfig) => {
+    await invoke("save_workspace_config", { config: newConfig });
+    setConfig(newConfig);
+    await loadData();
+  }, [loadData]);
+
+  return {
+    workspaces,
+    currentWorkspace,
+    config,
+    worktrees,
+    mainWorkspace,
+    configPath,
+    loading,
+    error,
+    setError,
+    loadWorkspaces,
+    loadData,
+    switchWorkspace,
+    addWorkspace,
+    createWorkspace,
+    removeWorkspace,
+    createWorktree,
+    cloneProject,
+    archiveWorktree,
+    restoreWorktree,
+    checkWorktreeStatus,
+    openInEditor,
+    openInTerminal,
+    switchBranch,
+    saveConfig,
+  };
+}

@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>使用指南 - Git Worktree Manager</title>
+  <meta name="description" content="Git Worktree Manager 完整使用指南，包含安装、配置和最佳实践">
+  <meta name="keywords" content="Git Worktree, 使用指南, 教程, 多分支开发">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="使用指南 - Git Worktree Manager">
+  <meta property="og:description" content="完整使用指南，包含安装、配置和最佳实践">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="icons/app-icon.svg">
+  <link rel="apple-touch-icon" href="icons/128x128.png">
+
+  <!-- TailwindCSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#3b82f6',
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: #1e293b; }
+    ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+    .prose code {
+      background: #0d1117;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.9em;
+      color: #22c55e;
+    }
+
+    .prose pre {
+      background: #0d1117;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 1.25rem;
+      overflow-x: auto;
+    }
+
+    .prose pre code {
+      background: transparent;
+      padding: 0;
+      color: #e2e8f0;
+    }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100">
+
+  <!-- Navigation -->
+  <nav class="fixed top-0 w-full bg-slate-900/95 backdrop-blur-sm border-b border-slate-700 z-50">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6">
+      <div class="flex items-center justify-between h-16">
+        <div class="flex items-center gap-3">
+          <svg class="w-8 h-8" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+            <defs><linearGradient id="nav-bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#1d4ed8"/></linearGradient></defs>
+            <rect width="512" height="512" rx="100" fill="url(#nav-bg)"/>
+            <circle cx="256" cy="280" r="12" fill="white"/>
+            <circle cx="256" cy="340" r="12" fill="white"/>
+            <line x1="256" y1="292" x2="256" y2="328" stroke="white" stroke-width="3"/>
+          </svg>
+          <span class="text-xl font-bold">Worktree Manager</span>
+        </div>
+        <div class="hidden md:flex items-center gap-6">
+          <a href="index.html" class="text-slate-300 hover:text-blue-300 transition">首页</a>
+          <a href="guide.html" class="text-blue-400 hover:text-blue-300 transition">使用指南</a>
+          <a href="https://github.com/guoyongchang/worktree-manager" target="_blank" class="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition">
+            <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            GitHub
+          </a>
+        </div>
+        <button type="button" aria-label="打开菜单" class="md:hidden p-2 rounded-lg hover:bg-slate-800 transition" onclick="toggleMobileMenu()">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+          </svg>
+        </button>
+      </div>
+      <div id="mobile-menu" class="hidden md:hidden pb-4">
+        <a href="index.html" class="block py-2 text-slate-300 hover:text-blue-300">首页</a>
+        <a href="guide.html" class="block py-2 text-blue-400">使用指南</a>
+        <a href="https://github.com/guoyongchang/worktree-manager" target="_blank" class="block py-2 text-slate-300 hover:text-blue-300">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <main class="pt-24 pb-20">
+    <div class="max-w-4xl mx-auto px-4">
+
+      <!-- Header -->
+      <div class="mb-12">
+        <h1 class="text-4xl md:text-5xl font-bold mb-4">使用指南</h1>
+        <p class="text-xl text-slate-400">从安装到精通，全面了解 Git Worktree Manager</p>
+      </div>
+
+      <!-- Table of Contents -->
+      <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 mb-12">
+        <h2 class="text-xl font-bold mb-4 flex items-center gap-2">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"></path>
+          </svg>
+          目录
+        </h2>
+        <nav class="space-y-2 text-slate-300">
+          <a href="#installation" class="block hover:text-blue-400 transition">1. 安装与启动</a>
+          <a href="#getting-started" class="block hover:text-blue-400 transition">2. 快速上手</a>
+          <a href="#workspace" class="block hover:text-blue-400 transition">3. 工作区管理</a>
+          <a href="#worktree" class="block hover:text-blue-400 transition">4. Worktree 操作</a>
+          <a href="#configuration" class="block hover:text-blue-400 transition">5. 配置详解</a>
+          <a href="#best-practices" class="block hover:text-blue-400 transition">6. 最佳实践</a>
+          <a href="#troubleshooting" class="block hover:text-blue-400 transition">7. 常见问题</a>
+        </nav>
+      </div>
+
+      <!-- Content Sections -->
+      <div class="prose prose-invert max-w-none space-y-16">
+
+        <!-- Installation -->
+        <section id="installation">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">1</span>
+            安装与启动
+          </h2>
+
+          <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 mb-6">
+            <h3 class="text-xl font-semibold mb-4">环境要求</h3>
+            <ul class="space-y-2 text-slate-300">
+              <li class="flex items-start gap-2">
+                <span class="text-green-400 mt-1">✓</span>
+                <span><strong>Node.js</strong> 20+ (<a href="https://nodejs.org" class="text-blue-400 hover:underline">下载安装</a>)</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <span class="text-green-400 mt-1">✓</span>
+                <span><strong>Rust</strong> 1.70+ (<a href="https://rustup.rs" class="text-blue-400 hover:underline">安装指南</a>)</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <span class="text-green-400 mt-1">✓</span>
+                <span><strong>Git</strong> 2.0+（命令行可用）</span>
+              </li>
+            </ul>
+          </div>
+
+          <h3 class="text-xl font-semibold mb-4">安装步骤</h3>
+          <pre class="mb-4"><code># 1. 克隆项目
+git clone https://github.com/guoyongchang/worktree-manager.git
+cd worktree-manager
+
+# 2. 安装依赖
+npm install
+
+# 3. 开发模式运行
+npm run tauri dev
+
+# 4. 构建生产版本（可选）
+npm run tauri build</code></pre>
+
+          <div class="bg-blue-900/20 border border-blue-700 rounded-lg p-4">
+            <p class="text-blue-200"><strong>💡 提示：</strong>首次运行可能需要几分钟下载 Rust 依赖，请耐心等待。</p>
+          </div>
+        </section>
+
+        <!-- Getting Started -->
+        <section id="getting-started">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">2</span>
+            快速上手
+          </h2>
+
+          <div class="space-y-6">
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-3 flex items-center gap-2">
+                <span class="flex items-center justify-center w-8 h-8 bg-blue-600 rounded-full text-sm">1</span>
+                创建工作区
+              </h3>
+              <p class="text-slate-300 mb-4">启动应用后，首次使用需要创建或导入工作区：</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li><strong>新建工作区</strong>：选择一个空目录，应用会自动初始化</li>
+                <li><strong>导入现有项目</strong>：选择包含 Git 项目的目录</li>
+              </ul>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-3 flex items-center gap-2">
+                <span class="flex items-center justify-center w-8 h-8 bg-blue-600 rounded-full text-sm">2</span>
+                添加项目
+              </h3>
+              <p class="text-slate-300 mb-4">在工作区中添加 Git 项目，支持三种方式：</p>
+              <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                  <thead>
+                    <tr class="border-b border-slate-600">
+                      <th class="py-2 px-4">方式</th>
+                      <th class="py-2 px-4">格式</th>
+                      <th class="py-2 px-4">示例</th>
+                    </tr>
+                  </thead>
+                  <tbody class="text-slate-300">
+                    <tr class="border-b border-slate-700">
+                      <td class="py-2 px-4">GitHub 简写</td>
+                      <td class="py-2 px-4"><code>owner/repo</code></td>
+                      <td class="py-2 px-4"><code>facebook/react</code></td>
+                    </tr>
+                    <tr class="border-b border-slate-700">
+                      <td class="py-2 px-4">SSH</td>
+                      <td class="py-2 px-4"><code>git@host:owner/repo.git</code></td>
+                      <td class="py-2 px-4"><code>git@github.com:facebook/react.git</code></td>
+                    </tr>
+                    <tr>
+                      <td class="py-2 px-4">HTTPS</td>
+                      <td class="py-2 px-4"><code>https://host/owner/repo.git</code></td>
+                      <td class="py-2 px-4"><code>https://github.com/facebook/react.git</code></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-3 flex items-center gap-2">
+                <span class="flex items-center justify-center w-8 h-8 bg-blue-600 rounded-full text-sm">3</span>
+                创建 Worktree
+              </h3>
+              <p class="text-slate-300 mb-4">点击侧边栏的 <code>+</code> 按钮，按照向导创建：</p>
+              <ol class="list-decimal list-inside space-y-2 text-slate-300">
+                <li>输入分支名称（如 <code>feature/login</code>）</li>
+                <li>选择基于哪个分支创建（默认 <code>main</code>）</li>
+                <li>选择要包含的项目</li>
+                <li>配置需要链接的文件夹（如 <code>node_modules</code>）</li>
+                <li>点击"创建"，等待完成</li>
+              </ol>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-3 flex items-center gap-2">
+                <span class="flex items-center justify-center w-8 h-8 bg-blue-600 rounded-full text-sm">4</span>
+                开始开发
+              </h3>
+              <p class="text-slate-300 mb-4">在 Worktree 列表中：</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li>点击<strong>打开 IDE</strong>：用 VS Code / Cursor / IDEA 打开</li>
+                <li>点击<strong>终端</strong>：在内置终端中运行命令</li>
+                <li>点击<strong>文件夹图标</strong>：在文件管理器中打开</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <!-- Workspace -->
+        <section id="workspace">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">3</span>
+            工作区管理
+          </h2>
+
+          <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 mb-6">
+            <h3 class="text-xl font-semibold mb-4">目录结构</h3>
+            <pre><code>workspace/
+├── .worktree-manager.json    # 工作区配置
+├── projects/                 # 主仓库目录
+│   ├── frontend/             # Git 项目 (main 分支)
+│   └── backend/
+├── worktrees/                # Worktree 目录
+│   ├── feature-login/
+│   │   ├── projects/
+│   │   │   ├── frontend/     # 独立分支的工作目录
+│   │   │   └── backend/
+│   │   ├── .claude → ../../.claude    # 软链接
+│   │   └── CLAUDE.md → ../../CLAUDE.md
+│   └── hotfix-bug/
+│       └── ...
+├── .claude/                  # 全局共享文件
+└── CLAUDE.md</code></pre>
+          </div>
+
+          <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+            <h3 class="text-xl font-semibold mb-4">全局文件共享</h3>
+            <p class="text-slate-300 mb-4">在工作区配置中设置 <code>linked_workspace_items</code>，这些文件/文件夹会自动链接到所有 Worktree：</p>
+            <pre><code>{
+  "linked_workspace_items": [
+    ".claude",
+    "CLAUDE.md",
+    "requirement-docs"
+  ]
+}</code></pre>
+            <p class="text-slate-300 mt-4">适用于 AI 辅助开发配置、需求文档等跨分支共享的资源。</p>
+          </div>
+        </section>
+
+        <!-- Worktree Operations -->
+        <section id="worktree">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">4</span>
+            Worktree 操作
+          </h2>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-lg font-semibold mb-3">🔄 切换分支</h3>
+              <p class="text-slate-300 text-sm">在列表中点击不同的 Worktree 即可切换，无需 <code>git checkout</code></p>
+            </div>
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-lg font-semibold mb-3">📊 状态监控</h3>
+              <p class="text-slate-300 text-sm">实时显示提交数、未提交更改、是否合并到测试分支</p>
+            </div>
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-lg font-semibold mb-3">🗑️ 归档 Worktree</h3>
+              <p class="text-slate-300 text-sm">完成开发后可归档，会先检查未提交/未推送的代码，避免丢失</p>
+            </div>
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-lg font-semibold mb-3">♻️ 恢复归档</h3>
+              <p class="text-slate-300 text-sm">从归档列表中一键恢复之前的 Worktree</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Configuration -->
+        <section id="configuration">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">5</span>
+            配置详解
+          </h2>
+
+          <div class="space-y-6">
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">全局配置</h3>
+              <p class="text-slate-300 mb-3">位置：<code>~/.config/worktree-manager/global.json</code></p>
+              <pre><code>{
+  "workspaces": [
+    { "name": "我的项目", "path": "/path/to/workspace" }
+  ],
+  "current_workspace": "/path/to/workspace"
+}</code></pre>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">工作区配置</h3>
+              <p class="text-slate-300 mb-3">位置：<code>{workspace}/.worktree-manager.json</code></p>
+              <pre><code>{
+  "name": "我的项目",
+  "worktrees_dir": "worktrees",
+  "linked_workspace_items": [".claude", "CLAUDE.md"],
+  "projects": [
+    {
+      "name": "frontend",
+      "base_branch": "main",
+      "test_branch": "test",
+      "merge_strategy": "merge",
+      "linked_folders": ["node_modules", ".next"]
+    }
+  ]
+}</code></pre>
+              <div class="mt-4 space-y-2 text-sm">
+                <p class="text-slate-300"><strong>worktrees_dir</strong>: Worktree 存放目录</p>
+                <p class="text-slate-300"><strong>linked_workspace_items</strong>: 全局共享文件</p>
+                <p class="text-slate-300"><strong>linked_folders</strong>: 项目级文件夹链接</p>
+                <p class="text-slate-300"><strong>merge_strategy</strong>: 合并策略 (<code>merge</code> 或 <code>rebase</code>)</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Best Practices -->
+        <section id="best-practices">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">6</span>
+            最佳实践
+          </h2>
+
+          <div class="space-y-4">
+            <div class="bg-gradient-to-r from-green-900/20 to-slate-800 border border-green-700 rounded-xl p-6">
+              <h3 class="text-lg font-semibold mb-2 text-green-400">✅ 推荐做法</h3>
+              <ul class="space-y-2 text-slate-300">
+                <li>• 为每个需求/功能创建独立的 Worktree</li>
+                <li>• 使用统一的分支命名规范（如 <code>feature/xxx</code>、<code>hotfix/xxx</code>）</li>
+                <li>• 定期归档已合并的 Worktree，保持列表整洁</li>
+                <li>• 将常用的依赖目录加入 <code>linked_folders</code></li>
+                <li>• 使用内置终端，避免路径混淆</li>
+              </ul>
+            </div>
+
+            <div class="bg-gradient-to-r from-red-900/20 to-slate-800 border border-red-700 rounded-xl p-6">
+              <h3 class="text-lg font-semibold mb-2 text-red-400">⚠️ 避免做法</h3>
+              <ul class="space-y-2 text-slate-300">
+                <li>• 不要手动删除 Worktree 目录，请使用归档功能</li>
+                <li>• 不要在多个 Worktree 中同时修改同一个文件（链接的文件除外）</li>
+                <li>• 不要链接会产生冲突的文件（如 <code>.env</code>）</li>
+                <li>• 避免创建过多 Worktree（建议不超过 10 个）</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <!-- Troubleshooting -->
+        <section id="troubleshooting">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">7</span>
+            常见问题
+          </h2>
+
+          <div class="space-y-4">
+            <details class="bg-slate-800 border border-slate-700 rounded-xl p-6 cursor-pointer">
+              <summary class="font-semibold text-lg">Q: 创建 Worktree 失败怎么办？</summary>
+              <div class="mt-4 text-slate-300 space-y-2">
+                <p><strong>可能原因：</strong></p>
+                <ul class="list-disc list-inside">
+                  <li>分支名已存在</li>
+                  <li>Git 仓库有未提交的更改</li>
+                  <li>磁盘空间不足</li>
+                </ul>
+                <p class="mt-3"><strong>解决方案：</strong>检查错误提示，确保主仓库状态干净，或手动运行 <code>git worktree add</code> 查看详细错误。</p>
+              </div>
+            </details>
+
+            <details class="bg-slate-800 border border-slate-700 rounded-xl p-6 cursor-pointer">
+              <summary class="font-semibold text-lg">Q: 软链接失效/找不到文件？</summary>
+              <div class="mt-4 text-slate-300 space-y-2">
+                <p>检查 <code>linked_folders</code> 配置是否正确，确保主仓库中对应的文件夹存在。在终端中运行：</p>
+                <pre><code>ls -la worktrees/your-worktree/</code></pre>
+                <p>查看链接是否正常。如果链接损坏，可以删除后重新创建 Worktree。</p>
+              </div>
+            </details>
+
+            <details class="bg-slate-800 border border-slate-700 rounded-xl p-6 cursor-pointer">
+              <summary class="font-semibold text-lg">Q: 如何在多台电脑间同步工作区？</summary>
+              <div class="mt-4 text-slate-300 space-y-2">
+                <p>工作区配置存储在 <code>.worktree-manager.json</code>，可以加入版本控制：</p>
+                <pre><code>git add .worktree-manager.json
+git commit -m "Add worktree config"
+git push</code></pre>
+                <p>在其他电脑上 pull 后，工作区会自动识别配置。</p>
+              </div>
+            </details>
+
+            <details class="bg-slate-800 border border-slate-700 rounded-xl p-6 cursor-pointer">
+              <summary class="font-semibold text-lg">Q: 归档的 Worktree 可以恢复吗？</summary>
+              <div class="mt-4 text-slate-300 space-y-2">
+                <p>可以！在归档列表中找到对应的 Worktree，点击"恢复"即可。注意恢复后分支状态可能与归档时不同（如果远程有更新）。</p>
+              </div>
+            </details>
+
+            <details class="bg-slate-800 border border-slate-700 rounded-xl p-6 cursor-pointer">
+              <summary class="font-semibold text-lg">Q: 支持哪些操作系统？</summary>
+              <div class="mt-4 text-slate-300 space-y-2">
+                <p>目前支持：</p>
+                <ul class="list-disc list-inside">
+                  <li>✅ macOS (Intel + Apple Silicon)</li>
+                  <li>✅ Linux (Ubuntu, Debian, Arch 等)</li>
+                  <li>⚠️ Windows (实验性支持，软链接需要管理员权限)</li>
+                </ul>
+              </div>
+            </details>
+          </div>
+        </section>
+
+      </div>
+
+      <!-- CTA -->
+      <div class="mt-16 bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-700 rounded-xl p-8 text-center">
+        <h3 class="text-2xl font-bold mb-3">还有疑问？</h3>
+        <p class="text-slate-300 mb-6">欢迎在 GitHub 上提 Issue 或参与讨论</p>
+        <div class="flex gap-3 justify-center flex-wrap">
+          <a href="https://github.com/guoyongchang/worktree-manager/issues" target="_blank" class="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition">
+            提交问题
+          </a>
+          <a href="https://github.com/guoyongchang/worktree-manager/discussions" target="_blank" class="inline-flex items-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white rounded-lg font-medium transition">
+            加入讨论
+          </a>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="text-center py-12 px-4 border-t border-slate-700">
+    <div class="max-w-5xl mx-auto">
+      <p class="text-slate-400">
+        <a href="https://github.com/guoyongchang/worktree-manager" class="text-blue-400 hover:text-blue-300">GitHub</a>
+        <span class="mx-2">·</span>
+        <a href="https://github.com/guoyongchang/worktree-manager/issues" class="text-blue-400 hover:text-blue-300">反馈问题</a>
+        <span class="mx-2">·</span>
+        <a href="index.html" class="text-blue-400 hover:text-blue-300">返回首页</a>
+        <span class="mx-2">·</span>
+        <span>MIT License</span>
+      </p>
+      <p class="mt-4 text-slate-500">Made with ❤️ using Tauri + React + Rust</p>
+      <p class="mt-2 text-xs text-slate-600">© 2024 Worktree Manager Team</p>
+    </div>
+  </footer>
+
+  <script>
+    function toggleMobileMenu() {
+      const menu = document.getElementById('mobile-menu');
+      menu.classList.toggle('hidden');
+    }
+
+    // Smooth scroll for anchor links
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+      anchor.addEventListener('click', function (e) {
+        e.preventDefault();
+        const target = document.querySelector(this.getAttribute('href'));
+        if (target) {
+          const offset = 80; // nav height
+          const targetPosition = target.offsetTop - offset;
+          window.scrollTo({
+            top: targetPosition,
+            behavior: 'smooth'
+          });
+        }
+      });
+    });
+  </script>
+
+</body>
+</html>

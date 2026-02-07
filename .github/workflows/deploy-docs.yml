@@ -1,0 +1,50 @@
+name: Deploy Documentation to GitHub Pages
+
+on:
+  # 监听 main 分支的 push 事件
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs/**'
+      - '.github/workflows/deploy-docs.yml'
+
+  # 支持手动触发
+  workflow_dispatch:
+
+# 配置正确的 Pages 权限
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 确保同一时间只有一个部署任务运行
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to GitHub Pages
+    runs-on: ubuntu-latest
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          # 从 docs 目录部署静态文件
+          path: './docs'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

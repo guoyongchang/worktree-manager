@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Git Worktree Manager - 多分支并行开发工具</title>
+  <meta name="description" content="一个优雅的 Git Worktree 可视化管理工具，让多分支并行开发变得简单高效。支持智能文件夹链接、内置终端、多IDE快速打开。">
+  <meta name="keywords" content="Git Worktree, Git 分支管理, 多分支开发, Tauri, React, 开发工具">
+  <meta name="author" content="Worktree Manager Team">
+
+  <!-- Open Graph / Social Media -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://github.com/guoyongchang/worktree-manager">
+  <meta property="og:title" content="Git Worktree Manager - 多分支并行开发工具">
+  <meta property="og:description" content="一个优雅的 Git Worktree 可视化管理工具，让多分支并行开发变得简单高效">
+  <meta property="og:image" content="https://guoyongchang.github.io/worktree-manager/icons/icon.png">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Git Worktree Manager">
+  <meta name="twitter:description" content="优雅的 Git Worktree 可视化管理工具">
+  <meta name="twitter:image" content="https://guoyongchang.github.io/worktree-manager/icons/icon.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="icons/app-icon.svg">
+  <link rel="apple-touch-icon" href="icons/128x128.png">
+
+  <!-- TailwindCSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#3b82f6',
+            'primary-hover': '#2563eb',
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    /* Custom scrollbar */
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: #1e293b; }
+    ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+    /* Feature Cards */
+    .feature-card {
+      background-color: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 0.75rem;
+      padding: 1.5rem;
+      transition: all 0.3s;
+    }
+    .feature-card:hover {
+      border-color: rgba(59, 130, 246, 0.5);
+      box-shadow: 0 10px 15px -3px rgba(59, 130, 246, 0.1);
+    }
+    .feature-icon {
+      font-size: 2.25rem;
+      margin-bottom: 1rem;
+    }
+    .feature-card h3 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      color: #f1f5f9;
+    }
+    .feature-card p {
+      color: #94a3b8;
+      font-size: 0.875rem;
+      line-height: 1.625;
+    }
+
+    /* Steps */
+    .steps {
+      max-width: 48rem;
+      margin: 0 auto 3rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+    .step {
+      display: flex;
+      gap: 1rem;
+      align-items: flex-start;
+    }
+    .step-number {
+      flex-shrink: 0;
+      width: 2.5rem;
+      height: 2.5rem;
+      border-radius: 9999px;
+      background: linear-gradient(to bottom right, #3b82f6, #1d4ed8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 700;
+      font-size: 1.125rem;
+    }
+    .step h3 {
+      font-size: 1.125rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      color: #f1f5f9;
+    }
+    .step p {
+      color: #94a3b8;
+      line-height: 1.625;
+    }
+
+    /* Directory Tree */
+    .tree-section {
+      margin-top: 3rem;
+      background-color: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 0.75rem;
+      padding: 1.5rem;
+    }
+    .tree-section h3 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      color: #f1f5f9;
+    }
+    .tree {
+      background-color: #020617;
+      border-radius: 0.5rem;
+      padding: 1rem;
+      overflow-x: auto;
+    }
+    .tree pre {
+      font-size: 0.875rem;
+      font-family: ui-monospace, monospace;
+      color: #cbd5e1;
+      line-height: 1.625;
+    }
+    .tree .dir {
+      color: #60a5fa;
+      font-weight: 600;
+    }
+    .tree .link {
+      color: #4ade80;
+    }
+    .tree .comment {
+      color: #64748b;
+      font-style: italic;
+    }
+
+    /* Code Block */
+    .code-block {
+      margin-top: 2rem;
+      background-color: #020617;
+      border: 1px solid #334155;
+      border-radius: 0.75rem;
+      padding: 1.5rem;
+      font-family: ui-monospace, monospace;
+      font-size: 0.875rem;
+      overflow-x: auto;
+    }
+    .code-comment {
+      color: #64748b;
+      display: block;
+      margin-bottom: 0.25rem;
+    }
+    .code-cmd {
+      color: #60a5fa;
+      display: block;
+      margin-bottom: 0.75rem;
+    }
+
+    /* Tech Grid */
+    .tech-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1rem;
+    }
+    @media (min-width: 768px) {
+      .tech-grid {
+        grid-template-columns: repeat(3, 1fr);
+      }
+    }
+    .tech-item {
+      background-color: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 0.5rem;
+      padding: 1rem;
+      text-align: center;
+      transition: border-color 0.2s;
+    }
+    .tech-item:hover {
+      border-color: rgba(59, 130, 246, 0.5);
+    }
+    .tech-label {
+      display: block;
+      font-size: 0.75rem;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.25rem;
+    }
+    .tech-value {
+      display: block;
+      font-size: 1.125rem;
+      font-weight: 600;
+      color: #f1f5f9;
+    }
+
+    /* Container */
+    .container {
+      max-width: 72rem;
+      margin: 0 auto;
+      padding: 0 1rem;
+    }
+
+    /* Section Headers */
+    section h2 {
+      font-size: 1.875rem;
+      font-weight: 700;
+      margin-bottom: 0.75rem;
+    }
+    @media (min-width: 768px) {
+      section h2 {
+        font-size: 2.25rem;
+      }
+    }
+    section > div > h2 {
+      text-align: center;
+    }
+    section > div > p:first-of-type {
+      text-align: center;
+      color: #94a3b8;
+      font-size: 1.125rem;
+      margin-bottom: 3rem;
+    }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100">
+
+  <!-- Navigation -->
+  <nav class="fixed top-0 w-full bg-slate-900/95 backdrop-blur-sm border-b border-slate-700 z-50">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6">
+      <div class="flex items-center justify-between h-16">
+        <div class="flex items-center gap-3">
+          <img src="icons/app-icon.svg" alt="Worktree Manager" class="w-8 h-8">
+          <span class="text-xl font-bold">Worktree Manager</span>
+        </div>
+        <div class="hidden md:flex items-center gap-6">
+          <a href="index.html" class="text-blue-400 hover:text-blue-300 transition">首页</a>
+          <a href="guide.html" class="text-slate-300 hover:text-blue-300 transition">使用指南</a>
+          <a href="https://github.com/guoyongchang/worktree-manager" target="_blank" class="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition">
+            <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            GitHub
+          </a>
+        </div>
+        <!-- Mobile menu button -->
+        <button type="button" aria-label="打开菜单" class="md:hidden p-2 rounded-lg hover:bg-slate-800 transition" onclick="toggleMobileMenu()">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+          </svg>
+        </button>
+      </div>
+      <!-- Mobile menu -->
+      <div id="mobile-menu" class="hidden md:hidden pb-4">
+        <a href="index.html" class="block py-2 text-blue-400">首页</a>
+        <a href="guide.html" class="block py-2 text-slate-300 hover:text-blue-300">使用指南</a>
+        <a href="https://github.com/guoyongchang/worktree-manager" target="_blank" class="block py-2 text-slate-300 hover:text-blue-300">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <header class="pt-32 pb-20 px-4 text-center bg-gradient-to-b from-slate-800 to-slate-900">
+    <img src="icons/app-icon.svg" alt="Worktree Manager" class="w-24 h-24 mx-auto mb-6">
+    <h1 class="text-4xl md:text-5xl font-bold mb-4">Git Worktree Manager</h1>
+    <p class="text-xl text-slate-400 max-w-2xl mx-auto mb-8">一个优雅的 Git Worktree 可视化管理工具，让多分支并行开发变得简单高效</p>
+    <div class="flex gap-3 justify-center flex-wrap">
+      <a href="https://github.com/guoyongchang/worktree-manager" class="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition">
+        <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+      <a href="guide.html" class="inline-flex items-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white rounded-lg font-medium transition">快速开始</a>
+    </div>
+  </header>
+
+  <!-- Pain Points -->
+  <section class="py-16">
+    <div class="max-w-5xl mx-auto px-4">
+      <h2 class="text-3xl font-bold mb-3">你是否遇到过这些烦恼？</h2>
+      <p class="text-slate-400 mb-10 text-lg">多分支开发中的常见痛点</p>
+      <div class="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+        <div class="p-6 border-b border-slate-700">
+          <div class="font-semibold mb-2 flex items-center gap-2">🔥 紧急修 Bug</div>
+          <p class="text-slate-400 text-sm">正在开发新功能，突然要切到 hotfix 分支修线上 bug。<code class="bg-slate-950 px-2 py-0.5 rounded text-sm font-mono">git stash</code> 暂存代码，修完再切回来，结果 <code class="bg-slate-950 px-2 py-0.5 rounded text-sm font-mono">node_modules</code> 要重新装一遍...</p>
+        </div>
+        <div class="p-6 border-b border-slate-700">
+          <div class="font-semibold mb-2 flex items-center gap-2">⏳ 多任务并行</div>
+          <p class="text-slate-400 text-sm">同时负责两个需求，来回切换分支，每次都要等 <code class="bg-slate-950 px-2 py-0.5 rounded text-sm font-mono">npm install</code>、等构建缓存重建。一天下来光等编译就花了一小时。</p>
+        </div>
+        <div class="p-6">
+          <div class="font-semibold mb-2 flex items-center gap-2">💾 磁盘空间浪费</div>
+          <p class="text-slate-400 text-sm">为了同时运行两个分支，只能 clone 两份代码。磁盘空间翻倍不说，还得维护两套环境。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Solution -->
+  <section class="py-16 bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900">
+    <div class="max-w-5xl mx-auto px-4 text-center">
+      <h2 class="text-3xl font-bold mb-3">Git Worktree Manager 让这些问题迎刃而解</h2>
+      <p class="text-slate-400 text-lg max-w-2xl mx-auto mt-3">
+        利用 Git 原生的 <a href="https://git-scm.com/docs/git-worktree" class="text-blue-400 hover:underline">worktree</a> 功能，在同一个仓库中同时检出多个分支。每个分支有独立的工作目录，共享 <code class="bg-slate-950 px-2 py-0.5 rounded text-sm font-mono">.git</code> 数据，还能自动链接 <code class="bg-slate-950 px-2 py-0.5 rounded text-sm font-mono">node_modules</code> 等大文件夹，节省磁盘空间。
+      </p>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="py-20 bg-slate-900">
+    <div class="max-w-6xl mx-auto px-4">
+      <h2 class="text-3xl md:text-4xl font-bold mb-3 text-center">核心功能</h2>
+      <p class="text-slate-400 text-lg mb-12 text-center">为多分支开发量身打造</p>
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div class="feature-card">
+          <div class="feature-icon">🔀</div>
+          <h3>多分支并行工作</h3>
+          <p>一个项目同时打开多个分支，互不干扰。不用 stash，不用 clone 多份。</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🔗</div>
+          <h3>智能文件夹链接</h3>
+          <p>自动链接 node_modules、.next、vendor 等构建产物，避免重复安装依赖。支持自定义路径。</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">📂</div>
+          <h3>全局文件共享</h3>
+          <p>.claude、CLAUDE.md、requirement-docs 等文件可配置为全局链接，在所有 worktree 中共享。</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">📊</div>
+          <h3>分支状态监控</h3>
+          <p>实时显示提交数、未提交更改、是否合并到测试分支等信息，一目了然。</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🚀</div>
+          <h3>快速打开 IDE</h3>
+          <p>一键用 VS Code、Cursor 或 IntelliJ IDEA 打开任意 worktree。</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">💻</div>
+          <h3>内置终端</h3>
+          <p>每个 worktree 有独立的终端会话，无需在多个窗口之间切换。</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">📦</div>
+          <h3>安全归档</h3>
+          <p>归档前自动检查未提交和未推送的代码，防止丢失。支持一键恢复。</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🔌</div>
+          <h3>多种克隆方式</h3>
+          <p>支持 GitHub 简写、SSH 和 HTTPS 三种方式添加项目。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section class="py-20 bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900">
+    <div class="container">
+      <h2>三步上手</h2>
+      <p>简单几步，开始多分支并行开发</p>
+      <div class="steps">
+        <div class="step">
+          <div class="step-number">1</div>
+          <div>
+            <h3>创建工作区</h3>
+            <p>启动应用后，导入你的项目目录，或者新建一个 Workspace。应用会自动识别目录中的 Git 项目。</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-number">2</div>
+          <div>
+            <h3>新建 Worktree</h3>
+            <p>点击侧边栏的 "+" 按钮，输入分支名（如 feature/login），选择需要包含的项目，一键创建。node_modules 等文件夹会自动链接。</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-number">3</div>
+          <div>
+            <h3>开始开发</h3>
+            <p>在列表中切换 worktree，用你喜欢的 IDE 打开。各分支的代码、依赖、终端完全隔离，互不干扰。</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Directory Tree -->
+      <div class="tree-section">
+        <h3>工作区目录结构</h3>
+        <div class="tree">
+<pre>
+<span class="dir">workspace/</span>
+├── .worktree-manager.json        <span class="comment"># 工作区配置</span>
+├── <span class="dir">projects/</span>                     <span class="comment"># 主仓库（main 分支）</span>
+│   ├── <span class="dir">frontend/</span>
+│   └── <span class="dir">backend/</span>
+├── <span class="dir">worktrees/</span>                    <span class="comment"># Worktree 目录（自动创建）</span>
+│   ├── <span class="dir">feature-login/</span>
+│   │   ├── <span class="dir">projects/</span>
+│   │   │   ├── <span class="dir">frontend/</span>         <span class="comment"># 独立分支的工作目录</span>
+│   │   │   └── <span class="dir">backend/</span>
+│   │   ├── <span class="link">.claude → ../../.claude</span>   <span class="comment"># 自动链接</span>
+│   │   └── <span class="link">CLAUDE.md → ../../CLAUDE.md</span>
+│   └── <span class="dir">hotfix-bug/</span>
+│       └── ...
+├── <span class="dir">.claude/</span>
+└── CLAUDE.md</pre>
+        </div>
+      </div>
+
+      <!-- Install -->
+      <div class="code-block">
+<span class="code-comment"># 克隆项目</span>
+<span class="code-cmd">git clone https://github.com/guoyongchang/worktree-manager.git</span>
+<span class="code-cmd">cd worktree-manager</span>
+
+<span class="code-comment"># 安装依赖</span>
+<span class="code-cmd">npm install</span>
+
+<span class="code-comment"># 开发模式运行</span>
+<span class="code-cmd">npm run tauri dev</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Tech Stack -->
+  <section class="py-20 bg-slate-900">
+    <div class="container">
+      <h2>技术栈</h2>
+      <p>基于现代技术构建</p>
+      <div class="tech-grid">
+        <div class="tech-item">
+          <span class="tech-label">框架</span>
+          <span class="tech-value">Tauri 2</span>
+        </div>
+        <div class="tech-item">
+          <span class="tech-label">前端</span>
+          <span class="tech-value">React 19</span>
+        </div>
+        <div class="tech-item">
+          <span class="tech-label">语言</span>
+          <span class="tech-value">TypeScript + Rust</span>
+        </div>
+        <div class="tech-item">
+          <span class="tech-label">样式</span>
+          <span class="tech-value">Tailwind CSS 4</span>
+        </div>
+        <div class="tech-item">
+          <span class="tech-label">UI 组件</span>
+          <span class="tech-value">Radix UI</span>
+        </div>
+        <div class="tech-item">
+          <span class="tech-label">构建</span>
+          <span class="tech-value">Vite 7</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="text-center py-12 px-4 border-t border-slate-700">
+    <div class="max-w-5xl mx-auto">
+      <p class="text-slate-400">
+        <a href="https://github.com/guoyongchang/worktree-manager" class="text-blue-400 hover:text-blue-300">GitHub</a>
+        <span class="mx-2">·</span>
+        <a href="https://github.com/guoyongchang/worktree-manager/issues" class="text-blue-400 hover:text-blue-300">反馈问题</a>
+        <span class="mx-2">·</span>
+        <a href="guide.html" class="text-blue-400 hover:text-blue-300">使用指南</a>
+        <span class="mx-2">·</span>
+        <span>MIT License</span>
+      </p>
+      <p class="mt-4 text-slate-500">Made with ❤️ using Tauri + React + Rust</p>
+      <p class="mt-2 text-xs text-slate-600">© 2024 Worktree Manager Team</p>
+    </div>
+  </footer>
+
+  <script>
+    function toggleMobileMenu() {
+      const menu = document.getElementById('mobile-menu');
+      menu.classList.toggle('hidden');
+    }
+  </script>
+
+</body>
+</html>
