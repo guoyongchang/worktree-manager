@@ -2,16 +2,40 @@ name: Release Build
 
 on:
   workflow_dispatch:
+    inputs:
+      major_version:
+        description: '大版本号'
+        required: false
+        default: '0'
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref_name }}
+  group: release
   cancel-in-progress: true
 
 jobs:
+  prepare:
+    name: Generate version
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Generate version from date
+        id: version
+        run: |
+          MAJOR="${{ github.event.inputs.major_version || '0' }}"
+          YYYYMMDD=$(date -u +%Y%m%d)
+          HHMMSS=$(( $(date -u +%-H) * 10000 + $(date -u +%-M) * 100 + $(date -u +%-S) ))
+          VERSION="${MAJOR}.${YYYYMMDD}.${HHMMSS}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Generated version: ${VERSION} (tag: v${VERSION})"
+
   release:
+    needs: prepare
     strategy:
       fail-fast: false
       matrix:
@@ -34,6 +58,12 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache Rust dependencies
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          cache-on-failure: true
+
       - name: Add macOS targets
         if: runner.os == 'macOS'
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
@@ -47,6 +77,26 @@ jobs:
             libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev \
             libwebkit2gtk-4.1-dev \
             libsoup-3.0-dev || sudo apt-get install -y --no-install-recommends libsoup2.4-dev
+
+      - name: Set version
+        shell: bash
+        env:
+          APP_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.version = process.env.APP_VERSION;
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+          node -e "
+            const fs = require('fs');
+            const conf = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8'));
+            conf.version = process.env.APP_VERSION;
+            fs.writeFileSync('src-tauri/tauri.conf.json', JSON.stringify(conf, null, 2) + '\n');
+          "
+          sed -i.bak 's/^version = ".*"/version = "'"$APP_VERSION"'"/' src-tauri/Cargo.toml && rm -f src-tauri/Cargo.toml.bak
+          echo "Set version to $APP_VERSION"
 
       - name: Install frontend dependencies
         shell: bash
@@ -75,10 +125,11 @@ jobs:
       - name: Prepare macOS assets
         if: runner.os == 'macOS'
         shell: bash
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euxo pipefail
           mkdir -p release-assets
-          VERSION="${GITHUB_REF_NAME}"
           for path in \
             "src-tauri/target/universal-apple-darwin/release/bundle/macos" \
             "src-tauri/target/aarch64-apple-darwin/release/bundle/macos" \
@@ -86,61 +137,63 @@ jobs:
             if [ -d "$path" ]; then
               TAR_GZ=$(find "$path" -maxdepth 1 -name "*.tar.gz" -type f | head -1 || true)
               if [ -n "$TAR_GZ" ]; then
-                cp "$TAR_GZ" "release-assets/Worktree-Manager-${VERSION}-macOS.tar.gz"
-                [ -f "$TAR_GZ.sig" ] && cp "$TAR_GZ.sig" "release-assets/Worktree-Manager-${VERSION}-macOS.tar.gz.sig"
+                cp "$TAR_GZ" "release-assets/Worktree-Manager-${TAG}-macOS.tar.gz"
+                [ -f "$TAR_GZ.sig" ] && cp "$TAR_GZ.sig" "release-assets/Worktree-Manager-${TAG}-macOS.tar.gz.sig"
                 break
               fi
             fi
           done
           DMG=$(find src-tauri/target -name "*.dmg" -type f | head -1 || true)
-          [ -n "$DMG" ] && cp "$DMG" "release-assets/Worktree-Manager-${VERSION}-macOS.dmg"
+          [ -n "$DMG" ] && cp "$DMG" "release-assets/Worktree-Manager-${TAG}-macOS.dmg"
 
       - name: Prepare Windows assets
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           New-Item -ItemType Directory -Force -Path release-assets | Out-Null
-          $VERSION = $env:GITHUB_REF_NAME
           $msi = Get-ChildItem -Path 'src-tauri/target/release/bundle' -Recurse -Include *.msi -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($null -ne $msi) {
-            Copy-Item $msi.FullName (Join-Path release-assets "Worktree-Manager-$VERSION-Windows.msi")
+            Copy-Item $msi.FullName (Join-Path release-assets "Worktree-Manager-$env:TAG-Windows.msi")
             $sigPath = "$($msi.FullName).sig"
             if (Test-Path $sigPath) {
-              Copy-Item $sigPath (Join-Path release-assets "Worktree-Manager-$VERSION-Windows.msi.sig")
+              Copy-Item $sigPath (Join-Path release-assets "Worktree-Manager-$env:TAG-Windows.msi.sig")
             }
           }
           $nsis = Get-ChildItem -Path 'src-tauri/target/release/bundle' -Recurse -Include *-setup.exe -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($null -ne $nsis) {
-            Copy-Item $nsis.FullName (Join-Path release-assets "Worktree-Manager-$VERSION-Windows-setup.exe")
+            Copy-Item $nsis.FullName (Join-Path release-assets "Worktree-Manager-$env:TAG-Windows-setup.exe")
             $sigPath = "$($nsis.FullName).sig"
             if (Test-Path $sigPath) {
-              Copy-Item $sigPath (Join-Path release-assets "Worktree-Manager-$VERSION-Windows-setup.exe.sig")
+              Copy-Item $sigPath (Join-Path release-assets "Worktree-Manager-$env:TAG-Windows-setup.exe.sig")
             }
           }
 
       - name: Prepare Linux assets
         if: runner.os == 'Linux'
         shell: bash
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euxo pipefail
           mkdir -p release-assets
-          VERSION="${GITHUB_REF_NAME}"
           APPIMAGE=$(find src-tauri/target/release/bundle -name "*.AppImage" | head -1 || true)
           if [ -n "$APPIMAGE" ]; then
-            cp "$APPIMAGE" "release-assets/Worktree-Manager-${VERSION}-Linux.AppImage"
-            [ -f "$APPIMAGE.sig" ] && cp "$APPIMAGE.sig" "release-assets/Worktree-Manager-${VERSION}-Linux.AppImage.sig"
+            cp "$APPIMAGE" "release-assets/Worktree-Manager-${TAG}-Linux.AppImage"
+            [ -f "$APPIMAGE.sig" ] && cp "$APPIMAGE.sig" "release-assets/Worktree-Manager-${TAG}-Linux.AppImage.sig"
           fi
           DEB=$(find src-tauri/target/release/bundle -name "*.deb" | head -1 || true)
-          [ -n "$DEB" ] && cp "$DEB" "release-assets/Worktree-Manager-${VERSION}-Linux.deb"
+          [ -n "$DEB" ] && cp "$DEB" "release-assets/Worktree-Manager-${TAG}-Linux.deb"
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: Worktree Manager ${{ github.ref_name }}
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: Worktree Manager ${{ needs.prepare.outputs.tag }}
           prerelease: false
           body: |
-            ## Worktree Manager ${{ github.ref_name }}
+            ## Worktree Manager ${{ needs.prepare.outputs.tag }}
 
             Git Worktree 可视化管理工具
 
@@ -167,16 +220,16 @@ jobs:
   assemble-latest-json:
     name: Assemble latest.json
     runs-on: ubuntu-22.04
-    needs: release
+    needs: [prepare, release]
     permissions:
       contents: write
     steps:
       - name: Download all release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euxo pipefail
-          TAG="${GITHUB_REF_NAME}"
           mkdir -p dl
           gh release download "$TAG" --dir dl --repo "$GITHUB_REPOSITORY"
           ls -la dl || true
@@ -184,10 +237,10 @@ jobs:
       - name: Generate latest.json
         env:
           REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
-          VERSION="${TAG#v}"
           PUB_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           base_url="https://github.com/$REPO/releases/download/$TAG"
 
@@ -240,4 +293,5 @@ jobs:
       - name: Upload latest.json to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$GITHUB_REF_NAME" latest.json --clobber --repo "$GITHUB_REPOSITORY"
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: gh release upload "$TAG" latest.json --clobber --repo "$GITHUB_REPOSITORY"
