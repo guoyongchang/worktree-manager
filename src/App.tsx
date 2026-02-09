@@ -362,8 +362,6 @@ function App() {
       }
     }
     function handleClick(): void {
-      setShowEditorMenu(false);
-      setShowWorkspaceMenu(false);
       setTerminalTabMenu(null);
     }
     window.addEventListener('keydown', handleKeyDown);
