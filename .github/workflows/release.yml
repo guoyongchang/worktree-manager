@@ -125,6 +125,13 @@ jobs:
           sed -i.bak 's/^version = ".*"/version = "'"$APP_VERSION"'"/' src-tauri/Cargo.toml && rm -f src-tauri/Cargo.toml.bak
           echo "Set version to $APP_VERSION"
 
+      - name: Cache npm downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('package.json') }}
+          restore-keys: npm-${{ runner.os }}-
+
       - name: Install frontend dependencies
         shell: bash
         run: |
