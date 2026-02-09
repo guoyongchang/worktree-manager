@@ -34,6 +34,33 @@ jobs:
           echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Generated version: ${VERSION} (tag: v${VERSION})"
 
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Worktree Manager $TAG" \
+            --notes "$(cat <<'EOF'
+          ## Worktree Manager
+
+          Git Worktree 可视化管理工具
+
+          ### 下载
+
+          - **macOS**: `.dmg` 安装包 或 `.tar.gz`
+          - **Windows**: `.msi` 安装包 或 `-setup.exe`
+          - **Linux**: `.AppImage` 或 `.deb`
+
+          ---
+
+          **自动更新**: 应用内置自动更新功能，下次启动时会自动检查新版本。
+
+          > macOS 如遇"无法打开"提示，请在终端执行：`xattr -cr "/Applications/worktree-manager.app"`
+          EOF
+          )"
+
   release:
     needs: prepare
     strategy:
@@ -187,30 +214,14 @@ jobs:
           [ -n "$DEB" ] && cp "$DEB" "release-assets/Worktree-Manager-${TAG}-Linux.deb"
 
       - name: Upload release assets
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.prepare.outputs.tag }}
-          name: Worktree Manager ${{ needs.prepare.outputs.tag }}
-          prerelease: false
-          body: |
-            ## Worktree Manager ${{ needs.prepare.outputs.tag }}
-
-            Git Worktree 可视化管理工具
-
-            ### 下载
-
-            - **macOS**: `.dmg` 安装包 或 `.tar.gz`
-            - **Windows**: `.msi` 安装包 或 `-setup.exe`
-            - **Linux**: `.AppImage` 或 `.deb`
-
-            ---
-
-            **自动更新**: 应用内置自动更新功能，下次启动时会自动检查新版本。
-
-            > macOS 如遇"无法打开"提示，请在终端执行：`xattr -cr "/Applications/worktree-manager.app"`
-          files: release-assets/*
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          for file in release-assets/*; do
+            [ -f "$file" ] && gh release upload "$TAG" "$file" --clobber --repo "$GITHUB_REPOSITORY"
+          done
 
       - name: List build bundles (debug)
         if: always()
