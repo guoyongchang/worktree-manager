@@ -37,6 +37,7 @@ export interface UseWorkspaceReturn {
   }) => Promise<void>;
   archiveWorktree: (name: string) => Promise<void>;
   restoreWorktree: (name: string) => Promise<void>;
+  deleteArchivedWorktree: (name: string) => Promise<void>;
   checkWorktreeStatus: (name: string) => Promise<WorktreeArchiveStatus>;
   openInEditor: (path: string, editor: EditorType) => Promise<void>;
   openInTerminal: (path: string) => Promise<void>;
@@ -166,6 +167,15 @@ export function useWorkspace(): UseWorkspaceReturn {
     }
   }, [loadData]);
 
+  const deleteArchivedWorktree = useCallback(async (name: string) => {
+    try {
+      await invoke("delete_archived_worktree", { name });
+      await loadData();
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [loadData]);
+
   const checkWorktreeStatus = useCallback(async (name: string): Promise<WorktreeArchiveStatus> => {
     return invoke<WorktreeArchiveStatus>("check_worktree_status", { name });
   }, []);
@@ -221,6 +231,7 @@ export function useWorkspace(): UseWorkspaceReturn {
     cloneProject,
     archiveWorktree,
     restoreWorktree,
+    deleteArchivedWorktree,
     checkWorktreeStatus,
     openInEditor,
     openInTerminal,

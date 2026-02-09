@@ -1,5 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogFooter,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import {
   WorktreeSidebar,
   WorktreeDetail,
   TerminalPanel,
@@ -83,6 +92,9 @@ function App() {
 
   // Archive modal state
   const [archiveModal, setArchiveModal] = useState<ArchiveModalState | null>(null);
+
+  // Delete archived worktree confirmation
+  const [deleteConfirmWorktree, setDeleteConfirmWorktree] = useState<WorktreeListItem | null>(null);
 
   // Settings state
   const [editingConfig, setEditingConfig] = useState<WorkspaceConfig | null>(null);
@@ -262,6 +274,19 @@ function App() {
     }
   }, [workspace, archiveModal, selectedWorktree]);
 
+  const handleDeleteArchivedWorktree = useCallback(async () => {
+    if (!deleteConfirmWorktree) return;
+    try {
+      await workspace.deleteArchivedWorktree(deleteConfirmWorktree.name);
+      if (selectedWorktree?.name === deleteConfirmWorktree.name) {
+        setSelectedWorktree(null);
+      }
+      setDeleteConfirmWorktree(null);
+    } catch (e) {
+      workspace.setError(String(e));
+    }
+  }, [workspace, deleteConfirmWorktree, selectedWorktree]);
+
   // Terminal tab context menu
   const handleTerminalTabContextMenu = useCallback((e: React.MouseEvent, path: string, name: string) => {
     e.preventDefault();
@@ -293,7 +318,7 @@ function App() {
     setEditingConfig({ ...editingConfig, [field]: value });
   }, [editingConfig]);
 
-  const updateEditingProject = useCallback((index: number, field: keyof ProjectConfig, value: string | boolean) => {
+  const updateEditingProject = useCallback((index: number, field: keyof ProjectConfig, value: string | boolean | string[]) => {
     if (!editingConfig) return;
     const newProjects = [...editingConfig.projects];
     newProjects[index] = { ...newProjects[index], [field]: value };
@@ -481,6 +506,7 @@ function App() {
               onSwitchBranch={workspace.switchBranch}
               onArchive={() => selectedWorktree && openArchiveModal(selectedWorktree)}
               onRestore={() => selectedWorktree && workspace.restoreWorktree(selectedWorktree.name)}
+              onDelete={selectedWorktree?.is_archived ? () => setDeleteConfirmWorktree(selectedWorktree) : undefined}
               onAddProject={() => setShowAddProjectModal(true)}
               error={workspace.error}
               onClearError={() => workspace.setError(null)}
@@ -565,6 +591,26 @@ function App() {
             areAllIssuesConfirmed={areAllIssuesConfirmed()}
           />
         )}
+
+        {/* Delete Archived Worktree Confirmation */}
+        <Dialog open={!!deleteConfirmWorktree} onOpenChange={(open) => !open && setDeleteConfirmWorktree(null)}>
+          <DialogContent className="max-w-[400px]">
+            <DialogHeader>
+              <DialogTitle>删除归档 Worktree</DialogTitle>
+              <DialogDescription>
+                确定要永久删除归档 "{deleteConfirmWorktree?.name}" 吗？此操作将同时删除关联的本地分支和所有文件，且无法恢复。
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="secondary" onClick={() => setDeleteConfirmWorktree(null)}>
+                取消
+              </Button>
+              <Button variant="destructive" onClick={handleDeleteArchivedWorktree}>
+                确认删除
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
 
       {/* Updater Dialogs */}

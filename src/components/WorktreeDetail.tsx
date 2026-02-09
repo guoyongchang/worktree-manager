@@ -38,6 +38,7 @@ interface WorktreeDetailProps {
   onSwitchBranch: (projectPath: string, branch: string) => void;
   onArchive: () => void;
   onRestore: () => void;
+  onDelete?: () => void;
   onAddProject?: () => void;
   error: string | null;
   onClearError: () => void;
@@ -71,6 +72,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
   onSwitchBranch,
   onArchive,
   onRestore,
+  onDelete,
   onAddProject,
   error,
   onClearError,
@@ -97,7 +99,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
         <div className="flex items-center justify-between mb-6">
           <div>
             <h2 className="text-xl font-semibold text-slate-100">主工作区 - {mainWorkspace.name}</h2>
-            <p className="text-slate-500 text-sm mt-1">{mainWorkspace.path}</p>
+            <p className="text-slate-500 text-sm mt-1 select-text">{mainWorkspace.path}</p>
           </div>
           <div className="flex gap-2 items-center">
             {onAddProject && (
@@ -164,7 +166,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                 <div className="flex items-center justify-between mt-2">
                   <div className="flex items-center gap-1.5 text-slate-400 text-sm">
                     <GitBranchIcon className="w-3.5 h-3.5" />
-                    <span>{proj.current_branch}</span>
+                    <span className="select-text">{proj.current_branch}</span>
                     {isSwitching && <RefreshIcon className="w-3 h-3 animate-spin ml-1" />}
                   </div>
                   <div className="flex items-center gap-1">
@@ -230,11 +232,16 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
               {selectedWorktree.is_archived ? <ArchiveIcon className="w-5 h-5 text-slate-500" /> : <FolderIcon className="w-5 h-5 text-blue-400" />}
               <h2 className="text-xl font-semibold text-slate-100">{selectedWorktree.name}</h2>
             </div>
-            <p className="text-slate-500 text-sm mt-1">{selectedWorktree.path}</p>
+            <p className="text-slate-500 text-sm mt-1 select-text">{selectedWorktree.path}</p>
           </div>
           <div className="flex gap-2 items-center">
             {selectedWorktree.is_archived ? (
-              <Button variant="default" className="bg-emerald-600 hover:bg-emerald-500" onClick={onRestore}>恢复</Button>
+              <>
+                <Button variant="default" className="bg-emerald-600 hover:bg-emerald-500" onClick={onRestore}>恢复</Button>
+                {onDelete && (
+                  <Button variant="destructive" onClick={onDelete}>删除</Button>
+                )}
+              </>
             ) : (
               <>
                 <DropdownMenu open={showEditorMenu} onOpenChange={onShowEditorMenu}>
@@ -275,7 +282,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                     <div className="font-medium text-slate-200">{proj.name}</div>
                     <div className="flex items-center gap-1.5 text-slate-400 text-sm mt-0.5">
                       <GitBranchIcon className="w-3.5 h-3.5" />
-                      <span>{proj.current_branch}</span>
+                      <span className="select-text">{proj.current_branch}</span>
                     </div>
                   </div>
                 </div>

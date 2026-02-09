@@ -3,6 +3,40 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Receiver};
+use log;
+
+/// Get the default shell for the current platform.
+/// Windows: COMSPEC -> PowerShell -> cmd.exe
+/// Unix: SHELL -> /bin/zsh -> /bin/bash
+fn get_default_shell() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(comspec) = std::env::var("COMSPEC") {
+            return comspec;
+        }
+        // Try PowerShell
+        let ps_paths = [
+            "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+            "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        ];
+        for ps in &ps_paths {
+            if std::path::Path::new(ps).exists() {
+                return ps.to_string();
+            }
+        }
+        "cmd.exe".to_string()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::env::var("SHELL").unwrap_or_else(|_| {
+            if std::path::Path::new("/bin/zsh").exists() {
+                "/bin/zsh".to_string()
+            } else {
+                "/bin/bash".to_string()
+            }
+        })
+    }
+}
 
 struct PtyReader {
     receiver: Receiver<Vec<u8>>,
@@ -57,7 +91,8 @@ impl PtyManager {
             .map_err(|e| format!("Failed to open PTY: {}", e))?;
 
         // Get the user's shell
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+        let shell = get_default_shell();
+        log::info!("PTY session '{}' using shell: {}", id, shell);
 
         let mut cmd = CommandBuilder::new(&shell);
         cmd.cwd(cwd);
@@ -76,6 +111,20 @@ impl PtyManager {
         }
         if let Ok(user) = std::env::var("USER") {
             cmd.env("USER", user);
+        }
+
+        // Windows-specific environment variables
+        #[cfg(target_os = "windows")]
+        {
+            if let Ok(userprofile) = std::env::var("USERPROFILE") {
+                cmd.env("USERPROFILE", userprofile);
+            }
+            if let Ok(homedrive) = std::env::var("HOMEDRIVE") {
+                cmd.env("HOMEDRIVE", homedrive);
+            }
+            if let Ok(homepath) = std::env::var("HOMEPATH") {
+                cmd.env("HOMEPATH", homepath);
+            }
         }
 
         let child = pair.slave

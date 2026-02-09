@@ -20,7 +20,7 @@ interface SettingsViewProps {
   onBack: () => void;
   onSave: () => void;
   onUpdateField: (field: 'name' | 'worktrees_dir', value: string) => void;
-  onUpdateProject: (index: number, field: keyof ProjectConfig, value: string | boolean) => void;
+  onUpdateProject: (index: number, field: keyof ProjectConfig, value: string | boolean | string[]) => void;
   onAddProject: () => void;
   onRemoveProject: (index: number) => void;
   onAddLinkedItem: (item: string) => void;
@@ -48,6 +48,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
   checkingUpdate = false,
 }) => {
   const [newLinkedItem, setNewLinkedItem] = useState('');
+  const [newProjectLinkedFolder, setNewProjectLinkedFolder] = useState<Record<number, string>>({});
   return (
     <div className="max-w-3xl mx-auto">
       {/* Header */}
@@ -81,7 +82,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
       {/* Config Path Info */}
       <div className="mb-6 p-3 bg-slate-800/50 rounded-lg border border-slate-700/50">
         <div className="text-xs text-slate-500">配置文件路径</div>
-        <div className="text-sm text-slate-300 mt-1 font-mono">{configPath}</div>
+        <div className="text-sm text-slate-300 mt-1 font-mono select-text">{configPath}</div>
       </div>
 
       {/* Workspace Settings */}
@@ -221,6 +222,66 @@ export const SettingsView: FC<SettingsViewProps> = ({
                         <SelectItem value="cherry-pick">cherry-pick</SelectItem>
                       </SelectContent>
                     </Select>
+                  </div>
+                </div>
+                {/* Linked Folders */}
+                <div className="mt-3 col-span-2">
+                  <label className="block text-xs text-slate-500 mb-1">链接文件夹</label>
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {(proj.linked_folders || []).map((folder, folderIdx) => (
+                      <span
+                        key={folderIdx}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-700 border border-slate-600 rounded text-xs text-slate-300"
+                      >
+                        <span className="select-text">{folder}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const newFolders = [...(proj.linked_folders || [])];
+                            newFolders.splice(folderIdx, 1);
+                            onUpdateProject(index, 'linked_folders', newFolders);
+                          }}
+                          className="text-slate-500 hover:text-red-400 ml-0.5"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <Input
+                      type="text"
+                      value={newProjectLinkedFolder[index] || ''}
+                      onChange={(e) => setNewProjectLinkedFolder(prev => ({ ...prev, [index]: e.target.value }))}
+                      placeholder="文件夹名称"
+                      className="h-7 text-xs"
+                      onKeyDown={(e) => {
+                        const val = (newProjectLinkedFolder[index] || '').trim();
+                        if (e.key === 'Enter' && val) {
+                          e.preventDefault();
+                          const newFolders = [...(proj.linked_folders || []), val];
+                          onUpdateProject(index, 'linked_folders', newFolders);
+                          setNewProjectLinkedFolder(prev => ({ ...prev, [index]: '' }));
+                        }
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={() => {
+                        const val = (newProjectLinkedFolder[index] || '').trim();
+                        if (val) {
+                          const newFolders = [...(proj.linked_folders || []), val];
+                          onUpdateProject(index, 'linked_folders', newFolders);
+                          setNewProjectLinkedFolder(prev => ({ ...prev, [index]: '' }));
+                        }
+                      }}
+                      disabled={!(newProjectLinkedFolder[index] || '').trim()}
+                    >
+                      添加
+                    </Button>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">

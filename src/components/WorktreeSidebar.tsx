@@ -193,7 +193,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
               <PlusIcon className="w-4 h-4" />
             </Button>
           </div>
-          <div className="text-slate-500 text-xs mt-1 truncate pl-6">{mainWorkspace.path}</div>
+          <div className="text-slate-500 text-xs mt-1 truncate pl-6 select-text">{mainWorkspace.path}</div>
         </div>
       )}
 
