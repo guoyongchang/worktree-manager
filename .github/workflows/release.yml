@@ -50,7 +50,7 @@ jobs:
           ### 下载
 
           - **macOS**: `.dmg` 安装包 或 `.tar.gz`
-          - **Windows**: `.msi` 安装包 或 `-setup.exe`
+          - **Windows**: `-setup.exe` 安装包
           - **Linux**: `.AppImage` 或 `.deb`
 
           ---
@@ -143,7 +143,7 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npx tauri build
+        run: npx tauri build --bundles nsis
 
       - name: Build Tauri App (Linux)
         if: runner.os == 'Linux'
@@ -183,20 +183,20 @@ jobs:
           TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           New-Item -ItemType Directory -Force -Path release-assets | Out-Null
-          $msi = Get-ChildItem -Path 'src-tauri/target/release/bundle' -Recurse -Include *.msi -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($null -ne $msi) {
-            Copy-Item $msi.FullName (Join-Path release-assets "Worktree-Manager-$env:TAG-Windows.msi")
-            $sigPath = "$($msi.FullName).sig"
-            if (Test-Path $sigPath) {
-              Copy-Item $sigPath (Join-Path release-assets "Worktree-Manager-$env:TAG-Windows.msi.sig")
-            }
-          }
           $nsis = Get-ChildItem -Path 'src-tauri/target/release/bundle' -Recurse -Include *-setup.exe -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($null -ne $nsis) {
             Copy-Item $nsis.FullName (Join-Path release-assets "Worktree-Manager-$env:TAG-Windows-setup.exe")
             $sigPath = "$($nsis.FullName).sig"
             if (Test-Path $sigPath) {
               Copy-Item $sigPath (Join-Path release-assets "Worktree-Manager-$env:TAG-Windows-setup.exe.sig")
+            }
+          }
+          $nsis_zip = Get-ChildItem -Path 'src-tauri/target/release/bundle' -Recurse -Include *-setup.nsis.zip -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($null -ne $nsis_zip) {
+            Copy-Item $nsis_zip.FullName (Join-Path release-assets "Worktree-Manager-$env:TAG-Windows-setup.nsis.zip")
+            $sigPath = "$($nsis_zip.FullName).sig"
+            if (Test-Path $sigPath) {
+              Copy-Item $sigPath (Join-Path release-assets "Worktree-Manager-$env:TAG-Windows-setup.nsis.zip.sig")
             }
           }
 
@@ -271,7 +271,7 @@ jobs:
             case "$fname" in
               *.tar.gz) mac_url="$url"; mac_sig="$sig_content" ;;
               *.AppImage) linux_url="$url"; linux_sig="$sig_content" ;;
-              *.msi) win_url="$url"; win_sig="$sig_content" ;;
+              *.nsis.zip) win_url="$url"; win_sig="$sig_content" ;;
             esac
           done
 
