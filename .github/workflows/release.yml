@@ -109,9 +109,8 @@ jobs:
           security import "$CERT_PATH" -k "$KEYCHAIN_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
           security set-key-partition-list -S apple-tool:,apple: -s -k "" "$KEYCHAIN_PATH"
           security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain
-          # Extract cert and trust it for code signing
-          openssl pkcs12 -in "$CERT_PATH" -clcerts -nokeys -out "$CERT_PEM" -passin pass:"$APPLE_CERTIFICATE_PASSWORD" -legacy 2>/dev/null || \
-            openssl pkcs12 -in "$CERT_PATH" -clcerts -nokeys -out "$CERT_PEM" -passin pass:"$APPLE_CERTIFICATE_PASSWORD"
+          # Extract cert from keychain and trust it for code signing
+          security find-certificate -a -p "$KEYCHAIN_PATH" > "$CERT_PEM"
           sudo security add-trusted-cert -d -r trustRoot -p codeSign "$CERT_PEM"
           # Get signing identity name
           IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep -o '"[^"]*"' | head -1 | tr -d '"')
