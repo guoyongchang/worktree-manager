@@ -61,6 +61,12 @@ export interface CreateProjectRequest {
   base_branch: string;
 }
 
+export interface AddProjectToWorktreeRequest {
+  worktree_name: string;
+  project_name: string;
+  base_branch: string;
+}
+
 // Branch and archive types
 export interface BranchStatus {
   project_name: string;

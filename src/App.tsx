@@ -18,6 +18,7 @@ import {
   AddWorkspaceModal,
   CreateWorkspaceModal,
   AddProjectModal,
+  AddProjectToWorktreeModal,
   ArchiveConfirmationModal,
   WorktreeContextMenu,
   TerminalTabContextMenu,
@@ -69,6 +70,8 @@ function App() {
   const [showAddWorkspaceModal, setShowAddWorkspaceModal] = useState(false);
   const [showCreateWorkspaceModal, setShowCreateWorkspaceModal] = useState(false);
   const [showAddProjectModal, setShowAddProjectModal] = useState(false);
+  const [showAddProjectToWorktreeModal, setShowAddProjectToWorktreeModal] = useState(false);
+  const [addingProjectToWorktree, setAddingProjectToWorktree] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
   const [showEditorMenu, setShowEditorMenu] = useState(false);
@@ -117,6 +120,13 @@ function App() {
       const activeWorktree = workspace.worktrees.find(w => !w.is_archived);
       if (activeWorktree) {
         setSelectedWorktree(activeWorktree);
+      }
+    }
+    // Also update the selected worktree data when worktrees refresh
+    if (selectedWorktree) {
+      const updated = workspace.worktrees.find(w => w.name === selectedWorktree.name);
+      if (updated && JSON.stringify(updated) !== JSON.stringify(selectedWorktree)) {
+        setSelectedWorktree(updated);
       }
     }
   }, [workspace.worktrees, selectedWorktree, hasUserSelected]);
@@ -242,6 +252,24 @@ function App() {
       }
     }
   }, [workspace, editingConfig]);
+
+  // Add project to existing worktree handler
+  const handleAddProjectToWorktree = useCallback(async (projectName: string, baseBranch: string) => {
+    if (!selectedWorktree) return;
+    setAddingProjectToWorktree(true);
+    try {
+      await workspace.addProjectToWorktree({
+        worktree_name: selectedWorktree.name,
+        project_name: projectName,
+        base_branch: baseBranch,
+      });
+      setShowAddProjectToWorktreeModal(false);
+    } catch (e) {
+      workspace.setError(String(e));
+    } finally {
+      setAddingProjectToWorktree(false);
+    }
+  }, [workspace, selectedWorktree]);
 
   // Scan project folders (for SettingsView)
   const handleScanProject = useCallback(async (projectName: string) => {
@@ -557,6 +585,7 @@ function App() {
               onRestore={() => selectedWorktree && workspace.restoreWorktree(selectedWorktree.name)}
               onDelete={selectedWorktree?.is_archived ? () => setDeleteConfirmWorktree(selectedWorktree) : undefined}
               onAddProject={() => setShowAddProjectModal(true)}
+              onAddProjectToWorktree={() => setShowAddProjectToWorktreeModal(true)}
               error={workspace.error}
               onClearError={() => workspace.setError(null)}
             />
@@ -609,6 +638,15 @@ function App() {
           scanLinkedFolders={workspace.scanLinkedFolders}
           workspacePath={workspace.currentWorkspace?.path}
           onUpdateLinkedFolders={handleUpdateLinkedFolders}
+        />
+
+        <AddProjectToWorktreeModal
+          open={showAddProjectToWorktreeModal}
+          onOpenChange={setShowAddProjectToWorktreeModal}
+          config={workspace.config}
+          worktree={selectedWorktree}
+          onSubmit={handleAddProjectToWorktree}
+          adding={addingProjectToWorktree}
         />
 
         {/* Context Menus */}

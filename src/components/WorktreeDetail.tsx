@@ -41,6 +41,7 @@ interface WorktreeDetailProps {
   onRestore: () => void;
   onDelete?: () => void;
   onAddProject?: () => void;
+  onAddProjectToWorktree?: () => void;
   error: string | null;
   onClearError: () => void;
 }
@@ -76,6 +77,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
   onRestore,
   onDelete,
   onAddProject,
+  onAddProjectToWorktree,
   error,
   onClearError,
 }) => {
@@ -352,6 +354,15 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
               </div>
             </div>
           ))}
+          {!selectedWorktree.is_archived && onAddProjectToWorktree && (
+            <button
+              onClick={onAddProjectToWorktree}
+              className="w-full p-3 rounded-lg border border-dashed border-slate-700 hover:border-slate-500 hover:bg-slate-800/30 transition-all flex items-center justify-center gap-2 text-slate-500 hover:text-slate-300"
+            >
+              <PlusIcon className="w-4 h-4" />
+              <span className="text-sm">添加项目</span>
+            </button>
+          )}
         </div>
       </div>
     );

@@ -1259,6 +1259,125 @@ fn delete_archived_worktree(name: String) -> Result<(), String> {
     Ok(())
 }
 
+// ==================== Tauri 命令：向已有 Worktree 添加项目 ====================
+
+#[derive(Debug, Deserialize)]
+pub struct AddProjectToWorktreeRequest {
+    pub worktree_name: String,
+    pub project_name: String,
+    pub base_branch: String,
+}
+
+#[tauri::command]
+fn add_project_to_worktree(request: AddProjectToWorktreeRequest) -> Result<(), String> {
+    let (workspace_path, config) = get_current_workspace_config()
+        .ok_or("No workspace selected")?;
+
+    let root = PathBuf::from(&workspace_path);
+    let worktree_path = root.join(&config.worktrees_dir).join(&request.worktree_name);
+
+    if !worktree_path.exists() {
+        return Err(format!("Worktree '{}' does not exist", request.worktree_name));
+    }
+
+    let main_proj_path = root.join("projects").join(&request.project_name);
+    if !main_proj_path.exists() {
+        return Err(format!("Project '{}' does not exist in main workspace", request.project_name));
+    }
+
+    let wt_proj_path = worktree_path.join("projects").join(&request.project_name);
+    if wt_proj_path.exists() {
+        return Err(format!("Project '{}' already exists in worktree '{}'", request.project_name, request.worktree_name));
+    }
+
+    // Ensure the projects directory exists in the worktree
+    let projects_dir = worktree_path.join("projects");
+    if !projects_dir.exists() {
+        std::fs::create_dir_all(&projects_dir)
+            .map_err(|e| format!("Failed to create projects directory: {}", e))?;
+    }
+
+    let proj_config = config.projects.iter()
+        .find(|p| p.name == request.project_name)
+        .cloned()
+        .unwrap_or(ProjectConfig {
+            name: request.project_name.clone(),
+            base_branch: request.base_branch.clone(),
+            test_branch: "test".to_string(),
+            merge_strategy: "merge".to_string(),
+            linked_folders: vec![],
+        });
+
+    log::info!("Adding project '{}' to worktree '{}'", request.project_name, request.worktree_name);
+
+    // Fetch origin first
+    run_git_command_with_timeout(
+        &["fetch", "origin"],
+        main_proj_path.to_str().unwrap(),
+    )?;
+
+    // Check if branch already exists
+    let branch_check = Command::new("git")
+        .args(["-C", main_proj_path.to_str().unwrap(), "branch", "--list", &request.worktree_name])
+        .output();
+
+    let branch_exists = branch_check
+        .as_ref()
+        .map(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty())
+        .unwrap_or(false);
+
+    // Create worktree: use existing branch or create new one
+    let output = if branch_exists {
+        log::info!("Branch '{}' already exists, using it for project {}", request.worktree_name, request.project_name);
+        Command::new("git")
+            .args([
+                "-C", main_proj_path.to_str().unwrap(),
+                "worktree", "add",
+                wt_proj_path.to_str().unwrap(),
+                &request.worktree_name,
+            ])
+            .output()
+            .map_err(|e| format!("Failed to create worktree: {}", e))?
+    } else {
+        log::info!("Creating new branch '{}' for project {} from origin/{}", request.worktree_name, request.project_name, request.base_branch);
+        Command::new("git")
+            .args([
+                "-C", main_proj_path.to_str().unwrap(),
+                "worktree", "add",
+                wt_proj_path.to_str().unwrap(),
+                "-b", &request.worktree_name,
+                &format!("origin/{}", request.base_branch),
+            ])
+            .output()
+            .map_err(|e| format!("Failed to create worktree: {}", e))?
+    };
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Failed to add project {} to worktree: {}", request.project_name, stderr));
+    }
+
+    // Link configured folders
+    for folder_name in &proj_config.linked_folders {
+        let main_folder = main_proj_path.join(folder_name);
+        let wt_folder = wt_proj_path.join(folder_name);
+
+        if main_folder.exists() && !wt_folder.exists() {
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&main_folder, &wt_folder).ok();
+
+            // Remove from git index if it's tracked
+            Command::new("git")
+                .args(["-C", wt_proj_path.to_str().unwrap(), "rm", "--cached", "-r", folder_name])
+                .output()
+                .ok();
+        }
+    }
+
+    log::info!("Successfully added project '{}' to worktree '{}'", request.project_name, request.worktree_name);
+    Ok(())
+}
+
 // ==================== Tauri 命令：Git 操作 ====================
 
 #[derive(Debug, Deserialize)]
@@ -1652,6 +1771,7 @@ pub fn run() {
             restore_worktree,
             delete_archived_worktree,
             check_worktree_status,
+            add_project_to_worktree,
             // Git 操作
             switch_branch,
             clone_project,
