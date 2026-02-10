@@ -1304,22 +1304,91 @@ pub struct OpenEditorRequest {
 
 #[tauri::command]
 fn open_in_editor(request: OpenEditorRequest) -> Result<(), String> {
-    let cmd = match request.editor.as_str() {
-        "vscode" => "code",
-        "cursor" => "cursor",
-        "idea" => "idea",
-        _ => "code",
-    };
+    let path = &request.path;
 
-    Command::new(cmd)
-        .arg(&request.path)
-        .spawn()
-        .map_err(|e| format!("Failed to open {}: {}", request.editor, e))?;
+    // On macOS, try `open -a` first since CLI commands may not be in PATH
+    // when the app is launched from Finder
+    #[cfg(target_os = "macos")]
+    {
+        let app_name = match request.editor.as_str() {
+            "vscode" => "Visual Studio Code",
+            "cursor" => "Cursor",
+            "idea" => "IntelliJ IDEA",
+            _ => "Visual Studio Code",
+        };
+
+        // Try `open -a "App Name" path` first
+        let result = Command::new("open")
+            .args(["-a", app_name, path])
+            .spawn();
+
+        if result.is_ok() {
+            return Ok(());
+        }
+
+        // Fallback: try CLI command directly (in case user has it in PATH)
+        let cmd = match request.editor.as_str() {
+            "vscode" => "code",
+            "cursor" => "cursor",
+            "idea" => "idea",
+            _ => "code",
+        };
+
+        Command::new(cmd)
+            .arg(path)
+            .spawn()
+            .map_err(|_| format!("无法打开 {}，请确认已安装该编辑器", app_name))?;
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let cmd = match request.editor.as_str() {
+            "vscode" => "code",
+            "cursor" => "cursor",
+            "idea" => "idea",
+            _ => "code",
+        };
+
+        Command::new(cmd)
+            .arg(path)
+            .spawn()
+            .map_err(|e| format!("无法打开编辑器 {}: {}", cmd, e))?;
+    }
+
     Ok(())
 }
 
 
 // ==================== PTY 终端命令 ====================
+
+#[tauri::command]
+fn open_log_dir() -> Result<(), String> {
+    let home = std::env::var("HOME")
+        .map_err(|_| "无法获取用户目录".to_string())?;
+    let log_dir = PathBuf::from(&home).join("Library/Logs/com.guo.worktree-manager");
+
+    if !log_dir.exists() {
+        return Err("日志目录不存在".to_string());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(log_dir.to_str().unwrap_or(""))
+            .spawn()
+            .map_err(|e| format!("无法打开日志目录: {}", e))?;
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Command::new("xdg-open")
+            .arg(log_dir.to_str().unwrap_or(""))
+            .spawn()
+            .map_err(|e| format!("无法打开日志目录: {}", e))?;
+    }
+
+    Ok(())
+}
 
 #[tauri::command]
 fn pty_create(session_id: String, cwd: String, cols: u16, rows: u16) -> Result<(), String> {
@@ -1399,6 +1468,7 @@ pub fn run() {
             // 工具
             open_in_terminal,
             open_in_editor,
+            open_log_dir,
             // PTY 终端
             pty_create,
             pty_write,

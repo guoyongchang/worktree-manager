@@ -1,4 +1,4 @@
-import { useState, type FC } from 'react';
+import { useState, useEffect, type FC } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -16,6 +16,12 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import {
   FolderIcon,
   ArchiveIcon,
   PlusIcon,
@@ -26,12 +32,16 @@ import {
   TrashIcon,
   ChevronDownIcon,
   WorkspaceIcon,
+  LogIcon,
 } from './Icons';
 import type {
   WorkspaceRef,
   WorktreeListItem,
   MainWorkspaceStatus,
 } from '../types';
+import type { UpdaterState } from '../hooks/useUpdater';
+import { getVersion } from '@tauri-apps/api/app';
+import { invoke } from '@tauri-apps/api/core';
 
 interface WorktreeSidebarProps {
   workspaces: WorkspaceRef[];
@@ -51,6 +61,8 @@ interface WorktreeSidebarProps {
   onRefresh: () => void;
   onOpenSettings: () => void;
   onOpenCreateModal: () => void;
+  updaterState: UpdaterState;
+  onCheckUpdate: () => void;
 }
 
 export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
@@ -71,11 +83,18 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
   onRefresh,
   onOpenSettings,
   onOpenCreateModal,
+  updaterState,
+  onCheckUpdate,
 }) => {
   const activeWorktrees = worktrees.filter(w => !w.is_archived);
   const archivedWorktrees = worktrees.filter(w => w.is_archived);
 
   const [removeConfirmWorkspace, setRemoveConfirmWorkspace] = useState<WorkspaceRef | null>(null);
+  const [appVersion, setAppVersion] = useState('');
+
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
+  }, []);
 
   const handleRemoveWorkspace = (ws: WorkspaceRef, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -88,6 +107,16 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
       setRemoveConfirmWorkspace(null);
     }
   };
+
+  const handleOpenLogDir = async () => {
+    try {
+      await invoke('open_log_dir');
+    } catch (e) {
+      console.error('Failed to open log dir:', e);
+    }
+  };
+
+  const hasUpdate = updaterState === 'notification' || updaterState === 'downloading' || updaterState === 'success';
 
   return (
     <div className="w-72 bg-slate-800/50 border-r border-slate-700/50 flex flex-col">
@@ -154,16 +183,6 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
               className="h-8 w-8"
             >
               <RefreshIcon className="w-4 h-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onOpenSettings}
-              title="设置"
-              aria-label="打开设置"
-              className="h-8 w-8"
-            >
-              <SettingsIcon className="w-4 h-4" />
             </Button>
           </div>
         </div>
@@ -260,6 +279,58 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
             </div>
           </div>
         ))}
+      </div>
+
+      {/* Bottom Bar */}
+      <div className="px-3 py-2.5 border-t border-slate-700/50 flex items-center justify-between">
+        <TooltipProvider delayDuration={300}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={onCheckUpdate}
+                className="relative text-xs text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
+              >
+                v{appVersion}
+                {hasUpdate && (
+                  <span className="absolute -top-1 -right-2.5 w-2 h-2 bg-red-500 rounded-full" />
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {hasUpdate ? '有新版本可用，点击更新' : '检查更新'}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        <div className="flex items-center gap-0.5">
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleOpenLogDir}
+                  className="h-7 w-7"
+                >
+                  <LogIcon className="w-3.5 h-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">日志文件夹</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={onOpenSettings}
+                  className="h-7 w-7"
+                >
+                  <SettingsIcon className="w-3.5 h-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">设置</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
       </div>
 
       {/* Remove Workspace Confirmation Dialog */}
