@@ -490,6 +490,8 @@ function App() {
           onRefresh={workspace.loadData}
           onOpenSettings={openSettings}
           onOpenCreateModal={openCreateModal}
+          updaterState={updater.state}
+          onCheckUpdate={() => updater.checkForUpdates(false)}
         />
 
         <div className="flex-1 flex flex-col bg-slate-900">
