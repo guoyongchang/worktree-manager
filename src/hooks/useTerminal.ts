@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { TerminalTab, MainWorkspaceStatus, WorktreeListItem } from '../types';
 import { TERMINAL } from '../constants';
 
@@ -29,6 +29,10 @@ export function useTerminal(
   const [isResizing, setIsResizing] = useState(false);
   const [activatedTerminals, setActivatedTerminals] = useState<Set<string>>(new Set());
   const [activeTerminalTab, setActiveTerminalTab] = useState<string | null>(null);
+
+  // Remember active tab per workspace root, so switching back restores it
+  const activeTabPerWorkspace = useRef<Map<string, string>>(new Map());
+  const prevWorkspaceRoot = useRef<string>('');
 
   const currentWorkspaceRoot = selectedWorktree?.path || mainWorkspace?.path || '';
 
@@ -63,6 +67,28 @@ export function useTerminal(
     });
 
   const terminalTabs = [...baseTabs, ...duplicatedTabs];
+
+  // Save/restore active tab when workspace root changes
+  useEffect(() => {
+    const prev = prevWorkspaceRoot.current;
+
+    if (prev && prev !== currentWorkspaceRoot && activeTerminalTab) {
+      // Save current active tab for the previous workspace
+      activeTabPerWorkspace.current.set(prev, activeTerminalTab);
+    }
+
+    if (currentWorkspaceRoot && currentWorkspaceRoot !== prev) {
+      // Restore saved active tab for the new workspace (if any)
+      const savedTab = activeTabPerWorkspace.current.get(currentWorkspaceRoot);
+      if (savedTab && activatedTerminals.has(savedTab)) {
+        setActiveTerminalTab(savedTab);
+      } else {
+        setActiveTerminalTab(null);
+      }
+    }
+
+    prevWorkspaceRoot.current = currentWorkspaceRoot;
+  }, [currentWorkspaceRoot]);
 
   // Handle terminal resize drag
   useEffect(() => {
@@ -132,12 +158,14 @@ export function useTerminal(
   }, [terminalVisible, activeTerminalTab, currentWorkspaceRoot, activatedTerminals]);
 
   const resetActiveTab = useCallback(() => {
-    setActiveTerminalTab(null);
+    // No-op: we now handle tab switching in the useEffect above
+    // This is kept for API compatibility
   }, []);
 
   const clearActivatedTerminals = useCallback(() => {
     setActivatedTerminals(new Set());
     setActiveTerminalTab(null);
+    activeTabPerWorkspace.current.clear();
   }, []);
 
   return {
