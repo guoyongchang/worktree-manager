@@ -110,28 +110,37 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                 添加项目
               </Button>
             )}
-            <DropdownMenu open={showEditorMenu} onOpenChange={onShowEditorMenu}>
-              <DropdownMenuTrigger asChild>
-                <Button>
-                  {selectedEditorName}
-                  <ChevronDownIcon className="w-3.5 h-3.5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {EDITORS.map(editor => (
-                  <DropdownMenuItem
-                    key={editor.id}
-                    onClick={() => {
-                      onSelectEditor(editor.id);
-                      onOpenInEditor(mainWorkspace.path, editor.id);
-                      onShowEditorMenu(false);
-                    }}
-                  >
-                    {editor.name}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <div className="inline-flex rounded-md">
+              <Button
+                className="rounded-r-none border-r border-blue-700/50"
+                onClick={() => onOpenInEditor(mainWorkspace.path)}
+              >
+                {selectedEditorName}
+              </Button>
+              <DropdownMenu open={showEditorMenu} onOpenChange={onShowEditorMenu}>
+                <DropdownMenuTrigger asChild>
+                  <Button className="rounded-l-none px-2 min-w-0">
+                    <ChevronDownIcon className="w-3.5 h-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {EDITORS.map(editor => (
+                    <DropdownMenuItem
+                      key={editor.id}
+                      onClick={() => {
+                        onSelectEditor(editor.id);
+                        onShowEditorMenu(false);
+                      }}
+                    >
+                      {editor.name}
+                      {editor.id === selectedEditor && (
+                        <span className="ml-2 text-xs text-green-400">✓</span>
+                      )}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
             <Button variant="secondary" onClick={() => onOpenInTerminal(mainWorkspace.path)}>外部终端</Button>
           </div>
         </div>
@@ -261,28 +270,37 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
               </>
             ) : (
               <>
-                <DropdownMenu open={showEditorMenu} onOpenChange={onShowEditorMenu}>
-                  <DropdownMenuTrigger asChild>
-                    <Button>
-                      {selectedEditorName}
-                      <ChevronDownIcon className="w-3.5 h-3.5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    {EDITORS.map(editor => (
-                      <DropdownMenuItem
-                        key={editor.id}
-                        onClick={() => {
-                          onSelectEditor(editor.id);
-                          onOpenInEditor(selectedWorktree.path, editor.id);
-                          onShowEditorMenu(false);
-                        }}
-                      >
-                        {editor.name}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <div className="inline-flex rounded-md">
+                  <Button
+                    className="rounded-r-none border-r border-blue-700/50"
+                    onClick={() => onOpenInEditor(selectedWorktree.path)}
+                  >
+                    {selectedEditorName}
+                  </Button>
+                  <DropdownMenu open={showEditorMenu} onOpenChange={onShowEditorMenu}>
+                    <DropdownMenuTrigger asChild>
+                      <Button className="rounded-l-none px-2 min-w-0">
+                        <ChevronDownIcon className="w-3.5 h-3.5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      {EDITORS.map(editor => (
+                        <DropdownMenuItem
+                          key={editor.id}
+                          onClick={() => {
+                            onSelectEditor(editor.id);
+                            onShowEditorMenu(false);
+                          }}
+                        >
+                          {editor.name}
+                          {editor.id === selectedEditor && (
+                            <span className="ml-2 text-xs text-green-400">✓</span>
+                          )}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
                 <Button variant="secondary" onClick={() => onOpenInTerminal(selectedWorktree.path)}>外部终端</Button>
                 <Button variant="warning" onClick={onArchive}>归档</Button>
               </>
