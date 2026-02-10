@@ -505,6 +505,7 @@ function App() {
               onSelectEditor={setSelectedEditor}
               onOpenInEditor={handleOpenInEditor}
               onOpenInTerminal={workspace.openInTerminal}
+              onRevealInFinder={workspace.revealInFinder}
               onSwitchBranch={workspace.switchBranch}
               onArchive={() => selectedWorktree && openArchiveModal(selectedWorktree)}
               onRestore={() => selectedWorktree && workspace.restoreWorktree(selectedWorktree.name)}
