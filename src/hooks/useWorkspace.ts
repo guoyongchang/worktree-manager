@@ -8,6 +8,7 @@ import type {
   CreateProjectRequest,
   WorktreeArchiveStatus,
   EditorType,
+  ScannedFolder,
 } from '../types';
 
 export interface UseWorkspaceReturn {
@@ -44,6 +45,7 @@ export interface UseWorkspaceReturn {
   revealInFinder: (path: string) => Promise<void>;
   switchBranch: (projectPath: string, branch: string) => Promise<void>;
   saveConfig: (config: WorkspaceConfig) => Promise<void>;
+  scanLinkedFolders: (projectPath: string) => Promise<ScannedFolder[]>;
 }
 
 export function useWorkspace(): UseWorkspaceReturn {
@@ -220,6 +222,10 @@ export function useWorkspace(): UseWorkspaceReturn {
     await loadData();
   }, [loadData]);
 
+  const scanLinkedFolders = useCallback(async (projectPath: string): Promise<ScannedFolder[]> => {
+    return invoke<ScannedFolder[]>("scan_linked_folders", { projectPath });
+  }, []);
+
   return {
     workspaces,
     currentWorkspace,
@@ -247,5 +253,6 @@ export function useWorkspace(): UseWorkspaceReturn {
     revealInFinder,
     switchBranch,
     saveConfig,
+    scanLinkedFolders,
   };
 }

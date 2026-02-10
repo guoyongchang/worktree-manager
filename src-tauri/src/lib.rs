@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::fs;
 use std::sync::Mutex;
@@ -338,6 +338,165 @@ pub struct MainProjectStatus {
     pub test_branch: String,
     pub linked_folders: Vec<String>,
 }
+
+// ==================== 智能软链接扫描 ====================
+
+#[derive(Debug, Serialize, Clone)]
+pub struct ScannedFolder {
+    pub relative_path: String,   // e.g. "packages/web/node_modules"
+    pub display_name: String,    // e.g. "node_modules"
+    pub size_bytes: u64,
+    pub size_display: String,    // e.g. "256.3 MB"
+    pub is_recommended: bool,    // 推荐预选
+}
+
+const KNOWN_LINKABLE_FOLDERS: &[&str] = &[
+    // JS/Node
+    "node_modules", ".next", ".nuxt", ".yarn", ".pnpm-store",
+    // Python
+    "venv", ".venv", "__pycache__", ".pytest_cache", ".mypy_cache",
+    // Rust
+    "target",
+    // Go
+    "vendor",
+    // Java/Kotlin
+    ".gradle", ".m2", "build",
+    // General
+    "dist", ".cache", ".parcel-cache", ".turbo",
+];
+
+const RECOMMENDED_LINKABLE_FOLDERS: &[&str] = &[
+    "node_modules", ".next", ".nuxt", ".pnpm-store",
+    "venv", ".venv", "target", ".gradle",
+];
+
+const SKIP_DIRS: &[&str] = &[".git", ".svn", ".hg"];
+
+fn format_size(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * KB;
+    const GB: u64 = 1024 * MB;
+
+    if bytes >= GB {
+        format!("{:.1} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
+fn calculate_dir_size(path: &Path) -> u64 {
+    let mut total: u64 = 0;
+
+    let entries = match fs::read_dir(path) {
+        Ok(entries) => entries,
+        Err(_) => return 0,
+    };
+
+    for entry in entries.flatten() {
+        let entry_path = entry.path();
+
+        // Skip symlinks
+        if entry_path.is_symlink() {
+            continue;
+        }
+
+        if entry_path.is_file() {
+            total += entry.metadata().map(|m| m.len()).unwrap_or(0);
+        } else if entry_path.is_dir() {
+            total += calculate_dir_size(&entry_path);
+        }
+    }
+
+    total
+}
+
+fn scan_dir_for_linkable_folders(
+    base: &Path,
+    current: &Path,
+    results: &mut Vec<ScannedFolder>,
+) {
+    let entries = match fs::read_dir(current) {
+        Ok(entries) => entries,
+        Err(_) => return,
+    };
+
+    for entry in entries.flatten() {
+        let entry_path = entry.path();
+
+        // Skip symlinks
+        if entry_path.is_symlink() {
+            continue;
+        }
+
+        // Skip non-directories
+        if !entry_path.is_dir() {
+            continue;
+        }
+
+        let dir_name = match entry_path.file_name().and_then(|n| n.to_str()) {
+            Some(name) => name.to_string(),
+            None => continue,
+        };
+
+        // Check if it's a known linkable folder
+        if KNOWN_LINKABLE_FOLDERS.contains(&dir_name.as_str()) {
+            let size_bytes = calculate_dir_size(&entry_path);
+            let relative_path = entry_path
+                .strip_prefix(base)
+                .unwrap_or(&entry_path)
+                .to_string_lossy()
+                .to_string();
+
+            results.push(ScannedFolder {
+                relative_path,
+                display_name: dir_name.clone(),
+                size_bytes,
+                size_display: format_size(size_bytes),
+                is_recommended: RECOMMENDED_LINKABLE_FOLDERS.contains(&dir_name.as_str()),
+            });
+            continue; // Don't recurse into matched folders
+        }
+
+        // Skip configured skip dirs
+        if SKIP_DIRS.contains(&dir_name.as_str()) {
+            continue;
+        }
+
+        // Skip other hidden directories (those starting with '.' but not in KNOWN list)
+        if dir_name.starts_with('.') {
+            continue;
+        }
+
+        // Recurse into other directories
+        scan_dir_for_linkable_folders(base, &entry_path, results);
+    }
+}
+
+#[tauri::command]
+async fn scan_linked_folders(project_path: String) -> Result<Vec<ScannedFolder>, String> {
+    let path = PathBuf::from(&project_path);
+    if !path.exists() {
+        return Err(format!("Path does not exist: {}", project_path));
+    }
+
+    let mut results = Vec::new();
+    scan_dir_for_linkable_folders(&path, &path, &mut results);
+
+    // Sort: recommended first, then by size descending
+    results.sort_by(|a, b| {
+        b.is_recommended
+            .cmp(&a.is_recommended)
+            .then_with(|| b.size_bytes.cmp(&a.size_bytes))
+    });
+
+    Ok(results)
+}
+
+// ==================== Worktree 操作数据结构 ====================
 
 #[derive(Debug, Deserialize)]
 pub struct CreateWorktreeRequest {
@@ -1501,6 +1660,8 @@ pub fn run() {
             open_in_editor,
             open_log_dir,
             reveal_in_finder,
+            // 智能扫描
+            scan_linked_folders,
             // PTY 终端
             pty_create,
             pty_write,

@@ -39,6 +39,7 @@ import type {
   TerminalTabMenuState,
   ArchiveModalState,
   CreateProjectRequest,
+  ScannedFolder,
 } from "./types";
 import "./index.css";
 
@@ -105,6 +106,10 @@ function App() {
 
   // Track if user has manually selected (including main workspace)
   const [hasUserSelected, setHasUserSelected] = useState(false);
+
+  // Scan state (for SettingsView)
+  const [scanningProject, setScanningProject] = useState<string | null>(null);
+  const [settingsScanResults, setSettingsScanResults] = useState<ScannedFolder[]>([]);
 
   // Set initial selected worktree when data loads (only on first load)
   useEffect(() => {
@@ -208,11 +213,49 @@ function App() {
     setCloningProject(true);
     try {
       await workspace.cloneProject(project);
-      setShowAddProjectModal(false);
+      // Don't close modal here — let AddProjectModal handle the scan phase
+    } catch (e) {
+      workspace.setError(String(e));
+      throw e; // Re-throw so AddProjectModal knows clone failed
+    } finally {
+      setCloningProject(false);
+    }
+  }, [workspace]);
+
+  // Update linked folders for a project (used after scanning)
+  const handleUpdateLinkedFolders = useCallback(async (projectName: string, folders: string[]) => {
+    if (!editingConfig && workspace.config) {
+      // Direct update from AddProjectModal
+      const updatedConfig = JSON.parse(JSON.stringify(workspace.config)) as WorkspaceConfig;
+      const project = updatedConfig.projects.find(p => p.name === projectName);
+      if (project) {
+        project.linked_folders = folders;
+        await workspace.saveConfig(updatedConfig);
+      }
+    } else if (editingConfig) {
+      // From SettingsView context
+      const project = editingConfig.projects.find(p => p.name === projectName);
+      if (project) {
+        project.linked_folders = folders;
+        setEditingConfig({ ...editingConfig });
+        await workspace.saveConfig(editingConfig);
+      }
+    }
+  }, [workspace, editingConfig]);
+
+  // Scan project folders (for SettingsView)
+  const handleScanProject = useCallback(async (projectName: string) => {
+    if (!workspace.currentWorkspace) return;
+    setScanningProject(projectName);
+    setSettingsScanResults([]);
+    try {
+      const projectPath = `${workspace.currentWorkspace.path}/projects/${projectName}`;
+      const results = await workspace.scanLinkedFolders(projectPath);
+      setSettingsScanResults(results);
     } catch (e) {
       workspace.setError(String(e));
     } finally {
-      setCloningProject(false);
+      setScanningProject(null);
     }
   }, [workspace]);
 
@@ -463,6 +506,9 @@ function App() {
             onClearError={() => workspace.setError(null)}
             onCheckUpdate={() => updater.checkForUpdates(false)}
             checkingUpdate={updater.state === 'checking'}
+            onScanProject={handleScanProject}
+            scanningProject={scanningProject}
+            scanResults={settingsScanResults}
           />
         )}
       </div>
@@ -560,6 +606,9 @@ function App() {
           onOpenChange={setShowAddProjectModal}
           onSubmit={handleAddProject}
           loading={cloningProject}
+          scanLinkedFolders={workspace.scanLinkedFolders}
+          workspacePath={workspace.currentWorkspace?.path}
+          onUpdateLinkedFolders={handleUpdateLinkedFolders}
         />
 
         {/* Context Menus */}

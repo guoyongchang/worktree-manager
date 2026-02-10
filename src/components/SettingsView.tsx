@@ -8,9 +8,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, Search } from 'lucide-react';
 import { BackIcon, PlusIcon, TrashIcon } from './Icons';
-import type { WorkspaceConfig, ProjectConfig } from '../types';
+import type { WorkspaceConfig, ProjectConfig, ScannedFolder } from '../types';
 import { getVersion } from '@tauri-apps/api/app';
 
 interface SettingsViewProps {
@@ -29,6 +29,9 @@ interface SettingsViewProps {
   onClearError: () => void;
   onCheckUpdate?: () => void;
   checkingUpdate?: boolean;
+  onScanProject?: (projectName: string) => void;
+  scanningProject?: string | null;
+  scanResults?: ScannedFolder[];
 }
 
 export const SettingsView: FC<SettingsViewProps> = ({
@@ -47,6 +50,9 @@ export const SettingsView: FC<SettingsViewProps> = ({
   onClearError,
   onCheckUpdate,
   checkingUpdate = false,
+  onScanProject,
+  scanningProject = null,
+  scanResults = [],
 }) => {
   const [newLinkedItem, setNewLinkedItem] = useState('');
   const [newProjectLinkedFolder, setNewProjectLinkedFolder] = useState<Record<number, string>>({});
@@ -244,7 +250,59 @@ export const SettingsView: FC<SettingsViewProps> = ({
               </div>
               {/* Linked Folders */}
               <div className="border-t border-slate-700/50 pt-3">
-                <label className="block text-xs text-slate-500 mb-2">链接文件夹</label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-xs text-slate-500">链接文件夹</label>
+                  {onScanProject && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 text-xs gap-1 text-slate-400 hover:text-slate-200"
+                      onClick={() => onScanProject(proj.name)}
+                      disabled={scanningProject === proj.name || !proj.name}
+                    >
+                      {scanningProject === proj.name ? (
+                        <>
+                          <div className="w-3 h-3 border border-blue-500 border-t-transparent rounded-full animate-spin" />
+                          扫描中...
+                        </>
+                      ) : (
+                        <>
+                          <Search className="w-3 h-3" />
+                          扫描
+                        </>
+                      )}
+                    </Button>
+                  )}
+                </div>
+
+                {/* Scan Results Panel */}
+                {scanResults.length > 0 && scanningProject === null && proj.name && (() => {
+                  const existingFolders = new Set(proj.linked_folders || []);
+                  const filteredResults = scanResults.filter(r => !existingFolders.has(r.relative_path));
+                  if (filteredResults.length === 0) return null;
+                  return (
+                    <div className="mb-2 p-2 bg-blue-900/20 border border-blue-800/30 rounded-lg">
+                      <div className="text-[10px] font-medium text-blue-400 mb-1.5">扫描结果 (点击添加)</div>
+                      <div className="space-y-1">
+                        {filteredResults.map(result => (
+                          <button
+                            key={result.relative_path}
+                            type="button"
+                            className="w-full flex items-center justify-between px-2 py-1 text-left rounded hover:bg-blue-900/30 transition-colors"
+                            onClick={() => {
+                              const newFolders = [...(proj.linked_folders || []), result.relative_path];
+                              onUpdateProject(index, 'linked_folders', newFolders);
+                            }}
+                          >
+                            <span className="text-xs text-slate-300 font-mono">{result.relative_path}</span>
+                            <span className="text-[10px] text-slate-500 ml-2">{result.size_display}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
                 {(proj.linked_folders || []).length > 0 && (
                   <div className="space-y-1.5 mb-2">
                     {(proj.linked_folders || []).map((folder, folderIdx) => (

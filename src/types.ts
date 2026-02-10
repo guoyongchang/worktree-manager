@@ -122,3 +122,12 @@ export interface ArchiveModalState {
   loading: boolean;
   confirmedIssues: Set<string>;
 }
+
+// Scanned folder type (from smart scan)
+export interface ScannedFolder {
+  relative_path: string;
+  display_name: string;
+  size_bytes: number;
+  size_display: string;
+  is_recommended: boolean;
+}
