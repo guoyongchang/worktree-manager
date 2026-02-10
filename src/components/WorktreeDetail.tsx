@@ -35,6 +35,7 @@ interface WorktreeDetailProps {
   onSelectEditor: (editor: EditorType) => void;
   onOpenInEditor: (path: string, editor?: EditorType) => void;
   onOpenInTerminal: (path: string) => void;
+  onRevealInFinder: (path: string) => void;
   onSwitchBranch: (projectPath: string, branch: string) => void;
   onArchive: () => void;
   onRestore: () => void;
@@ -69,6 +70,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
   onSelectEditor,
   onOpenInEditor,
   onOpenInTerminal,
+  onRevealInFinder,
   onSwitchBranch,
   onArchive,
   onRestore,
@@ -153,10 +155,10 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                   <span className="font-medium text-slate-200">{proj.name}</span>
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
-                      onClick={() => onOpenInEditor(projectPath)}
+                      onClick={() => onRevealInFinder(projectPath)}
                       className="p-1 hover:bg-slate-600 rounded text-slate-400 hover:text-slate-200"
-                      title={`在 ${selectedEditorName} 中打开`}
-                      aria-label={`在 ${selectedEditorName} 中打开 ${proj.name}`}
+                      title="在 Finder 中打开"
+                      aria-label={`在 Finder 中打开 ${proj.name}`}
                     >
                       <FolderIcon className="w-3.5 h-3.5" />
                     </button>

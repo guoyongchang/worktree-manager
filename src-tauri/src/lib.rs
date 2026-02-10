@@ -1359,6 +1359,37 @@ fn open_in_editor(request: OpenEditorRequest) -> Result<(), String> {
 }
 
 
+#[tauri::command]
+fn reveal_in_finder(path: String) -> Result<(), String> {
+    let normalized = normalize_path(&path);
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(&normalized)
+            .spawn()
+            .map_err(|e| format!("无法打开文件夹: {}", e))?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("explorer")
+            .arg(&normalized)
+            .spawn()
+            .map_err(|e| format!("无法打开文件夹: {}", e))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        Command::new("xdg-open")
+            .arg(&normalized)
+            .spawn()
+            .map_err(|e| format!("无法打开文件夹: {}", e))?;
+    }
+
+    Ok(())
+}
+
 // ==================== PTY 终端命令 ====================
 
 #[tauri::command]
@@ -1469,6 +1500,7 @@ pub fn run() {
             open_in_terminal,
             open_in_editor,
             open_log_dir,
+            reveal_in_finder,
             // PTY 终端
             pty_create,
             pty_write,

@@ -41,6 +41,7 @@ export interface UseWorkspaceReturn {
   checkWorktreeStatus: (name: string) => Promise<WorktreeArchiveStatus>;
   openInEditor: (path: string, editor: EditorType) => Promise<void>;
   openInTerminal: (path: string) => Promise<void>;
+  revealInFinder: (path: string) => Promise<void>;
   switchBranch: (projectPath: string, branch: string) => Promise<void>;
   saveConfig: (config: WorkspaceConfig) => Promise<void>;
 }
@@ -196,6 +197,14 @@ export function useWorkspace(): UseWorkspaceReturn {
     }
   }, []);
 
+  const revealInFinder = useCallback(async (path: string) => {
+    try {
+      await invoke("reveal_in_finder", { path });
+    } catch (e) {
+      setError(String(e));
+    }
+  }, []);
+
   const switchBranch = useCallback(async (projectPath: string, branch: string) => {
     try {
       await invoke("switch_branch", { request: { project_path: projectPath, branch } });
@@ -235,6 +244,7 @@ export function useWorkspace(): UseWorkspaceReturn {
     checkWorktreeStatus,
     openInEditor,
     openInTerminal,
+    revealInFinder,
     switchBranch,
     saveConfig,
   };
