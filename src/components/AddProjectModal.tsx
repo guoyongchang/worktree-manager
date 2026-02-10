@@ -10,6 +10,13 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 const RECOMMENDED_LINKED_FOLDERS = [
   { name: 'node_modules', label: 'node_modules', desc: 'npm/yarn/pnpm 依赖' },
@@ -42,6 +49,7 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
   loading = false,
 }) => {
   const [name, setName] = useState('');
+  const [nameManuallyEdited, setNameManuallyEdited] = useState(false);
   const [repoUrl, setRepoUrl] = useState('');
   const [baseBranch, setBaseBranch] = useState('main');
   const [testBranch, setTestBranch] = useState('test');
@@ -49,6 +57,46 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
   const [linkedFolders, setLinkedFolders] = useState<Set<string>>(new Set());
   const [customFolder, setCustomFolder] = useState('');
   const [urlFormat, setUrlFormat] = useState<'gh' | 'ssh' | 'https'>('gh');
+
+  const extractProjectName = (url: string): string => {
+    const trimmed = url.trim();
+    if (!trimmed) return '';
+    // gh:owner/repo or owner/repo
+    if (!trimmed.includes('://') && !trimmed.startsWith('git@')) {
+      const repo = trimmed.replace(/^gh:/, '');
+      const parts = repo.split('/');
+      return (parts[parts.length - 1] || '').replace(/\.git$/, '');
+    }
+    // git@github.com:owner/repo.git
+    if (trimmed.startsWith('git@')) {
+      const match = trimmed.match(/:(.+?)(?:\.git)?$/);
+      if (match) {
+        const parts = match[1].split('/');
+        return parts[parts.length - 1] || '';
+      }
+    }
+    // https://github.com/owner/repo.git
+    try {
+      const pathname = new URL(trimmed).pathname;
+      const parts = pathname.split('/').filter(Boolean);
+      return (parts[parts.length - 1] || '').replace(/\.git$/, '');
+    } catch {
+      return '';
+    }
+  };
+
+  const handleRepoUrlChange = (url: string) => {
+    setRepoUrl(url);
+    if (!nameManuallyEdited) {
+      const derived = extractProjectName(url);
+      if (derived) setName(derived);
+    }
+  };
+
+  const handleNameChange = (value: string) => {
+    setName(value);
+    setNameManuallyEdited(true);
+  };
 
   const handleSubmit = () => {
     if (!name.trim() || !repoUrl.trim()) return;
@@ -64,6 +112,7 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
 
     // Reset form
     setName('');
+    setNameManuallyEdited(false);
     setRepoUrl('');
     setBaseBranch('main');
     setTestBranch('test');
@@ -139,7 +188,7 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
             <Input
               type="text"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => handleNameChange(e.target.value)}
               placeholder="my-project"
             />
           </div>
@@ -185,7 +234,7 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
             <Input
               type="text"
               value={repoUrl}
-              onChange={(e) => setRepoUrl(e.target.value)}
+              onChange={(e) => handleRepoUrlChange(e.target.value)}
               placeholder={getPlaceholder()}
             />
             <p className="text-xs text-slate-500 mt-1">
@@ -228,15 +277,16 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
             <label className="block text-sm font-medium text-slate-300 mb-2">
               合并策略
             </label>
-            <select
-              value={mergeStrategy}
-              onChange={(e) => setMergeStrategy(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-md text-sm text-slate-100"
-            >
-              <option value="merge">Merge</option>
-              <option value="cherry-pick">Cherry-pick</option>
-              <option value="rebase">Rebase</option>
-            </select>
+            <Select value={mergeStrategy} onValueChange={setMergeStrategy}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="merge">Merge</SelectItem>
+                <SelectItem value="cherry-pick">Cherry-pick</SelectItem>
+                <SelectItem value="rebase">Rebase</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Linked Folders */}
