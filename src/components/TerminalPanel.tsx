@@ -121,9 +121,9 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
         className="flex-1 min-h-0 overflow-hidden relative"
         style={{ display: visible ? 'flex' : 'none' }}
       >
-        {activeTerminalTab ? (
+        {/* Always render all activated terminals to preserve PTY sessions across view switches */}
+        {activatedTerminals.size > 0 ? (
           <>
-            {/* Render all activated terminals, show only the current one */}
             {Array.from(activatedTerminals).map(path => (
               <div
                 key={path}
@@ -136,6 +136,11 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
                 />
               </div>
             ))}
+            {!activeTerminalTab && (
+              <div className="flex items-center justify-center h-full text-slate-500 text-sm">
+                点击上方项目标签打开终端
+              </div>
+            )}
           </>
         ) : (
           <div className="flex items-center justify-center h-full text-slate-500 text-sm">
