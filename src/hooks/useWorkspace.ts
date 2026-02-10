@@ -9,6 +9,7 @@ import type {
   WorktreeArchiveStatus,
   EditorType,
   ScannedFolder,
+  AddProjectToWorktreeRequest,
 } from '../types';
 
 export interface UseWorkspaceReturn {
@@ -46,6 +47,7 @@ export interface UseWorkspaceReturn {
   switchBranch: (projectPath: string, branch: string) => Promise<void>;
   saveConfig: (config: WorkspaceConfig) => Promise<void>;
   scanLinkedFolders: (projectPath: string) => Promise<ScannedFolder[]>;
+  addProjectToWorktree: (request: AddProjectToWorktreeRequest) => Promise<void>;
 }
 
 export function useWorkspace(): UseWorkspaceReturn {
@@ -226,6 +228,11 @@ export function useWorkspace(): UseWorkspaceReturn {
     return invoke<ScannedFolder[]>("scan_linked_folders", { projectPath });
   }, []);
 
+  const addProjectToWorktree = useCallback(async (request: AddProjectToWorktreeRequest): Promise<void> => {
+    await invoke("add_project_to_worktree", { request });
+    await loadData();
+  }, [loadData]);
+
   return {
     workspaces,
     currentWorkspace,
@@ -254,5 +261,6 @@ export function useWorkspace(): UseWorkspaceReturn {
     switchBranch,
     saveConfig,
     scanLinkedFolders,
+    addProjectToWorktree,
   };
 }
