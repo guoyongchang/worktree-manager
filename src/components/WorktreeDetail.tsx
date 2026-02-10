@@ -208,6 +208,21 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                     </DropdownMenu>
                   </div>
                 </div>
+                {proj.linked_folders && proj.linked_folders.length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-slate-700/50">
+                    <div className="text-xs text-slate-500 mb-1">链接文件夹</div>
+                    <div className="flex flex-wrap gap-1">
+                      {proj.linked_folders.map((folder, idx) => (
+                        <span
+                          key={idx}
+                          className="inline-flex items-center px-1.5 py-0.5 bg-slate-700/50 rounded text-xs text-slate-400"
+                        >
+                          {folder}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}

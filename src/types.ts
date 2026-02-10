@@ -39,6 +39,7 @@ export interface MainProjectStatus {
   has_uncommitted: boolean;
   base_branch: string;
   test_branch: string;
+  linked_folders: string[];
 }
 
 export interface MainWorkspaceStatus {

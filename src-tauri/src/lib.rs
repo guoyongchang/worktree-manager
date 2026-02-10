@@ -336,6 +336,7 @@ pub struct MainProjectStatus {
     pub has_uncommitted: bool,
     pub base_branch: String,
     pub test_branch: String,
+    pub linked_folders: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -621,6 +622,7 @@ fn get_main_workspace_status() -> Result<MainWorkspaceStatus, String> {
             has_uncommitted: info.uncommitted_count > 0,
             base_branch: proj_config.base_branch.clone(),
             test_branch: proj_config.test_branch.clone(),
+            linked_folders: proj_config.linked_folders.clone(),
         });
     }
 

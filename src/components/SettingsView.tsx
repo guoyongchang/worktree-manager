@@ -1,4 +1,4 @@
-import { useState, type FC } from 'react';
+import { useState, useEffect, type FC } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -11,6 +11,7 @@ import {
 import { RefreshCw } from 'lucide-react';
 import { BackIcon, PlusIcon, TrashIcon } from './Icons';
 import type { WorkspaceConfig, ProjectConfig } from '../types';
+import { getVersion } from '@tauri-apps/api/app';
 
 interface SettingsViewProps {
   config: WorkspaceConfig;
@@ -49,6 +50,11 @@ export const SettingsView: FC<SettingsViewProps> = ({
 }) => {
   const [newLinkedItem, setNewLinkedItem] = useState('');
   const [newProjectLinkedFolder, setNewProjectLinkedFolder] = useState<Record<number, string>>({});
+  const [appVersion, setAppVersion] = useState('');
+
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
+  }, []);
   return (
     <div className="max-w-3xl mx-auto">
       {/* Header */}
@@ -176,7 +182,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
         <div className="space-y-3">
           {config.projects.map((proj, index) => (
             <div key={index} className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4">
-              <div className="flex items-start gap-4">
+              <div className="flex items-start gap-3 mb-3">
                 <div className="flex-1 grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs text-slate-500 mb-1">项目名称</label>
@@ -220,18 +226,31 @@ export const SettingsView: FC<SettingsViewProps> = ({
                       <SelectContent>
                         <SelectItem value="merge">merge</SelectItem>
                         <SelectItem value="cherry-pick">cherry-pick</SelectItem>
+                        <SelectItem value="rebase">rebase</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                 </div>
-                {/* Linked Folders */}
-                <div className="mt-3 col-span-2">
-                  <label className="block text-xs text-slate-500 mb-1">链接文件夹</label>
-                  <div className="flex flex-wrap gap-1.5 mb-2">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => onRemoveProject(index)}
+                  className="h-8 w-8 text-red-400 hover:text-red-300 hover:bg-red-900/30 shrink-0"
+                  title="删除项目"
+                  aria-label={`删除项目 ${proj.name || '未命名'}`}
+                >
+                  <TrashIcon className="w-4 h-4" />
+                </Button>
+              </div>
+              {/* Linked Folders */}
+              <div className="border-t border-slate-700/50 pt-3">
+                <label className="block text-xs text-slate-500 mb-2">链接文件夹</label>
+                {(proj.linked_folders || []).length > 0 && (
+                  <div className="space-y-1.5 mb-2">
                     {(proj.linked_folders || []).map((folder, folderIdx) => (
-                      <span
+                      <div
                         key={folderIdx}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-700 border border-slate-600 rounded text-xs text-slate-300"
+                        className="flex items-center justify-between px-3 py-1.5 bg-slate-700/50 border border-slate-600/50 rounded text-sm text-slate-300"
                       >
                         <span className="select-text">{folder}</span>
                         <button
@@ -241,59 +260,47 @@ export const SettingsView: FC<SettingsViewProps> = ({
                             newFolders.splice(folderIdx, 1);
                             onUpdateProject(index, 'linked_folders', newFolders);
                           }}
-                          className="text-slate-500 hover:text-red-400 ml-0.5"
+                          className="text-slate-500 hover:text-red-400 text-xs ml-2"
                         >
-                          ×
+                          删除
                         </button>
-                      </span>
+                      </div>
                     ))}
                   </div>
-                  <div className="flex gap-2">
-                    <Input
-                      type="text"
-                      value={newProjectLinkedFolder[index] || ''}
-                      onChange={(e) => setNewProjectLinkedFolder(prev => ({ ...prev, [index]: e.target.value }))}
-                      placeholder="文件夹名称"
-                      className="h-7 text-xs"
-                      onKeyDown={(e) => {
-                        const val = (newProjectLinkedFolder[index] || '').trim();
-                        if (e.key === 'Enter' && val) {
-                          e.preventDefault();
-                          const newFolders = [...(proj.linked_folders || []), val];
-                          onUpdateProject(index, 'linked_folders', newFolders);
-                          setNewProjectLinkedFolder(prev => ({ ...prev, [index]: '' }));
-                        }
-                      }}
-                    />
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      className="h-7 text-xs"
-                      onClick={() => {
-                        const val = (newProjectLinkedFolder[index] || '').trim();
-                        if (val) {
-                          const newFolders = [...(proj.linked_folders || []), val];
-                          onUpdateProject(index, 'linked_folders', newFolders);
-                          setNewProjectLinkedFolder(prev => ({ ...prev, [index]: '' }));
-                        }
-                      }}
-                      disabled={!(newProjectLinkedFolder[index] || '').trim()}
-                    >
-                      添加
-                    </Button>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
+                )}
+                <div className="flex gap-2">
+                  <Input
+                    type="text"
+                    value={newProjectLinkedFolder[index] || ''}
+                    onChange={(e) => setNewProjectLinkedFolder(prev => ({ ...prev, [index]: e.target.value }))}
+                    placeholder="例如: node_modules"
+                    className="h-7 text-xs"
+                    onKeyDown={(e) => {
+                      const val = (newProjectLinkedFolder[index] || '').trim();
+                      if (e.key === 'Enter' && val) {
+                        e.preventDefault();
+                        const newFolders = [...(proj.linked_folders || []), val];
+                        onUpdateProject(index, 'linked_folders', newFolders);
+                        setNewProjectLinkedFolder(prev => ({ ...prev, [index]: '' }));
+                      }
+                    }}
+                  />
                   <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => onRemoveProject(index)}
-                    className="h-8 w-8 text-red-400 hover:text-red-300 hover:bg-red-900/30"
-                    title="删除项目"
-                    aria-label={`删除项目 ${proj.name || '未命名'}`}
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => {
+                      const val = (newProjectLinkedFolder[index] || '').trim();
+                      if (val) {
+                        const newFolders = [...(proj.linked_folders || []), val];
+                        onUpdateProject(index, 'linked_folders', newFolders);
+                        setNewProjectLinkedFolder(prev => ({ ...prev, [index]: '' }));
+                      }
+                    }}
+                    disabled={!(newProjectLinkedFolder[index] || '').trim()}
                   >
-                    <TrashIcon className="w-4 h-4" />
+                    添加
                   </Button>
                 </div>
               </div>
@@ -309,7 +316,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
           <div className="flex items-center gap-4 mb-3">
             <div>
               <h3 className="text-base font-semibold text-slate-100">Worktree Manager</h3>
-              <p className="text-xs text-slate-400 mt-0.5">版本: v{config.name ? '0.1.0' : '0.1.0'}</p>
+              <p className="text-xs text-slate-400 mt-0.5">版本: v{appVersion}</p>
             </div>
           </div>
           <p className="text-sm text-slate-400 mb-4">Git Worktree 可视化管理工具</p>
