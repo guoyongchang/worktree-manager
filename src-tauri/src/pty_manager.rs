@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Receiver};
+use tokio::sync::broadcast;
 use log;
 
 /// Get the default shell for the current platform.
@@ -47,6 +48,7 @@ pub struct PtySession {
     writer: Box<dyn Write + Send>,
     reader: PtyReader,
     child: Box<dyn Child + Send + Sync>,
+    broadcast_tx: broadcast::Sender<Vec<u8>>,
 }
 
 impl PtySession {
@@ -140,8 +142,12 @@ impl PtyManager {
         let mut reader = pair.master.try_clone_reader()
             .map_err(|e| format!("Failed to get reader: {}", e))?;
 
-        // Create channel for async reading
+        // Create channel for async reading (desktop polling via invoke)
         let (tx, rx) = channel::<Vec<u8>>();
+
+        // Create broadcast channel for WebSocket subscribers
+        let (broadcast_tx, _) = broadcast::channel::<Vec<u8>>(256);
+        let broadcast_tx_clone = broadcast_tx.clone();
 
         // Spawn a thread to read from PTY
         std::thread::spawn(move || {
@@ -150,7 +156,11 @@ impl PtyManager {
                 match reader.read(&mut buf) {
                     Ok(0) => break, // EOF
                     Ok(n) => {
-                        if tx.send(buf[..n].to_vec()).is_err() {
+                        let data = buf[..n].to_vec();
+                        // Send to broadcast (for WS subscribers); ignore errors (no receivers)
+                        let _ = broadcast_tx_clone.send(data.clone());
+                        // Send to mpsc (for desktop pty_read polling)
+                        if tx.send(data).is_err() {
                             break; // Receiver dropped
                         }
                     }
@@ -164,6 +174,7 @@ impl PtyManager {
             writer,
             reader: PtyReader { receiver: rx },
             child,
+            broadcast_tx,
         };
 
         self.sessions.insert(id.to_string(), Arc::new(Mutex::new(session)));
@@ -222,6 +233,13 @@ impl PtyManager {
 
     pub fn has_session(&self, id: &str) -> bool {
         self.sessions.contains_key(id)
+    }
+
+    /// Get a broadcast receiver for a PTY session's output (used by WebSocket subscribers).
+    pub fn subscribe_session(&self, id: &str) -> Option<broadcast::Receiver<Vec<u8>>> {
+        let session_arc = self.sessions.get(id)?;
+        let session = session_arc.lock().ok()?;
+        Some(session.broadcast_tx.subscribe())
     }
 
     pub fn close_sessions_by_path_prefix(&mut self, path_prefix: &str) -> Vec<String> {

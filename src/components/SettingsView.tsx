@@ -19,7 +19,7 @@ import {
 import { RefreshCw, Search } from 'lucide-react';
 import { BackIcon, PlusIcon, TrashIcon } from './Icons';
 import type { WorkspaceRef, WorkspaceConfig, ProjectConfig, ScannedFolder } from '../types';
-import { getVersion } from '@tauri-apps/api/app';
+import { getAppVersion } from '../lib/backend';
 
 interface SettingsViewProps {
   config: WorkspaceConfig;
@@ -74,7 +74,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
   const [removeConfirmWorkspace, setRemoveConfirmWorkspace] = useState<WorkspaceRef | null>(null);
 
   useEffect(() => {
-    getVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
+    getAppVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
   }, []);
   return (
     <div className="max-w-3xl mx-auto">

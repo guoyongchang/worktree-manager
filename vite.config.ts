@@ -35,5 +35,16 @@ export default defineConfig(async () => ({
       // 3. tell Vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],
     },
+    // Proxy /api and /ws requests to the Rust HTTP server (for browser mode)
+    proxy: {
+      "/api": {
+        target: "http://localhost:3001",
+        changeOrigin: true,
+      },
+      "/ws": {
+        target: "ws://localhost:3001",
+        ws: true,
+      },
+    },
   },
 }));

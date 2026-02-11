@@ -30,6 +30,9 @@ import {
   UpToDateToast,
 } from "./components";
 import { useWorkspace, useTerminal, useUpdater } from "./hooks";
+import { Input } from "@/components/ui/input";
+import { callBackend, getWindowLabel, setWindowTitle, isTauri, startSharing, stopSharing, getShareState, getShareInfo, authenticate, updateSharePassword } from "./lib/backend";
+import { getWebSocketManager } from "./lib/websocket";
 import type {
   WorktreeListItem,
   ViewMode,
@@ -44,8 +47,8 @@ import type {
 } from "./types";
 import "./index.css";
 
-// Disable browser-like behaviors
-if (typeof window !== 'undefined') {
+// Disable browser-like behaviors (only in Tauri desktop mode)
+if (typeof window !== 'undefined' && isTauri()) {
   window.addEventListener('contextmenu', (e) => e.preventDefault());
   window.addEventListener('keydown', (e) => {
     if (e.key === 'F5' || (e.metaKey && e.key === 'r') || (e.ctrlKey && e.key === 'r')) {
@@ -58,7 +61,10 @@ if (typeof window !== 'undefined') {
 }
 
 function App() {
-  const workspace = useWorkspace();
+  // Browser auth state (declared early so useWorkspace can depend on it)
+  const [browserAuthenticated, setBrowserAuthenticated] = useState(isTauri());
+
+  const workspace = useWorkspace(browserAuthenticated);
   const [selectedWorktree, setSelectedWorktree] = useState<WorktreeListItem | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('main');
 
@@ -126,25 +132,57 @@ function App() {
   const [scanningProject, setScanningProject] = useState<string | null>(null);
   const [settingsScanResults, setSettingsScanResults] = useState<ScannedFolder[]>([]);
 
+  // Share state
+  const [shareActive, setShareActive] = useState(false);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [sharePassword, setSharePassword] = useState('');
+
+  const [browserLoginPassword, setBrowserLoginPassword] = useState('');
+  const [browserLoginError, setBrowserLoginError] = useState<string | null>(null);
+  const [browserLoggingIn, setBrowserLoggingIn] = useState(false);
+
   // Worktree lock state (for multi-window)
   const [lockedWorktrees, setLockedWorktrees] = useState<Record<string, string>>({});
 
   // Refresh worktree locks periodically
+  const currentWorkspacePath = workspace.currentWorkspace?.path;
+  const getLockedWorktreesFn = workspace.getLockedWorktrees;
+
   const refreshLockedWorktrees = useCallback(async () => {
-    if (!workspace.currentWorkspace) return;
+    if (!currentWorkspacePath) return;
     try {
-      const locks = await workspace.getLockedWorktrees(workspace.currentWorkspace.path);
-      setLockedWorktrees(locks);
+      const locks = await getLockedWorktreesFn(currentWorkspacePath);
+      setLockedWorktrees(prev => {
+        const next = JSON.stringify(locks);
+        return next === JSON.stringify(prev) ? prev : locks;
+      });
     } catch {
       // ignore
     }
-  }, [workspace]);
+  }, [currentWorkspacePath, getLockedWorktreesFn]);
 
   useEffect(() => {
-    refreshLockedWorktrees();
-    const interval = setInterval(refreshLockedWorktrees, 2000);
-    return () => clearInterval(interval);
-  }, [refreshLockedWorktrees]);
+    if (!isTauri() && currentWorkspacePath) {
+      // Browser mode: subscribe to WebSocket lock updates (no polling)
+      const wsManager = getWebSocketManager();
+      wsManager.subscribeLocks(currentWorkspacePath, (locks) => {
+        setLockedWorktrees(prev => {
+          const next = JSON.stringify(locks);
+          return next === JSON.stringify(prev) ? prev : locks;
+        });
+      });
+      // Also fetch initial state via HTTP as fallback
+      refreshLockedWorktrees();
+      return () => {
+        wsManager.unsubscribeLocks();
+      };
+    } else {
+      // Tauri desktop mode: poll every 3s
+      refreshLockedWorktrees();
+      const interval = setInterval(refreshLockedWorktrees, 3000);
+      return () => clearInterval(interval);
+    }
+  }, [refreshLockedWorktrees, currentWorkspacePath]);
 
   // Set initial selected worktree when data loads (only on first load)
   useEffect(() => {
@@ -153,7 +191,7 @@ function App() {
       // Find first active worktree that is not locked by another window
       const tryAutoSelect = async () => {
         const locks: Record<string, string> = await workspace.getLockedWorktrees(wsPath).catch(() => ({} as Record<string, string>));
-        const windowLabel = (await import('@tauri-apps/api/window')).getCurrentWindow().label;
+        const windowLabel = await getWindowLabel();
         const activeWorktree = workspace.worktrees.find(w => {
           if (w.is_archived) return false;
           const lockedBy = locks[w.name];
@@ -216,25 +254,15 @@ function App() {
 
   // Update window title based on workspace and worktree
   useEffect(() => {
-    const updateTitle = async () => {
-      const wsName = workspace.currentWorkspace?.name;
-      let title: string;
-      if (!wsName) {
-        title = 'Worktree Manager';
-      } else {
-        const wtName = selectedWorktree ? selectedWorktree.name : '主工作区';
-        title = `${wsName} - ${wtName}`;
-      }
-      document.title = title;
-      // Also update the native window title bar
-      try {
-        const { getCurrentWindow } = await import('@tauri-apps/api/window');
-        await getCurrentWindow().setTitle(title);
-      } catch {
-        // Ignore errors (e.g., when running outside Tauri)
-      }
-    };
-    updateTitle();
+    const wsName = workspace.currentWorkspace?.name;
+    let title: string;
+    if (!wsName) {
+      title = 'Worktree Manager';
+    } else {
+      const wtName = selectedWorktree ? selectedWorktree.name : '主工作区';
+      title = `${wsName} - ${wtName}`;
+    }
+    setWindowTitle(title);
   }, [workspace.currentWorkspace?.name, selectedWorktree]);
 
   // Workspace handlers
@@ -410,6 +438,84 @@ function App() {
     }
   }, [workspace]);
 
+  // Share handlers
+  const generatePassword = useCallback(() => {
+    const chars = 'abcdefghijkmnpqrstuvwxyz23456789';
+    return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+  }, []);
+
+  const handleStartShare = useCallback(async () => {
+    try {
+      const port = 49152 + Math.floor(Math.random() * (65535 - 49152));
+      const pwd = generatePassword();
+      const url = await startSharing(port, pwd);
+      setShareActive(true);
+      setShareUrl(url);
+      setSharePassword(pwd);
+    } catch (e) {
+      workspace.setError(String(e));
+    }
+  }, [workspace, generatePassword]);
+
+  const handleStopShare = useCallback(async () => {
+    try {
+      await stopSharing();
+      setShareActive(false);
+      setShareUrl(null);
+      setSharePassword('');
+    } catch (e) {
+      workspace.setError(String(e));
+    }
+  }, [workspace]);
+
+  const handleUpdateSharePassword = useCallback(async (newPassword: string) => {
+    try {
+      await updateSharePassword(newPassword);
+      setSharePassword(newPassword);
+    } catch (e) {
+      workspace.setError(String(e));
+    }
+  }, [workspace]);
+
+  // Restore share state on mount (Tauri only)
+  useEffect(() => {
+    if (isTauri()) {
+      getShareState().then(state => {
+        if (state.active && state.url) {
+          setShareActive(true);
+          setShareUrl(state.url);
+        }
+      }).catch(() => {});
+    }
+  }, []);
+
+  // Browser: after authentication, bind to the shared workspace THEN load data
+  useEffect(() => {
+    if (!isTauri() && browserAuthenticated) {
+      getShareInfo().then(async (info) => {
+        await callBackend('set_window_workspace', { workspacePath: info.workspace_path });
+        await workspace.loadWorkspaces();
+        await workspace.loadData();
+      }).catch(() => {});
+    }
+  }, [browserAuthenticated]);
+
+  // Browser login handler
+  const handleBrowserLogin = useCallback(async () => {
+    if (!browserLoginPassword.trim()) return;
+    setBrowserLoggingIn(true);
+    setBrowserLoginError(null);
+    try {
+      await authenticate(browserLoginPassword.trim());
+      setBrowserAuthenticated(true);
+      setBrowserLoginPassword('');
+    } catch (e) {
+      setBrowserLoginError(String(e));
+    } finally {
+      setBrowserLoggingIn(false);
+    }
+  }, [browserLoginPassword]);
+
   // Archive handlers
   const handleContextMenu = useCallback((e: React.MouseEvent, worktree: WorktreeListItem) => {
     e.preventDefault();
@@ -575,15 +681,15 @@ function App() {
         setShowWorkspaceMenu(false);
         setTerminalTabMenu(null);
       }
-      // Cmd/Ctrl+N: Open create worktree modal
-      if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+      // Cmd/Ctrl+N: Open create worktree modal (Tauri only)
+      if ((e.metaKey || e.ctrlKey) && e.key === 'n' && isTauri()) {
         e.preventDefault();
         if (viewMode === 'main' && workspace.config) {
           openCreateModal();
         }
       }
-      // Cmd/Ctrl+,: Open settings
-      if ((e.metaKey || e.ctrlKey) && e.key === ',') {
+      // Cmd/Ctrl+,: Open settings (Tauri only)
+      if ((e.metaKey || e.ctrlKey) && e.key === ',' && isTauri()) {
         e.preventDefault();
         if (viewMode === 'main') {
           openSettings();
@@ -607,6 +713,40 @@ function App() {
       window.removeEventListener('click', handleClick);
     };
   }, [viewMode, workspace.config, openCreateModal, openSettings, terminalFullscreen]);
+
+  // Browser mode: show login screen if not authenticated
+  if (!isTauri() && !browserAuthenticated) {
+    return (
+      <div className="min-h-screen bg-slate-900 text-slate-100 flex items-center justify-center">
+        <div className="w-80 space-y-4">
+          <div className="text-center space-y-2">
+            <h1 className="text-xl font-semibold">Worktree Manager</h1>
+            <p className="text-sm text-slate-400">请输入访问密码</p>
+          </div>
+          <form onSubmit={(e) => { e.preventDefault(); handleBrowserLogin(); }} className="space-y-3">
+            <Input
+              type="password"
+              placeholder="密码"
+              value={browserLoginPassword}
+              onChange={(e) => setBrowserLoginPassword(e.target.value)}
+              autoFocus
+              className="bg-slate-800 border-slate-700"
+            />
+            {browserLoginError && (
+              <p className="text-sm text-red-400">{browserLoginError}</p>
+            )}
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={browserLoggingIn || !browserLoginPassword.trim()}
+            >
+              {browserLoggingIn ? '验证中...' : '进入'}
+            </Button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   // Loading state
   if (workspace.loading) {
@@ -711,11 +851,17 @@ function App() {
           onOpenCreateModal={openCreateModal}
           updaterState={updater.state}
           onCheckUpdate={() => updater.checkForUpdates(false)}
-          onOpenInNewWindow={handleOpenInNewWindow}
+          onOpenInNewWindow={isTauri() ? handleOpenInNewWindow : undefined}
           lockedWorktrees={lockedWorktrees}
           collapsed={sidebarCollapsed}
           onToggleCollapsed={() => setSidebarCollapsed(prev => !prev)}
           switchingWorkspace={switchingWorkspace}
+          shareActive={shareActive}
+          shareUrl={shareUrl}
+          sharePassword={sharePassword}
+          onStartShare={handleStartShare}
+          onStopShare={handleStopShare}
+          onUpdateSharePassword={handleUpdateSharePassword}
         />
         )}
 
@@ -792,16 +938,18 @@ function App() {
           creating={creating}
         />
 
-        <AddWorkspaceModal
-          open={showAddWorkspaceModal}
-          onOpenChange={setShowAddWorkspaceModal}
-          name={newWorkspaceName}
-          onNameChange={setNewWorkspaceName}
-          path={newWorkspacePath}
-          onPathChange={setNewWorkspacePath}
-          onSubmit={handleAddWorkspace}
-          loading={addingWorkspace}
-        />
+        {isTauri() && (
+          <AddWorkspaceModal
+            open={showAddWorkspaceModal}
+            onOpenChange={setShowAddWorkspaceModal}
+            name={newWorkspaceName}
+            onNameChange={setNewWorkspaceName}
+            path={newWorkspacePath}
+            onPathChange={setNewWorkspacePath}
+            onSubmit={handleAddWorkspace}
+            loading={addingWorkspace}
+          />
+        )}
 
         <AddProjectModal
           open={showAddProjectModal}
@@ -914,6 +1062,7 @@ function App() {
       />
 
       <UpToDateToast show={updater.showUpToDateToast} />
+
     </>
   );
 }

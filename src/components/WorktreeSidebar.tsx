@@ -34,6 +34,10 @@ import {
   ExternalLinkIcon,
   SidebarCollapseIcon,
   SidebarExpandIcon,
+  ShareIcon,
+  StopIcon,
+  CopyIcon,
+  CheckCircleIcon,
 } from './Icons';
 import type {
   WorkspaceRef,
@@ -41,9 +45,141 @@ import type {
   MainWorkspaceStatus,
 } from '../types';
 import type { UpdaterState } from '../hooks/useUpdater';
-import { getVersion } from '@tauri-apps/api/app';
-import { invoke } from '@tauri-apps/api/core';
-import { getCurrentWindow } from '@tauri-apps/api/window';
+import { callBackend, getAppVersion, getWindowLabel, isMainWindow as checkIsMainWindow, isTauri } from '../lib/backend';
+
+// ==================== ShareBar ====================
+
+const ShareBar: FC<{
+  active: boolean;
+  url: string | null;
+  password: string;
+  onStart?: () => void;
+  onStop?: () => void;
+  onUpdatePassword?: (password: string) => void;
+}> = ({ active, url, password, onStart, onStop, onUpdatePassword }) => {
+  const [showPassword, setShowPassword] = useState(false);
+  const [editingPassword, setEditingPassword] = useState('');
+  const [passwordDirty, setPasswordDirty] = useState(false);
+  const [passwordConfirmed, setPasswordConfirmed] = useState(false);
+
+  // Sync editing password when prop changes (e.g., on share start)
+  useEffect(() => {
+    setEditingPassword(password);
+    setPasswordDirty(false);
+    setPasswordConfirmed(false);
+  }, [password]);
+
+  const handlePasswordChange = (value: string) => {
+    setEditingPassword(value);
+    setPasswordDirty(value !== password);
+    setPasswordConfirmed(false);
+  };
+
+  const handleConfirmPassword = () => {
+    if (!editingPassword.trim() || !passwordDirty) return;
+    onUpdatePassword?.(editingPassword.trim());
+    setPasswordDirty(false);
+    setPasswordConfirmed(true);
+    setTimeout(() => setPasswordConfirmed(false), 2000);
+  };
+
+  if (!active) {
+    return (
+      <div className="px-3 py-2 border-t border-slate-700/50">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onStart}
+          className="w-full justify-center gap-2 h-8 text-slate-400 hover:text-slate-200"
+        >
+          <ShareIcon className="w-3.5 h-3.5" />
+          <span className="text-xs">分享</span>
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="px-3 py-2 border-t border-slate-700/50 space-y-1.5">
+      {/* URL row */}
+      <div className="flex items-center gap-1">
+        <span className="flex-1 text-xs text-emerald-400 truncate min-w-0 select-all" title={url || ''}>
+          {url || '...'}
+        </span>
+        <TooltipProvider delayDuration={300}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => url && navigator.clipboard.writeText(url)}
+                className="h-5 w-5 shrink-0"
+              >
+                <CopyIcon className="w-2.5 h-2.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">复制链接</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onStop}
+                className="h-5 w-5 shrink-0 text-red-400 hover:text-red-300"
+              >
+                <StopIcon className="w-2.5 h-2.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">停止分享</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      </div>
+      {/* Password row */}
+      <div className="flex items-center gap-1">
+        <div className="flex-1 min-w-0 relative">
+          <input
+            type={showPassword ? 'text' : 'password'}
+            value={editingPassword}
+            onChange={(e) => handlePasswordChange(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleConfirmPassword(); }}
+            onClick={() => setShowPassword(true)}
+            onBlur={() => setShowPassword(false)}
+            className="w-full bg-transparent text-xs text-slate-300 outline-none font-mono tracking-wider py-0.5 px-1 rounded hover:bg-slate-700/30 focus:bg-slate-700/40 transition-colors"
+            spellCheck={false}
+          />
+        </div>
+        {passwordDirty ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleConfirmPassword}
+            className="h-5 w-5 shrink-0 text-emerald-400 hover:text-emerald-300"
+            title="确认密码更新"
+          >
+            <CheckCircleIcon className="w-3 h-3" />
+          </Button>
+        ) : passwordConfirmed ? (
+          <span className="h-5 w-5 flex items-center justify-center shrink-0 text-emerald-400">
+            <CheckCircleIcon className="w-3 h-3" />
+          </span>
+        ) : (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => url && navigator.clipboard.writeText(editingPassword)}
+            className="h-5 w-5 shrink-0"
+            title="复制密码"
+          >
+            <CopyIcon className="w-2.5 h-2.5" />
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ==================== WorktreeSidebar ====================
 
 interface WorktreeSidebarProps {
   workspaces: WorkspaceRef[];
@@ -69,6 +205,12 @@ interface WorktreeSidebarProps {
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
   switchingWorkspace?: boolean;
+  shareActive?: boolean;
+  shareUrl?: string | null;
+  sharePassword?: string;
+  onStartShare?: () => void;
+  onStopShare?: () => void;
+  onUpdateSharePassword?: (password: string) => void;
 }
 
 export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
@@ -95,23 +237,34 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
   collapsed = false,
   onToggleCollapsed,
   switchingWorkspace = false,
+  shareActive = false,
+  shareUrl,
+  sharePassword = '',
+  onStartShare,
+  onStopShare,
+  onUpdateSharePassword,
 }) => {
   const activeWorktrees = worktrees.filter(w => !w.is_archived);
   const archivedWorktrees = worktrees.filter(w => w.is_archived);
 
   const [appVersion, setAppVersion] = useState('');
   const [switchConfirmPath, setSwitchConfirmPath] = useState<string | null>(null);
-  const currentWindow = getCurrentWindow();
-  const isMainWindow = currentWindow.label === 'main';
-  const currentWindowLabel = currentWindow.label;
+  const [isMainWin, setIsMainWin] = useState(true);
+  const [currentWindowLabel, setCurrentWindowLabel] = useState('main');
 
   const isDev = import.meta.env.DEV;
+  const _isTauri = isTauri();
 
   useEffect(() => {
-    if (isMainWindow && !isDev) {
-      getVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
+    checkIsMainWindow().then(setIsMainWin);
+    getWindowLabel().then(setCurrentWindowLabel);
+  }, []);
+
+  useEffect(() => {
+    if (isMainWin && !isDev) {
+      getAppVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
     }
-  }, [isMainWindow, isDev]);
+  }, [isMainWin, isDev]);
 
   const handleSwitchClick = (wsPath: string) => {
     if (currentWorkspace?.path === wsPath) return; // Already current
@@ -132,7 +285,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
 
   const handleOpenLogDir = async () => {
     try {
-      await invoke('open_log_dir');
+      await callBackend('open_log_dir');
     } catch (e) {
       console.error('Failed to open log dir:', e);
     }
@@ -223,14 +376,16 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
 
           {/* Bottom icons */}
           <div className="flex flex-col items-center gap-0.5 mt-1">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" onClick={onOpenSettings} className="h-7 w-7">
-                  <SettingsIcon className="w-3.5 h-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="right">设置</TooltipContent>
-            </Tooltip>
+            {_isTauri && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" onClick={onOpenSettings} className="h-7 w-7">
+                    <SettingsIcon className="w-3.5 h-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">设置</TooltipContent>
+              </Tooltip>
+            )}
           </div>
         </TooltipProvider>
       </div>
@@ -243,82 +398,91 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
       {/* Workspace Selector + Settings */}
       <div className="p-3 border-b border-slate-700/50">
         <div className="flex items-center gap-1.5">
-          <DropdownMenu open={showWorkspaceMenu} onOpenChange={onShowWorkspaceMenu}>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="secondary"
-                className="flex-1 justify-between min-w-0"
-              >
-                <div className="flex items-center gap-2 min-w-0 flex-1">
-                  <WorkspaceIcon className="w-4 h-4 text-blue-400 shrink-0" />
-                  <span className="font-medium text-sm truncate">{currentWorkspace?.name || '选择 Workspace'}</span>
-                </div>
-                <ChevronDownIcon className="w-4 h-4 text-slate-400 shrink-0" />
-              </Button>
-            </DropdownMenuTrigger>
-          <DropdownMenuContent className="w-[var(--radix-dropdown-menu-trigger-width)]" align="start">
-            {workspaces.map(ws => {
-              const isCurrent = currentWorkspace?.path === ws.path;
-              return (
-                <div
-                  key={ws.path}
-                  className={`flex items-stretch rounded-sm text-sm ${
-                    isCurrent ? 'bg-slate-700/50' : 'hover:bg-slate-700/40'
-                  }`}
-                >
-                  {/* Left: click to switch in current window */}
-                  <button
-                    className={`flex-1 min-w-0 text-left px-2 py-1.5 rounded-l-sm transition-colors ${
-                      isCurrent ? 'cursor-default' : 'cursor-pointer hover:bg-slate-700/60'
-                    }`}
-                    onClick={() => handleSwitchClick(ws.path)}
-                  >
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <span className="truncate font-medium">{ws.name}</span>
-                      {isCurrent && (
-                        <span className="text-[10px] text-blue-400 bg-blue-500/10 px-1 py-px rounded shrink-0">当前</span>
-                      )}
-                    </div>
-                  </button>
-                  {/* Right: open in new window */}
-                  {onOpenInNewWindow && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); onOpenInNewWindow(ws.path); onShowWorkspaceMenu(false); }}
-                      className="px-2 flex items-center text-slate-500 hover:text-blue-400 hover:bg-slate-600/40 rounded-r-sm transition-colors shrink-0 border-l border-slate-700/50"
-                      title="在新窗口打开"
-                      aria-label={`在新窗口打开 ${ws.name}`}
-                    >
-                      <ExternalLinkIcon className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-            <DropdownMenuSeparator />
-            <button
-              className="w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-sm hover:bg-slate-700/40 transition-colors text-slate-300"
-              onClick={() => { onAddWorkspace(); onShowWorkspaceMenu(false); }}
-            >
-              <PlusIcon className="w-4 h-4" />
-              <span>添加 Workspace</span>
-            </button>
-          </DropdownMenuContent>
-        </DropdownMenu>
-          <TooltipProvider delayDuration={300}>
-            <Tooltip>
-              <TooltipTrigger asChild>
+          {_isTauri ? (
+            <DropdownMenu open={showWorkspaceMenu} onOpenChange={onShowWorkspaceMenu}>
+              <DropdownMenuTrigger asChild>
                 <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={onOpenSettings}
-                  className="h-9 w-9 shrink-0"
+                  variant="secondary"
+                  className="flex-1 justify-between min-w-0"
                 >
-                  <SettingsIcon className="w-4 h-4" />
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <WorkspaceIcon className="w-4 h-4 text-blue-400 shrink-0" />
+                    <span className="font-medium text-sm truncate">{currentWorkspace?.name || '选择 Workspace'}</span>
+                  </div>
+                  <ChevronDownIcon className="w-4 h-4 text-slate-400 shrink-0" />
                 </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">设置</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+              </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-[var(--radix-dropdown-menu-trigger-width)]" align="start">
+              {workspaces.map(ws => {
+                const isCurrent = currentWorkspace?.path === ws.path;
+                return (
+                  <div
+                    key={ws.path}
+                    className={`flex items-stretch rounded-sm text-sm ${
+                      isCurrent ? 'bg-slate-700/50' : 'hover:bg-slate-700/40'
+                    }`}
+                  >
+                    {/* Left: click to switch in current window */}
+                    <button
+                      className={`flex-1 min-w-0 text-left px-2 py-1.5 rounded-l-sm transition-colors ${
+                        isCurrent ? 'cursor-default' : 'cursor-pointer hover:bg-slate-700/60'
+                      }`}
+                      onClick={() => handleSwitchClick(ws.path)}
+                    >
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="truncate font-medium">{ws.name}</span>
+                        {isCurrent && (
+                          <span className="text-[10px] text-blue-400 bg-blue-500/10 px-1 py-px rounded shrink-0">当前</span>
+                        )}
+                      </div>
+                    </button>
+                    {/* Right: open in new window */}
+                    {onOpenInNewWindow && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onOpenInNewWindow(ws.path); onShowWorkspaceMenu(false); }}
+                        className="px-2 flex items-center text-slate-500 hover:text-blue-400 hover:bg-slate-600/40 rounded-r-sm transition-colors shrink-0 border-l border-slate-700/50"
+                        title="在新窗口打开"
+                        aria-label={`在新窗口打开 ${ws.name}`}
+                      >
+                        <ExternalLinkIcon className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+              <DropdownMenuSeparator />
+              <button
+                className="w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-sm hover:bg-slate-700/40 transition-colors text-slate-300"
+                onClick={() => { onAddWorkspace(); onShowWorkspaceMenu(false); }}
+              >
+                <PlusIcon className="w-4 h-4" />
+                <span>添加 Workspace</span>
+              </button>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          ) : (
+            <div className="flex-1 flex items-center gap-2 min-w-0 px-3 py-2 bg-slate-700/30 rounded-md">
+              <WorkspaceIcon className="w-4 h-4 text-blue-400 shrink-0" />
+              <span className="font-medium text-sm truncate">{currentWorkspace?.name || 'Workspace'}</span>
+            </div>
+          )}
+          {_isTauri && (
+            <TooltipProvider delayDuration={300}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={onOpenSettings}
+                    className="h-9 w-9 shrink-0"
+                  >
+                    <SettingsIcon className="w-4 h-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">设置</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
         </div>
       </div>
 
@@ -366,16 +530,18 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
               <FolderIcon className="w-4 h-4 text-slate-400" />
               <span className="font-medium text-sm">主工作区</span>
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={(e) => { e.stopPropagation(); onOpenCreateModal(); }}
-              title="新建 Worktree"
-              aria-label="新建 Worktree"
-              className="h-7 w-7"
-            >
-              <PlusIcon className="w-4 h-4" />
-            </Button>
+            {_isTauri && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={(e) => { e.stopPropagation(); onOpenCreateModal(); }}
+                title="新建 Worktree"
+                aria-label="新建 Worktree"
+                className="h-7 w-7"
+              >
+                <PlusIcon className="w-4 h-4" />
+              </Button>
+            )}
           </div>
           <div className="text-slate-500 text-xs mt-1 truncate pl-6 select-text">{mainWorkspace.path}</div>
         </div>
@@ -455,11 +621,29 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
         ))}
       </div>
 
+      {/* Share Bar (Tauri only) */}
+      {_isTauri && (
+        <ShareBar
+          active={shareActive}
+          url={shareUrl || null}
+          password={sharePassword}
+          onStart={onStartShare}
+          onStop={onStopShare}
+          onUpdatePassword={onUpdateSharePassword}
+        />
+      )}
+
       {/* Bottom Bar */}
       <div className="px-3 py-2.5 border-t border-slate-700/50 flex items-center justify-between">
-        {isMainWindow ? (
+        {isMainWin ? (
           isDev ? (
-            <span className="text-xs text-slate-500">v0.0.1-dev</span>
+            <button
+              onClick={() => { callBackend('open_devtools').catch(() => {}); }}
+              className="text-xs text-amber-500/70 hover:text-amber-400 transition-colors cursor-pointer font-mono"
+              title="打开 DevTools"
+            >
+              DEV
+            </button>
           ) : (
             <TooltipProvider delayDuration={300}>
               <Tooltip>
@@ -484,21 +668,23 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
           <div />
         )}
         <div className="flex items-center gap-0.5">
-          <TooltipProvider delayDuration={300}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={handleOpenLogDir}
-                  className="h-7 w-7"
-                >
-                  <LogIcon className="w-3.5 h-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="top">日志文件夹</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          {_isTauri && (
+            <TooltipProvider delayDuration={300}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleOpenLogDir}
+                    className="h-7 w-7"
+                  >
+                    <LogIcon className="w-3.5 h-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">日志文件夹</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
         </div>
       </div>
 

@@ -1,5 +1,5 @@
 import { type FC, useCallback } from 'react';
-import { open } from '@tauri-apps/plugin-dialog';
+import { openDirectoryDialog } from '../lib/backend';
 import {
   Dialog,
   DialogContent,
@@ -34,12 +34,8 @@ export const AddWorkspaceModal: FC<AddWorkspaceModalProps> = ({
   loading = false,
 }) => {
   const handleSelectFolder = useCallback(async () => {
-    const selected = await open({
-      directory: true,
-      multiple: false,
-      title: '选择 Workspace 目录',
-    });
-    if (selected && typeof selected === 'string') {
+    const selected = await openDirectoryDialog('选择 Workspace 目录');
+    if (selected) {
       onPathChange(selected);
       // Auto-fill name from folder name if empty
       if (!name) {
@@ -123,12 +119,8 @@ export const CreateWorkspaceModal: FC<CreateWorkspaceModalProps> = ({
   loading = false,
 }) => {
   const handleSelectFolder = useCallback(async () => {
-    const selected = await open({
-      directory: true,
-      multiple: false,
-      title: '选择父目录',
-    });
-    if (selected && typeof selected === 'string') {
+    const selected = await openDirectoryDialog('选择父目录');
+    if (selected) {
       onPathChange(selected);
     }
   }, [onPathChange]);
