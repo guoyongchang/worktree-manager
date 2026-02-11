@@ -23,6 +23,11 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Generate version from date
         id: version
         run: |
@@ -34,31 +39,89 @@ jobs:
           echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Generated version: ${VERSION} (tag: v${VERSION})"
 
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Find previous release tag
+          PREV_TAG=$(git tag --sort=-creatordate | head -1 || true)
+          echo "Previous tag: $PREV_TAG"
+
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="${PREV_TAG}..HEAD"
+          else
+            RANGE="HEAD~20..HEAD"
+          fi
+
+          # Extract commit messages, categorize by prefix
+          FEATURES=""
+          FIXES=""
+          OTHERS=""
+
+          while IFS= read -r line; do
+            # Skip merge commits and Co-Authored-By lines
+            case "$line" in
+              Merge*) continue ;;
+              "") continue ;;
+            esac
+
+            if echo "$line" | grep -qiE '^feat'; then
+              # Remove "feat: " or "feat(...): " prefix for cleaner display
+              clean=$(echo "$line" | sed -E 's/^feat(\(.*\))?:\s*//')
+              FEATURES="${FEATURES}- ${clean}\n"
+            elif echo "$line" | grep -qiE '^fix'; then
+              clean=$(echo "$line" | sed -E 's/^fix(\(.*\))?:\s*//')
+              FIXES="${FIXES}- ${clean}\n"
+            elif echo "$line" | grep -qiE '^refactor'; then
+              clean=$(echo "$line" | sed -E 's/^refactor(\(.*\))?:\s*//')
+              OTHERS="${OTHERS}- ${clean}\n"
+            fi
+          done < <(git log "$RANGE" --pretty=format:"%s" --no-merges 2>/dev/null || true)
+
+          # Build changelog
+          CHANGELOG=""
+          if [ -n "$FEATURES" ]; then
+            CHANGELOG="${CHANGELOG}### ✨ 新功能\n\n${FEATURES}\n"
+          fi
+          if [ -n "$FIXES" ]; then
+            CHANGELOG="${CHANGELOG}### 🐛 修复\n\n${FIXES}\n"
+          fi
+          if [ -n "$OTHERS" ]; then
+            CHANGELOG="${CHANGELOG}### 🔧 优化\n\n${OTHERS}\n"
+          fi
+
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="常规更新与改进\n"
+          fi
+
+          # Write to file for multi-line output
+          echo -e "$CHANGELOG" > /tmp/changelog.md
+          echo "changelog_file=/tmp/changelog.md" >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.version.outputs.tag }}
         run: |
+          CHANGELOG=$(cat /tmp/changelog.md)
           gh release create "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --title "Worktree Manager $TAG" \
-            --notes "$(cat <<'EOF'
-          ## Worktree Manager
+            --notes "$(cat <<EOF
+          ## 更新内容
 
-          Git Worktree 可视化管理工具
+          ${CHANGELOG}
+          ---
 
           ### 下载
 
-          - **macOS**: `.dmg` 安装包 或 `.tar.gz`
-          - **Windows**: `-setup.exe` 安装包
-          - **Linux**: `.AppImage` 或 `.deb`
-
-          ---
+          - **macOS**: \`.dmg\` 安装包 或 \`.tar.gz\`
+          - **Windows**: \`-setup.exe\` 安装包
+          - **Linux**: \`.AppImage\` 或 \`.deb\`
 
           **自动更新**: 应用内置自动更新功能，下次启动时会自动检查新版本。
 
-          > macOS 请下载 `.dmg`，安装后首次打开请**右键点击 app → 打开**，之后即可正常使用。
-          > 如仍提示"已损坏"，请在终端执行：`xattr -cr "/Applications/Worktree Manager.app"`
+          > macOS 请下载 \`.dmg\`，安装后首次打开请**右键点击 app → 打开**，之后即可正常使用。
+          > 如仍提示"已损坏"，请在终端执行：\`xattr -cr "/Applications/Worktree Manager.app"\`
           EOF
           )"
 
@@ -258,6 +321,7 @@ jobs:
 
       - name: Generate latest.json
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           TAG: ${{ needs.prepare.outputs.tag }}
           VERSION: ${{ needs.prepare.outputs.version }}
@@ -265,6 +329,11 @@ jobs:
           set -euo pipefail
           PUB_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           base_url="https://github.com/$REPO/releases/download/$TAG"
+
+          # Fetch release notes from GitHub Release for the updater dialog
+          NOTES=$(gh release view "$TAG" --repo "$REPO" --json body -q '.body' 2>/dev/null | head -50 || echo "Release $TAG")
+          # Escape for JSON: replace newlines, quotes, backslashes
+          NOTES_JSON=$(echo "$NOTES" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')
 
           mac_url="" mac_sig=""
           win_url="" win_sig=""
@@ -286,7 +355,7 @@ jobs:
           {
             echo '{'
             echo "  \"version\": \"$VERSION\","
-            echo "  \"notes\": \"Release $TAG\","
+            echo "  \"notes\": ${NOTES_JSON},"
             echo "  \"pub_date\": \"$PUB_DATE\","
             echo '  "platforms": {'
             first=1
