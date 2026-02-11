@@ -216,13 +216,25 @@ function App() {
 
   // Update window title based on workspace and worktree
   useEffect(() => {
-    const wsName = workspace.currentWorkspace?.name;
-    if (!wsName) {
-      document.title = 'Worktree Manager';
-      return;
-    }
-    const wtName = selectedWorktree ? selectedWorktree.name : '主工作区';
-    document.title = `${wsName} - ${wtName}`;
+    const updateTitle = async () => {
+      const wsName = workspace.currentWorkspace?.name;
+      let title: string;
+      if (!wsName) {
+        title = 'Worktree Manager';
+      } else {
+        const wtName = selectedWorktree ? selectedWorktree.name : '主工作区';
+        title = `${wsName} - ${wtName}`;
+      }
+      document.title = title;
+      // Also update the native window title bar
+      try {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        await getCurrentWindow().setTitle(title);
+      } catch {
+        // Ignore errors (e.g., when running outside Tauri)
+      }
+    };
+    updateTitle();
   }, [workspace.currentWorkspace?.name, selectedWorktree]);
 
   // Workspace handlers
