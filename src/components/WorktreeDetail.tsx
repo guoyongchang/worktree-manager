@@ -17,6 +17,7 @@ import {
   ChevronDownIcon,
   RefreshIcon,
   PlusIcon,
+  ExternalLinkIcon,
 } from './Icons';
 import { EDITORS } from '../constants';
 import type {
@@ -129,18 +130,33 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   {EDITORS.map(editor => (
-                    <DropdownMenuItem
+                    <div
                       key={editor.id}
-                      onClick={() => {
-                        onSelectEditor(editor.id);
-                        onShowEditorMenu(false);
-                      }}
+                      className="flex items-stretch rounded-sm text-sm"
                     >
-                      {editor.name}
-                      {editor.id === selectedEditor && (
-                        <span className="ml-2 text-xs text-green-400">✓</span>
-                      )}
-                    </DropdownMenuItem>
+                      <button
+                        className="flex-1 min-w-0 text-left px-2 py-1.5 rounded-l-sm hover:bg-slate-700/60 transition-colors flex items-center gap-1.5"
+                        onClick={() => {
+                          onSelectEditor(editor.id);
+                          onShowEditorMenu(false);
+                        }}
+                      >
+                        {editor.name}
+                        {editor.id === selectedEditor && (
+                          <span className="text-xs text-green-400">✓</span>
+                        )}
+                      </button>
+                      <button
+                        className="px-2 flex items-center text-slate-500 hover:text-blue-400 hover:bg-slate-600/40 rounded-r-sm transition-colors shrink-0 border-l border-slate-700/50"
+                        title={`用 ${editor.name} 打开`}
+                        onClick={() => {
+                          onOpenInEditor(mainWorkspace.path, editor.id);
+                          onShowEditorMenu(false);
+                        }}
+                      >
+                        <ExternalLinkIcon className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   ))}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => onRevealInFinder(mainWorkspace.path)}>
@@ -296,18 +312,33 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       {EDITORS.map(editor => (
-                        <DropdownMenuItem
+                        <div
                           key={editor.id}
-                          onClick={() => {
-                            onSelectEditor(editor.id);
-                            onShowEditorMenu(false);
-                          }}
+                          className="flex items-stretch rounded-sm text-sm"
                         >
-                          {editor.name}
-                          {editor.id === selectedEditor && (
-                            <span className="ml-2 text-xs text-green-400">✓</span>
-                          )}
-                        </DropdownMenuItem>
+                          <button
+                            className="flex-1 min-w-0 text-left px-2 py-1.5 rounded-l-sm hover:bg-slate-700/60 transition-colors flex items-center gap-1.5"
+                            onClick={() => {
+                              onSelectEditor(editor.id);
+                              onShowEditorMenu(false);
+                            }}
+                          >
+                            {editor.name}
+                            {editor.id === selectedEditor && (
+                              <span className="text-xs text-green-400">✓</span>
+                            )}
+                          </button>
+                          <button
+                            className="px-2 flex items-center text-slate-500 hover:text-blue-400 hover:bg-slate-600/40 rounded-r-sm transition-colors shrink-0 border-l border-slate-700/50"
+                            title={`用 ${editor.name} 打开`}
+                            onClick={() => {
+                              onOpenInEditor(selectedWorktree.path, editor.id);
+                              onShowEditorMenu(false);
+                            }}
+                          >
+                            <ExternalLinkIcon className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       ))}
                       <DropdownMenuSeparator />
                       <DropdownMenuItem onClick={() => onRevealInFinder(selectedWorktree.path)}>
