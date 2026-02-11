@@ -32,6 +32,8 @@ import {
   WorkspaceIcon,
   LogIcon,
   ExternalLinkIcon,
+  SidebarCollapseIcon,
+  SidebarExpandIcon,
 } from './Icons';
 import type {
   WorkspaceRef,
@@ -63,7 +65,9 @@ interface WorktreeSidebarProps {
   updaterState: UpdaterState;
   onCheckUpdate: () => void;
   onOpenInNewWindow?: (workspacePath: string) => void;
-  lockedWorktrees?: Record<string, string>; // worktree_name -> window_label
+  lockedWorktrees?: Record<string, string>;
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
 }
 
 export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
@@ -87,6 +91,8 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
   onCheckUpdate,
   onOpenInNewWindow,
   lockedWorktrees = {},
+  collapsed = false,
+  onToggleCollapsed,
 }) => {
   const activeWorktrees = worktrees.filter(w => !w.is_archived);
   const archivedWorktrees = worktrees.filter(w => w.is_archived);
@@ -132,8 +138,106 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
 
   const hasUpdate = updaterState === 'notification' || updaterState === 'downloading' || updaterState === 'success';
 
+  // ==================== Collapsed Sidebar ====================
+  if (collapsed) {
+    return (
+      <div className="w-12 bg-slate-800/50 border-r border-slate-700/50 flex flex-col items-center py-2 shrink-0">
+        {/* Expand button */}
+        <TooltipProvider delayDuration={300}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onToggleCollapsed}
+                className="h-8 w-8 mb-2"
+              >
+                <SidebarExpandIcon className="w-4 h-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">展开侧边栏</TooltipContent>
+          </Tooltip>
+
+          {/* Workspace icon */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => onShowWorkspaceMenu(!showWorkspaceMenu)}
+                className="h-8 w-8 flex items-center justify-center rounded-md hover:bg-slate-700/50 transition-colors mb-1"
+              >
+                <WorkspaceIcon className="w-4 h-4 text-blue-400" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right">{currentWorkspace?.name || 'Workspace'}</TooltipContent>
+          </Tooltip>
+
+          <div className="w-6 h-px bg-slate-700/50 my-1.5" />
+
+          {/* Main workspace */}
+          {mainWorkspace && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => onSelectWorktree(null)}
+                  className={`h-8 w-8 flex items-center justify-center rounded-md transition-colors mb-0.5 ${
+                    !selectedWorktree ? 'bg-slate-700/50' : 'hover:bg-slate-700/30'
+                  }`}
+                >
+                  <FolderIcon className="w-4 h-4 text-slate-400" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right">主工作区</TooltipContent>
+            </Tooltip>
+          )}
+
+          {/* Worktree icons */}
+          <div className="flex-1 overflow-y-auto flex flex-col items-center gap-0.5 w-full px-1">
+            {activeWorktrees.map(wt => {
+              const lockedBy = lockedWorktrees[wt.name];
+              const isLockedByOther = lockedBy && lockedBy !== currentWindowLabel;
+              return (
+                <Tooltip key={wt.name}>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => !isLockedByOther && onSelectWorktree(wt)}
+                      className={`h-8 w-8 flex items-center justify-center rounded-md transition-colors shrink-0 ${
+                        isLockedByOther
+                          ? 'opacity-30 cursor-not-allowed'
+                          : selectedWorktree?.name === wt.name
+                            ? 'bg-blue-500/20 text-blue-400'
+                            : 'hover:bg-slate-700/30 text-blue-400'
+                      }`}
+                    >
+                      <FolderIcon className="w-4 h-4" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">
+                    {wt.name}{isLockedByOther ? ' (已占用)' : ''}
+                  </TooltipContent>
+                </Tooltip>
+              );
+            })}
+          </div>
+
+          {/* Bottom icons */}
+          <div className="flex flex-col items-center gap-0.5 mt-1">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" onClick={onOpenSettings} className="h-7 w-7">
+                  <SettingsIcon className="w-3.5 h-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="right">设置</TooltipContent>
+            </Tooltip>
+          </div>
+        </TooltipProvider>
+      </div>
+    );
+  }
+
+  // ==================== Expanded Sidebar ====================
   return (
-    <div className="w-72 bg-slate-800/50 border-r border-slate-700/50 flex flex-col">
+    <div className="w-72 bg-slate-800/50 border-r border-slate-700/50 flex flex-col shrink-0">
       {/* Workspace Selector */}
       <div className="p-3 border-b border-slate-700/50">
         <DropdownMenu open={showWorkspaceMenu} onOpenChange={onShowWorkspaceMenu}>
@@ -214,6 +318,18 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
             >
               <RefreshIcon className="w-4 h-4" />
             </Button>
+            {onToggleCollapsed && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onToggleCollapsed}
+                title="收起侧边栏"
+                aria-label="收起侧边栏"
+                className="h-8 w-8"
+              >
+                <SidebarCollapseIcon className="w-4 h-4" />
+              </Button>
+            )}
           </div>
         </div>
       </div>

@@ -75,6 +75,7 @@ function App() {
   const [showArchived, setShowArchived] = useState(false);
   const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
   const [showEditorMenu, setShowEditorMenu] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Create modal state
   const [newWorktreeName, setNewWorktreeName] = useState("");
@@ -525,6 +526,13 @@ function App() {
           openSettings();
         }
       }
+      // Cmd/Ctrl+B: Toggle sidebar
+      if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
+        e.preventDefault();
+        if (viewMode === 'main') {
+          setSidebarCollapsed(prev => !prev);
+        }
+      }
     }
     function handleClick(): void {
       setTerminalTabMenu(null);
@@ -639,6 +647,8 @@ function App() {
           onCheckUpdate={() => updater.checkForUpdates(false)}
           onOpenInNewWindow={handleOpenInNewWindow}
           lockedWorktrees={lockedWorktrees}
+          collapsed={sidebarCollapsed}
+          onToggleCollapsed={() => setSidebarCollapsed(prev => !prev)}
         />
 
         <div className="flex-1 flex flex-col bg-slate-900">
