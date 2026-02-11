@@ -2,9 +2,10 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default capabilities for the application",
-  "windows": ["main"],
+  "windows": ["main", "worktree-*"],
   "permissions": [
     "core:default",
+    "core:window:allow-set-title",
     "dialog:allow-open",
     "dialog:allow-save",
     "updater:default",
