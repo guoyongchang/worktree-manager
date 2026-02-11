@@ -241,6 +241,10 @@ function App() {
   const handleSwitchWorkspace = useCallback(async (path: string) => {
     setSwitchingWorkspace(true);
     try {
+      // Unlock current worktree before switching workspace
+      if (selectedWorktree && workspace.currentWorkspace) {
+        await workspace.unlockWorktree(workspace.currentWorkspace.path, selectedWorktree.name).catch(() => {});
+      }
       await workspace.switchWorkspace(path);
       setShowWorkspaceMenu(false);
       setSelectedWorktree(null);
@@ -248,7 +252,7 @@ function App() {
     } finally {
       setSwitchingWorkspace(false);
     }
-  }, [workspace]);
+  }, [workspace, selectedWorktree]);
 
   const handleAddWorkspace = useCallback(async () => {
     if (!newWorkspaceName.trim() || !newWorkspacePath.trim()) return;
