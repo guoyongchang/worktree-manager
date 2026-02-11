@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import type {
   WorkspaceRef,
   WorkspaceConfig,
@@ -48,6 +49,8 @@ export interface UseWorkspaceReturn {
   saveConfig: (config: WorkspaceConfig) => Promise<void>;
   scanLinkedFolders: (projectPath: string) => Promise<ScannedFolder[]>;
   addProjectToWorktree: (request: AddProjectToWorktreeRequest) => Promise<void>;
+  openWorkspaceInNewWindow: (workspacePath: string) => Promise<void>;
+  getOpenedWorkspaces: () => Promise<string[]>;
 }
 
 export function useWorkspace(): UseWorkspaceReturn {
@@ -60,6 +63,27 @@ export function useWorkspace(): UseWorkspaceReturn {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const initialLoadDone = useRef(false);
+
+  // 初始化时注册窗口 workspace 绑定（从 URL 参数获取）
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const workspacePath = params.get('workspace');
+    if (workspacePath) {
+      invoke('set_window_workspace', { workspacePath }).catch((e) => {
+        console.error('Failed to set window workspace:', e);
+      });
+    }
+
+    // 窗口关闭时注销绑定
+    const currentWin = getCurrentWindow();
+    const unlisten = currentWin.onCloseRequested(async () => {
+      await invoke('unregister_window').catch(() => {});
+    });
+
+    return () => {
+      unlisten.then(fn => fn());
+    };
+  }, []);
 
   const loadWorkspaces = useCallback(async () => {
     try {
@@ -233,6 +257,14 @@ export function useWorkspace(): UseWorkspaceReturn {
     await loadData();
   }, [loadData]);
 
+  const openWorkspaceInNewWindow = useCallback(async (workspacePath: string) => {
+    await invoke("open_workspace_window", { workspacePath });
+  }, []);
+
+  const getOpenedWorkspaces = useCallback(async (): Promise<string[]> => {
+    return invoke<string[]>("get_opened_workspaces");
+  }, []);
+
   return {
     workspaces,
     currentWorkspace,
@@ -262,5 +294,7 @@ export function useWorkspace(): UseWorkspaceReturn {
     saveConfig,
     scanLinkedFolders,
     addProjectToWorktree,
+    openWorkspaceInNewWindow,
+    getOpenedWorkspaces,
   };
 }

@@ -33,6 +33,7 @@ import {
   ChevronDownIcon,
   WorkspaceIcon,
   LogIcon,
+  ExternalLinkIcon,
 } from './Icons';
 import type {
   WorkspaceRef,
@@ -42,6 +43,7 @@ import type {
 import type { UpdaterState } from '../hooks/useUpdater';
 import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 
 interface WorktreeSidebarProps {
   workspaces: WorkspaceRef[];
@@ -63,6 +65,7 @@ interface WorktreeSidebarProps {
   onOpenCreateModal: () => void;
   updaterState: UpdaterState;
   onCheckUpdate: () => void;
+  onOpenInNewWindow?: (workspacePath: string) => void;
 }
 
 export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
@@ -85,16 +88,20 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
   onOpenCreateModal,
   updaterState,
   onCheckUpdate,
+  onOpenInNewWindow,
 }) => {
   const activeWorktrees = worktrees.filter(w => !w.is_archived);
   const archivedWorktrees = worktrees.filter(w => w.is_archived);
 
   const [removeConfirmWorkspace, setRemoveConfirmWorkspace] = useState<WorkspaceRef | null>(null);
   const [appVersion, setAppVersion] = useState('');
+  const isMainWindow = getCurrentWindow().label === 'main';
 
   useEffect(() => {
-    getVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
-  }, []);
+    if (isMainWindow) {
+      getVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
+    }
+  }, [isMainWindow]);
 
   const handleRemoveWorkspace = (ws: WorkspaceRef, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -149,14 +156,26 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
                   <div className="text-xs text-slate-500 truncate">{ws.path}</div>
                 </div>
                 {workspaces.length > 1 && (
-                  <button
-                    onClick={(e) => handleRemoveWorkspace(ws, e)}
-                    className="p-1 text-slate-500 hover:text-red-400 transition-colors"
-                    title="移除"
-                    aria-label={`移除工作区 ${ws.name}`}
-                  >
-                    <TrashIcon className="w-3.5 h-3.5" />
-                  </button>
+                  <div className="flex items-center gap-0.5">
+                    {onOpenInNewWindow && currentWorkspace?.path !== ws.path && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onOpenInNewWindow(ws.path); }}
+                        className="p-1 text-slate-500 hover:text-blue-400 transition-colors"
+                        title="在新窗口打开"
+                        aria-label={`在新窗口打开 ${ws.name}`}
+                      >
+                        <ExternalLinkIcon className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    <button
+                      onClick={(e) => handleRemoveWorkspace(ws, e)}
+                      className="p-1 text-slate-500 hover:text-red-400 transition-colors"
+                      title="移除"
+                      aria-label={`移除工作区 ${ws.name}`}
+                    >
+                      <TrashIcon className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 )}
               </DropdownMenuItem>
             ))}
@@ -283,24 +302,28 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
 
       {/* Bottom Bar */}
       <div className="px-3 py-2.5 border-t border-slate-700/50 flex items-center justify-between">
-        <TooltipProvider delayDuration={300}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={onCheckUpdate}
-                className="relative text-xs text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
-              >
-                v{appVersion}
-                {hasUpdate && (
-                  <span className="absolute -top-1 -right-2.5 w-2 h-2 bg-red-500 rounded-full" />
-                )}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              {hasUpdate ? '有新版本可用，点击更新' : '检查更新'}
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+        {isMainWindow ? (
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={onCheckUpdate}
+                  className="relative text-xs text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
+                >
+                  v{appVersion}
+                  {hasUpdate && (
+                    <span className="absolute -top-1 -right-2.5 w-2 h-2 bg-red-500 rounded-full" />
+                  )}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {hasUpdate ? '有新版本可用，点击更新' : '检查更新'}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ) : (
+          <div />
+        )}
         <div className="flex items-center gap-0.5">
           <TooltipProvider delayDuration={300}>
             <Tooltip>

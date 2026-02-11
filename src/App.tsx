@@ -287,6 +287,15 @@ function App() {
     }
   }, [workspace]);
 
+  // Open workspace in new window
+  const handleOpenInNewWindow = useCallback(async (workspacePath: string) => {
+    try {
+      await workspace.openWorkspaceInNewWindow(workspacePath);
+    } catch (e) {
+      workspace.setError(String(e));
+    }
+  }, [workspace]);
+
   // Archive handlers
   const handleContextMenu = useCallback((e: React.MouseEvent, worktree: WorktreeListItem) => {
     e.preventDefault();
@@ -566,6 +575,7 @@ function App() {
           onOpenCreateModal={openCreateModal}
           updaterState={updater.state}
           onCheckUpdate={() => updater.checkForUpdates(false)}
+          onOpenInNewWindow={handleOpenInNewWindow}
         />
 
         <div className="flex-1 flex flex-col bg-slate-900">

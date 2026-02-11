@@ -33,4 +33,5 @@ wait-timeout = "0.2"
 openssl-sys = { version = "0.9", features = ["vendored"] }
 log = "0.4"
 tauri-plugin-log = "2"
+urlencoding = "2"
 

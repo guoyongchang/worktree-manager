@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::fs;
@@ -16,6 +17,9 @@ use pty_manager::PtyManager;
 
 // PTY Manager 全局实例
 static PTY_MANAGER: Lazy<Mutex<PtyManager>> = Lazy::new(|| Mutex::new(PtyManager::new()));
+
+// 多窗口 workspace 绑定：window_label -> workspace_path
+static WINDOW_WORKSPACES: Lazy<Mutex<HashMap<String, String>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 // Git command timeout (30 seconds)
 const GIT_COMMAND_TIMEOUT_SECS: u64 = 30;
@@ -287,13 +291,23 @@ fn save_workspace_config_internal(workspace_path: &str, config: &WorkspaceConfig
 
 // ==================== 获取当前 Workspace ====================
 
-fn get_current_workspace_path() -> Option<String> {
+/// 获取窗口绑定的 workspace 路径，优先从 WINDOW_WORKSPACES 获取，
+/// 回退到 global config 的 current_workspace
+fn get_window_workspace_path(window_label: &str) -> Option<String> {
+    // 先查窗口绑定
+    {
+        let map = WINDOW_WORKSPACES.lock().unwrap();
+        if let Some(path) = map.get(window_label) {
+            return Some(path.clone());
+        }
+    }
+    // 回退到全局
     let global = load_global_config();
     global.current_workspace
 }
 
-fn get_current_workspace_config() -> Option<(String, WorkspaceConfig)> {
-    let workspace_path = get_current_workspace_path()?;
+fn get_window_workspace_config(window_label: &str) -> Option<(String, WorkspaceConfig)> {
+    let workspace_path = get_window_workspace_path(window_label)?;
     let config = load_workspace_config(&workspace_path);
     Some((workspace_path, config))
 }
@@ -519,16 +533,16 @@ fn list_workspaces() -> Vec<WorkspaceRef> {
 }
 
 #[tauri::command]
-fn get_current_workspace() -> Option<WorkspaceRef> {
+fn get_current_workspace(window: tauri::Window) -> Option<WorkspaceRef> {
     let global = load_global_config();
-    let current_path = global.current_workspace?;
+    let current_path = get_window_workspace_path(window.label())?;
     global.workspaces.iter()
         .find(|w| w.path == current_path)
         .cloned()
 }
 
 #[tauri::command]
-fn switch_workspace(path: String) -> Result<(), String> {
+fn switch_workspace(window: tauri::Window, path: String) -> Result<(), String> {
     let mut global = load_global_config();
 
     // 验证 workspace 存在
@@ -538,6 +552,12 @@ fn switch_workspace(path: String) -> Result<(), String> {
 
     global.current_workspace = Some(path.clone());
     save_global_config_internal(&global)?;
+
+    // 绑定窗口 workspace
+    {
+        let mut map = WINDOW_WORKSPACES.lock().unwrap();
+        map.insert(window.label().to_string(), path);
+    }
 
     // 清除 workspace 配置缓存
     {
@@ -632,22 +652,22 @@ fn create_workspace(name: String, path: String) -> Result<(), String> {
 // ==================== Tauri 命令：Workspace 配置 ====================
 
 #[tauri::command]
-fn get_workspace_config() -> Result<WorkspaceConfig, String> {
-    let (_, config) = get_current_workspace_config()
+fn get_workspace_config(window: tauri::Window) -> Result<WorkspaceConfig, String> {
+    let (_, config) = get_window_workspace_config(window.label())
         .ok_or("No workspace selected")?;
     Ok(config)
 }
 
 #[tauri::command]
-fn save_workspace_config(config: WorkspaceConfig) -> Result<(), String> {
-    let workspace_path = get_current_workspace_path()
+fn save_workspace_config(window: tauri::Window, config: WorkspaceConfig) -> Result<(), String> {
+    let workspace_path = get_window_workspace_path(window.label())
         .ok_or("No workspace selected")?;
     save_workspace_config_internal(&workspace_path, &config)
 }
 
 #[tauri::command]
-fn get_config_path_info() -> String {
-    if let Some(workspace_path) = get_current_workspace_path() {
+fn get_config_path_info(window: tauri::Window) -> String {
+    if let Some(workspace_path) = get_window_workspace_path(window.label()) {
         normalize_path(&get_workspace_config_path(&workspace_path).to_string_lossy())
     } else {
         normalize_path(&get_global_config_path().to_string_lossy())
@@ -657,8 +677,8 @@ fn get_config_path_info() -> String {
 // ==================== Tauri 命令：Worktree 操作 ====================
 
 #[tauri::command]
-fn list_worktrees(include_archived: bool) -> Result<Vec<WorktreeListItem>, String> {
-    let (workspace_path, config) = get_current_workspace_config()
+fn list_worktrees(window: tauri::Window, include_archived: bool) -> Result<Vec<WorktreeListItem>, String> {
+    let (workspace_path, config) = get_window_workspace_config(window.label())
         .ok_or("No workspace selected")?;
 
     let worktrees_path = PathBuf::from(&workspace_path).join(&config.worktrees_dir);
@@ -758,8 +778,8 @@ fn scan_worktrees_dir(dir: &PathBuf, config: &WorkspaceConfig, include_archived:
 }
 
 #[tauri::command]
-fn get_main_workspace_status() -> Result<MainWorkspaceStatus, String> {
-    let (workspace_path, config) = get_current_workspace_config()
+fn get_main_workspace_status(window: tauri::Window) -> Result<MainWorkspaceStatus, String> {
+    let (workspace_path, config) = get_window_workspace_config(window.label())
         .ok_or("No workspace selected")?;
 
     let root_path = PathBuf::from(&workspace_path);
@@ -793,8 +813,8 @@ fn get_main_workspace_status() -> Result<MainWorkspaceStatus, String> {
 }
 
 #[tauri::command]
-fn create_worktree(request: CreateWorktreeRequest) -> Result<String, String> {
-    let (workspace_path, config) = get_current_workspace_config()
+fn create_worktree(window: tauri::Window, request: CreateWorktreeRequest) -> Result<String, String> {
+    let (workspace_path, config) = get_window_workspace_config(window.label())
         .ok_or("No workspace selected")?;
 
     let root = PathBuf::from(&workspace_path);
@@ -902,8 +922,8 @@ fn create_worktree(request: CreateWorktreeRequest) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn archive_worktree(name: String) -> Result<(), String> {
-    let (workspace_path, config) = get_current_workspace_config()
+fn archive_worktree(window: tauri::Window, name: String) -> Result<(), String> {
+    let (workspace_path, config) = get_window_workspace_config(window.label())
         .ok_or("No workspace selected")?;
 
     let root = PathBuf::from(&workspace_path);
@@ -968,8 +988,8 @@ pub struct WorktreeArchiveStatus {
 }
 
 #[tauri::command]
-fn check_worktree_status(name: String) -> Result<WorktreeArchiveStatus, String> {
-    let (workspace_path, config) = get_current_workspace_config()
+fn check_worktree_status(window: tauri::Window, name: String) -> Result<WorktreeArchiveStatus, String> {
+    let (workspace_path, config) = get_window_workspace_config(window.label())
         .ok_or("No workspace selected")?;
 
     let root = PathBuf::from(&workspace_path);
@@ -1044,8 +1064,8 @@ fn check_worktree_status(name: String) -> Result<WorktreeArchiveStatus, String> 
 }
 
 #[tauri::command]
-fn restore_worktree(name: String) -> Result<(), String> {
-    let (workspace_path, config) = get_current_workspace_config()
+fn restore_worktree(window: tauri::Window, name: String) -> Result<(), String> {
+    let (workspace_path, config) = get_window_workspace_config(window.label())
         .ok_or("No workspace selected")?;
 
     let root = PathBuf::from(&workspace_path);
@@ -1193,8 +1213,8 @@ fn restore_worktree(name: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn delete_archived_worktree(name: String) -> Result<(), String> {
-    let (workspace_path, config) = get_current_workspace_config()
+fn delete_archived_worktree(window: tauri::Window, name: String) -> Result<(), String> {
+    let (workspace_path, config) = get_window_workspace_config(window.label())
         .ok_or("No workspace selected")?;
 
     let root = PathBuf::from(&workspace_path);
@@ -1269,8 +1289,8 @@ pub struct AddProjectToWorktreeRequest {
 }
 
 #[tauri::command]
-fn add_project_to_worktree(request: AddProjectToWorktreeRequest) -> Result<(), String> {
-    let (workspace_path, config) = get_current_workspace_config()
+fn add_project_to_worktree(window: tauri::Window, request: AddProjectToWorktreeRequest) -> Result<(), String> {
+    let (workspace_path, config) = get_window_workspace_config(window.label())
         .ok_or("No workspace selected")?;
 
     let root = PathBuf::from(&workspace_path);
@@ -1444,8 +1464,8 @@ pub struct CloneProjectRequest {
 }
 
 #[tauri::command]
-fn clone_project(request: CloneProjectRequest) -> Result<(), String> {
-    let (workspace_path, mut config) = get_current_workspace_config()
+fn clone_project(window: tauri::Window, request: CloneProjectRequest) -> Result<(), String> {
+    let (workspace_path, mut config) = get_window_workspace_config(window.label())
         .ok_or("No workspace selected")?;
 
     let projects_path = PathBuf::from(&workspace_path).join("projects");
@@ -1741,6 +1761,81 @@ fn pty_close_by_path(path_prefix: String) -> Result<Vec<String>, String> {
     Ok(manager.close_sessions_by_path_prefix(&path_prefix))
 }
 
+// ==================== 多窗口管理 ====================
+
+#[tauri::command]
+fn set_window_workspace(window: tauri::Window, workspace_path: String) -> Result<(), String> {
+    let global = load_global_config();
+    if !global.workspaces.iter().any(|w| w.path == workspace_path) {
+        return Err("Workspace not found".to_string());
+    }
+
+    let mut map = WINDOW_WORKSPACES.lock().unwrap();
+    map.insert(window.label().to_string(), workspace_path);
+    Ok(())
+}
+
+#[tauri::command]
+fn get_opened_workspaces() -> Vec<String> {
+    let map = WINDOW_WORKSPACES.lock().unwrap();
+    map.values().cloned().collect()
+}
+
+#[tauri::command]
+fn unregister_window(window: tauri::Window) {
+    let mut map = WINDOW_WORKSPACES.lock().unwrap();
+    map.remove(window.label());
+}
+
+#[tauri::command]
+async fn open_workspace_window(app: tauri::AppHandle, workspace_path: String) -> Result<String, String> {
+    // 检查该 workspace 是否已经在其他窗口打开
+    {
+        let map = WINDOW_WORKSPACES.lock().unwrap();
+        for (label, path) in map.iter() {
+            if *path == workspace_path {
+                return Err(format!("该工作区已在窗口 {} 中打开", label));
+            }
+        }
+    }
+
+    let global = load_global_config();
+    if !global.workspaces.iter().any(|w| w.path == workspace_path) {
+        return Err("Workspace not found".to_string());
+    }
+
+    let ws_name = global.workspaces.iter()
+        .find(|w| w.path == workspace_path)
+        .map(|w| w.name.clone())
+        .unwrap_or_else(|| "Worktree Manager".to_string());
+
+    let window_label = format!("workspace-{}", std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis());
+
+    let url = format!("index.html?workspace={}", urlencoding::encode(&workspace_path));
+
+    let _webview = tauri::WebviewWindowBuilder::new(
+        &app,
+        &window_label,
+        tauri::WebviewUrl::App(url.into()),
+    )
+    .title(format!("Worktree Manager - {}", ws_name))
+    .inner_size(1100.0, 700.0)
+    .min_inner_size(900.0, 500.0)
+    .build()
+    .map_err(|e| format!("Failed to create window: {}", e))?;
+
+    // 注册窗口绑定
+    {
+        let mut map = WINDOW_WORKSPACES.lock().unwrap();
+        map.insert(window_label.clone(), workspace_path);
+    }
+
+    Ok(window_label)
+}
+
 // ==================== Tauri 入口 ====================
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1780,6 +1875,11 @@ pub fn run() {
             open_in_editor,
             open_log_dir,
             reveal_in_finder,
+            // 多窗口管理
+            set_window_workspace,
+            get_opened_workspaces,
+            unregister_window,
+            open_workspace_window,
             // 智能扫描
             scan_linked_folders,
             // PTY 终端
