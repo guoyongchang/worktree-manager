@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { getCurrentWindow } from '@tauri-apps/api/window';
 import type {
   WorkspaceRef,
   WorkspaceConfig,
@@ -77,15 +76,8 @@ export function useWorkspace(): UseWorkspaceReturn {
       });
     }
 
-    // 窗口关闭时注销绑定
-    const currentWin = getCurrentWindow();
-    const unlisten = currentWin.onCloseRequested(async () => {
-      await invoke('unregister_window').catch(() => {});
-    });
-
-    return () => {
-      unlisten.then(fn => fn());
-    };
+    // 窗口关闭时的清理由 Rust 层 on_window_event 处理，
+    // 不在前端注册 onCloseRequested 以避免阻塞窗口关闭
   }, []);
 
   const loadWorkspaces = useCallback(async () => {

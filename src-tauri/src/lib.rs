@@ -1887,6 +1887,19 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_log::Builder::new().build())
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                let label = window.label().to_string();
+                {
+                    let mut map = WINDOW_WORKSPACES.lock().unwrap();
+                    map.remove(&label);
+                }
+                {
+                    let mut locks = WORKTREE_LOCKS.lock().unwrap();
+                    locks.retain(|_, v| *v != label);
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             // Workspace 管理
             list_workspaces,

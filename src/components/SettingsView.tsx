@@ -101,7 +101,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
 
       {error && (
         <div className="mb-4 p-4 bg-red-900/30 border border-red-800/50 rounded-lg">
-          <div className="text-red-300 text-sm">{error}</div>
+          <div className="text-red-300 text-sm select-text">{error}</div>
           <Button variant="link" size="sm" onClick={onClearError} className="text-red-400 hover:text-red-200 mt-1 p-0 h-auto">关闭</Button>
         </div>
       )}
@@ -139,7 +139,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
             <div className="space-y-2">
               {config.linked_workspace_items.map((item, index) => (
                 <div key={index} className="flex items-center gap-2 bg-slate-800 border border-slate-700 rounded px-3 py-2">
-                  <span className="flex-1 text-sm text-slate-300">{item}</span>
+                  <span className="flex-1 text-sm text-slate-300 select-text">{item}</span>
                   <button
                     type="button"
                     onClick={() => onRemoveLinkedItem(index)}
@@ -433,7 +433,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
           <div className="flex items-center gap-4 mb-3">
             <div>
               <h3 className="text-base font-semibold text-slate-100">Worktree Manager</h3>
-              <p className="text-xs text-slate-400 mt-0.5">版本: v{appVersion}</p>
+              <p className="text-xs text-slate-400 mt-0.5 select-text">版本: v{appVersion}</p>
             </div>
           </div>
           <p className="text-sm text-slate-400 mb-4">Git Worktree 可视化管理工具</p>

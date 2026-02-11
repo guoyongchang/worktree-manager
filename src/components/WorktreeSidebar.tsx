@@ -68,6 +68,7 @@ interface WorktreeSidebarProps {
   lockedWorktrees?: Record<string, string>;
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
+  switchingWorkspace?: boolean;
 }
 
 export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
@@ -93,6 +94,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
   lockedWorktrees = {},
   collapsed = false,
   onToggleCollapsed,
+  switchingWorkspace = false,
 }) => {
   const activeWorktrees = worktrees.filter(w => !w.is_archived);
   const archivedWorktrees = worktrees.filter(w => w.is_archived);
@@ -509,8 +511,8 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
             <Button variant="secondary" onClick={() => setSwitchConfirmPath(null)}>
               取消
             </Button>
-            <Button onClick={confirmSwitch}>
-              确认切换
+            <Button onClick={confirmSwitch} disabled={switchingWorkspace}>
+              {switchingWorkspace ? "切换中..." : "确认切换"}
             </Button>
           </DialogFooter>
         </DialogContent>

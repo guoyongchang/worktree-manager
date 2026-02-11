@@ -9,6 +9,7 @@ interface ArchiveConfirmationModalProps {
   onConfirmIssue: (issueKey: string) => void;
   onArchive: () => void;
   areAllIssuesConfirmed: boolean;
+  archiving?: boolean;
 }
 
 export const ArchiveConfirmationModal: FC<ArchiveConfirmationModalProps> = ({
@@ -17,13 +18,14 @@ export const ArchiveConfirmationModal: FC<ArchiveConfirmationModalProps> = ({
   onConfirmIssue,
   onArchive,
   areAllIssuesConfirmed,
+  archiving = false,
 }) => {
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-[520px] max-h-[80vh] overflow-hidden shadow-2xl">
         <div className="p-5 border-b border-slate-700">
           <h3 className="text-lg font-semibold text-slate-100">归档 Worktree</h3>
-          <p className="text-sm text-slate-400 mt-1">
+          <p className="text-sm text-slate-400 mt-1 select-text">
             {archiveModal.worktree.name} → {archiveModal.worktree.name}.archive
           </p>
         </div>
@@ -57,7 +59,7 @@ export const ArchiveConfirmationModal: FC<ArchiveConfirmationModalProps> = ({
                           </div>
                           <div className="text-xs text-slate-500 flex items-center gap-1">
                             <GitBranchIcon className="w-3 h-3" />
-                            {proj.branch_name}
+                            <span className="select-text">{proj.branch_name}</span>
                           </div>
                         </div>
 
@@ -136,9 +138,9 @@ export const ArchiveConfirmationModal: FC<ArchiveConfirmationModalProps> = ({
           <Button
             variant="warning"
             onClick={onArchive}
-            disabled={archiveModal.loading || !areAllIssuesConfirmed}
+            disabled={archiveModal.loading || !areAllIssuesConfirmed || archiving}
           >
-            确认归档
+            {archiving ? "归档中..." : "确认归档"}
           </Button>
         </div>
       </div>

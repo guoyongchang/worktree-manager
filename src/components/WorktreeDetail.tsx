@@ -44,6 +44,7 @@ interface WorktreeDetailProps {
   onAddProjectToWorktree?: () => void;
   error: string | null;
   onClearError: () => void;
+  restoring?: boolean;
 }
 
 function getProjectStatus(project: ProjectStatus): 'success' | 'warning' | 'info' | 'sync' {
@@ -80,6 +81,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
   onAddProjectToWorktree,
   error,
   onClearError,
+  restoring = false,
 }) => {
   const selectedEditorName = EDITORS.find(e => e.id === selectedEditor)?.name || 'VS Code';
   const [switchingBranch, setSwitchingBranch] = useState<string | null>(null);
@@ -96,7 +98,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
       <div>
         {error && (
           <div className="mb-4 p-4 bg-red-900/30 border border-red-800/50 rounded-lg">
-            <div className="text-red-300 text-sm">{error}</div>
+            <div className="text-red-300 text-sm select-text">{error}</div>
             <button onClick={onClearError} className="text-red-400 hover:text-red-200 text-xs mt-2 underline">关闭</button>
           </div>
         )}
@@ -228,7 +230,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                       {proj.linked_folders.map((folder, idx) => (
                         <span
                           key={idx}
-                          className="inline-flex items-center px-1.5 py-0.5 bg-slate-700/50 rounded text-xs text-slate-400"
+                          className="inline-flex items-center px-1.5 py-0.5 bg-slate-700/50 rounded text-xs text-slate-400 select-text"
                         >
                           {folder}
                         </span>
@@ -250,7 +252,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
       <div>
         {error && (
           <div className="mb-4 p-4 bg-red-900/30 border border-red-800/50 rounded-lg">
-            <div className="text-red-300 text-sm">{error}</div>
+            <div className="text-red-300 text-sm select-text">{error}</div>
             <button onClick={onClearError} className="text-red-400 hover:text-red-200 text-xs mt-2 underline">关闭</button>
           </div>
         )}
@@ -265,7 +267,9 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
           <div className="flex gap-2 items-center">
             {selectedWorktree.is_archived ? (
               <>
-                <Button variant="default" className="bg-emerald-600 hover:bg-emerald-500" onClick={onRestore}>恢复</Button>
+                <Button variant="default" className="bg-emerald-600 hover:bg-emerald-500" onClick={onRestore} disabled={restoring}>
+                  {restoring ? "恢复中..." : "恢复"}
+                </Button>
                 {onDelete && (
                   <Button variant="destructive" onClick={onDelete}>删除</Button>
                 )}
@@ -325,8 +329,8 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="text-right">
-                    <div className="text-sm text-slate-300">{getStatusText(proj)}</div>
-                    <div className="text-xs text-slate-500 mt-0.5">base: {proj.base_branch} · test: {proj.test_branch}</div>
+                    <div className="text-sm text-slate-300 select-text">{getStatusText(proj)}</div>
+                    <div className="text-xs text-slate-500 mt-0.5 select-text">base: {proj.base_branch} · test: {proj.test_branch}</div>
                   </div>
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <Button

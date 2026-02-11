@@ -77,6 +77,17 @@ function App() {
   const [showEditorMenu, setShowEditorMenu] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
+  // Loading states for async operations
+  const [switchingWorkspace, setSwitchingWorkspace] = useState(false);
+  const [addingWorkspace, setAddingWorkspace] = useState(false);
+  const [creatingWorkspace, setCreatingWorkspace] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const [deletingArchived, setDeletingArchived] = useState(false);
+  const [restoringWorktree, setRestoringWorktree] = useState(false);
+
+  // Terminal fullscreen state
+  const [terminalFullscreen, setTerminalFullscreen] = useState(false);
+
   // Create modal state
   const [newWorktreeName, setNewWorktreeName] = useState("");
   const [selectedProjects, setSelectedProjects] = useState<Map<string, string>>(new Map());
@@ -205,27 +216,42 @@ function App() {
 
   // Workspace handlers
   const handleSwitchWorkspace = useCallback(async (path: string) => {
-    await workspace.switchWorkspace(path);
-    setShowWorkspaceMenu(false);
-    setSelectedWorktree(null);
-    setHasUserSelected(false); // Reset so auto-selection works on new workspace
+    setSwitchingWorkspace(true);
+    try {
+      await workspace.switchWorkspace(path);
+      setShowWorkspaceMenu(false);
+      setSelectedWorktree(null);
+      setHasUserSelected(false);
+    } finally {
+      setSwitchingWorkspace(false);
+    }
   }, [workspace]);
 
   const handleAddWorkspace = useCallback(async () => {
     if (!newWorkspaceName.trim() || !newWorkspacePath.trim()) return;
-    await workspace.addWorkspace(newWorkspaceName.trim(), newWorkspacePath.trim());
-    setShowAddWorkspaceModal(false);
-    setNewWorkspaceName("");
-    setNewWorkspacePath("");
+    setAddingWorkspace(true);
+    try {
+      await workspace.addWorkspace(newWorkspaceName.trim(), newWorkspacePath.trim());
+      setShowAddWorkspaceModal(false);
+      setNewWorkspaceName("");
+      setNewWorkspacePath("");
+    } finally {
+      setAddingWorkspace(false);
+    }
   }, [workspace, newWorkspaceName, newWorkspacePath]);
 
   const handleCreateWorkspace = useCallback(async () => {
     if (!createWorkspaceName.trim() || !createWorkspacePath.trim()) return;
-    const fullPath = `${createWorkspacePath.trim()}/${createWorkspaceName.trim()}`;
-    await workspace.createWorkspace(createWorkspaceName.trim(), fullPath);
-    setShowCreateWorkspaceModal(false);
-    setCreateWorkspaceName("");
-    setCreateWorkspacePath("");
+    setCreatingWorkspace(true);
+    try {
+      const fullPath = `${createWorkspacePath.trim()}/${createWorkspaceName.trim()}`;
+      await workspace.createWorkspace(createWorkspaceName.trim(), fullPath);
+      setShowCreateWorkspaceModal(false);
+      setCreateWorkspaceName("");
+      setCreateWorkspacePath("");
+    } finally {
+      setCreatingWorkspace(false);
+    }
   }, [workspace, createWorkspaceName, createWorkspacePath]);
 
   // Create worktree handlers
@@ -404,6 +430,7 @@ function App() {
 
   const handleArchiveWorktree = useCallback(async () => {
     if (!archiveModal) return;
+    setArchiving(true);
     try {
       await workspace.archiveWorktree(archiveModal.worktree.name);
       if (selectedWorktree?.name === archiveModal.worktree.name) {
@@ -412,11 +439,14 @@ function App() {
       setArchiveModal(null);
     } catch (e) {
       workspace.setError(String(e));
+    } finally {
+      setArchiving(false);
     }
   }, [workspace, archiveModal, selectedWorktree]);
 
   const handleDeleteArchivedWorktree = useCallback(async () => {
     if (!deleteConfirmWorktree) return;
+    setDeletingArchived(true);
     try {
       await workspace.deleteArchivedWorktree(deleteConfirmWorktree.name);
       if (selectedWorktree?.name === deleteConfirmWorktree.name) {
@@ -425,6 +455,8 @@ function App() {
       setDeleteConfirmWorktree(null);
     } catch (e) {
       workspace.setError(String(e));
+    } finally {
+      setDeletingArchived(false);
     }
   }, [workspace, deleteConfirmWorktree, selectedWorktree]);
 
@@ -506,6 +538,10 @@ function App() {
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent): void {
       if (e.key === 'Escape') {
+        if (terminalFullscreen) {
+          setTerminalFullscreen(false);
+          return;
+        }
         setContextMenu(null);
         setArchiveModal(null);
         setShowEditorMenu(false);
@@ -543,7 +579,7 @@ function App() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('click', handleClick);
     };
-  }, [viewMode, workspace.config, openCreateModal, openSettings]);
+  }, [viewMode, workspace.config, openCreateModal, openSettings, terminalFullscreen]);
 
   // Loading state
   if (workspace.loading) {
@@ -573,6 +609,7 @@ function App() {
           path={newWorkspacePath}
           onPathChange={setNewWorkspacePath}
           onSubmit={handleAddWorkspace}
+          loading={addingWorkspace}
         />
         <CreateWorkspaceModal
           open={showCreateWorkspaceModal}
@@ -582,6 +619,7 @@ function App() {
           path={createWorkspacePath}
           onPathChange={setCreateWorkspacePath}
           onSubmit={handleCreateWorkspace}
+          loading={creatingWorkspace}
         />
       </>
     );
@@ -626,7 +664,8 @@ function App() {
         className="min-h-screen bg-slate-900 text-slate-100 flex"
         style={{ display: viewMode === 'main' ? 'flex' : 'none' }}
       >
-        <WorktreeSidebar
+        {!terminalFullscreen && (
+          <WorktreeSidebar
           workspaces={workspace.workspaces}
           currentWorkspace={workspace.currentWorkspace}
           showWorkspaceMenu={showWorkspaceMenu}
@@ -649,9 +688,12 @@ function App() {
           lockedWorktrees={lockedWorktrees}
           collapsed={sidebarCollapsed}
           onToggleCollapsed={() => setSidebarCollapsed(prev => !prev)}
+          switchingWorkspace={switchingWorkspace}
         />
+        )}
 
         <div className="flex-1 flex flex-col bg-slate-900">
+          {!terminalFullscreen && (
           <div className="flex-1 p-6 overflow-y-auto min-h-0">
             <WorktreeDetail
               selectedWorktree={selectedWorktree}
@@ -665,7 +707,18 @@ function App() {
               onRevealInFinder={workspace.revealInFinder}
               onSwitchBranch={workspace.switchBranch}
               onArchive={() => selectedWorktree && openArchiveModal(selectedWorktree)}
-              onRestore={() => selectedWorktree && workspace.restoreWorktree(selectedWorktree.name)}
+              onRestore={async () => {
+                if (!selectedWorktree) return;
+                setRestoringWorktree(true);
+                try {
+                  await workspace.restoreWorktree(selectedWorktree.name);
+                } catch (e) {
+                  workspace.setError(String(e));
+                } finally {
+                  setRestoringWorktree(false);
+                }
+              }}
+              restoring={restoringWorktree}
               onDelete={selectedWorktree?.is_archived ? () => setDeleteConfirmWorktree(selectedWorktree) : undefined}
               onAddProject={() => setShowAddProjectModal(true)}
               onAddProjectToWorktree={() => setShowAddProjectToWorktreeModal(true)}
@@ -673,6 +726,7 @@ function App() {
               onClearError={() => workspace.setError(null)}
             />
           </div>
+          )}
 
           <TerminalPanel
             visible={terminal.terminalVisible}
@@ -686,6 +740,14 @@ function App() {
             onCloseTab={terminal.handleCloseTerminalTab}
             onToggle={terminal.handleToggleTerminal}
             onCollapse={() => terminal.setTerminalVisible(false)}
+            isFullscreen={terminalFullscreen}
+            onToggleFullscreen={() => {
+              const next = !terminalFullscreen;
+              setTerminalFullscreen(next);
+              if (next && !terminal.terminalVisible) {
+                terminal.handleToggleTerminal();
+              }
+            }}
           />
         </div>
 
@@ -711,6 +773,7 @@ function App() {
           path={newWorkspacePath}
           onPathChange={setNewWorkspacePath}
           onSubmit={handleAddWorkspace}
+          loading={addingWorkspace}
         />
 
         <AddProjectModal
@@ -762,6 +825,7 @@ function App() {
             onConfirmIssue={confirmArchiveIssue}
             onArchive={handleArchiveWorktree}
             areAllIssuesConfirmed={areAllIssuesConfirmed()}
+            archiving={archiving}
           />
         )}
 
@@ -778,8 +842,8 @@ function App() {
               <Button variant="secondary" onClick={() => setDeleteConfirmWorktree(null)}>
                 取消
               </Button>
-              <Button variant="destructive" onClick={handleDeleteArchivedWorktree}>
-                确认删除
+              <Button variant="destructive" onClick={handleDeleteArchivedWorktree} disabled={deletingArchived}>
+                {deletingArchived ? "删除中..." : "确认删除"}
               </Button>
             </DialogFooter>
           </DialogContent>

@@ -6,6 +6,8 @@ import {
   ChevronIcon,
   ChevronDownIcon,
   CloseIcon,
+  MaximizeIcon,
+  RestoreIcon,
 } from './Icons';
 import type { TerminalTab } from '../types';
 
@@ -21,6 +23,8 @@ interface TerminalPanelProps {
   onCloseTab: (path: string) => void;
   onToggle: () => void;
   onCollapse: () => void;
+  isFullscreen?: boolean;
+  onToggleFullscreen?: () => void;
 }
 
 export const TerminalPanel: FC<TerminalPanelProps> = ({
@@ -35,14 +39,16 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
   onCloseTab,
   onToggle,
   onCollapse,
+  isFullscreen = false,
+  onToggleFullscreen,
 }) => {
   return (
     <div
-      className="border-t border-slate-700 flex flex-col shrink-0"
-      style={{ height: visible ? height : 32 }}
+      className={`border-t border-slate-700 flex flex-col shrink-0 ${isFullscreen ? 'fixed inset-0 z-50 border-t-0 bg-slate-900' : ''}`}
+      style={isFullscreen ? undefined : { height: visible ? height : 32 }}
     >
-      {/* Resize handle */}
-      {visible && (
+      {/* Resize handle - hidden in fullscreen */}
+      {visible && !isFullscreen && (
         <div
           className="h-1 bg-slate-700 hover:bg-blue-500 cursor-ns-resize shrink-0 transition-colors"
           onMouseDown={(e) => {
@@ -104,16 +110,34 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
             })}
           </div>
         </div>
-        {/* Collapse button */}
+        {/* Fullscreen & Collapse buttons */}
         {visible && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onCollapse(); }}
-            className="p-1.5 mx-2 hover:bg-slate-700 rounded text-slate-500 hover:text-slate-300 transition-colors"
-            title="折叠终端"
-            aria-label="折叠终端面板"
-          >
-            <ChevronDownIcon className="w-3.5 h-3.5" />
-          </button>
+          <div className="flex items-center mx-1">
+            {onToggleFullscreen && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onToggleFullscreen(); }}
+                className="p-1.5 hover:bg-slate-700 rounded text-slate-500 hover:text-slate-300 transition-colors"
+                title={isFullscreen ? "退出全屏" : "终端全屏"}
+                aria-label={isFullscreen ? "退出终端全屏" : "终端全屏"}
+              >
+                {isFullscreen ? (
+                  <RestoreIcon className="w-3.5 h-3.5" />
+                ) : (
+                  <MaximizeIcon className="w-3.5 h-3.5" />
+                )}
+              </button>
+            )}
+            {!isFullscreen && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onCollapse(); }}
+                className="p-1.5 hover:bg-slate-700 rounded text-slate-500 hover:text-slate-300 transition-colors"
+                title="折叠终端"
+                aria-label="折叠终端面板"
+              >
+                <ChevronDownIcon className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
         )}
       </div>
       {/* Terminal content - always mounted but hidden when collapsed to preserve PTY sessions */}
