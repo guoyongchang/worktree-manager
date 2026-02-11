@@ -240,21 +240,22 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
   // ==================== Expanded Sidebar ====================
   return (
     <div className="w-72 bg-slate-800/50 border-r border-slate-700/50 flex flex-col shrink-0">
-      {/* Workspace Selector */}
+      {/* Workspace Selector + Settings */}
       <div className="p-3 border-b border-slate-700/50">
-        <DropdownMenu open={showWorkspaceMenu} onOpenChange={onShowWorkspaceMenu}>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="secondary"
-              className="w-full justify-between min-w-0"
-            >
-              <div className="flex items-center gap-2 min-w-0 flex-1">
-                <WorkspaceIcon className="w-4 h-4 text-blue-400 shrink-0" />
-                <span className="font-medium text-sm truncate">{currentWorkspace?.name || '选择 Workspace'}</span>
-              </div>
-              <ChevronDownIcon className="w-4 h-4 text-slate-400 shrink-0" />
-            </Button>
-          </DropdownMenuTrigger>
+        <div className="flex items-center gap-1.5">
+          <DropdownMenu open={showWorkspaceMenu} onOpenChange={onShowWorkspaceMenu}>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="secondary"
+                className="flex-1 justify-between min-w-0"
+              >
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <WorkspaceIcon className="w-4 h-4 text-blue-400 shrink-0" />
+                  <span className="font-medium text-sm truncate">{currentWorkspace?.name || '选择 Workspace'}</span>
+                </div>
+                <ChevronDownIcon className="w-4 h-4 text-slate-400 shrink-0" />
+              </Button>
+            </DropdownMenuTrigger>
           <DropdownMenuContent className="w-[var(--radix-dropdown-menu-trigger-width)]" align="start">
             {workspaces.map(ws => {
               const isCurrent = currentWorkspace?.path === ws.path;
@@ -303,6 +304,22 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
             </button>
           </DropdownMenuContent>
         </DropdownMenu>
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={onOpenSettings}
+                  className="h-9 w-9 shrink-0"
+                >
+                  <SettingsIcon className="w-4 h-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">设置</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
       </div>
 
       {/* Header */}
@@ -480,19 +497,6 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="top">日志文件夹</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={onOpenSettings}
-                  className="h-7 w-7"
-                >
-                  <SettingsIcon className="w-3.5 h-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="top">设置</TooltipContent>
             </Tooltip>
           </TooltipProvider>
         </div>
