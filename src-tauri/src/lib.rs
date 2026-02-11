@@ -21,6 +21,10 @@ static PTY_MANAGER: Lazy<Mutex<PtyManager>> = Lazy::new(|| Mutex::new(PtyManager
 // 多窗口 workspace 绑定：window_label -> workspace_path
 static WINDOW_WORKSPACES: Lazy<Mutex<HashMap<String, String>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
+// 多窗口 worktree 锁定：(workspace_path, worktree_name) -> window_label
+// 同一 worktree 只能被一个窗口独占选中
+static WORKTREE_LOCKS: Lazy<Mutex<HashMap<(String, String), String>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
 // Git command timeout (30 seconds)
 const GIT_COMMAND_TIMEOUT_SECS: u64 = 30;
 
@@ -1783,22 +1787,59 @@ fn get_opened_workspaces() -> Vec<String> {
 
 #[tauri::command]
 fn unregister_window(window: tauri::Window) {
-    let mut map = WINDOW_WORKSPACES.lock().unwrap();
-    map.remove(window.label());
+    let label = window.label().to_string();
+    {
+        let mut map = WINDOW_WORKSPACES.lock().unwrap();
+        map.remove(&label);
+    }
+    // 同时释放该窗口持有的所有 worktree 锁
+    {
+        let mut locks = WORKTREE_LOCKS.lock().unwrap();
+        locks.retain(|_, v| *v != label);
+    }
+}
+
+/// 锁定 worktree 到当前窗口，如果该 worktree 已被其他窗口锁定则返回错误
+#[tauri::command]
+fn lock_worktree(window: tauri::Window, workspace_path: String, worktree_name: String) -> Result<(), String> {
+    let label = window.label().to_string();
+    let mut locks = WORKTREE_LOCKS.lock().unwrap();
+    let key = (workspace_path, worktree_name.clone());
+
+    if let Some(existing_label) = locks.get(&key) {
+        if *existing_label != label {
+            return Err(format!("Worktree \"{}\" 已在其他窗口中打开", worktree_name));
+        }
+    }
+    locks.insert(key, label);
+    Ok(())
+}
+
+/// 解锁当前窗口持有的指定 worktree
+#[tauri::command]
+fn unlock_worktree(window: tauri::Window, workspace_path: String, worktree_name: String) {
+    let label = window.label().to_string();
+    let mut locks = WORKTREE_LOCKS.lock().unwrap();
+    let key = (workspace_path, worktree_name);
+    if let Some(existing_label) = locks.get(&key) {
+        if *existing_label == label {
+            locks.remove(&key);
+        }
+    }
+}
+
+/// 获取指定 workspace 中所有被锁定的 worktree 列表 (worktree_name -> window_label)
+#[tauri::command]
+fn get_locked_worktrees(workspace_path: String) -> HashMap<String, String> {
+    let locks = WORKTREE_LOCKS.lock().unwrap();
+    locks.iter()
+        .filter(|((ws_path, _), _)| *ws_path == workspace_path)
+        .map(|((_, wt_name), label)| (wt_name.clone(), label.clone()))
+        .collect()
 }
 
 #[tauri::command]
 async fn open_workspace_window(app: tauri::AppHandle, workspace_path: String) -> Result<String, String> {
-    // 检查该 workspace 是否已经在其他窗口打开
-    {
-        let map = WINDOW_WORKSPACES.lock().unwrap();
-        for (label, path) in map.iter() {
-            if *path == workspace_path {
-                return Err(format!("该工作区已在窗口 {} 中打开", label));
-            }
-        }
-    }
-
     let global = load_global_config();
     if !global.workspaces.iter().any(|w| w.path == workspace_path) {
         return Err("Workspace not found".to_string());
@@ -1880,6 +1921,9 @@ pub fn run() {
             get_opened_workspaces,
             unregister_window,
             open_workspace_window,
+            lock_worktree,
+            unlock_worktree,
+            get_locked_worktrees,
             // 智能扫描
             scan_linked_folders,
             // PTY 终端

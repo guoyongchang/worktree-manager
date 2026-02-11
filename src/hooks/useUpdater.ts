@@ -52,8 +52,9 @@ export function useUpdater(): UseUpdaterReturn {
   const updateRef = useRef<Update | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Auto check on mount with a 3-second delay (silent mode)
+  // Auto check on mount with a 3-second delay (silent mode), skip in dev mode
   useEffect(() => {
+    if (import.meta.env.DEV) return;
     const timer = setTimeout(() => {
       checkForUpdates(true);
     }, 3000);

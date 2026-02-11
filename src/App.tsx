@@ -114,13 +114,50 @@ function App() {
   const [scanningProject, setScanningProject] = useState<string | null>(null);
   const [settingsScanResults, setSettingsScanResults] = useState<ScannedFolder[]>([]);
 
+  // Worktree lock state (for multi-window)
+  const [lockedWorktrees, setLockedWorktrees] = useState<Record<string, string>>({});
+
+  // Refresh worktree locks periodically
+  const refreshLockedWorktrees = useCallback(async () => {
+    if (!workspace.currentWorkspace) return;
+    try {
+      const locks = await workspace.getLockedWorktrees(workspace.currentWorkspace.path);
+      setLockedWorktrees(locks);
+    } catch {
+      // ignore
+    }
+  }, [workspace]);
+
+  useEffect(() => {
+    refreshLockedWorktrees();
+    const interval = setInterval(refreshLockedWorktrees, 2000);
+    return () => clearInterval(interval);
+  }, [refreshLockedWorktrees]);
+
   // Set initial selected worktree when data loads (only on first load)
   useEffect(() => {
-    if (!hasUserSelected && !selectedWorktree && workspace.worktrees.length > 0) {
-      const activeWorktree = workspace.worktrees.find(w => !w.is_archived);
-      if (activeWorktree) {
-        setSelectedWorktree(activeWorktree);
-      }
+    if (!hasUserSelected && !selectedWorktree && workspace.worktrees.length > 0 && workspace.currentWorkspace) {
+      const wsPath = workspace.currentWorkspace.path;
+      // Find first active worktree that is not locked by another window
+      const tryAutoSelect = async () => {
+        const locks: Record<string, string> = await workspace.getLockedWorktrees(wsPath).catch(() => ({} as Record<string, string>));
+        const windowLabel = (await import('@tauri-apps/api/window')).getCurrentWindow().label;
+        const activeWorktree = workspace.worktrees.find(w => {
+          if (w.is_archived) return false;
+          const lockedBy = locks[w.name];
+          return !lockedBy || lockedBy === windowLabel;
+        });
+        if (activeWorktree) {
+          try {
+            await workspace.lockWorktree(wsPath, activeWorktree.name);
+            setSelectedWorktree(activeWorktree);
+          } catch {
+            // If lock fails, still select main workspace (null)
+            setSelectedWorktree(null);
+          }
+        }
+      };
+      tryAutoSelect();
     }
     // Also update the selected worktree data when worktrees refresh
     if (selectedWorktree) {
@@ -129,13 +166,36 @@ function App() {
         setSelectedWorktree(updated);
       }
     }
-  }, [workspace.worktrees, selectedWorktree, hasUserSelected]);
+  }, [workspace.worktrees, selectedWorktree, hasUserSelected, workspace.currentWorkspace]);
 
-  // Wrap setSelectedWorktree to track user selection
-  const handleSelectWorktree = useCallback((worktree: WorktreeListItem | null) => {
+  // Wrap setSelectedWorktree to track user selection and lock worktree
+  const handleSelectWorktree = useCallback(async (worktree: WorktreeListItem | null) => {
+    const wsPath = workspace.currentWorkspace?.path;
+    if (!wsPath) return;
+
+    // Unlock previous worktree
+    if (selectedWorktree) {
+      try {
+        await workspace.unlockWorktree(wsPath, selectedWorktree.name);
+      } catch {
+        // ignore unlock errors
+      }
+    }
+
+    // Lock new worktree
+    if (worktree) {
+      try {
+        await workspace.lockWorktree(wsPath, worktree.name);
+      } catch (e) {
+        workspace.setError(String(e));
+        return; // Don't select if lock fails
+      }
+    }
+
     setHasUserSelected(true);
     setSelectedWorktree(worktree);
-  }, []);
+    refreshLockedWorktrees();
+  }, [workspace, selectedWorktree, refreshLockedWorktrees]);
 
   // Reset terminal active tab when worktree changes
   useEffect(() => {
@@ -576,6 +636,7 @@ function App() {
           updaterState={updater.state}
           onCheckUpdate={() => updater.checkForUpdates(false)}
           onOpenInNewWindow={handleOpenInNewWindow}
+          lockedWorktrees={lockedWorktrees}
         />
 
         <div className="flex-1 flex flex-col bg-slate-900">

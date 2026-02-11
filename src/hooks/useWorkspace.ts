@@ -51,6 +51,9 @@ export interface UseWorkspaceReturn {
   addProjectToWorktree: (request: AddProjectToWorktreeRequest) => Promise<void>;
   openWorkspaceInNewWindow: (workspacePath: string) => Promise<void>;
   getOpenedWorkspaces: () => Promise<string[]>;
+  lockWorktree: (workspacePath: string, worktreeName: string) => Promise<void>;
+  unlockWorktree: (workspacePath: string, worktreeName: string) => Promise<void>;
+  getLockedWorktrees: (workspacePath: string) => Promise<Record<string, string>>;
 }
 
 export function useWorkspace(): UseWorkspaceReturn {
@@ -265,6 +268,18 @@ export function useWorkspace(): UseWorkspaceReturn {
     return invoke<string[]>("get_opened_workspaces");
   }, []);
 
+  const lockWorktree = useCallback(async (workspacePath: string, worktreeName: string): Promise<void> => {
+    await invoke("lock_worktree", { workspacePath, worktreeName });
+  }, []);
+
+  const unlockWorktree = useCallback(async (workspacePath: string, worktreeName: string): Promise<void> => {
+    await invoke("unlock_worktree", { workspacePath, worktreeName });
+  }, []);
+
+  const getLockedWorktrees = useCallback(async (workspacePath: string): Promise<Record<string, string>> => {
+    return invoke<Record<string, string>>("get_locked_worktrees", { workspacePath });
+  }, []);
+
   return {
     workspaces,
     currentWorkspace,
@@ -296,5 +311,8 @@ export function useWorkspace(): UseWorkspaceReturn {
     addProjectToWorktree,
     openWorkspaceInNewWindow,
     getOpenedWorkspaces,
+    lockWorktree,
+    unlockWorktree,
+    getLockedWorktrees,
   };
 }

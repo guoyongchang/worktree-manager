@@ -66,6 +66,7 @@ interface WorktreeSidebarProps {
   updaterState: UpdaterState;
   onCheckUpdate: () => void;
   onOpenInNewWindow?: (workspacePath: string) => void;
+  lockedWorktrees?: Record<string, string>; // worktree_name -> window_label
 }
 
 export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
@@ -89,19 +90,24 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
   updaterState,
   onCheckUpdate,
   onOpenInNewWindow,
+  lockedWorktrees = {},
 }) => {
   const activeWorktrees = worktrees.filter(w => !w.is_archived);
   const archivedWorktrees = worktrees.filter(w => w.is_archived);
 
   const [removeConfirmWorkspace, setRemoveConfirmWorkspace] = useState<WorkspaceRef | null>(null);
   const [appVersion, setAppVersion] = useState('');
-  const isMainWindow = getCurrentWindow().label === 'main';
+  const currentWindow = getCurrentWindow();
+  const isMainWindow = currentWindow.label === 'main';
+  const currentWindowLabel = currentWindow.label;
+
+  const isDev = import.meta.env.DEV;
 
   useEffect(() => {
-    if (isMainWindow) {
+    if (isMainWindow && !isDev) {
       getVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
     }
-  }, [isMainWindow]);
+  }, [isMainWindow, isDev]);
 
   const handleRemoveWorkspace = (ws: WorkspaceRef, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -155,18 +161,18 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
                   <div className="text-sm font-medium">{ws.name}</div>
                   <div className="text-xs text-slate-500 truncate">{ws.path}</div>
                 </div>
-                {workspaces.length > 1 && (
-                  <div className="flex items-center gap-0.5">
-                    {onOpenInNewWindow && currentWorkspace?.path !== ws.path && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onOpenInNewWindow(ws.path); }}
-                        className="p-1 text-slate-500 hover:text-blue-400 transition-colors"
-                        title="在新窗口打开"
-                        aria-label={`在新窗口打开 ${ws.name}`}
-                      >
-                        <ExternalLinkIcon className="w-3.5 h-3.5" />
-                      </button>
-                    )}
+                <div className="flex items-center gap-0.5">
+                  {onOpenInNewWindow && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onOpenInNewWindow(ws.path); }}
+                      className="p-1 text-slate-500 hover:text-blue-400 transition-colors"
+                      title="在新窗口打开"
+                      aria-label={`在新窗口打开 ${ws.name}`}
+                    >
+                      <ExternalLinkIcon className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  {workspaces.length > 1 && (
                     <button
                       onClick={(e) => handleRemoveWorkspace(ws, e)}
                       className="p-1 text-slate-500 hover:text-red-400 transition-colors"
@@ -175,8 +181,8 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
                     >
                       <TrashIcon className="w-3.5 h-3.5" />
                     </button>
-                  </div>
-                )}
+                  )}
+                </div>
               </DropdownMenuItem>
             ))}
             <DropdownMenuSeparator />
@@ -251,27 +257,36 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
             <p className="text-slate-600 text-xs mt-1">点击上方 + 按钮创建</p>
           </div>
         ) : (
-          activeWorktrees.map(wt => (
+          activeWorktrees.map(wt => {
+            const lockedBy = lockedWorktrees[wt.name];
+            const isLockedByOther = lockedBy && lockedBy !== currentWindowLabel;
+            return (
             <div
               key={wt.name}
-              className={`px-4 py-2.5 cursor-pointer transition-colors border-l-2 ${
-                selectedWorktree?.name === wt.name
-                  ? "bg-slate-700/30 border-blue-500"
-                  : "border-transparent hover:bg-slate-700/20"
+              className={`px-4 py-2.5 transition-colors border-l-2 ${
+                isLockedByOther
+                  ? "border-transparent opacity-40 cursor-not-allowed"
+                  : selectedWorktree?.name === wt.name
+                    ? "bg-slate-700/30 border-blue-500 cursor-pointer"
+                    : "border-transparent hover:bg-slate-700/20 cursor-pointer"
               }`}
-              onClick={() => onSelectWorktree(wt)}
-              onContextMenu={(e) => onContextMenu(e, wt)}
+              onClick={() => !isLockedByOther && onSelectWorktree(wt)}
+              onContextMenu={(e) => !isLockedByOther && onContextMenu(e, wt)}
             >
               <div className="flex items-center gap-2.5">
-                <FolderIcon className="w-4 h-4 text-blue-400" />
+                <FolderIcon className={`w-4 h-4 ${isLockedByOther ? 'text-slate-500' : 'text-blue-400'}`} />
                 <span className="font-medium text-sm truncate flex-1">{wt.name}</span>
-                {wt.projects.some(p => p.has_uncommitted) && (
+                {isLockedByOther && (
+                  <span className="text-[10px] text-slate-500 bg-slate-700/50 px-1.5 py-0.5 rounded">已占用</span>
+                )}
+                {wt.projects.some(p => p.has_uncommitted) && !isLockedByOther && (
                   <WarningIcon className="w-3.5 h-3.5 text-amber-500" />
                 )}
               </div>
               <div className="text-slate-500 text-xs mt-0.5 pl-6">{wt.projects.length} 个项目</div>
             </div>
-          ))
+            );
+          })
         )}
 
         <div
@@ -303,24 +318,28 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
       {/* Bottom Bar */}
       <div className="px-3 py-2.5 border-t border-slate-700/50 flex items-center justify-between">
         {isMainWindow ? (
-          <TooltipProvider delayDuration={300}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={onCheckUpdate}
-                  className="relative text-xs text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
-                >
-                  v{appVersion}
-                  {hasUpdate && (
-                    <span className="absolute -top-1 -right-2.5 w-2 h-2 bg-red-500 rounded-full" />
-                  )}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top">
-                {hasUpdate ? '有新版本可用，点击更新' : '检查更新'}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          isDev ? (
+            <span className="text-xs text-slate-500">v0.0.1-dev</span>
+          ) : (
+            <TooltipProvider delayDuration={300}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={onCheckUpdate}
+                    className="relative text-xs text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
+                  >
+                    v{appVersion}
+                    {hasUpdate && (
+                      <span className="absolute -top-1 -right-2.5 w-2 h-2 bg-red-500 rounded-full" />
+                    )}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {hasUpdate ? '有新版本可用，点击更新' : '检查更新'}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )
         ) : (
           <div />
         )}
