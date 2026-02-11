@@ -142,6 +142,11 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                       )}
                     </DropdownMenuItem>
                   ))}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => onRevealInFinder(mainWorkspace.path)}>
+                    <FolderIcon className="w-4 h-4 mr-1.5 text-slate-400" />
+                    在文件夹中打开
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
@@ -304,6 +309,11 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                           )}
                         </DropdownMenuItem>
                       ))}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => onRevealInFinder(selectedWorktree.path)}>
+                        <FolderIcon className="w-4 h-4 mr-1.5 text-slate-400" />
+                        在文件夹中打开
+                      </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
