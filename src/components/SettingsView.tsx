@@ -2,6 +2,14 @@ import { useState, useEffect, type FC } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogFooter,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -10,7 +18,7 @@ import {
 } from '@/components/ui/select';
 import { RefreshCw, Search } from 'lucide-react';
 import { BackIcon, PlusIcon, TrashIcon } from './Icons';
-import type { WorkspaceConfig, ProjectConfig, ScannedFolder } from '../types';
+import type { WorkspaceRef, WorkspaceConfig, ProjectConfig, ScannedFolder } from '../types';
 import { getVersion } from '@tauri-apps/api/app';
 
 interface SettingsViewProps {
@@ -32,6 +40,9 @@ interface SettingsViewProps {
   onScanProject?: (projectName: string) => void;
   scanningProject?: string | null;
   scanResults?: ScannedFolder[];
+  workspaces?: WorkspaceRef[];
+  currentWorkspace?: WorkspaceRef | null;
+  onRemoveWorkspace?: (path: string) => void;
 }
 
 export const SettingsView: FC<SettingsViewProps> = ({
@@ -53,10 +64,14 @@ export const SettingsView: FC<SettingsViewProps> = ({
   onScanProject,
   scanningProject = null,
   scanResults = [],
+  workspaces = [],
+  currentWorkspace = null,
+  onRemoveWorkspace,
 }) => {
   const [newLinkedItem, setNewLinkedItem] = useState('');
   const [newProjectLinkedFolder, setNewProjectLinkedFolder] = useState<Record<number, string>>({});
   const [appVersion, setAppVersion] = useState('');
+  const [removeConfirmWorkspace, setRemoveConfirmWorkspace] = useState<WorkspaceRef | null>(null);
 
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
@@ -170,6 +185,50 @@ export const SettingsView: FC<SettingsViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Workspace Management */}
+      {workspaces.length > 0 && onRemoveWorkspace && (
+        <div className="mb-8">
+          <h2 className="text-lg font-medium mb-4">Workspace 管理</h2>
+          <div className="space-y-2">
+            {workspaces.map(ws => (
+              <div
+                key={ws.path}
+                className={`flex items-center justify-between p-3 bg-slate-800/50 border rounded-lg ${
+                  currentWorkspace?.path === ws.path
+                    ? 'border-blue-500/50'
+                    : 'border-slate-700/50'
+                }`}
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-slate-200">{ws.name}</span>
+                    {currentWorkspace?.path === ws.path && (
+                      <span className="text-[10px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded">当前</span>
+                    )}
+                  </div>
+                  <div className="text-xs text-slate-500 truncate mt-0.5 select-text">{ws.path}</div>
+                </div>
+                {workspaces.length > 1 && currentWorkspace?.path !== ws.path && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setRemoveConfirmWorkspace(ws)}
+                    className="h-8 w-8 text-slate-500 hover:text-red-400 hover:bg-red-900/20 shrink-0 ml-2"
+                    title="移除工作区"
+                    aria-label={`移除工作区 ${ws.name}`}
+                  >
+                    <TrashIcon className="w-4 h-4" />
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-slate-500 mt-2">
+            移除工作区仅从列表中删除，不会删除实际文件。当前使用中的工作区无法移除。
+          </p>
+        </div>
+      )}
 
       {/* Projects */}
       <div>
@@ -391,6 +450,31 @@ export const SettingsView: FC<SettingsViewProps> = ({
           )}
         </div>
       </div>
+
+      {/* Remove Workspace Confirmation Dialog */}
+      <Dialog open={!!removeConfirmWorkspace} onOpenChange={(open) => !open && setRemoveConfirmWorkspace(null)}>
+        <DialogContent className="max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>移除工作区</DialogTitle>
+            <DialogDescription>
+              确定要移除工作区 "{removeConfirmWorkspace?.name}" 吗？此操作仅从列表中移除，不会删除实际文件。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setRemoveConfirmWorkspace(null)}>
+              取消
+            </Button>
+            <Button variant="warning" onClick={() => {
+              if (removeConfirmWorkspace && onRemoveWorkspace) {
+                onRemoveWorkspace(removeConfirmWorkspace.path);
+                setRemoveConfirmWorkspace(null);
+              }
+            }}>
+              确认移除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

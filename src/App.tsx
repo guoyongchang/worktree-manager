@@ -606,6 +606,9 @@ function App() {
             onScanProject={handleScanProject}
             scanningProject={scanningProject}
             scanResults={settingsScanResults}
+            workspaces={workspace.workspaces}
+            currentWorkspace={workspace.currentWorkspace}
+            onRemoveWorkspace={workspace.removeWorkspace}
           />
         )}
       </div>
@@ -621,7 +624,6 @@ function App() {
           showWorkspaceMenu={showWorkspaceMenu}
           onShowWorkspaceMenu={setShowWorkspaceMenu}
           onSwitchWorkspace={handleSwitchWorkspace}
-          onRemoveWorkspace={workspace.removeWorkspace}
           onAddWorkspace={() => { setShowWorkspaceMenu(false); setShowAddWorkspaceModal(true); }}
           mainWorkspace={workspace.mainWorkspace}
           worktrees={workspace.worktrees}

@@ -1,14 +1,6 @@
 import { useState, useEffect, type FC } from 'react';
 import { Button } from '@/components/ui/button';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogFooter,
-  DialogTitle,
-  DialogDescription,
-} from '@/components/ui/dialog';
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -29,7 +21,6 @@ import {
   SettingsIcon,
   ChevronIcon,
   WarningIcon,
-  TrashIcon,
   ChevronDownIcon,
   WorkspaceIcon,
   LogIcon,
@@ -51,7 +42,6 @@ interface WorktreeSidebarProps {
   showWorkspaceMenu: boolean;
   onShowWorkspaceMenu: (show: boolean) => void;
   onSwitchWorkspace: (path: string) => void;
-  onRemoveWorkspace: (path: string) => void;
   onAddWorkspace: () => void;
   mainWorkspace: MainWorkspaceStatus | null;
   worktrees: WorktreeListItem[];
@@ -75,7 +65,6 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
   showWorkspaceMenu,
   onShowWorkspaceMenu,
   onSwitchWorkspace,
-  onRemoveWorkspace,
   onAddWorkspace,
   mainWorkspace,
   worktrees,
@@ -95,7 +84,6 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
   const activeWorktrees = worktrees.filter(w => !w.is_archived);
   const archivedWorktrees = worktrees.filter(w => w.is_archived);
 
-  const [removeConfirmWorkspace, setRemoveConfirmWorkspace] = useState<WorkspaceRef | null>(null);
   const [appVersion, setAppVersion] = useState('');
   const currentWindow = getCurrentWindow();
   const isMainWindow = currentWindow.label === 'main';
@@ -108,18 +96,6 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
       getVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
     }
   }, [isMainWindow, isDev]);
-
-  const handleRemoveWorkspace = (ws: WorkspaceRef, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setRemoveConfirmWorkspace(ws);
-  };
-
-  const confirmRemoveWorkspace = () => {
-    if (removeConfirmWorkspace) {
-      onRemoveWorkspace(removeConfirmWorkspace.path);
-      setRemoveConfirmWorkspace(null);
-    }
-  };
 
   const handleOpenLogDir = async () => {
     try {
@@ -161,28 +137,16 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
                   <div className="text-sm font-medium">{ws.name}</div>
                   <div className="text-xs text-slate-500 truncate">{ws.path}</div>
                 </div>
-                <div className="flex items-center gap-0.5">
-                  {onOpenInNewWindow && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); onOpenInNewWindow(ws.path); }}
-                      className="p-1 text-slate-500 hover:text-blue-400 transition-colors"
-                      title="在新窗口打开"
-                      aria-label={`在新窗口打开 ${ws.name}`}
-                    >
-                      <ExternalLinkIcon className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                  {workspaces.length > 1 && (
-                    <button
-                      onClick={(e) => handleRemoveWorkspace(ws, e)}
-                      className="p-1 text-slate-500 hover:text-red-400 transition-colors"
-                      title="移除"
-                      aria-label={`移除工作区 ${ws.name}`}
-                    >
-                      <TrashIcon className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
+                {onOpenInNewWindow && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onOpenInNewWindow(ws.path); }}
+                    className="p-1 text-slate-500 hover:text-blue-400 transition-colors"
+                    title="在新窗口打开"
+                    aria-label={`在新窗口打开 ${ws.name}`}
+                  >
+                    <ExternalLinkIcon className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </DropdownMenuItem>
             ))}
             <DropdownMenuSeparator />
@@ -374,26 +338,6 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
           </TooltipProvider>
         </div>
       </div>
-
-      {/* Remove Workspace Confirmation Dialog */}
-      <Dialog open={!!removeConfirmWorkspace} onOpenChange={(open) => !open && setRemoveConfirmWorkspace(null)}>
-        <DialogContent className="max-w-[400px]">
-          <DialogHeader>
-            <DialogTitle>移除工作区</DialogTitle>
-            <DialogDescription>
-              确定要移除工作区 "{removeConfirmWorkspace?.name}" 吗？此操作仅从列表中移除，不会删除实际文件。
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="secondary" onClick={() => setRemoveConfirmWorkspace(null)}>
-              取消
-            </Button>
-            <Button variant="warning" onClick={confirmRemoveWorkspace}>
-              确认移除
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };
