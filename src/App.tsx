@@ -624,7 +624,7 @@ function App() {
           showWorkspaceMenu={showWorkspaceMenu}
           onShowWorkspaceMenu={setShowWorkspaceMenu}
           onSwitchWorkspace={handleSwitchWorkspace}
-          onAddWorkspace={() => { setShowWorkspaceMenu(false); setShowAddWorkspaceModal(true); }}
+          onAddWorkspace={() => setShowAddWorkspaceModal(true)}
           mainWorkspace={workspace.mainWorkspace}
           worktrees={workspace.worktrees}
           selectedWorktree={selectedWorktree}

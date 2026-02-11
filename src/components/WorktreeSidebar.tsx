@@ -1,9 +1,16 @@
 import { useState, useEffect, type FC } from 'react';
 import { Button } from '@/components/ui/button';
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogFooter,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
+import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
@@ -85,6 +92,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
   const archivedWorktrees = worktrees.filter(w => w.is_archived);
 
   const [appVersion, setAppVersion] = useState('');
+  const [switchConfirmPath, setSwitchConfirmPath] = useState<string | null>(null);
   const currentWindow = getCurrentWindow();
   const isMainWindow = currentWindow.label === 'main';
   const currentWindowLabel = currentWindow.label;
@@ -96,6 +104,23 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
       getVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
     }
   }, [isMainWindow, isDev]);
+
+  const handleSwitchClick = (wsPath: string) => {
+    if (currentWorkspace?.path === wsPath) return; // Already current
+    setSwitchConfirmPath(wsPath);
+    onShowWorkspaceMenu(false);
+  };
+
+  const confirmSwitch = () => {
+    if (switchConfirmPath) {
+      onSwitchWorkspace(switchConfirmPath);
+      setSwitchConfirmPath(null);
+    }
+  };
+
+  const switchTargetName = switchConfirmPath
+    ? workspaces.find(ws => ws.path === switchConfirmPath)?.name || ''
+    : '';
 
   const handleOpenLogDir = async () => {
     try {
@@ -115,45 +140,61 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
           <DropdownMenuTrigger asChild>
             <Button
               variant="secondary"
-              className="w-full justify-between"
+              className="w-full justify-between min-w-0"
             >
-              <div className="flex items-center gap-2">
-                <WorkspaceIcon className="w-4 h-4 text-blue-400" />
-                <span className="font-medium text-sm">{currentWorkspace?.name || '选择 Workspace'}</span>
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <WorkspaceIcon className="w-4 h-4 text-blue-400 shrink-0" />
+                <span className="font-medium text-sm truncate">{currentWorkspace?.name || '选择 Workspace'}</span>
               </div>
-              <ChevronDownIcon className="w-4 h-4 text-slate-400" />
+              <ChevronDownIcon className="w-4 h-4 text-slate-400 shrink-0" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent className="w-[calc(100%-1.5rem)]" align="start">
-            {workspaces.map(ws => (
-              <DropdownMenuItem
-                key={ws.path}
-                className={`flex items-center justify-between ${
-                  currentWorkspace?.path === ws.path ? 'bg-slate-700/50' : ''
-                }`}
-                onClick={() => onSwitchWorkspace(ws.path)}
-              >
-                <div className="flex-1">
-                  <div className="text-sm font-medium">{ws.name}</div>
-                  <div className="text-xs text-slate-500 truncate">{ws.path}</div>
-                </div>
-                {onOpenInNewWindow && (
+          <DropdownMenuContent className="w-[var(--radix-dropdown-menu-trigger-width)]" align="start">
+            {workspaces.map(ws => {
+              const isCurrent = currentWorkspace?.path === ws.path;
+              return (
+                <div
+                  key={ws.path}
+                  className={`flex items-stretch rounded-sm text-sm ${
+                    isCurrent ? 'bg-slate-700/50' : 'hover:bg-slate-700/40'
+                  }`}
+                >
+                  {/* Left: click to switch in current window */}
                   <button
-                    onClick={(e) => { e.stopPropagation(); onOpenInNewWindow(ws.path); }}
-                    className="p-1 text-slate-500 hover:text-blue-400 transition-colors"
-                    title="在新窗口打开"
-                    aria-label={`在新窗口打开 ${ws.name}`}
+                    className={`flex-1 min-w-0 text-left px-2 py-1.5 rounded-l-sm transition-colors ${
+                      isCurrent ? 'cursor-default' : 'cursor-pointer hover:bg-slate-700/60'
+                    }`}
+                    onClick={() => handleSwitchClick(ws.path)}
                   >
-                    <ExternalLinkIcon className="w-3.5 h-3.5" />
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="truncate font-medium">{ws.name}</span>
+                      {isCurrent && (
+                        <span className="text-[10px] text-blue-400 bg-blue-500/10 px-1 py-px rounded shrink-0">当前</span>
+                      )}
+                    </div>
                   </button>
-                )}
-              </DropdownMenuItem>
-            ))}
+                  {/* Right: open in new window */}
+                  {onOpenInNewWindow && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onOpenInNewWindow(ws.path); onShowWorkspaceMenu(false); }}
+                      className="px-2 flex items-center text-slate-500 hover:text-blue-400 hover:bg-slate-600/40 rounded-r-sm transition-colors shrink-0 border-l border-slate-700/50"
+                      title="在新窗口打开"
+                      aria-label={`在新窗口打开 ${ws.name}`}
+                    >
+                      <ExternalLinkIcon className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={onAddWorkspace}>
+            <button
+              className="w-full flex items-center gap-2 px-2 py-1.5 text-sm rounded-sm hover:bg-slate-700/40 transition-colors text-slate-300"
+              onClick={() => { onAddWorkspace(); onShowWorkspaceMenu(false); }}
+            >
               <PlusIcon className="w-4 h-4" />
-              <span className="text-sm">添加 Workspace</span>
-            </DropdownMenuItem>
+              <span>添加 Workspace</span>
+            </button>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -338,6 +379,26 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
           </TooltipProvider>
         </div>
       </div>
+
+      {/* Switch Workspace Confirmation Dialog */}
+      <Dialog open={!!switchConfirmPath} onOpenChange={(open) => !open && setSwitchConfirmPath(null)}>
+        <DialogContent className="max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>切换工作区</DialogTitle>
+            <DialogDescription>
+              确定要切换到工作区 "{switchTargetName}" 吗？当前工作区的 Worktree 选择状态将被重置。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setSwitchConfirmPath(null)}>
+              取消
+            </Button>
+            <Button onClick={confirmSwitch}>
+              确认切换
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
