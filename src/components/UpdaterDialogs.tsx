@@ -27,6 +27,110 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// --- Simple Markdown Renderer ---
+
+const SimpleMarkdown: FC<{ content: string }> = ({ content }) => {
+  const lines = content.split('\n');
+  const elements: React.ReactNode[] = [];
+  let listItems: string[] = [];
+  let key = 0;
+
+  const flushList = () => {
+    if (listItems.length > 0) {
+      elements.push(
+        <ul key={key++} className="space-y-1 mb-3">
+          {listItems.map((item, i) => (
+            <li key={i} className="text-sm text-slate-400 flex items-start gap-2">
+              <span className="text-blue-400 mt-0.5 shrink-0">•</span>
+              <span>{renderInline(item)}</span>
+            </li>
+          ))}
+        </ul>
+      );
+      listItems = [];
+    }
+  };
+
+  const renderInline = (text: string): React.ReactNode => {
+    // Handle **bold** and `code`
+    const parts: React.ReactNode[] = [];
+    let remaining = text;
+    let partKey = 0;
+    while (remaining.length > 0) {
+      const boldMatch = remaining.match(/\*\*(.+?)\*\*/);
+      const codeMatch = remaining.match(/`(.+?)`/);
+
+      // Find the earliest match
+      const boldIdx = boldMatch?.index ?? Infinity;
+      const codeIdx = codeMatch?.index ?? Infinity;
+
+      if (boldIdx === Infinity && codeIdx === Infinity) {
+        parts.push(remaining);
+        break;
+      }
+
+      if (boldIdx <= codeIdx && boldMatch) {
+        parts.push(remaining.slice(0, boldIdx));
+        parts.push(<strong key={partKey++} className="text-slate-200 font-medium">{boldMatch[1]}</strong>);
+        remaining = remaining.slice(boldIdx + boldMatch[0].length);
+      } else if (codeMatch) {
+        parts.push(remaining.slice(0, codeIdx));
+        parts.push(<code key={partKey++} className="px-1 py-0.5 bg-slate-700 rounded text-xs text-blue-300">{codeMatch[1]}</code>);
+        remaining = remaining.slice(codeIdx + codeMatch[0].length);
+      }
+    }
+    return parts.length === 1 ? parts[0] : <>{parts}</>;
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      flushList();
+      continue;
+    }
+
+    // Heading: ### or ##
+    const headingMatch = trimmed.match(/^(#{1,3})\s+(.+)$/);
+    if (headingMatch) {
+      flushList();
+      const level = headingMatch[1].length;
+      const text = headingMatch[2];
+      if (level <= 2) {
+        elements.push(
+          <h3 key={key++} className="text-sm font-semibold text-slate-200 mb-2 mt-3 first:mt-0">
+            {renderInline(text)}
+          </h3>
+        );
+      } else {
+        elements.push(
+          <h4 key={key++} className="text-sm font-medium text-slate-300 mb-1.5 mt-2.5 first:mt-0">
+            {renderInline(text)}
+          </h4>
+        );
+      }
+      continue;
+    }
+
+    // List item: - or *
+    const listMatch = trimmed.match(/^[-*]\s+(.+)$/);
+    if (listMatch) {
+      listItems.push(listMatch[1]);
+      continue;
+    }
+
+    // Regular paragraph
+    flushList();
+    elements.push(
+      <p key={key++} className="text-sm text-slate-400 mb-2">
+        {renderInline(trimmed)}
+      </p>
+    );
+  }
+  flushList();
+
+  return <div className="select-text">{elements}</div>;
+};
+
 // --- Update Notification Dialog ---
 
 interface UpdateNotificationDialogProps {
@@ -66,16 +170,11 @@ export const UpdateNotificationDialog: FC<UpdateNotificationDialogProps> = ({
               </p>
 
               {updateInfo.notes.length > 0 && (
-                <div className="mb-4">
+                <div className="mb-4 max-h-[300px] overflow-y-auto pr-1">
                   <p className="text-sm font-medium text-slate-300 mb-2">更新内容:</p>
-                  <ul className="space-y-1.5">
-                    {updateInfo.notes.map((note, i) => (
-                      <li key={i} className="text-sm text-slate-400 flex items-start gap-2">
-                        <span className="text-blue-400 mt-0.5">-</span>
-                        <span>{note}</span>
-                      </li>
-                    ))}
-                  </ul>
+                  <div className="pl-1">
+                    <SimpleMarkdown content={updateInfo.notes.join('\n')} />
+                  </div>
                 </div>
               )}
 

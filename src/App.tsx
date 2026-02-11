@@ -214,6 +214,17 @@ function App() {
     terminal.resetActiveTab();
   }, [selectedWorktree?.path]);
 
+  // Update window title based on workspace and worktree
+  useEffect(() => {
+    const wsName = workspace.currentWorkspace?.name;
+    if (!wsName) {
+      document.title = 'Worktree Manager';
+      return;
+    }
+    const wtName = selectedWorktree ? selectedWorktree.name : '主工作区';
+    document.title = `${wsName} - ${wtName}`;
+  }, [workspace.currentWorkspace?.name, selectedWorktree]);
+
   // Workspace handlers
   const handleSwitchWorkspace = useCallback(async (path: string) => {
     setSwitchingWorkspace(true);

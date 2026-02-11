@@ -334,9 +334,14 @@ jobs:
           base_url="https://github.com/$REPO/releases/download/$TAG"
 
           # Fetch release notes from GitHub Release for the updater dialog
-          NOTES=$(gh release view "$TAG" --repo "$REPO" --json body -q '.body' 2>/dev/null | head -50 || echo "Release $TAG")
-          # Escape for JSON: replace newlines, quotes, backslashes
-          NOTES_JSON=$(echo "$NOTES" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')
+          # Only include changelog (update content), not download/install instructions
+          NOTES=$(gh release view "$TAG" --repo "$REPO" --json body -q '.body' 2>/dev/null || echo "Release $TAG")
+          # Extract only the changelog section (between "## 更新内容" and "---")
+          CHANGELOG_ONLY=$(echo "$NOTES" | sed -n '/^## 更新内容$/,/^---$/p' | sed '1d;$d' | sed '/^$/N;/^\n$/d')
+          if [ -z "$CHANGELOG_ONLY" ]; then
+            CHANGELOG_ONLY="$NOTES"
+          fi
+          NOTES_JSON=$(echo "$CHANGELOG_ONLY" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')
 
           mac_url="" mac_sig=""
           win_url="" win_sig=""
