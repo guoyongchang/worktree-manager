@@ -120,8 +120,11 @@ jobs:
 
           **自动更新**: 应用内置自动更新功能，下次启动时会自动检查新版本。
 
-          > macOS 请下载 \`.dmg\`，安装后首次打开请**右键点击 app → 打开**，之后即可正常使用。
-          > 如仍提示"已损坏"，请在终端执行：\`xattr -cr "/Applications/Worktree Manager.app"\`
+          > **macOS 首次安装说明：**
+          > 1. 下载 \`.dmg\`，拖入 Applications 安装
+          > 2. 首次打开如提示无法验证开发者，请**右键点击 app → 打开**
+          > 3. 如仍无法打开，前往 **系统设置 → 隐私与安全性**，在底部找到提示并点击 **仍要打开**
+          > 4. 以上方法均无效时，打开终端执行：\`xattr -cr "/Applications/Worktree Manager.app"\`
           EOF
           )"
 
