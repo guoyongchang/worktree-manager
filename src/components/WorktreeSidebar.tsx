@@ -52,11 +52,15 @@ import { callBackend, getAppVersion, getWindowLabel, isMainWindow as checkIsMain
 const ShareBar: FC<{
   active: boolean;
   url: string | null;
+  ngrokUrl: string | null;
   password: string;
+  ngrokAvailable: boolean;
+  ngrokLoading: boolean;
+  onToggleNgrok?: () => void;
   onStart?: () => void;
   onStop?: () => void;
   onUpdatePassword?: (password: string) => void;
-}> = ({ active, url, password, onStart, onStop, onUpdatePassword }) => {
+}> = ({ active, url, ngrokUrl, password, ngrokAvailable, ngrokLoading, onToggleNgrok, onStart, onStop, onUpdatePassword }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [editingPassword, setEditingPassword] = useState('');
   const [passwordDirty, setPasswordDirty] = useState(false);
@@ -101,8 +105,53 @@ const ShareBar: FC<{
 
   return (
     <div className="px-3 py-2 border-t border-slate-700/50 space-y-1.5">
-      {/* URL row */}
+      {/* ngrok row */}
+      {ngrokAvailable && (
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] font-medium text-slate-500 shrink-0">NGROK:</span>
+          {ngrokUrl ? (
+            <>
+              <span className="flex-1 text-xs text-blue-400 truncate min-w-0 select-all" title={ngrokUrl}>
+                {ngrokUrl.replace(/^https?:\/\//, '')}
+              </span>
+              <TooltipProvider delayDuration={300}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => navigator.clipboard.writeText(ngrokUrl)}
+                      className="h-5 w-5 shrink-0"
+                    >
+                      <CopyIcon className="w-2.5 h-2.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">复制外网链接</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </>
+          ) : (
+            <span className="flex-1" />
+          )}
+          <button
+            type="button"
+            onClick={onToggleNgrok}
+            disabled={ngrokLoading}
+            className={`relative inline-flex h-4 w-7 items-center rounded-full shrink-0 transition-colors ${
+              ngrokLoading ? 'opacity-50 cursor-wait' : 'cursor-pointer'
+            } ${ngrokUrl ? 'bg-blue-500' : 'bg-slate-600'}`}
+          >
+            <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${
+              ngrokUrl ? 'translate-x-3.5' : 'translate-x-0.5'
+            }`} />
+          </button>
+        </div>
+      )}
+      {/* LAN URL row */}
       <div className="flex items-center gap-1">
+        <span className="text-[9px] font-bold px-1 py-0.5 rounded shrink-0 bg-slate-600/30 text-slate-500">
+          LAN
+        </span>
         <span className="flex-1 text-xs text-emerald-400 truncate min-w-0 select-all" title={url || ''}>
           {url || '...'}
         </span>
@@ -207,10 +256,14 @@ interface WorktreeSidebarProps {
   switchingWorkspace?: boolean;
   shareActive?: boolean;
   shareUrl?: string | null;
+  shareNgrokUrl?: string | null;
   sharePassword?: string;
   onStartShare?: () => void;
   onStopShare?: () => void;
   onUpdateSharePassword?: (password: string) => void;
+  ngrokAvailable?: boolean;
+  ngrokLoading?: boolean;
+  onToggleNgrok?: () => void;
 }
 
 export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
@@ -239,10 +292,14 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
   switchingWorkspace = false,
   shareActive = false,
   shareUrl,
+  shareNgrokUrl,
   sharePassword = '',
   onStartShare,
   onStopShare,
   onUpdateSharePassword,
+  ngrokAvailable = false,
+  ngrokLoading = false,
+  onToggleNgrok,
 }) => {
   const activeWorktrees = worktrees.filter(w => !w.is_archived);
   const archivedWorktrees = worktrees.filter(w => w.is_archived);
@@ -626,7 +683,11 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
         <ShareBar
           active={shareActive}
           url={shareUrl || null}
+          ngrokUrl={shareNgrokUrl || null}
           password={sharePassword}
+          ngrokAvailable={ngrokAvailable}
+          ngrokLoading={ngrokLoading}
+          onToggleNgrok={onToggleNgrok}
           onStart={onStartShare}
           onStop={onStopShare}
           onUpdatePassword={onUpdateSharePassword}

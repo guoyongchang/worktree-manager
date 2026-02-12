@@ -8,6 +8,9 @@ use std::time::Duration;
 use once_cell::sync::Lazy;
 use wait_timeout::ChildExt;
 use log;
+use ngrok::config::ForwarderBuilder;
+use ngrok::forwarder::Forwarder;
+use ngrok::tunnel::{EndpointInfo, HttpTunnel};
 
 mod git_ops;
 mod pty_manager;
@@ -34,6 +37,8 @@ pub struct ShareState {
     pub port: u16,
     pub password: Option<String>,
     pub shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
+    pub ngrok_url: Option<String>,
+    pub ngrok_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl Default for ShareState {
@@ -44,6 +49,8 @@ impl Default for ShareState {
             port: 0,
             password: None,
             shutdown_tx: None,
+            ngrok_url: None,
+            ngrok_task: None,
         }
     }
 }
@@ -68,6 +75,7 @@ pub static LOCK_BROADCAST: Lazy<tokio::sync::broadcast::Sender<String>> = Lazy::
 pub struct ShareStateInfo {
     pub active: bool,
     pub url: Option<String>,
+    pub ngrok_url: Option<String>,
     pub workspace_path: Option<String>,
 }
 
@@ -117,6 +125,8 @@ fn run_git_command_with_timeout(args: &[&str], cwd: &str) -> Result<std::process
 pub struct GlobalConfig {
     pub workspaces: Vec<WorkspaceRef>,
     pub current_workspace: Option<String>,  // 当前选中的 workspace 路径
+    #[serde(default)]
+    pub ngrok_token: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -130,6 +140,7 @@ impl Default for GlobalConfig {
         Self {
             workspaces: vec![],
             current_workspace: None,
+            ngrok_token: None,
         }
     }
 }
@@ -257,7 +268,7 @@ pub fn load_global_config() -> GlobalConfig {
     config
 }
 
-fn save_global_config_internal(config: &GlobalConfig) -> Result<(), String> {
+pub fn save_global_config_internal(config: &GlobalConfig) -> Result<(), String> {
     let config_path = get_global_config_path();
 
     if let Some(parent) = config_path.parent() {
@@ -2248,6 +2259,20 @@ pub fn open_log_dir_internal() -> Result<(), String> {
 // ==================== 分享功能命令 ====================
 
 #[tauri::command]
+async fn get_ngrok_token() -> Result<Option<String>, String> {
+    let config = load_global_config();
+    Ok(config.ngrok_token)
+}
+
+#[tauri::command]
+async fn set_ngrok_token(token: String) -> Result<(), String> {
+    let mut config = load_global_config();
+    config.ngrok_token = if token.is_empty() { None } else { Some(token) };
+    save_global_config_internal(&config)?;
+    Ok(())
+}
+
+#[tauri::command]
 async fn start_sharing(window: tauri::Window, port: u16, password: String) -> Result<String, String> {
     let workspace_path = get_window_workspace_path(window.label())
         .ok_or("No workspace selected")?;
@@ -2294,17 +2319,115 @@ async fn start_sharing(window: tauri::Window, port: u16, password: String) -> Re
     Ok(share_url)
 }
 
+pub async fn start_ngrok_tunnel_internal() -> Result<String, String> {
+    let port = {
+        let state = SHARE_STATE.lock().unwrap();
+        if !state.active {
+            return Err("请先开启分享".to_string());
+        }
+        if state.ngrok_url.is_some() {
+            return Err("ngrok 隧道已在运行".to_string());
+        }
+        state.port
+    };
+
+    let ngrok_token = load_global_config().ngrok_token
+        .ok_or("未配置 ngrok token，请先在设置中配置".to_string())?;
+
+    let (url_tx, url_rx) = std::sync::mpsc::channel::<Result<String, String>>();
+
+    let ngrok_handle = TOKIO_RT.spawn(async move {
+        let result = async {
+            let session = ngrok::Session::builder()
+                .authtoken(ngrok_token)
+                .connect()
+                .await
+                .map_err(|e| format!("ngrok 连接失败: {}", e))?;
+
+            let forwarder = session
+                .http_endpoint()
+                .listen_and_forward(
+                    url::Url::parse(&format!("http://localhost:{}", port))
+                        .map_err(|e| format!("URL 解析失败: {}", e))?
+                )
+                .await
+                .map_err(|e| format!("ngrok 隧道创建失败: {}", e))?;
+
+            let ngrok_url = forwarder.url().to_string();
+            Ok::<(String, Forwarder<HttpTunnel>), String>((ngrok_url, forwarder))
+        }.await;
+
+        match result {
+            Ok((url, mut forwarder)) => {
+                let _ = url_tx.send(Ok(url));
+                // join() keeps the forwarder actively forwarding traffic
+                let _ = forwarder.join().await;
+            }
+            Err(e) => {
+                let _ = url_tx.send(Err(e));
+            }
+        }
+    });
+
+    // Wait for the ngrok URL (with timeout)
+    match url_rx.recv_timeout(std::time::Duration::from_secs(30)) {
+        Ok(Ok(ngrok_url)) => {
+            let mut state = SHARE_STATE.lock().unwrap();
+            state.ngrok_url = Some(ngrok_url.clone());
+            state.ngrok_task = Some(ngrok_handle);
+            log::info!("ngrok tunnel started: {}", ngrok_url);
+            Ok(ngrok_url)
+        }
+        Ok(Err(e)) => {
+            ngrok_handle.abort();
+            Err(e)
+        }
+        Err(_) => {
+            ngrok_handle.abort();
+            Err("ngrok 隧道启动超时".to_string())
+        }
+    }
+}
+
+#[tauri::command]
+async fn start_ngrok_tunnel() -> Result<String, String> {
+    start_ngrok_tunnel_internal().await
+}
+
+#[tauri::command]
+async fn stop_ngrok_tunnel() -> Result<(), String> {
+    let mut state = SHARE_STATE.lock().unwrap();
+    if let Some(handle) = state.ngrok_task.take() {
+        handle.abort();
+    }
+    state.ngrok_url = None;
+    log::info!("ngrok tunnel stopped");
+    Ok(())
+}
+
 #[tauri::command]
 async fn stop_sharing() -> Result<(), String> {
-    let tx = {
-        let mut state = SHARE_STATE.lock().unwrap();
+    {
+        let state = SHARE_STATE.lock().unwrap();
         if !state.active {
             return Err("Not currently sharing".to_string());
         }
+    }
+
+    // Stop ngrok tunnel if active
+    {
+        let mut state = SHARE_STATE.lock().unwrap();
+        if let Some(handle) = state.ngrok_task.take() {
+            handle.abort();
+        }
+        state.ngrok_url = None;
+    }
+
+    // Stop HTTP server
+    let tx = {
+        let mut state = SHARE_STATE.lock().unwrap();
         state.shutdown_tx.take()
     };
-
-    // Send shutdown signal
     if let Some(tx) = tx {
         let _ = tx.send(true);
     }
@@ -2316,7 +2439,6 @@ async fn stop_sharing() -> Result<(), String> {
         state.workspace_path = None;
         state.port = 0;
         state.password = None;
-        // shutdown_tx already taken above
     }
 
     // Clear authenticated sessions
@@ -2344,6 +2466,7 @@ async fn get_share_state() -> Result<ShareStateInfo, String> {
     Ok(ShareStateInfo {
         active: state.active,
         url,
+        ngrok_url: state.ngrok_url.clone(),
         workspace_path: state.workspace_path.clone(),
     })
 }
@@ -2375,12 +2498,17 @@ fn open_devtools(webview_window: tauri::WebviewWindow) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Install rustls CryptoProvider before any TLS usage (required by rustls 0.23+)
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_log::Builder::new().build())
+        .plugin(tauri_plugin_log::Builder::new()
+            .level(log::LevelFilter::Info)
+            .build())
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
                 let label = window.label().to_string();
@@ -2446,6 +2574,11 @@ pub fn run() {
             stop_sharing,
             get_share_state,
             update_share_password,
+            // ngrok
+            get_ngrok_token,
+            set_ngrok_token,
+            start_ngrok_tunnel,
+            stop_ngrok_tunnel,
             // DevTools
             open_devtools,
         ])

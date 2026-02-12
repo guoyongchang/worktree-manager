@@ -429,6 +429,39 @@ async fn h_auth(headers: HeaderMap, Json(args): Json<Value>) -> Response {
     }
 }
 
+// -- ngrok token --
+
+async fn h_get_ngrok_token() -> Response {
+    let config = crate::load_global_config();
+    Json(json!(config.ngrok_token)).into_response()
+}
+
+async fn h_set_ngrok_token(Json(args): Json<Value>) -> Response {
+    let token = args["token"].as_str().unwrap_or("").to_string();
+    let mut config = crate::load_global_config();
+    config.ngrok_token = if token.is_empty() { None } else { Some(token) };
+    match crate::save_global_config_internal(&config) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+async fn h_start_ngrok_tunnel() -> Response {
+    match crate::start_ngrok_tunnel_internal().await {
+        Ok(url) => Json(json!(url)).into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+async fn h_stop_ngrok_tunnel() -> Response {
+    let mut state = SHARE_STATE.lock().unwrap();
+    if let Some(handle) = state.ngrok_task.take() {
+        handle.abort();
+    }
+    state.ngrok_url = None;
+    StatusCode::NO_CONTENT.into_response()
+}
+
 // -- Share info --
 
 async fn h_get_share_info() -> Response {
@@ -772,6 +805,11 @@ pub fn create_router() -> Router {
         .route("/api/auth", post(h_auth))
         // Share info
         .route("/api/get_share_info", get(h_get_share_info))
+        // ngrok
+        .route("/api/get_ngrok_token", post(h_get_ngrok_token))
+        .route("/api/set_ngrok_token", post(h_set_ngrok_token))
+        .route("/api/start_ngrok_tunnel", post(h_start_ngrok_tunnel))
+        .route("/api/stop_ngrok_tunnel", post(h_stop_ngrok_tunnel))
         // Misc
         .route("/api/get_app_version", post(h_get_app_version))
         // WebSocket (auth handled in upgrade handler via query param)

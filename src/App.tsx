@@ -31,7 +31,7 @@ import {
 } from "./components";
 import { useWorkspace, useTerminal, useUpdater } from "./hooks";
 import { Input } from "@/components/ui/input";
-import { callBackend, getWindowLabel, setWindowTitle, isTauri, startSharing, stopSharing, getShareState, getShareInfo, authenticate, updateSharePassword } from "./lib/backend";
+import { callBackend, getWindowLabel, setWindowTitle, isTauri, startSharing, stopSharing, getShareState, getShareInfo, authenticate, updateSharePassword, getNgrokToken, startNgrokTunnel, stopNgrokTunnel } from "./lib/backend";
 import { getWebSocketManager } from "./lib/websocket";
 import type {
   WorktreeListItem,
@@ -135,7 +135,10 @@ function App() {
   // Share state
   const [shareActive, setShareActive] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [shareNgrokUrl, setShareNgrokUrl] = useState<string | null>(null);
   const [sharePassword, setSharePassword] = useState('');
+  const [ngrokAvailable, setNgrokAvailable] = useState(false);
+  const [ngrokLoading, setNgrokLoading] = useState(false);
 
   const [browserLoginPassword, setBrowserLoginPassword] = useState('');
   const [browserLoginError, setBrowserLoginError] = useState<string | null>(null);
@@ -462,11 +465,30 @@ function App() {
       await stopSharing();
       setShareActive(false);
       setShareUrl(null);
+      setShareNgrokUrl(null);
       setSharePassword('');
     } catch (e) {
       workspace.setError(String(e));
     }
   }, [workspace]);
+
+  const handleToggleNgrok = useCallback(async () => {
+    if (ngrokLoading) return;
+    setNgrokLoading(true);
+    try {
+      if (shareNgrokUrl) {
+        await stopNgrokTunnel();
+        setShareNgrokUrl(null);
+      } else {
+        const ngrokUrl = await startNgrokTunnel();
+        setShareNgrokUrl(ngrokUrl);
+      }
+    } catch (e) {
+      workspace.setError(String(e));
+    } finally {
+      setNgrokLoading(false);
+    }
+  }, [workspace, shareNgrokUrl, ngrokLoading]);
 
   const handleUpdateSharePassword = useCallback(async (newPassword: string) => {
     try {
@@ -477,14 +499,20 @@ function App() {
     }
   }, [workspace]);
 
-  // Restore share state on mount (Tauri only)
+  // Restore share state and load ngrok token on mount (Tauri only)
   useEffect(() => {
     if (isTauri()) {
       getShareState().then(state => {
         if (state.active && state.url) {
           setShareActive(true);
           setShareUrl(state.url);
+          if (state.ngrok_url) {
+            setShareNgrokUrl(state.ngrok_url);
+          }
         }
+      }).catch(() => {});
+      getNgrokToken().then(token => {
+        setNgrokAvailable(!!token);
       }).catch(() => {});
     }
   }, []);
@@ -605,6 +633,13 @@ function App() {
     setEditingConfig(workspace.config ? JSON.parse(JSON.stringify(workspace.config)) : null);
     setViewMode('settings');
   }, [workspace.config]);
+
+  // Refresh ngrok availability when returning from settings
+  useEffect(() => {
+    if (viewMode === 'main' && isTauri()) {
+      getNgrokToken().then(token => setNgrokAvailable(!!token)).catch(() => {});
+    }
+  }, [viewMode]);
 
   const handleSaveConfig = useCallback(async () => {
     if (!editingConfig) return;
@@ -858,10 +893,14 @@ function App() {
           switchingWorkspace={switchingWorkspace}
           shareActive={shareActive}
           shareUrl={shareUrl}
+          shareNgrokUrl={shareNgrokUrl}
           sharePassword={sharePassword}
           onStartShare={handleStartShare}
           onStopShare={handleStopShare}
           onUpdateSharePassword={handleUpdateSharePassword}
+          ngrokAvailable={ngrokAvailable}
+          ngrokLoading={ngrokLoading}
+          onToggleNgrok={handleToggleNgrok}
         />
         )}
 

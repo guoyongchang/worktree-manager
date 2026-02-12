@@ -146,6 +146,7 @@ export async function isMainWindow(): Promise<boolean> {
 export interface ShareState {
   active: boolean;
   url?: string;
+  ngrok_url?: string;
   workspace_path?: string;
 }
 
@@ -157,6 +158,16 @@ export interface ShareInfo {
 /** Start sharing the current workspace with a password. Returns the share URL. */
 export async function startSharing(port: number, password: string): Promise<string> {
   return callBackend<string>('start_sharing', { port, password });
+}
+
+/** Start ngrok tunnel for the current sharing session. Returns the ngrok URL. */
+export async function startNgrokTunnel(): Promise<string> {
+  return callBackend<string>('start_ngrok_tunnel');
+}
+
+/** Stop ngrok tunnel (LAN sharing continues). */
+export async function stopNgrokTunnel(): Promise<void> {
+  return callBackend<void>('stop_ngrok_tunnel');
 }
 
 /** Stop sharing (shuts down the HTTP server). */
@@ -172,6 +183,16 @@ export async function getShareState(): Promise<ShareState> {
 /** Update the share password while sharing is active. */
 export async function updateSharePassword(password: string): Promise<void> {
   return callBackend<void>('update_share_password', { password });
+}
+
+/** Get the configured ngrok token. */
+export async function getNgrokToken(): Promise<string | null> {
+  return callBackend<string | null>('get_ngrok_token');
+}
+
+/** Set the ngrok token. */
+export async function setNgrokToken(token: string): Promise<void> {
+  return callBackend<void>('set_ngrok_token', { token });
 }
 
 /** Browser mode: fetch info about the shared workspace from the HTTP server. */
