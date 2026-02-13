@@ -100,7 +100,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
         {error && (
           <div className="mb-4 p-4 bg-red-900/30 border border-red-800/50 rounded-lg">
             <div className="text-red-300 text-sm select-text">{error}</div>
-            <button onClick={onClearError} className="text-red-400 hover:text-red-200 text-xs mt-2 underline">关闭</button>
+            <Button variant="link" size="sm" onClick={onClearError} className="text-red-400 hover:text-red-200 mt-1 p-0 h-auto">关闭</Button>
           </div>
         )}
         <div className="flex items-center justify-between mb-6">
@@ -190,7 +190,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
                       onClick={() => onRevealInFinder(projectPath)}
-                      className="p-1 hover:bg-slate-600 rounded text-slate-400 hover:text-slate-200"
+                      className="p-1 hover:bg-slate-600 rounded text-slate-400 hover:text-slate-200 transition-colors"
                       title="在 Finder 中打开"
                       aria-label={`在 Finder 中打开 ${proj.name}`}
                     >
@@ -274,7 +274,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
         {error && (
           <div className="mb-4 p-4 bg-red-900/30 border border-red-800/50 rounded-lg">
             <div className="text-red-300 text-sm select-text">{error}</div>
-            <button onClick={onClearError} className="text-red-400 hover:text-red-200 text-xs mt-2 underline">关闭</button>
+            <Button variant="link" size="sm" onClick={onClearError} className="text-red-400 hover:text-red-200 mt-1 p-0 h-auto">关闭</Button>
           </div>
         )}
         <div className="flex items-center justify-between mb-6">
@@ -402,7 +402,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
           {!selectedWorktree.is_archived && onAddProjectToWorktree && (
             <button
               onClick={onAddProjectToWorktree}
-              className="w-full p-3 rounded-lg border border-dashed border-slate-700 hover:border-slate-500 hover:bg-slate-800/30 transition-all flex items-center justify-center gap-2 text-slate-500 hover:text-slate-300"
+              className="w-full p-3 rounded-lg border border-dashed border-slate-700 hover:border-slate-500 hover:bg-slate-800/30 transition-colors flex items-center justify-center gap-2 text-slate-500 hover:text-slate-300"
             >
               <PlusIcon className="w-4 h-4" />
               <span className="text-sm">添加项目</span>

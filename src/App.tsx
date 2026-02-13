@@ -31,7 +31,8 @@ import {
 } from "./components";
 import { useWorkspace, useTerminal, useUpdater } from "./hooks";
 import { Input } from "@/components/ui/input";
-import { callBackend, getWindowLabel, setWindowTitle, isTauri, startSharing, stopSharing, getShareState, getShareInfo, authenticate, updateSharePassword, getNgrokToken, startNgrokTunnel, stopNgrokTunnel } from "./lib/backend";
+import { callBackend, getWindowLabel, setWindowTitle, isTauri, getSessionId, clearSessionId, startSharing, stopSharing, getShareState, getShareInfo, authenticate, updateSharePassword, getNgrokToken, startNgrokTunnel, stopNgrokTunnel, getConnectedClients } from "./lib/backend";
+import type { ConnectedClient } from "./lib/backend";
 import { getWebSocketManager } from "./lib/websocket";
 import type {
   WorktreeListItem,
@@ -68,7 +69,7 @@ function App() {
   const [selectedWorktree, setSelectedWorktree] = useState<WorktreeListItem | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('main');
 
-  const terminal = useTerminal(selectedWorktree, workspace.mainWorkspace);
+  const terminal = useTerminal(selectedWorktree, workspace.mainWorkspace, workspace.currentWorkspace?.path);
   const updater = useUpdater();
 
   // Modal states
@@ -140,6 +141,9 @@ function App() {
   const [ngrokAvailable, setNgrokAvailable] = useState(false);
   const [ngrokLoading, setNgrokLoading] = useState(false);
 
+  // Connected clients tracking
+  const [connectedClients, setConnectedClients] = useState<ConnectedClient[]>([]);
+
   const [browserLoginPassword, setBrowserLoginPassword] = useState('');
   const [browserLoginError, setBrowserLoginError] = useState<string | null>(null);
   const [browserLoggingIn, setBrowserLoggingIn] = useState(false);
@@ -151,41 +155,36 @@ function App() {
   const currentWorkspacePath = workspace.currentWorkspace?.path;
   const getLockedWorktreesFn = workspace.getLockedWorktrees;
 
+  // Update locks only when content actually changes (avoids unnecessary re-renders)
+  const updateLocksIfChanged = useCallback((locks: Record<string, string>) => {
+    setLockedWorktrees(prev => {
+      const next = JSON.stringify(locks);
+      return next === JSON.stringify(prev) ? prev : locks;
+    });
+  }, []);
+
   const refreshLockedWorktrees = useCallback(async () => {
     if (!currentWorkspacePath) return;
     try {
       const locks = await getLockedWorktreesFn(currentWorkspacePath);
-      setLockedWorktrees(prev => {
-        const next = JSON.stringify(locks);
-        return next === JSON.stringify(prev) ? prev : locks;
-      });
+      updateLocksIfChanged(locks);
     } catch {
       // ignore
     }
-  }, [currentWorkspacePath, getLockedWorktreesFn]);
+  }, [currentWorkspacePath, getLockedWorktreesFn, updateLocksIfChanged]);
 
   useEffect(() => {
     if (!isTauri() && currentWorkspacePath) {
-      // Browser mode: subscribe to WebSocket lock updates (no polling)
       const wsManager = getWebSocketManager();
-      wsManager.subscribeLocks(currentWorkspacePath, (locks) => {
-        setLockedWorktrees(prev => {
-          const next = JSON.stringify(locks);
-          return next === JSON.stringify(prev) ? prev : locks;
-        });
-      });
-      // Also fetch initial state via HTTP as fallback
+      wsManager.subscribeLocks(currentWorkspacePath, updateLocksIfChanged);
       refreshLockedWorktrees();
-      return () => {
-        wsManager.unsubscribeLocks();
-      };
+      return () => { wsManager.unsubscribeLocks(); };
     } else {
-      // Tauri desktop mode: poll every 3s
       refreshLockedWorktrees();
       const interval = setInterval(refreshLockedWorktrees, 3000);
       return () => clearInterval(interval);
     }
-  }, [refreshLockedWorktrees, currentWorkspacePath]);
+  }, [refreshLockedWorktrees, currentWorkspacePath, updateLocksIfChanged]);
 
   // Set initial selected worktree when data loads (only on first load)
   useEffect(() => {
@@ -193,6 +192,12 @@ function App() {
       const wsPath = workspace.currentWorkspace.path;
       // Find first active worktree that is not locked by another window
       const tryAutoSelect = async () => {
+        // 网页端：不自动选择和锁定，等待用户手动选择
+        if (!isTauri()) {
+          return;
+        }
+
+        // 桌面端：自动选择第一个未被锁定的工作区
         const locks: Record<string, string> = await workspace.getLockedWorktrees(wsPath).catch(() => ({} as Record<string, string>));
         const windowLabel = await getWindowLabel();
         const activeWorktree = workspace.worktrees.find(w => {
@@ -226,6 +231,14 @@ function App() {
     const wsPath = workspace.currentWorkspace?.path;
     if (!wsPath) return;
 
+    // 网页端：直接查看，不需要锁定（因为已经被桌面端锁定了）
+    if (!isTauri()) {
+      setHasUserSelected(true);
+      setSelectedWorktree(worktree);
+      return;
+    }
+
+    // 桌面端：需要锁定/解锁逻辑
     // Unlock previous worktree
     if (selectedWorktree) {
       try {
@@ -389,12 +402,14 @@ function App() {
       }
     } else if (editingConfig) {
       // From SettingsView context
-      const project = editingConfig.projects.find(p => p.name === projectName);
-      if (project) {
-        project.linked_folders = folders;
-        setEditingConfig({ ...editingConfig });
-        await workspace.saveConfig(editingConfig);
-      }
+      const updatedConfig = {
+        ...editingConfig,
+        projects: editingConfig.projects.map(p =>
+          p.name === projectName ? { ...p, linked_folders: folders } : p
+        ),
+      };
+      setEditingConfig(updatedConfig);
+      await workspace.saveConfig(updatedConfig);
     }
   }, [workspace, editingConfig]);
 
@@ -447,10 +462,9 @@ function App() {
     return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
   }, []);
 
-  const handleStartShare = useCallback(async () => {
+  const handleStartShare = useCallback(async (port: number) => {
     try {
-      const port = 49152 + Math.floor(Math.random() * (65535 - 49152));
-      const pwd = generatePassword();
+      const pwd = sharePassword || generatePassword();
       const url = await startSharing(port, pwd);
       setShareActive(true);
       setShareUrl(url);
@@ -458,7 +472,7 @@ function App() {
     } catch (e) {
       workspace.setError(String(e));
     }
-  }, [workspace, generatePassword]);
+  }, [workspace, generatePassword, sharePassword]);
 
   const handleStopShare = useCallback(async () => {
     try {
@@ -466,7 +480,7 @@ function App() {
       setShareActive(false);
       setShareUrl(null);
       setShareNgrokUrl(null);
-      setSharePassword('');
+      setConnectedClients([]);
     } catch (e) {
       workspace.setError(String(e));
     }
@@ -515,6 +529,39 @@ function App() {
         setNgrokAvailable(!!token);
       }).catch(() => {});
     }
+  }, []);
+
+  // Poll connected clients when sharing is active (Tauri only)
+  useEffect(() => {
+    if (!isTauri() || !shareActive) {
+      setConnectedClients([]);
+      return;
+    }
+    // Fetch immediately, then poll every 5s
+    const fetchClients = () => {
+      getConnectedClients()
+        .then(setConnectedClients)
+        .catch(() => {});
+    };
+    fetchClients();
+    const interval = setInterval(fetchClients, 5000);
+    return () => clearInterval(interval);
+  }, [shareActive]);
+
+  // Browser: validate stored session on startup (avoids re-auth on refresh)
+  useEffect(() => {
+    if (isTauri()) return;
+    const sid = getSessionId();
+    if (!sid) return;
+    // Try an authenticated call to check if session is still valid
+    callBackend('list_workspaces')
+      .then(() => setBrowserAuthenticated(true))
+      .catch(() => {
+        // Only clear if session hasn't been replaced by a fresh auth in the meantime
+        if (getSessionId() === sid) {
+          clearSessionId();
+        }
+      });
   }, []);
 
   // Browser: after authentication, bind to the shared workspace THEN load data
@@ -901,6 +948,7 @@ function App() {
           ngrokAvailable={ngrokAvailable}
           ngrokLoading={ngrokLoading}
           onToggleNgrok={handleToggleNgrok}
+          connectedClients={connectedClients}
         />
         )}
 

@@ -4,23 +4,29 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::fs;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use once_cell::sync::Lazy;
 use wait_timeout::ChildExt;
 use log;
-use ngrok::config::ForwarderBuilder;
+use ngrok::config::ForwarderBuilder;  // trait import: provides listen_and_forward()
 use ngrok::forwarder::Forwarder;
-use ngrok::tunnel::{EndpointInfo, HttpTunnel};
+use ngrok::tunnel::{EndpointInfo, HttpTunnel};  // EndpointInfo trait import: provides url()
+use tauri::Emitter;
 
 mod git_ops;
 mod pty_manager;
+mod tmux_manager;
 pub mod http_server;
 
 use git_ops::{get_worktree_info, get_branch_status, BranchStatus};
 use pty_manager::PtyManager;
+use tmux_manager::TmuxManager;
 
 // PTY Manager 全局实例
 pub static PTY_MANAGER: Lazy<Mutex<PtyManager>> = Lazy::new(|| Mutex::new(PtyManager::new()));
+
+// Tmux Manager 全局实例
+pub static TMUX_MANAGER: Lazy<Mutex<TmuxManager>> = Lazy::new(|| Mutex::new(TmuxManager::new()));
 
 // 多窗口 workspace 绑定：window_label -> workspace_path
 pub static WINDOW_WORKSPACES: Lazy<Mutex<HashMap<String, String>>> = Lazy::new(|| Mutex::new(HashMap::new()));
@@ -28,6 +34,17 @@ pub static WINDOW_WORKSPACES: Lazy<Mutex<HashMap<String, String>>> = Lazy::new(|
 // 多窗口 worktree 锁定：(workspace_path, worktree_name) -> window_label
 // 同一 worktree 只能被一个窗口独占选中
 pub static WORKTREE_LOCKS: Lazy<Mutex<HashMap<(String, String), String>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
+// Worktree 协作者映射：(workspace_path, worktree_name) -> Vec<session_id>
+// 允许多个会话同时协作同一个 worktree（通过 tmux 共享）
+pub static WORKTREE_COLLABORATORS: Lazy<Mutex<HashMap<(String, String), Vec<String>>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
+// Broadcast channel for collaborator changes (WebSocket push)
+// Increased capacity from 64 to 256 to reduce message lag and drops
+pub static COLLABORATOR_BROADCAST: Lazy<tokio::sync::broadcast::Sender<String>> = Lazy::new(|| {
+    let (tx, _) = tokio::sync::broadcast::channel(256);
+    tx
+});
 
 // ==================== 分享状态 ====================
 
@@ -61,15 +78,93 @@ pub static SHARE_STATE: Lazy<Mutex<ShareState>> = Lazy::new(|| Mutex::new(ShareS
 pub static AUTHENTICATED_SESSIONS: Lazy<Mutex<std::collections::HashSet<String>>> =
     Lazy::new(|| Mutex::new(std::collections::HashSet::new()));
 
+// 已连接的客户端追踪
+#[derive(Debug, Serialize, Clone)]
+pub struct ConnectedClient {
+    pub session_id: String,
+    pub ip: String,
+    pub user_agent: String,
+    pub authenticated_at: String,
+    pub last_active: String,
+    pub ws_connected: bool,
+}
+
+pub static CONNECTED_CLIENTS: Lazy<Mutex<HashMap<String, ConnectedClient>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
 pub static TOKIO_RT: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
     tokio::runtime::Runtime::new().expect("Failed to create tokio runtime for sharing")
 });
 
 // Broadcast channel for lock state changes (WebSocket push)
+// Increased capacity from 64 to 256 to reduce message lag and drops
 pub static LOCK_BROADCAST: Lazy<tokio::sync::broadcast::Sender<String>> = Lazy::new(|| {
-    let (tx, _) = tokio::sync::broadcast::channel(64);
+    let (tx, _) = tokio::sync::broadcast::channel(256);
     tx
 });
+
+// Broadcast channel for terminal state changes (WebSocket push)
+// Increased capacity from 64 to 256 to reduce message lag and drops
+pub static TERMINAL_STATE_BROADCAST: Lazy<tokio::sync::broadcast::Sender<String>> = Lazy::new(|| {
+    let (tx, _) = tokio::sync::broadcast::channel(256);
+    tx
+});
+
+// Terminal state cache: (workspace_path, worktree_name) -> TerminalState
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TerminalState {
+    pub activated_terminals: Vec<String>,
+    pub active_terminal_tab: Option<String>,
+    pub terminal_visible: bool,
+    pub sequence: Option<u64>,
+}
+
+pub static TERMINAL_STATES: Lazy<Mutex<HashMap<(String, String), TerminalState>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+// Global AppHandle for emitting events from anywhere
+pub static APP_HANDLE: Lazy<Mutex<Option<tauri::AppHandle>>> = Lazy::new(|| Mutex::new(None));
+
+// Auth rate limiter: per-IP sliding window (max 5 attempts per 60 seconds)
+pub struct AuthRateLimiter {
+    attempts: HashMap<String, Vec<Instant>>,
+}
+
+impl AuthRateLimiter {
+    pub fn new() -> Self {
+        Self { attempts: HashMap::new() }
+    }
+
+    /// Returns true if the request is allowed, false if rate-limited.
+    pub fn check_and_record(&mut self, ip: &str) -> bool {
+        let window = Duration::from_secs(60);
+        let max_attempts = 5;
+        let now = Instant::now();
+
+        let attempts = self.attempts.entry(ip.to_string()).or_default();
+        // Remove expired entries
+        attempts.retain(|t| now.duration_since(*t) < window);
+
+        if attempts.len() >= max_attempts {
+            return false;
+        }
+        attempts.push(now);
+        true
+    }
+
+    /// Clean up stale entries (call periodically)
+    pub fn cleanup(&mut self) {
+        let window = Duration::from_secs(60);
+        let now = Instant::now();
+        self.attempts.retain(|_, attempts| {
+            attempts.retain(|t| now.duration_since(*t) < window);
+            !attempts.is_empty()
+        });
+    }
+}
+
+pub static AUTH_RATE_LIMITER: Lazy<Mutex<AuthRateLimiter>> =
+    Lazy::new(|| Mutex::new(AuthRateLimiter::new()));
 
 #[derive(Debug, Serialize, Clone)]
 pub struct ShareStateInfo {
@@ -125,8 +220,12 @@ fn run_git_command_with_timeout(args: &[&str], cwd: &str) -> Result<std::process
 pub struct GlobalConfig {
     pub workspaces: Vec<WorkspaceRef>,
     pub current_workspace: Option<String>,  // 当前选中的 workspace 路径
+    // TODO(security): ngrok_token is stored in plaintext in the config file.
+    // Consider using the OS keychain (e.g., keytar/keyring crate) for sensitive credentials.
     #[serde(default)]
     pub ngrok_token: Option<String>,
+    #[serde(default)]
+    pub last_share_port: Option<u16>,  // 上次使用的分享端口
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -141,6 +240,7 @@ impl Default for GlobalConfig {
             workspaces: vec![],
             current_workspace: None,
             ngrok_token: None,
+            last_share_port: None,
         }
     }
 }
@@ -304,21 +404,15 @@ fn load_workspace_config(workspace_path: &str) -> WorkspaceConfig {
 
     let config_path = get_workspace_config_path(workspace_path);
     let config = if config_path.exists() {
-        match fs::read_to_string(&config_path) {
-            Ok(content) => {
-                match serde_json::from_str::<WorkspaceConfig>(&content) {
-                    Ok(cfg) => cfg,
-                    Err(e) => {
-                        log::warn!("Failed to parse workspace config at {:?}: {}", config_path, e);
-                        WorkspaceConfig::default()
-                    }
-                }
-            }
-            Err(e) => {
-                log::warn!("Failed to read workspace config at {:?}: {}", config_path, e);
-                WorkspaceConfig::default()
-            }
-        }
+        fs::read_to_string(&config_path)
+            .map_err(|e| log::warn!("Failed to read workspace config at {:?}: {}", config_path, e))
+            .ok()
+            .and_then(|content| {
+                serde_json::from_str::<WorkspaceConfig>(&content)
+                    .map_err(|e| log::warn!("Failed to parse workspace config at {:?}: {}", config_path, e))
+                    .ok()
+            })
+            .unwrap_or_default()
     } else {
         let default_config = WorkspaceConfig::default();
         let _ = save_workspace_config_internal(workspace_path, &default_config);
@@ -553,22 +647,7 @@ fn scan_dir_for_linkable_folders(
 
 #[tauri::command]
 async fn scan_linked_folders(project_path: String) -> Result<Vec<ScannedFolder>, String> {
-    let path = PathBuf::from(&project_path);
-    if !path.exists() {
-        return Err(format!("Path does not exist: {}", project_path));
-    }
-
-    let mut results = Vec::new();
-    scan_dir_for_linkable_folders(&path, &path, &mut results);
-
-    // Sort: recommended first, then by size descending
-    results.sort_by(|a, b| {
-        b.is_recommended
-            .cmp(&a.is_recommended)
-            .then_with(|| b.size_bytes.cmp(&a.size_bytes))
-    });
-
-    Ok(results)
+    scan_linked_folders_sync(&project_path)
 }
 
 // ==================== Worktree 操作数据结构 ====================
@@ -1717,60 +1796,52 @@ pub struct OpenEditorRequest {
     pub editor: String,
 }
 
-#[tauri::command]
-fn open_in_editor(request: OpenEditorRequest) -> Result<(), String> {
+fn editor_cli_command(editor: &str) -> &'static str {
+    match editor {
+        "vscode" => "code",
+        "cursor" => "cursor",
+        "idea" => "idea",
+        _ => "code",
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn editor_app_name(editor: &str) -> &'static str {
+    match editor {
+        "vscode" => "Visual Studio Code",
+        "cursor" => "Cursor",
+        "idea" => "IntelliJ IDEA",
+        _ => "Visual Studio Code",
+    }
+}
+
+fn open_editor_at_path(request: &OpenEditorRequest) -> Result<(), String> {
     let path = &request.path;
 
-    // On macOS, try `open -a` first since CLI commands may not be in PATH
-    // when the app is launched from Finder
     #[cfg(target_os = "macos")]
     {
-        let app_name = match request.editor.as_str() {
-            "vscode" => "Visual Studio Code",
-            "cursor" => "Cursor",
-            "idea" => "IntelliJ IDEA",
-            _ => "Visual Studio Code",
-        };
-
-        // Try `open -a "App Name" path` first
-        let result = Command::new("open")
-            .args(["-a", app_name, path])
-            .spawn();
-
-        if result.is_ok() {
+        let app_name = editor_app_name(&request.editor);
+        if Command::new("open").args(["-a", app_name, path]).spawn().is_ok() {
             return Ok(());
         }
-
-        // Fallback: try CLI command directly (in case user has it in PATH)
-        let cmd = match request.editor.as_str() {
-            "vscode" => "code",
-            "cursor" => "cursor",
-            "idea" => "idea",
-            _ => "code",
-        };
-
-        Command::new(cmd)
-            .arg(path)
-            .spawn()
+        let cmd = editor_cli_command(&request.editor);
+        Command::new(cmd).arg(path).spawn()
             .map_err(|_| format!("无法打开 {}，请确认已安装该编辑器", app_name))?;
     }
 
     #[cfg(not(target_os = "macos"))]
     {
-        let cmd = match request.editor.as_str() {
-            "vscode" => "code",
-            "cursor" => "cursor",
-            "idea" => "idea",
-            _ => "code",
-        };
-
-        Command::new(cmd)
-            .arg(path)
-            .spawn()
+        let cmd = editor_cli_command(&request.editor);
+        Command::new(cmd).arg(path).spawn()
             .map_err(|e| format!("无法打开编辑器 {}: {}", cmd, e))?;
     }
 
     Ok(())
+}
+
+#[tauri::command]
+fn open_in_editor(request: OpenEditorRequest) -> Result<(), String> {
+    open_editor_at_path(&request)
 }
 
 
@@ -1872,6 +1943,9 @@ fn pty_exists(session_id: String) -> Result<bool, String> {
     Ok(manager.has_session(&session_id))
 }
 
+/// Close all PTY sessions whose working directory starts with the given path prefix.
+/// Used internally when archiving/deleting worktrees (see archive_worktree, delete_archived_worktree)
+/// and exposed via the HTTP server for remote access mode.
 #[tauri::command]
 fn pty_close_by_path(path_prefix: String) -> Result<Vec<String>, String> {
     let mut manager = PTY_MANAGER.lock().map_err(|e| format!("Lock error: {}", e))?;
@@ -1909,29 +1983,18 @@ pub fn unregister_window_impl(window_label: &str) {
         map.remove(&label);
     }
     // 同时释放该窗口持有的所有 worktree 锁
-    {
+    let affected_workspaces: Vec<String> = {
         let mut locks = WORKTREE_LOCKS.lock().unwrap();
-        let had_locks = locks.values().any(|v| *v == label);
+        let affected: Vec<String> = locks
+            .iter()
+            .filter(|(_, v)| **v == label)
+            .map(|((ws_path, _), _)| ws_path.clone())
+            .collect();
         locks.retain(|_, v| *v != label);
-        // If locks changed, broadcast updates for all workspaces
-        if had_locks {
-            let mut by_workspace: HashMap<String, HashMap<String, String>> = HashMap::new();
-            for ((ws_path, wt_name), lbl) in locks.iter() {
-                by_workspace
-                    .entry(ws_path.clone())
-                    .or_default()
-                    .insert(wt_name.clone(), lbl.clone());
-            }
-            drop(locks);
-            for (ws_path, lock_snapshot) in by_workspace {
-                if let Ok(json_str) = serde_json::to_string(&serde_json::json!({
-                    "workspacePath": ws_path,
-                    "locks": lock_snapshot,
-                })) {
-                    let _ = LOCK_BROADCAST.send(json_str);
-                }
-            }
-        }
+        affected
+    };
+    for ws_path in affected_workspaces {
+        broadcast_lock_state(&ws_path);
     }
 }
 
@@ -1943,31 +2006,18 @@ fn unregister_window(window: tauri::Window) {
 /// 锁定 worktree 到当前窗口，如果该 worktree 已被其他窗口锁定则返回错误
 pub fn lock_worktree_impl(window_label: &str, workspace_path: String, worktree_name: String) -> Result<(), String> {
     let label = window_label.to_string();
-    let ws_path = workspace_path.clone();
-    let mut locks = WORKTREE_LOCKS.lock().unwrap();
-    let key = (workspace_path, worktree_name.clone());
+    {
+        let mut locks = WORKTREE_LOCKS.lock().unwrap();
+        let key = (workspace_path.clone(), worktree_name.clone());
 
-    if let Some(existing_label) = locks.get(&key) {
-        if *existing_label != label {
-            return Err(format!("Worktree \"{}\" 已在其他窗口中打开", worktree_name));
+        if let Some(existing_label) = locks.get(&key) {
+            if *existing_label != label {
+                return Err(format!("Worktree \"{}\" 已在其他窗口中打开", worktree_name));
+            }
         }
+        locks.insert(key, label);
     }
-    locks.insert(key, label);
-
-    // Broadcast lock state change for the affected workspace
-    let lock_snapshot: HashMap<String, String> = locks
-        .iter()
-        .filter(|((wp, _), _)| *wp == ws_path)
-        .map(|((_, wt), lbl)| (wt.clone(), lbl.clone()))
-        .collect();
-    drop(locks);
-    if let Ok(json_str) = serde_json::to_string(&serde_json::json!({
-        "workspacePath": ws_path,
-        "locks": lock_snapshot,
-    })) {
-        let _ = LOCK_BROADCAST.send(json_str);
-    }
-
+    broadcast_lock_state(&workspace_path);
     Ok(())
 }
 
@@ -1979,28 +2029,16 @@ fn lock_worktree(window: tauri::Window, workspace_path: String, worktree_name: S
 /// 解锁当前窗口持有的指定 worktree
 pub fn unlock_worktree_impl(window_label: &str, workspace_path: String, worktree_name: String) {
     let label = window_label.to_string();
-    let ws_path = workspace_path.clone();
-    let mut locks = WORKTREE_LOCKS.lock().unwrap();
-    let key = (workspace_path, worktree_name);
-    if let Some(existing_label) = locks.get(&key) {
-        if *existing_label == label {
-            locks.remove(&key);
+    {
+        let mut locks = WORKTREE_LOCKS.lock().unwrap();
+        let key = (workspace_path.clone(), worktree_name);
+        if let Some(existing_label) = locks.get(&key) {
+            if *existing_label == label {
+                locks.remove(&key);
+            }
         }
     }
-
-    // Broadcast lock state change for the affected workspace
-    let lock_snapshot: HashMap<String, String> = locks
-        .iter()
-        .filter(|((wp, _), _)| *wp == ws_path)
-        .map(|((_, wt), lbl)| (wt.clone(), lbl.clone()))
-        .collect();
-    drop(locks);
-    if let Ok(json_str) = serde_json::to_string(&serde_json::json!({
-        "workspacePath": ws_path,
-        "locks": lock_snapshot,
-    })) {
-        let _ = LOCK_BROADCAST.send(json_str);
-    }
+    broadcast_lock_state(&workspace_path);
 }
 
 #[tauri::command]
@@ -2016,6 +2054,49 @@ fn get_locked_worktrees(workspace_path: String) -> HashMap<String, String> {
         .filter(|((ws_path, _), _)| *ws_path == workspace_path)
         .map(|((_, wt_name), label)| (wt_name.clone(), label.clone()))
         .collect()
+}
+
+/// 广播终端状态变化（用于桌面端同步到网页端）
+#[tauri::command]
+fn broadcast_terminal_state(
+    app: tauri::AppHandle,
+    workspace_path: String,
+    worktree_name: String,
+    activated_terminals: Vec<String>,
+    active_terminal_tab: Option<String>,
+    terminal_visible: bool,
+) {
+    let key = (workspace_path.clone(), worktree_name.clone());
+
+    // 更新缓存
+    if let Ok(mut states) = TERMINAL_STATES.lock() {
+        states.insert(key, TerminalState {
+            activated_terminals: activated_terminals.clone(),
+            active_terminal_tab: active_terminal_tab.clone(),
+            terminal_visible,
+            sequence: None,
+        });
+    }
+
+    // 广播给所有连接的客户端（WebSocket）
+    if let Ok(json_str) = serde_json::to_string(&serde_json::json!({
+        "workspacePath": workspace_path,
+        "worktreeName": worktree_name,
+        "activatedTerminals": activated_terminals,
+        "activeTerminalTab": active_terminal_tab,
+        "terminalVisible": terminal_visible,
+    })) {
+        let _ = TERMINAL_STATE_BROADCAST.send(json_str);
+    }
+
+    // 同时通过 Tauri 事件发送给所有桌面端窗口
+    let _ = app.emit("terminal-state-update", serde_json::json!({
+        "workspacePath": workspace_path,
+        "worktreeName": worktree_name,
+        "activatedTerminals": activated_terminals,
+        "activeTerminalTab": active_terminal_tab,
+        "terminalVisible": terminal_visible,
+    }));
 }
 
 #[tauri::command]
@@ -2139,6 +2220,11 @@ pub fn switch_branch_internal(request: &SwitchBranchRequest) -> Result<(), Strin
 }
 
 pub fn scan_linked_folders_internal(project_path: &str) -> Result<Vec<ScannedFolder>, String> {
+    // Delegate to the async version's inner logic (same implementation)
+    scan_linked_folders_sync(project_path)
+}
+
+fn scan_linked_folders_sync(project_path: &str) -> Result<Vec<ScannedFolder>, String> {
     let path = PathBuf::from(project_path);
     if !path.exists() {
         return Err(format!("Path does not exist: {}", project_path));
@@ -2154,106 +2240,19 @@ pub fn scan_linked_folders_internal(project_path: &str) -> Result<Vec<ScannedFol
 }
 
 pub fn open_in_terminal_internal(path: &str) -> Result<(), String> {
-    let normalized = normalize_path(path);
-    #[cfg(target_os = "macos")]
-    {
-        Command::new("open")
-            .args(["-a", "Terminal", &normalized])
-            .spawn()
-            .map_err(|e| format!("Failed to open terminal: {}", e))?;
-    }
-    #[cfg(target_os = "linux")]
-    {
-        Command::new("xdg-open")
-            .arg(&normalized)
-            .spawn()
-            .map_err(|e| format!("Failed to open terminal: {}", e))?;
-    }
-    Ok(())
+    open_in_terminal(path.to_string())
 }
 
 pub fn open_in_editor_internal(request: &OpenEditorRequest) -> Result<(), String> {
-    let path = &request.path;
-    #[cfg(target_os = "macos")]
-    {
-        let app_name = match request.editor.as_str() {
-            "vscode" => "Visual Studio Code",
-            "cursor" => "Cursor",
-            "idea" => "IntelliJ IDEA",
-            _ => "Visual Studio Code",
-        };
-        let result = Command::new("open").args(["-a", app_name, path]).spawn();
-        if result.is_ok() {
-            return Ok(());
-        }
-        let cmd = match request.editor.as_str() {
-            "vscode" => "code",
-            "cursor" => "cursor",
-            "idea" => "idea",
-            _ => "code",
-        };
-        Command::new(cmd)
-            .arg(path)
-            .spawn()
-            .map_err(|_| format!("无法打开 {}，请确认已安装该编辑器", app_name))?;
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let cmd = match request.editor.as_str() {
-            "vscode" => "code",
-            "cursor" => "cursor",
-            "idea" => "idea",
-            _ => "code",
-        };
-        Command::new(cmd)
-            .arg(path)
-            .spawn()
-            .map_err(|e| format!("无法打开编辑器 {}: {}", cmd, e))?;
-    }
-    Ok(())
+    open_editor_at_path(request)
 }
 
 pub fn reveal_in_finder_internal(path: &str) -> Result<(), String> {
-    let normalized = normalize_path(path);
-    #[cfg(target_os = "macos")]
-    {
-        Command::new("open")
-            .arg(&normalized)
-            .spawn()
-            .map_err(|e| format!("无法打开文件夹: {}", e))?;
-    }
-    #[cfg(target_os = "linux")]
-    {
-        Command::new("xdg-open")
-            .arg(&normalized)
-            .spawn()
-            .map_err(|e| format!("无法打开文件夹: {}", e))?;
-    }
-    Ok(())
+    reveal_in_finder(path.to_string())
 }
 
 pub fn open_log_dir_internal() -> Result<(), String> {
-    let home = std::env::var("HOME")
-        .map_err(|_| "无法获取用户目录".to_string())?;
-    let log_dir = PathBuf::from(&home).join("Library/Logs/com.guo.worktree-manager");
-    if !log_dir.exists() {
-        return Err("日志目录不存在".to_string());
-    }
-    #[cfg(target_os = "macos")]
-    {
-        Command::new("open")
-            .arg(log_dir.to_str().unwrap_or(""))
-            .spawn()
-            .map_err(|e| format!("无法打开日志目录: {}", e))?;
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Command::new("xdg-open")
-            .arg(log_dir.to_str().unwrap_or(""))
-            .spawn()
-            .map_err(|e| format!("无法打开日志目录: {}", e))?;
-    }
-    Ok(())
+    open_log_dir()
 }
 
 // ==================== 分享功能命令 ====================
@@ -2273,16 +2272,41 @@ async fn set_ngrok_token(token: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn get_last_share_port() -> Result<Option<u16>, String> {
+    let config = load_global_config();
+    Ok(config.last_share_port)
+}
+
+#[tauri::command]
 async fn start_sharing(window: tauri::Window, port: u16, password: String) -> Result<String, String> {
     let workspace_path = get_window_workspace_path(window.label())
         .ok_or("No workspace selected")?;
 
+    // SECURITY: Validate password is not empty (required for remote access security)
+    if password.trim().is_empty() {
+        return Err("分享密码不能为空".to_string());
+    }
+
+    // Validate port range (recommended dynamic/private ports: 49152-65535)
+    // Allow common development ports (3000-9999) for convenience
+    if port < 3000 {
+        return Err(format!("端口 {} 过小。推荐使用 49152-65535 范围内的端口，或 3000-9999 开发端口", port));
+    }
+
     // Check if already sharing
     {
-        let state = SHARE_STATE.lock().unwrap();
+        let state = SHARE_STATE.lock()
+            .map_err(|_| "Internal state error".to_string())?;
         if state.active {
             return Err("Already sharing. Stop current sharing first.".to_string());
         }
+    }
+
+    // Check if port is available
+    // Bind to 0.0.0.0 to allow LAN access (security handled by password auth)
+    let bind_addr = format!("0.0.0.0:{}", port);
+    if let Err(e) = tokio::net::TcpListener::bind(&bind_addr).await {
+        return Err(format!("端口 {} 已被占用: {}", port, e));
     }
 
     // Determine local IP for the share URL
@@ -2297,7 +2321,8 @@ async fn start_sharing(window: tauri::Window, port: u16, password: String) -> Re
 
     // Update share state
     {
-        let mut state = SHARE_STATE.lock().unwrap();
+        let mut state = SHARE_STATE.lock()
+            .map_err(|_| "Internal state error".to_string())?;
         state.active = true;
         state.workspace_path = Some(workspace_path.clone());
         state.port = port;
@@ -2305,9 +2330,15 @@ async fn start_sharing(window: tauri::Window, port: u16, password: String) -> Re
         state.shutdown_tx = Some(tx);
     }
 
-    // Clear any previous authenticated sessions
+    // 保存端口到全局配置
     {
-        let mut sessions = AUTHENTICATED_SESSIONS.lock().unwrap();
+        let mut config = load_global_config();
+        config.last_share_port = Some(port);
+        let _ = save_global_config_internal(&config);
+    }
+
+    // Clear any previous authenticated sessions
+    if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() {
         sessions.clear();
     }
 
@@ -2321,7 +2352,8 @@ async fn start_sharing(window: tauri::Window, port: u16, password: String) -> Re
 
 pub async fn start_ngrok_tunnel_internal() -> Result<String, String> {
     let port = {
-        let state = SHARE_STATE.lock().unwrap();
+        let state = SHARE_STATE.lock()
+            .map_err(|_| "Internal state error".to_string())?;
         if !state.active {
             return Err("请先开启分享".to_string());
         }
@@ -2372,7 +2404,8 @@ pub async fn start_ngrok_tunnel_internal() -> Result<String, String> {
     // Wait for the ngrok URL (with timeout)
     match url_rx.recv_timeout(std::time::Duration::from_secs(30)) {
         Ok(Ok(ngrok_url)) => {
-            let mut state = SHARE_STATE.lock().unwrap();
+            let mut state = SHARE_STATE.lock()
+                .map_err(|_| "Internal state error".to_string())?;
             state.ngrok_url = Some(ngrok_url.clone());
             state.ngrok_task = Some(ngrok_handle);
             log::info!("ngrok tunnel started: {}", ngrok_url);
@@ -2396,8 +2429,11 @@ async fn start_ngrok_tunnel() -> Result<String, String> {
 
 #[tauri::command]
 async fn stop_ngrok_tunnel() -> Result<(), String> {
-    let mut state = SHARE_STATE.lock().unwrap();
+    let mut state = SHARE_STATE.lock()
+        .map_err(|_| "Internal state error".to_string())?;
     if let Some(handle) = state.ngrok_task.take() {
+        // abort() is intentional: the ngrok crate's Forwarder does not expose a graceful
+        // shutdown API. Aborting the task triggers its Drop impl, which handles cleanup.
         handle.abort();
     }
     state.ngrok_url = None;
@@ -2407,44 +2443,42 @@ async fn stop_ngrok_tunnel() -> Result<(), String> {
 
 #[tauri::command]
 async fn stop_sharing() -> Result<(), String> {
-    {
-        let state = SHARE_STATE.lock().unwrap();
+    // Single lock scope: check active, stop ngrok, extract shutdown_tx, and reset state
+    let shutdown_tx = {
+        let mut state = SHARE_STATE.lock()
+            .map_err(|_| "Internal state error".to_string())?;
         if !state.active {
             return Err("Not currently sharing".to_string());
         }
-    }
 
-    // Stop ngrok tunnel if active
-    {
-        let mut state = SHARE_STATE.lock().unwrap();
+        // Stop ngrok tunnel if active
+        // NOTE: abort() is intentional here -- the ngrok crate's Forwarder does not expose
+        // a graceful shutdown API; aborting the task triggers its Drop impl for cleanup.
         if let Some(handle) = state.ngrok_task.take() {
             handle.abort();
         }
         state.ngrok_url = None;
-    }
 
-    // Stop HTTP server
-    let tx = {
-        let mut state = SHARE_STATE.lock().unwrap();
-        state.shutdown_tx.take()
-    };
-    if let Some(tx) = tx {
-        let _ = tx.send(true);
-    }
-
-    // Reset state
-    {
-        let mut state = SHARE_STATE.lock().unwrap();
+        // Extract shutdown_tx and reset all state atomically
+        let tx = state.shutdown_tx.take();
         state.active = false;
         state.workspace_path = None;
         state.port = 0;
         state.password = None;
+        tx
+    };
+
+    // Stop HTTP server (outside SHARE_STATE lock to avoid holding it during send)
+    if let Some(tx) = shutdown_tx {
+        let _ = tx.send(true);
     }
 
-    // Clear authenticated sessions
-    {
-        let mut sessions = AUTHENTICATED_SESSIONS.lock().unwrap();
+    // Clear authenticated sessions and connected clients
+    if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() {
         sessions.clear();
+    }
+    if let Ok(mut clients) = CONNECTED_CLIENTS.lock() {
+        clients.clear();
     }
 
     log::info!("Sharing stopped");
@@ -2453,7 +2487,8 @@ async fn stop_sharing() -> Result<(), String> {
 
 #[tauri::command]
 async fn get_share_state() -> Result<ShareStateInfo, String> {
-    let state = SHARE_STATE.lock().unwrap();
+    let state = SHARE_STATE.lock()
+        .map_err(|_| "Internal state error".to_string())?;
     let url = if state.active {
         let local_ip = local_ip_address::local_ip()
             .map(|ip| ip.to_string())
@@ -2473,18 +2508,253 @@ async fn get_share_state() -> Result<ShareStateInfo, String> {
 
 #[tauri::command]
 async fn update_share_password(password: String) -> Result<(), String> {
-    let mut state = SHARE_STATE.lock().unwrap();
+    // SECURITY: Validate password is not empty
+    if password.trim().is_empty() {
+        return Err("分享密码不能为空".to_string());
+    }
+    let mut state = SHARE_STATE.lock()
+        .map_err(|_| "Internal state error".to_string())?;
     if !state.active {
         return Err("Not currently sharing".to_string());
     }
     state.password = Some(password);
     drop(state);
 
-    // Clear authenticated sessions so everyone must re-auth with the new password
-    AUTHENTICATED_SESSIONS.lock().unwrap().clear();
+    // Clear authenticated sessions and connected clients so everyone must re-auth with the new password
+    if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() { sessions.clear(); }
+    if let Ok(mut clients) = CONNECTED_CLIENTS.lock() { clients.clear(); }
 
     log::info!("Share password updated");
     Ok(())
+}
+
+// ==================== Connected Clients ====================
+
+#[tauri::command]
+fn get_connected_clients() -> Vec<ConnectedClient> {
+    let Ok(clients) = CONNECTED_CLIENTS.lock() else {
+        return vec![];
+    };
+    clients.values().cloned().collect()
+}
+
+// ==================== Worktree 协作功能 ====================
+
+#[derive(Debug, Serialize, Clone)]
+pub struct CollaborationInfo {
+    pub tmux_session: String,
+    pub collaborators: Vec<String>,
+    pub owner: String,
+}
+
+/// 加入 worktree 协作（创建或附加到 tmux session）
+pub fn join_collaboration_impl(
+    session_id: &str,
+    workspace_path: String,
+    worktree_name: String,
+) -> Result<CollaborationInfo, String> {
+    // 检查 tmux 是否可用
+    if !TmuxManager::is_available() {
+        return Err("tmux is not installed or not available".to_string());
+    }
+
+    let key = (workspace_path.clone(), worktree_name.clone());
+
+    // 获取 worktree 路径作为 cwd
+    let worktree_path = get_worktree_path_impl(&workspace_path, &worktree_name)?;
+
+    // 获取或创建 tmux session
+    let mut tmux = TMUX_MANAGER.lock()
+        .map_err(|e| format!("Failed to lock tmux manager: {}", e))?;
+    let tmux_session = tmux.get_or_create_session(&workspace_path, &worktree_name, &worktree_path)?;
+    drop(tmux);
+
+    // 添加到协作者列表
+    let mut collaborators = WORKTREE_COLLABORATORS.lock()
+        .map_err(|e| format!("Failed to lock collaborators: {}", e))?;
+    let collaborator_list = collaborators.entry(key.clone()).or_insert_with(Vec::new);
+
+    if !collaborator_list.contains(&session_id.to_string()) {
+        collaborator_list.push(session_id.to_string());
+    }
+
+    let owner = collaborator_list.first().cloned().unwrap_or_default();
+    let all_collaborators = collaborator_list.clone();
+    drop(collaborators);
+
+    // 广播协作者变化
+    broadcast_collaborator_update(&key, &all_collaborators);
+
+    log::info!("Session {} joined collaboration for worktree {}/{}", session_id, workspace_path, worktree_name);
+
+    Ok(CollaborationInfo {
+        tmux_session,
+        collaborators: all_collaborators,
+        owner,
+    })
+}
+
+/// 离开 worktree 协作
+pub fn leave_collaboration_impl(
+    session_id: &str,
+    workspace_path: String,
+    worktree_name: String,
+) {
+    let key = (workspace_path.clone(), worktree_name.clone());
+    let Ok(mut collaborators) = WORKTREE_COLLABORATORS.lock() else {
+        log::error!("Failed to lock collaborators in leave_collaboration");
+        return;
+    };
+
+    if let Some(list) = collaborators.get_mut(&key) {
+        list.retain(|s| s != session_id);
+        let remaining = list.clone();
+
+        // 如果没有协作者了，清理 tmux session
+        if remaining.is_empty() {
+            collaborators.remove(&key);
+            drop(collaborators);
+
+            let Ok(mut tmux) = TMUX_MANAGER.lock() else {
+                log::error!("Failed to lock tmux manager for cleanup");
+                return;
+            };
+            let session_name = format!(
+                "wt-{}-{}",
+                workspace_path.replace(['/', '\\'], "-"),
+                worktree_name.replace(['/', '\\'], "-")
+            );
+            let _ = tmux.kill_session(&session_name);
+        } else {
+            drop(collaborators);
+            broadcast_collaborator_update(&key, &remaining);
+        }
+    }
+
+    log::info!("Session {} left collaboration for worktree {}/{}", session_id, workspace_path, worktree_name);
+}
+
+/// 获取 worktree 的协作信息
+pub fn get_collaboration_info_impl(
+    workspace_path: String,
+    worktree_name: String,
+) -> Result<CollaborationInfo, String> {
+    let key = (workspace_path.clone(), worktree_name.clone());
+    let collaborators = WORKTREE_COLLABORATORS.lock()
+        .map_err(|e| format!("Failed to lock collaborators: {}", e))?;
+
+    let collaborator_list = collaborators.get(&key).cloned().unwrap_or_default();
+    let owner = collaborator_list.first().cloned().unwrap_or_default();
+
+    let tmux_session = format!(
+        "wt-{}-{}",
+        workspace_path.replace(['/', '\\'], "-"),
+        worktree_name.replace(['/', '\\'], "-")
+    );
+
+    Ok(CollaborationInfo {
+        tmux_session,
+        collaborators: collaborator_list,
+        owner,
+    })
+}
+
+// ==================== Tmux Commands (for desktop collaboration) ====================
+
+#[tauri::command]
+fn tmux_capture(tmux_session: String, cwd: Option<String>) -> Result<String, String> {
+    // Check if we need to create the session
+    if let Some(ref cwd_path) = cwd {
+        let tmux = TMUX_MANAGER.lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        if !tmux.session_exists(&tmux_session) {
+            tmux.create_session_with_cwd(&tmux_session, Some(cwd_path))?;
+        }
+    }
+
+    // Capture the pane
+    let tmux = TMUX_MANAGER.lock()
+        .map_err(|e| format!("Lock error: {}", e))?;
+    tmux.capture_pane(&tmux_session)
+}
+
+#[tauri::command]
+fn tmux_input(tmux_session: String, data: String) -> Result<(), String> {
+    let tmux = TMUX_MANAGER.lock()
+        .map_err(|e| format!("Lock error: {}", e))?;
+    tmux.send_keys(&tmux_session, &data)
+}
+
+#[tauri::command]
+fn join_collaboration(
+    window: tauri::Window,
+    workspace_path: String,
+    worktree_name: String,
+) -> Result<CollaborationInfo, String> {
+    let session_id = window.label().to_string();
+    join_collaboration_impl(&session_id, workspace_path, worktree_name)
+}
+
+#[tauri::command]
+fn leave_collaboration(
+    window: tauri::Window,
+    workspace_path: String,
+    worktree_name: String,
+) {
+    let session_id = window.label().to_string();
+    leave_collaboration_impl(&session_id, workspace_path, worktree_name);
+}
+
+#[tauri::command]
+fn get_collaboration_info(
+    workspace_path: String,
+    worktree_name: String,
+) -> Result<CollaborationInfo, String> {
+    get_collaboration_info_impl(workspace_path, worktree_name)
+}
+
+/// 获取 worktree 的实际文件系统路径
+fn get_worktree_path_impl(workspace_path: &str, worktree_name: &str) -> Result<String, String> {
+    let _config = load_workspace_config(workspace_path);
+    let worktrees_dir = PathBuf::from(workspace_path).join("worktrees");
+    let worktree_path = worktrees_dir.join(worktree_name);
+
+    if !worktree_path.exists() {
+        return Err(format!("Worktree {} does not exist", worktree_name));
+    }
+
+    Ok(normalize_path(&worktree_path.to_string_lossy()))
+}
+
+/// Broadcast the current lock state for a given workspace to all WebSocket clients.
+/// `locks` must already be dropped before calling this to avoid deadlocks.
+fn broadcast_lock_state(workspace_path: &str) {
+    let lock_snapshot: HashMap<String, String> = {
+        let locks = WORKTREE_LOCKS.lock().unwrap();
+        locks
+            .iter()
+            .filter(|((wp, _), _)| *wp == workspace_path)
+            .map(|((_, wt), lbl)| (wt.clone(), lbl.clone()))
+            .collect()
+    };
+    if let Ok(json_str) = serde_json::to_string(&serde_json::json!({
+        "workspacePath": workspace_path,
+        "locks": lock_snapshot,
+    })) {
+        let _ = LOCK_BROADCAST.send(json_str);
+    }
+}
+
+/// 广播协作者变化
+fn broadcast_collaborator_update(key: &(String, String), collaborators: &[String]) {
+    let (workspace_path, worktree_name) = key;
+    if let Ok(json_str) = serde_json::to_string(&serde_json::json!({
+        "workspacePath": workspace_path,
+        "worktreeName": worktree_name,
+        "collaborators": collaborators,
+    })) {
+        let _ = COLLABORATOR_BROADCAST.send(json_str);
+    }
 }
 
 // ==================== DevTools ====================
@@ -2511,15 +2781,7 @@ pub fn run() {
             .build())
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
-                let label = window.label().to_string();
-                {
-                    let mut map = WINDOW_WORKSPACES.lock().unwrap();
-                    map.remove(&label);
-                }
-                {
-                    let mut locks = WORKTREE_LOCKS.lock().unwrap();
-                    locks.retain(|_, v| *v != label);
-                }
+                unregister_window_impl(window.label());
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -2559,6 +2821,7 @@ pub fn run() {
             lock_worktree,
             unlock_worktree,
             get_locked_worktrees,
+            broadcast_terminal_state,
             // 智能扫描
             scan_linked_folders,
             // PTY 终端
@@ -2574,14 +2837,28 @@ pub fn run() {
             stop_sharing,
             get_share_state,
             update_share_password,
+            get_connected_clients,
             // ngrok
             get_ngrok_token,
             set_ngrok_token,
+            get_last_share_port,
             start_ngrok_tunnel,
             stop_ngrok_tunnel,
+            // Collaboration
+            join_collaboration,
+            leave_collaboration,
+            get_collaboration_info,
+            // Tmux (for desktop collaboration)
+            tmux_capture,
+            tmux_input,
             // DevTools
             open_devtools,
         ])
+        .setup(|app| {
+            // Initialize APP_HANDLE for use in WebSocket handlers
+            *APP_HANDLE.lock().unwrap() = Some(app.handle().clone());
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

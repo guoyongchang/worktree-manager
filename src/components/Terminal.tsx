@@ -22,7 +22,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible 
   const fitAddonRef = useRef<FitAddon | null>(null);
   // Extract actual cwd (remove #timestamp suffix if present)
   const actualCwd = cwd.split('#')[0];
-  const sessionIdRef = useRef<string>(`pty-${cwd.replace(/[\/#]/g, '-')}-${Date.now()}`);
+  const sessionIdRef = useRef<string>(`pty-${cwd.replace(/[\/#]/g, '-')}`);
   const readerIntervalRef = useRef<number | null>(null);
   const initializedRef = useRef(false);
   const cwdRef = useRef(actualCwd);
@@ -196,17 +196,6 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible 
     }
   }, []);
 
-  // Manage reading based on visibility
-  useEffect(() => {
-    if (!initializedRef.current) return;
-
-    if (visible) {
-      startReading();
-    } else {
-      stopReading();
-    }
-  }, [visible, startReading, stopReading]);
-
   // Handle resize
   const handleResize = useCallback(() => {
     if (!fitAddonRef.current || !xtermRef.current || !visible) return;
@@ -223,6 +212,23 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible 
       // PTY resize failed silently
     });
   }, [visible]);
+
+  // Manage reading based on visibility
+  useEffect(() => {
+    if (!initializedRef.current) return;
+
+    if (visible) {
+      startReading();
+      // Trigger resize when terminal becomes visible to ensure proper display
+      // Use a small delay to ensure DOM is fully rendered
+      const resizeTimer = setTimeout(() => {
+        handleResize();
+      }, 50);
+      return () => clearTimeout(resizeTimer);
+    } else {
+      stopReading();
+    }
+  }, [visible, startReading, stopReading, handleResize]);
 
   // ResizeObserver for container size changes (handles visibility, window resize, layout changes)
   useEffect(() => {

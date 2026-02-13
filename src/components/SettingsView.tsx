@@ -78,6 +78,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
   const [ngrokTokenLoaded, setNgrokTokenLoaded] = useState(false);
   const [ngrokSaving, setNgrokSaving] = useState(false);
   const [ngrokSaved, setNgrokSaved] = useState(false);
+  const [ngrokError, setNgrokError] = useState<string | null>(null);
 
   useEffect(() => {
     getAppVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
@@ -155,7 +156,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                   <button
                     type="button"
                     onClick={() => onRemoveLinkedItem(index)}
-                    className="text-slate-500 hover:text-red-400 text-xs"
+                    className="text-slate-500 hover:text-red-400 text-xs transition-colors"
                   >
                     删除
                   </button>
@@ -389,7 +390,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                             newFolders.splice(folderIdx, 1);
                             onUpdateProject(index, 'linked_folders', newFolders);
                           }}
-                          className="text-slate-500 hover:text-red-400 text-xs ml-2"
+                          className="text-slate-500 hover:text-red-400 text-xs ml-2 transition-colors"
                         >
                           删除
                         </button>
@@ -459,12 +460,13 @@ export const SettingsView: FC<SettingsViewProps> = ({
                   disabled={ngrokSaving}
                   onClick={async () => {
                     setNgrokSaving(true);
+                    setNgrokError(null);
                     try {
                       await saveNgrokToken(ngrokToken.trim());
                       setNgrokSaved(true);
                       setTimeout(() => setNgrokSaved(false), 2000);
-                    } catch {
-                      // ignore
+                    } catch (e) {
+                      setNgrokError(String(e));
                     } finally {
                       setNgrokSaving(false);
                     }
@@ -473,12 +475,15 @@ export const SettingsView: FC<SettingsViewProps> = ({
                   {ngrokSaving ? '保存中...' : ngrokSaved ? '已保存' : '保存'}
                 </Button>
               </div>
+              {ngrokError && (
+                <p className="text-sm text-red-400 mt-1">{ngrokError}</p>
+              )}
             </div>
             <p className="text-xs text-slate-500">
               配置 ngrok token 后，分享时可选择"外网"模式，通过公网 URL 访问。
               <button
                 type="button"
-                className="text-blue-400 hover:text-blue-300 ml-1 underline cursor-pointer"
+                className="text-blue-400 hover:text-blue-300 ml-1 underline cursor-pointer transition-colors"
                 onClick={async () => {
                   const url = 'https://dashboard.ngrok.com/get-started/your-authtoken';
                   if (isTauri()) {

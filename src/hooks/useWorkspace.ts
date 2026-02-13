@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { callBackend } from '../lib/backend';
+import { callBackend, isTauri } from '../lib/backend';
 import type {
   WorkspaceRef,
   WorkspaceConfig,
@@ -49,7 +49,6 @@ export interface UseWorkspaceReturn {
   scanLinkedFolders: (projectPath: string) => Promise<ScannedFolder[]>;
   addProjectToWorktree: (request: AddProjectToWorktreeRequest) => Promise<void>;
   openWorkspaceInNewWindow: (workspacePath: string) => Promise<void>;
-  getOpenedWorkspaces: () => Promise<string[]>;
   lockWorktree: (workspacePath: string, worktreeName: string) => Promise<void>;
   unlockWorktree: (workspacePath: string, worktreeName: string) => Promise<void>;
   getLockedWorktrees: (workspacePath: string) => Promise<Record<string, string>>;
@@ -255,11 +254,10 @@ export function useWorkspace(ready = true): UseWorkspaceReturn {
   }, [loadData]);
 
   const openWorkspaceInNewWindow = useCallback(async (workspacePath: string) => {
-    await callBackend("open_workspace_window", { workspacePath });
-  }, []);
-
-  const getOpenedWorkspaces = useCallback(async (): Promise<string[]> => {
-    return callBackend<string[]>("get_opened_workspaces");
+    const result = await callBackend<string>("open_workspace_window", { workspacePath });
+    if (!isTauri() && result) {
+      window.open(result, '_blank');
+    }
   }, []);
 
   const lockWorktree = useCallback(async (workspacePath: string, worktreeName: string): Promise<void> => {
@@ -304,7 +302,6 @@ export function useWorkspace(ready = true): UseWorkspaceReturn {
     scanLinkedFolders,
     addProjectToWorktree,
     openWorkspaceInNewWindow,
-    getOpenedWorkspaces,
     lockWorktree,
     unlockWorktree,
     getLockedWorktrees,

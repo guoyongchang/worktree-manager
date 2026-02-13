@@ -18,18 +18,23 @@ export const isTauri = (): boolean => '__TAURI_INTERNALS__' in window;
 // Session management (browser mode)
 // ---------------------------------------------------------------------------
 
-let _sessionId: string | null = null;
-
+/**
+ * Get the current session ID.
+ * Always reads from sessionStorage to avoid stale in-memory cache
+ * (e.g., after HMR reload or race conditions with auth flow).
+ */
 export function getSessionId(): string {
-  if (!_sessionId) {
-    // Try to restore from sessionStorage (survives page refresh)
-    _sessionId = sessionStorage.getItem('wm_session_id');
-    if (!_sessionId) {
-      _sessionId = `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      sessionStorage.setItem('wm_session_id', _sessionId);
-    }
-  }
-  return _sessionId;
+  return sessionStorage.getItem('wm_session_id') || '';
+}
+
+/** Store the server-generated session ID (called after successful authentication). */
+function setSessionId(sid: string): void {
+  sessionStorage.setItem('wm_session_id', sid);
+}
+
+/** Clear the stored session ID (e.g., on session expiration). */
+export function clearSessionId(): void {
+  sessionStorage.removeItem('wm_session_id');
 }
 
 // ---------------------------------------------------------------------------
@@ -195,9 +200,31 @@ export async function setNgrokToken(token: string): Promise<void> {
   return callBackend<void>('set_ngrok_token', { token });
 }
 
+/** Get the last used share port. */
+export async function getLastSharePort(): Promise<number | null> {
+  return callBackend<number | null>('get_last_share_port');
+}
+
+// ---------------------------------------------------------------------------
+// Connected clients API
+// ---------------------------------------------------------------------------
+
+export interface ConnectedClient {
+  session_id: string;
+  ip: string;
+  user_agent: string;
+  authenticated_at: string;
+  last_active: string;
+  ws_connected: boolean;
+}
+
+export async function getConnectedClients(): Promise<ConnectedClient[]> {
+  return callBackend<ConnectedClient[]>('get_connected_clients');
+}
+
 /** Browser mode: fetch info about the shared workspace from the HTTP server. */
 export async function getShareInfo(): Promise<ShareInfo> {
-  const res = await fetch(`${'/api'}/get_share_info`);
+  const res = await fetch(`${getApiBase()}/get_share_info`);
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || `HTTP ${res.status}`);
@@ -209,14 +236,34 @@ export async function getShareInfo(): Promise<ShareInfo> {
 export async function authenticate(password: string): Promise<void> {
   const res = await fetch('/api/auth', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Session-Id': getSessionId(),
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ password }),
   });
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || '认证失败');
   }
+  // Server returns a generated session ID — clear old and store new
+  const data = await res.json();
+  if (data.sessionId) {
+    clearSessionId();
+    setSessionId(data.sessionId);
+  }
+}
+
+/** Broadcast terminal state (desktop only) */
+export async function broadcastTerminalState(
+  workspacePath: string,
+  worktreeName: string,
+  activatedTerminals: string[],
+  activeTerminalTab: string | null,
+  terminalVisible: boolean
+): Promise<void> {
+  return callBackend('broadcast_terminal_state', {
+    workspacePath,
+    worktreeName,
+    activatedTerminals,
+    activeTerminalTab,
+    terminalVisible,
+  });
 }

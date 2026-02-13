@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { TerminalTab, MainWorkspaceStatus, WorktreeListItem } from '../types';
 import { TERMINAL } from '../constants';
+import { isTauri, broadcastTerminalState as broadcastTerminalStateBackend } from '../lib/backend';
+import { getWebSocketManager } from '../lib/websocket';
+import { listen } from '@tauri-apps/api/event';
 
 export interface UseTerminalReturn {
   terminalVisible: boolean;
@@ -17,12 +20,12 @@ export interface UseTerminalReturn {
   handleDuplicateTerminal: (path: string) => void;
   handleToggleTerminal: () => void;
   resetActiveTab: () => void;
-  clearActivatedTerminals: () => void;
 }
 
 export function useTerminal(
   selectedWorktree: WorktreeListItem | null,
-  mainWorkspace: MainWorkspaceStatus | null
+  mainWorkspace: MainWorkspaceStatus | null,
+  workspacePathParam?: string
 ): UseTerminalReturn {
   const [terminalVisible, setTerminalVisible] = useState(false);
   const [terminalHeight, setTerminalHeight] = useState<number>(TERMINAL.DEFAULT_HEIGHT);
@@ -34,7 +37,23 @@ export function useTerminal(
   const activeTabPerWorkspace = useRef<Map<string, string>>(new Map());
   const prevWorkspaceRoot = useRef<string>('');
 
+  // Prevent broadcast loops: track if receiving external updates
+  const isReceivingUpdate = useRef(false);
+  // Debounce timer for broadcast rate limiting
+  const broadcastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Last broadcast timestamp for rate limiting
+  const lastBroadcastTime = useRef<number>(0);
+  // Message sequence number for deduplication
+  const messageSequence = useRef<number>(0);
+  // Last received sequence number to detect duplicates
+  const lastReceivedSequence = useRef<number>(-1);
+
   const currentWorkspaceRoot = selectedWorktree?.path || mainWorkspace?.path || '';
+  const _isTauri = isTauri();
+
+  // Get workspace path for broadcasting (needed for both desktop and web)
+  const workspacePath = workspacePathParam || '';
+  const worktreeName = selectedWorktree?.name || '';
 
   const currentProjects: Array<{ name: string; path: string }> = selectedWorktree?.projects ||
     (mainWorkspace ? mainWorkspace.projects.map(p => ({
@@ -90,6 +109,158 @@ export function useTerminal(
     prevWorkspaceRoot.current = currentWorkspaceRoot;
   }, [currentWorkspaceRoot]);
 
+  // Shared handler for incoming terminal state messages (used by both Tauri and WebSocket)
+  const handleTerminalStateMessage = useCallback((msg: {
+    workspacePath?: string;
+    worktreeName?: string;
+    activatedTerminals: string[];
+    activeTerminalTab: string | null;
+    terminalVisible: boolean;
+    sequence?: number;
+  }) => {
+    const sequence = msg.sequence;
+    if (sequence !== undefined && sequence <= lastReceivedSequence.current) {
+      return;
+    }
+
+    // Only process updates for current workspace (Tauri events are global)
+    if (msg.workspacePath && msg.worktreeName &&
+        (msg.workspacePath !== workspacePath || msg.worktreeName !== worktreeName)) {
+      return;
+    }
+
+    if (sequence !== undefined) {
+      lastReceivedSequence.current = sequence;
+    }
+
+    isReceivingUpdate.current = true;
+
+    const newActivatedTerminals = new Set(msg.activatedTerminals);
+    const activatedChanged =
+      newActivatedTerminals.size !== activatedTerminals.size ||
+      !Array.from(newActivatedTerminals).every(t => activatedTerminals.has(t));
+
+    if (activatedChanged ||
+        msg.activeTerminalTab !== activeTerminalTab ||
+        msg.terminalVisible !== terminalVisible) {
+      setActivatedTerminals(newActivatedTerminals);
+      setActiveTerminalTab(msg.activeTerminalTab);
+      setTerminalVisible(msg.terminalVisible);
+    }
+
+    setTimeout(() => {
+      isReceivingUpdate.current = false;
+    }, TERMINAL.BROADCAST_DEBOUNCE_MS);
+  }, [workspacePath, worktreeName, activatedTerminals, activeTerminalTab, terminalVisible]);
+
+  // Terminal state synchronization: both desktop and web subscribe and broadcast
+  useEffect(() => {
+    if (!selectedWorktree || !workspacePath || !worktreeName) return;
+
+    let unsubscribe: (() => void) | undefined;
+
+    if (_isTauri) {
+      const unlisten = listen<{
+        workspacePath: string;
+        worktreeName: string;
+        activatedTerminals: string[];
+        activeTerminalTab: string | null;
+        terminalVisible: boolean;
+        sequence?: number;
+      }>('terminal-state-update', (event) => handleTerminalStateMessage(event.payload));
+
+      unsubscribe = () => { unlisten.then(fn => fn()); };
+    } else {
+      const wsManager = getWebSocketManager();
+      unsubscribe = wsManager.subscribeTerminalState(
+        workspacePath,
+        worktreeName,
+        (msg) => handleTerminalStateMessage(msg as any),
+      );
+    }
+
+    return unsubscribe;
+  }, [selectedWorktree, workspacePath, worktreeName, _isTauri, handleTerminalStateMessage]);
+
+  // Broadcast terminal state changes (both desktop and web) with rate limiting
+  useEffect(() => {
+    // If receiving external update, don't broadcast (avoid loop)
+    if (isReceivingUpdate.current) {
+      if (import.meta.env.DEV) {
+        console.log('[useTerminal] Skipping broadcast (receiving external update)');
+      }
+      return;
+    }
+
+    if (!selectedWorktree || !workspacePath || !worktreeName) return;
+
+    // Rate limiting: prevent broadcasts more frequent than BROADCAST_RATE_LIMIT_MS
+    const now = Date.now();
+    const timeSinceLastBroadcast = now - lastBroadcastTime.current;
+
+    const doBroadcast = () => {
+      if (import.meta.env.DEV) {
+        console.log('[useTerminal] Broadcasting terminal state:');
+        console.log('  isTauri:', _isTauri);
+        console.log('  activatedTerminals:', Array.from(activatedTerminals));
+        console.log('  activeTerminalTab:', activeTerminalTab);
+      }
+
+      // Increment sequence number for message deduplication
+      messageSequence.current += 1;
+      const sequence = messageSequence.current;
+
+      // Bidirectional sync: both PC and Web broadcast terminal state changes
+      if (_isTauri) {
+        // Desktop: call Tauri command to broadcast
+        broadcastTerminalStateBackend(
+          workspacePath,
+          worktreeName,
+          Array.from(activatedTerminals),
+          activeTerminalTab,
+          terminalVisible
+        ).catch(err => {
+          console.error('[useTerminal] Failed to broadcast terminal state:', err);
+        });
+      } else {
+        // Web: broadcast via WebSocket with sequence number
+        const wsManager = getWebSocketManager();
+        wsManager.broadcastTerminalState(
+          workspacePath,
+          worktreeName,
+          Array.from(activatedTerminals),
+          activeTerminalTab,
+          terminalVisible,
+          sequence
+        );
+      }
+
+      lastBroadcastTime.current = Date.now();
+    };
+
+    // Clear any pending broadcast timer
+    if (broadcastTimerRef.current) {
+      clearTimeout(broadcastTimerRef.current);
+    }
+
+    // If enough time has passed, broadcast immediately
+    if (timeSinceLastBroadcast >= TERMINAL.BROADCAST_RATE_LIMIT_MS) {
+      doBroadcast();
+    } else {
+      // Otherwise, schedule broadcast after rate limit period
+      const delay = TERMINAL.BROADCAST_RATE_LIMIT_MS - timeSinceLastBroadcast;
+      broadcastTimerRef.current = setTimeout(doBroadcast, delay);
+    }
+
+    // Cleanup function
+    return () => {
+      if (broadcastTimerRef.current) {
+        clearTimeout(broadcastTimerRef.current);
+        broadcastTimerRef.current = null;
+      }
+    };
+  }, [_isTauri, selectedWorktree, workspacePath, worktreeName, activatedTerminals, activeTerminalTab, terminalVisible]);
+
   // Handle terminal resize drag
   useEffect(() => {
     if (!isResizing) return;
@@ -124,6 +295,13 @@ export function useTerminal(
     if (!activatedTerminals.has(projectPath)) {
       setActivatedTerminals(prev => new Set(prev).add(projectPath));
     }
+
+    // Trigger terminal resize by temporarily adjusting height
+    // This ensures the CLI resets properly when switching terminals
+    setTerminalHeight(prev => prev - TERMINAL.RESIZE_TRIGGER_OFFSET);
+    setTimeout(() => {
+      setTerminalHeight(prev => prev + TERMINAL.RESIZE_TRIGGER_OFFSET);
+    }, TERMINAL.RESIZE_DELAY_MS);
   }, [terminalVisible, activatedTerminals]);
 
   const handleCloseTerminalTab = useCallback((path: string) => {
@@ -162,12 +340,6 @@ export function useTerminal(
     // This is kept for API compatibility
   }, []);
 
-  const clearActivatedTerminals = useCallback(() => {
-    setActivatedTerminals(new Set());
-    setActiveTerminalTab(null);
-    activeTabPerWorkspace.current.clear();
-  }, []);
-
   return {
     terminalVisible,
     terminalHeight,
@@ -183,6 +355,5 @@ export function useTerminal(
     handleDuplicateTerminal,
     handleToggleTerminal,
     resetActiveTab,
-    clearActivatedTerminals,
   };
 }

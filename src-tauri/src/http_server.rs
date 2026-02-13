@@ -1,6 +1,6 @@
 use axum::{
-    extract::{Json, Query, Request, ws::{Message, WebSocket, WebSocketUpgrade}},
-    http::{HeaderMap, StatusCode},
+    extract::{ConnectInfo, Json, Query, Request, ws::{Message, WebSocket, WebSocketUpgrade}},
+    http::{header, HeaderMap, HeaderValue, Method, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -13,8 +13,10 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex as TokioMutex;
-use tower_http::cors::{Any, CorsLayer};
-use tower_http::services::ServeDir;
+use tower_http::cors::CorsLayer;
+use tower_http::limit::RequestBodyLimitLayer;
+use tower_http::services::{ServeDir, ServeFile};
+use tauri::Emitter;
 
 use crate::{
     // _impl functions (window-context commands)
@@ -27,11 +29,14 @@ use crate::{
     delete_archived_worktree_impl, add_project_to_worktree_impl,
     clone_project_impl, unregister_window_impl,
     lock_worktree_impl, unlock_worktree_impl,
+    // Collaboration functions
+    join_collaboration_impl, leave_collaboration_impl, get_collaboration_info_impl,
     // Direct functions (no window context)
     WorkspaceConfig, CreateWorktreeRequest, AddProjectToWorktreeRequest,
     SwitchBranchRequest, CloneProjectRequest, OpenEditorRequest,
-    PTY_MANAGER, SHARE_STATE, AUTHENTICATED_SESSIONS, LOCK_BROADCAST,
-    load_workspace_config,
+    PTY_MANAGER, SHARE_STATE, AUTHENTICATED_SESSIONS, CONNECTED_CLIENTS, LOCK_BROADCAST,
+    TMUX_MANAGER, COLLABORATOR_BROADCAST, AUTH_RATE_LIMITER, TERMINAL_STATE_BROADCAST,
+    ConnectedClient, load_workspace_config,
 };
 
 // ---------------------------------------------------------------------------
@@ -48,8 +53,7 @@ fn session_id(headers: &HeaderMap) -> String {
         .to_string();
 
     // Auto-bind: if SHARE_STATE has an active workspace, bind this session to it
-    {
-        let share_state = SHARE_STATE.lock().unwrap();
+    if let Ok(share_state) = SHARE_STATE.lock() {
         if let Some(ref ws_path) = share_state.workspace_path {
             if share_state.active {
                 let _ = set_window_workspace_impl(&sid, ws_path.clone());
@@ -259,9 +263,13 @@ async fn h_open_log_dir() -> Response {
 // -- Multi-window management --
 
 async fn h_get_opened_workspaces() -> Response {
-    let map = crate::WINDOW_WORKSPACES.lock().unwrap();
-    let values: Vec<String> = map.values().cloned().collect();
-    Json(json!(values)).into_response()
+    match crate::WINDOW_WORKSPACES.lock() {
+        Ok(map) => {
+            let values: Vec<String> = map.values().cloned().collect();
+            Json(json!(values)).into_response()
+        }
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Internal state error").into_response(),
+    }
 }
 
 async fn h_unregister_window(headers: HeaderMap) -> Response {
@@ -287,87 +295,120 @@ async fn h_unlock_worktree(headers: HeaderMap, Json(args): Json<Value>) -> Respo
 
 async fn h_get_locked_worktrees(Json(args): Json<Value>) -> Response {
     let ws_path = args["workspacePath"].as_str().unwrap_or("").to_string();
-    let locks = crate::WORKTREE_LOCKS.lock().unwrap();
-    let result: HashMap<String, String> = locks
-        .iter()
-        .filter(|((wp, _), _)| *wp == ws_path)
-        .map(|((_, wt), label)| (wt.clone(), label.clone()))
-        .collect();
-    Json(json!(result)).into_response()
+    match crate::WORKTREE_LOCKS.lock() {
+        Ok(locks) => {
+            let result: HashMap<String, String> = locks
+                .iter()
+                .filter(|((wp, _), _)| *wp == ws_path)
+                .map(|((_, wt), label)| (wt.clone(), label.clone()))
+                .collect();
+            Json(json!(result)).into_response()
+        }
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Internal state error").into_response(),
+    }
 }
 
 // -- PTY --
+
+/// Run a closure that requires the PTY_MANAGER lock on a blocking thread.
+async fn with_pty_manager<T, F>(f: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(&mut crate::pty_manager::PtyManager) -> Result<T, String> + Send + 'static,
+{
+    tokio::task::spawn_blocking(move || {
+        let mut manager = PTY_MANAGER.lock().map_err(|e| format!("Lock error: {}", e))?;
+        f(&mut manager)
+    })
+    .await
+    .unwrap_or_else(|e| Err(format!("Task error: {}", e)))
+}
 
 async fn h_pty_create(Json(args): Json<Value>) -> Response {
     let session_id = args["sessionId"].as_str().unwrap_or("").to_string();
     let cwd = args["cwd"].as_str().unwrap_or("").to_string();
     let cols = args["cols"].as_u64().unwrap_or(80) as u16;
     let rows = args["rows"].as_u64().unwrap_or(24) as u16;
-    let r = PTY_MANAGER
-        .lock()
-        .map_err(|e| format!("Lock error: {}", e))
-        .and_then(|mut m| m.create_session(&session_id, &cwd, cols, rows));
-    result_ok(r)
+    result_ok(with_pty_manager(move |m| m.create_session(&session_id, &cwd, cols, rows)).await)
 }
 
 async fn h_pty_write(Json(args): Json<Value>) -> Response {
     let session_id = args["sessionId"].as_str().unwrap_or("").to_string();
     let data = args["data"].as_str().unwrap_or("").to_string();
-    let r = PTY_MANAGER
-        .lock()
-        .map_err(|e| format!("Lock error: {}", e))
-        .and_then(|m| m.write_to_session(&session_id, &data));
-    result_ok(r)
+    result_ok(with_pty_manager(move |m| m.write_to_session(&session_id, &data)).await)
 }
 
 async fn h_pty_read(Json(args): Json<Value>) -> Response {
     let session_id = args["sessionId"].as_str().unwrap_or("").to_string();
-    let r = PTY_MANAGER
-        .lock()
-        .map_err(|e| format!("Lock error: {}", e))
-        .and_then(|m| m.read_from_session(&session_id));
-    result_json(r)
+    result_json(with_pty_manager(move |m| m.read_from_session(&session_id)).await)
 }
 
 async fn h_pty_resize(Json(args): Json<Value>) -> Response {
     let session_id = args["sessionId"].as_str().unwrap_or("").to_string();
     let cols = args["cols"].as_u64().unwrap_or(80) as u16;
     let rows = args["rows"].as_u64().unwrap_or(24) as u16;
-    let r = PTY_MANAGER
-        .lock()
-        .map_err(|e| format!("Lock error: {}", e))
-        .and_then(|m| m.resize_session(&session_id, cols, rows));
-    result_ok(r)
+    result_ok(with_pty_manager(move |m| m.resize_session(&session_id, cols, rows)).await)
 }
 
 async fn h_pty_close(Json(args): Json<Value>) -> Response {
     let session_id = args["sessionId"].as_str().unwrap_or("").to_string();
-    let r = PTY_MANAGER
-        .lock()
-        .map_err(|e| format!("Lock error: {}", e))
-        .and_then(|mut m| m.close_session(&session_id));
-    result_ok(r)
+    result_ok(with_pty_manager(move |m| m.close_session(&session_id)).await)
 }
 
 async fn h_pty_exists(Json(args): Json<Value>) -> Response {
     let session_id = args["sessionId"].as_str().unwrap_or("").to_string();
-    let r = PTY_MANAGER
-        .lock()
-        .map_err(|e| format!("Lock error: {}", e))
-        .map(|m| m.has_session(&session_id));
-    result_json(r)
+    result_json(with_pty_manager(move |m| Ok(m.has_session(&session_id))).await)
 }
 
 async fn h_pty_close_by_path(Json(args): Json<Value>) -> Response {
     let path_prefix = args["pathPrefix"].as_str().unwrap_or("").to_string();
-    let r: Result<Vec<String>, String> = PTY_MANAGER
-        .lock()
-        .map_err(|e| format!("Lock error: {}", e))
-        .map(|mut m| m.close_sessions_by_path_prefix(&path_prefix));
-    result_json(r)
+    result_json(with_pty_manager(move |m| Ok(m.close_sessions_by_path_prefix(&path_prefix))).await)
 }
 
 // -- Auth --
+
+/// Middleware: block dangerous host-only operations from remote (non-localhost) clients.
+/// Operations like open_in_terminal, open_in_editor, reveal_in_finder, open_log_dir
+/// should only be available from localhost, not from remote browser sessions.
+async fn localhost_only_middleware(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let path = request.uri().path().to_string();
+    let restricted_paths = [
+        "/api/open_in_terminal",
+        "/api/open_in_editor",
+        "/api/reveal_in_finder",
+        "/api/open_log_dir",
+        // ngrok management should only be accessible from localhost
+        "/api/get_ngrok_token",
+        "/api/set_ngrok_token",
+        "/api/start_ngrok_tunnel",
+        "/api/stop_ngrok_tunnel",
+    ];
+
+    if restricted_paths.contains(&path.as_str()) {
+        let ip = addr.ip();
+        if !ip.is_loopback() {
+            return (StatusCode::FORBIDDEN, "This operation is only available from localhost").into_response();
+        }
+    }
+
+    next.run(request).await
+}
+
+/// Middleware: add security headers to all responses.
+async fn security_headers_middleware(request: Request, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    headers.insert("x-content-type-options", HeaderValue::from_static("nosniff"));
+    headers.insert("x-frame-options", HeaderValue::from_static("DENY"));
+    headers.insert("x-xss-protection", HeaderValue::from_static("1; mode=block"));
+    headers.insert("referrer-policy", HeaderValue::from_static("strict-origin-when-cross-origin"));
+    headers.insert("permissions-policy", HeaderValue::from_static("camera=(), microphone=(), geolocation=()"));
+    response
+}
 
 /// Middleware: check if the request is authenticated when password is set.
 /// Exempt: /api/auth, /api/get_share_info, and non-API paths (static files).
@@ -380,10 +421,10 @@ async fn auth_middleware(headers: HeaderMap, request: Request, next: Next) -> Re
     }
 
     // Check if sharing is active and has a password
-    let needs_auth = {
-        let state = SHARE_STATE.lock().unwrap();
-        state.active && state.password.is_some()
-    };
+    let needs_auth = SHARE_STATE
+        .lock()
+        .map(|state| state.active && state.password.is_some())
+        .unwrap_or(false);
 
     if !needs_auth {
         return next.run(request).await;
@@ -396,34 +437,113 @@ async fn auth_middleware(headers: HeaderMap, request: Request, next: Next) -> Re
         .unwrap_or("web-default")
         .to_string();
 
-    let is_authenticated = {
-        let sessions = AUTHENTICATED_SESSIONS.lock().unwrap();
-        sessions.contains(&sid)
-    };
+    let is_authenticated = AUTHENTICATED_SESSIONS
+        .lock()
+        .map(|sessions| sessions.contains(&sid))
+        .unwrap_or(false);
 
     if is_authenticated {
+        // Update last_active timestamp
+        if let Ok(mut clients) = CONNECTED_CLIENTS.lock() {
+            if let Some(client) = clients.get_mut(&sid) {
+                client.last_active = chrono::Utc::now().to_rfc3339();
+            }
+        }
         return next.run(request).await;
     }
 
     (StatusCode::UNAUTHORIZED, "Authentication required").into_response()
 }
 
-async fn h_auth(headers: HeaderMap, Json(args): Json<Value>) -> Response {
+async fn h_auth(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(args): Json<Value>,
+) -> Response {
+    let client_ip = addr.ip().to_string();
+
+    // Rate limiting: max 5 attempts per 60 seconds per IP
+    let rate_ok = AUTH_RATE_LIMITER.lock()
+        .map(|mut limiter| limiter.check_and_record(&client_ip))
+        .unwrap_or(false);
+    if !rate_ok {
+        log::warn!("Auth rate limited for IP: {}", client_ip);
+        return (StatusCode::TOO_MANY_REQUESTS, "请求过于频繁，请稍后再试").into_response();
+    }
+
     let password = args["password"].as_str().unwrap_or("");
 
-    let expected = {
-        let state = SHARE_STATE.lock().unwrap();
-        state.password.clone().unwrap_or_default()
-    };
+    let expected = SHARE_STATE
+        .lock()
+        .map(|state| state.password.clone().unwrap_or_default())
+        .unwrap_or_default();
 
-    if password == expected {
-        let sid = headers
-            .get("x-session-id")
+    // Constant-time comparison to prevent timing attacks.
+    // We hash both inputs with a fixed-length output to avoid leaking length information.
+    use std::hash::{Hash, Hasher};
+    let password_match = {
+        // Use SipHash (Rust default) on both values to normalize length, then compare.
+        // This prevents timing leaks from early-exit on length mismatch.
+        let hash_val = |s: &str| -> u64 {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            s.hash(&mut hasher);
+            hasher.finish()
+        };
+        let h_input = hash_val(password);
+        let h_expected = hash_val(&expected);
+        // Constant-time XOR comparison on fixed 8-byte values
+        let mut diff = h_input ^ h_expected;
+        // Also require exact string match to avoid hash collisions
+        diff |= (password.len() != expected.len()) as u64;
+        // Iterate bytes for actual comparison (both hashed to same length first)
+        let a = password.as_bytes();
+        let b = expected.as_bytes();
+        let max_len = a.len().max(b.len());
+        let mut byte_diff = 0u8;
+        for i in 0..max_len {
+            let x = if i < a.len() { a[i] } else { 0 };
+            let y = if i < b.len() { b[i] } else { 1 }; // different default to avoid false match
+            byte_diff |= x ^ y;
+        }
+        diff == 0 && byte_diff == 0
+    };
+    if password_match {
+        // Generate a server-side session ID to prevent client forgery
+        let sid = uuid::Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        let user_agent = headers
+            .get("user-agent")
             .and_then(|v| v.to_str().ok())
-            .unwrap_or("web-default")
+            .unwrap_or("unknown")
             .to_string();
-        AUTHENTICATED_SESSIONS.lock().unwrap().insert(sid);
-        StatusCode::NO_CONTENT.into_response()
+
+        // Record connected client, removing stale entries from the same IP
+        let client_ip = addr.ip().to_string();
+        let client = ConnectedClient {
+            session_id: sid.clone(),
+            ip: client_ip.clone(),
+            user_agent,
+            authenticated_at: now.clone(),
+            last_active: now,
+            ws_connected: false,
+        };
+        // Remove old sessions from the same IP that don't have an active WebSocket
+        let stale_sids: Vec<String> = if let Ok(mut clients) = CONNECTED_CLIENTS.lock() {
+            let stale: Vec<String> = clients.iter()
+                .filter(|(_, c)| c.ip == client_ip && !c.ws_connected)
+                .map(|(s, _)| s.clone())
+                .collect();
+            for s in &stale { clients.remove(s); }
+            clients.insert(sid.clone(), client);
+            stale
+        } else {
+            vec![]
+        };
+        if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() {
+            for s in &stale_sids { sessions.remove(s); }
+            sessions.insert(sid.clone());
+        }
+        Json(json!({ "sessionId": sid })).into_response()
     } else {
         (StatusCode::UNAUTHORIZED, "密码错误").into_response()
     }
@@ -454,30 +574,34 @@ async fn h_start_ngrok_tunnel() -> Response {
 }
 
 async fn h_stop_ngrok_tunnel() -> Response {
-    let mut state = SHARE_STATE.lock().unwrap();
-    if let Some(handle) = state.ngrok_task.take() {
-        handle.abort();
+    match SHARE_STATE.lock() {
+        Ok(mut state) => {
+            if let Some(handle) = state.ngrok_task.take() {
+                handle.abort();
+            }
+            state.ngrok_url = None;
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Internal state error").into_response(),
     }
-    state.ngrok_url = None;
-    StatusCode::NO_CONTENT.into_response()
 }
 
 // -- Share info --
 
 async fn h_get_share_info() -> Response {
-    let share_state = SHARE_STATE.lock().unwrap();
-    if !share_state.active {
-        return Json(json!({
-            "workspace_name": null,
-            "workspace_path": null
-        })).into_response();
-    }
+    let null_response = || Json(json!({ "workspace_name": null, "workspace_path": null })).into_response();
 
-    let (ws_name, ws_path) = if let Some(ref path) = share_state.workspace_path {
-        let config = load_workspace_config(path);
-        (Some(config.name), Some(path.clone()))
-    } else {
-        (None, None)
+    let share_state = match SHARE_STATE.lock() {
+        Ok(s) if s.active => s,
+        _ => return null_response(),
+    };
+
+    let (ws_name, ws_path) = match share_state.workspace_path {
+        Some(ref path) => {
+            let config = load_workspace_config(path);
+            (Some(config.name), Some(path.clone()))
+        }
+        None => (None, None),
     };
 
     Json(json!({
@@ -511,6 +635,7 @@ struct WsParams {
 
 async fn h_ws_upgrade(
     ws: WebSocketUpgrade,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Query(params): Query<WsParams>,
 ) -> Response {
     // Authenticate via query param
@@ -519,31 +644,41 @@ async fn h_ws_upgrade(
         None => return (StatusCode::UNAUTHORIZED, "Missing session_id").into_response(),
     };
 
-    let needs_auth = {
-        let state = SHARE_STATE.lock().unwrap();
-        state.active && state.password.is_some()
-    };
+    let needs_auth = SHARE_STATE
+        .lock()
+        .map(|state| state.active && state.password.is_some())
+        .unwrap_or(false);
 
     if needs_auth {
-        let is_authenticated = {
-            let sessions = AUTHENTICATED_SESSIONS.lock().unwrap();
-            sessions.contains(&sid)
-        };
+        let is_authenticated = AUTHENTICATED_SESSIONS
+            .lock()
+            .map(|sessions| sessions.contains(&sid))
+            .unwrap_or(false);
         if !is_authenticated {
             return (StatusCode::UNAUTHORIZED, "Not authenticated").into_response();
         }
     }
 
+    // Mark WebSocket connected
+    if let Ok(mut clients) = CONNECTED_CLIENTS.lock() {
+        if let Some(client) = clients.get_mut(&sid) {
+            client.ws_connected = true;
+            client.last_active = chrono::Utc::now().to_rfc3339();
+        }
+    }
+    log::info!("WebSocket upgrade for session {} from {}", sid, addr.ip());
+
     ws.on_upgrade(move |socket| handle_ws(socket, sid))
 }
 
+// TODO(security): Consider per-session rate limiting for WebSocket messages
+// to prevent a single client from flooding the server with pty_write commands.
 async fn handle_ws(socket: WebSocket, session_id: String) {
     let (ws_sender, mut ws_receiver) = socket.split();
     let ws_sender = Arc::new(TokioMutex::new(ws_sender));
 
     // Auto-bind session to the shared workspace
-    {
-        let share_state = SHARE_STATE.lock().unwrap();
+    if let Ok(share_state) = SHARE_STATE.lock() {
         if let Some(ref ws_path) = share_state.workspace_path {
             if share_state.active {
                 let _ = set_window_workspace_impl(&session_id, ws_path.clone());
@@ -554,6 +689,8 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
     // Track spawned forwarder tasks so we can abort them on disconnect
     let mut pty_forwarders: HashMap<String, tokio::task::JoinHandle<()>> = HashMap::new();
     let mut lock_forwarder: Option<tokio::task::JoinHandle<()>> = None;
+    let mut collaborator_forwarder: Option<tokio::task::JoinHandle<()>> = None;
+    let mut terminal_state_forwarder: Option<tokio::task::JoinHandle<()>> = None;
 
     // Process incoming messages
     while let Some(msg) = ws_receiver.next().await {
@@ -614,8 +751,10 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                                         break;
                                     }
                                 }
-                                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                                    // Missed some messages, continue
+                                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                                    // Log lagged receiver warning - client is too slow to process PTY output
+                                    log::warn!("PTY output broadcast lagged, skipped {} messages for session {}",
+                                        skipped, sid);
                                     continue;
                                 }
                                 Err(tokio::sync::broadcast::error::RecvError::Closed) => {
@@ -638,17 +777,136 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
 
             "pty_write" => {
                 let pty_session_id = match parsed["sessionId"].as_str() {
-                    Some(s) => s,
+                    Some(s) => s.to_string(),
                     None => continue,
                 };
                 let data = match parsed["data"].as_str() {
-                    Some(d) => d,
+                    Some(d) => d.to_string(),
                     None => continue,
                 };
-                let _ = PTY_MANAGER
-                    .lock()
-                    .map_err(|e| format!("Lock error: {}", e))
-                    .and_then(|m| m.write_to_session(pty_session_id, data));
+                let _ = tokio::task::spawn_blocking(move || {
+                    PTY_MANAGER
+                        .lock()
+                        .map_err(|e| format!("Lock error: {}", e))
+                        .and_then(|m| m.write_to_session(&pty_session_id, &data))
+                }).await;
+            }
+
+            "tmux_input" => {
+                let tmux_session = match parsed["tmuxSession"].as_str() {
+                    Some(s) => s.to_string(),
+                    None => continue,
+                };
+                let data = match parsed["data"].as_str() {
+                    Some(d) => d.to_string(),
+                    None => continue,
+                };
+                let _ = tokio::task::spawn_blocking(move || {
+                    TMUX_MANAGER
+                        .lock()
+                        .map_err(|e| format!("Lock error: {}", e))
+                        .and_then(|tmux| tmux.send_keys(&tmux_session, &data))
+                }).await;
+            }
+
+            "tmux_resize" => {
+                let tmux_session = match parsed["tmuxSession"].as_str() {
+                    Some(s) => s.to_string(),
+                    None => continue,
+                };
+                let cols = parsed["cols"].as_u64().unwrap_or(80) as u16;
+                let rows = parsed["rows"].as_u64().unwrap_or(24) as u16;
+                let _ = tokio::task::spawn_blocking(move || {
+                    TMUX_MANAGER
+                        .lock()
+                        .map_err(|e| format!("Lock error: {}", e))
+                        .and_then(|tmux| tmux.resize_session(&tmux_session, cols, rows))
+                }).await;
+            }
+
+            "tmux_capture" => {
+                let tmux_session = match parsed["tmuxSession"].as_str() {
+                    Some(s) => s.to_string(),
+                    None => continue,
+                };
+
+                // Run blocking tmux capture-pane on a dedicated thread
+                let ts = tmux_session.clone();
+                let output = tokio::task::spawn_blocking(move || {
+                    TMUX_MANAGER
+                        .lock()
+                        .map_err(|e| format!("Lock error: {}", e))
+                        .and_then(|tmux| tmux.capture_pane(&ts))
+                }).await.unwrap_or_else(|e| Err(format!("Task error: {}", e)));
+
+                if let Ok(output) = output {
+                    let msg = json!({
+                        "type": "tmux_output",
+                        "tmuxSession": tmux_session,
+                        "data": output,
+                    });
+                    let mut sender = ws_sender.lock().await;
+                    let _ = sender.send(Message::text(msg.to_string())).await;
+                }
+            }
+
+            "subscribe_collaborators" => {
+                let ws_path = match parsed["workspacePath"].as_str() {
+                    Some(s) => s.to_string(),
+                    None => continue,
+                };
+                let wt_name = match parsed["worktreeName"].as_str() {
+                    Some(s) => s.to_string(),
+                    None => continue,
+                };
+
+                // Send initial collaborator state
+                if let Ok(info) = get_collaboration_info_impl(ws_path.clone(), wt_name.clone()) {
+                    let msg = json!({
+                        "type": "collaborator_update",
+                        "workspacePath": ws_path,
+                        "worktreeName": wt_name,
+                        "collaborators": info.collaborators,
+                        "owner": info.owner,
+                    });
+                    let mut sender = ws_sender.lock().await;
+                    let _ = sender.send(Message::text(msg.to_string())).await;
+                }
+
+                // Abort existing collaborator forwarder if any
+                if let Some(handle) = collaborator_forwarder.take() {
+                    handle.abort();
+                }
+
+                // Subscribe to collaborator broadcast
+                let mut rx = COLLABORATOR_BROADCAST.subscribe();
+                let sender = Arc::clone(&ws_sender);
+                let handle = tokio::spawn(async move {
+                    loop {
+                        match rx.recv().await {
+                            Ok(json_str) => {
+                                if let Ok(val) = serde_json::from_str::<Value>(&json_str) {
+                                    if val["workspacePath"].as_str() == Some(&ws_path)
+                                        && val["worktreeName"].as_str() == Some(&wt_name) {
+                                        let msg = json!({
+                                            "type": "collaborator_update",
+                                            "workspacePath": &ws_path,
+                                            "worktreeName": &wt_name,
+                                            "collaborators": val["collaborators"],
+                                        });
+                                        let mut sender = sender.lock().await;
+                                        if sender.send(Message::text(msg.to_string())).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        }
+                    }
+                });
+                collaborator_forwarder = Some(handle);
             }
 
             "subscribe_locks" => {
@@ -663,19 +921,21 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                 }
 
                 // Send initial lock state
-                {
-                    let msg_str = {
-                        let locks = crate::WORKTREE_LOCKS.lock().unwrap();
-                        let lock_snapshot: HashMap<String, String> = locks
-                            .iter()
-                            .filter(|((wp, _), _)| *wp == workspace_path)
-                            .map(|((_, wt), label)| (wt.clone(), label.clone()))
-                            .collect();
-                        json!({
-                            "type": "lock_update",
-                            "locks": lock_snapshot,
-                        }).to_string()
-                    };
+                // Scope the std::sync::MutexGuard so it drops before any .await
+                let initial_lock_msg = if let Ok(locks) = crate::WORKTREE_LOCKS.lock() {
+                    let lock_snapshot: HashMap<String, String> = locks
+                        .iter()
+                        .filter(|((wp, _), _)| *wp == workspace_path)
+                        .map(|((_, wt), label)| (wt.clone(), label.clone()))
+                        .collect();
+                    Some(json!({
+                        "type": "lock_update",
+                        "locks": lock_snapshot,
+                    }).to_string())
+                } else {
+                    None
+                };
+                if let Some(msg_str) = initial_lock_msg {
                     let mut sender = ws_sender.lock().await;
                     let _ = sender.send(Message::text(msg_str)).await;
                 }
@@ -711,6 +971,137 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                 lock_forwarder = Some(handle);
             }
 
+            "subscribe_terminal_state" => {
+                let workspace_path = match parsed["workspacePath"].as_str() {
+                    Some(s) => s.to_string(),
+                    None => continue,
+                };
+                let worktree_name = match parsed["worktreeName"].as_str() {
+                    Some(s) => s.to_string(),
+                    None => continue,
+                };
+
+                // Abort existing terminal state forwarder if any
+                if let Some(handle) = terminal_state_forwarder.take() {
+                    handle.abort();
+                }
+
+                // Send initial terminal state from cache
+                let initial_state = crate::TERMINAL_STATES
+                    .lock()
+                    .ok()
+                    .and_then(|states| {
+                        let key = (workspace_path.clone(), worktree_name.clone());
+                        states.get(&key).cloned()
+                    });
+
+                if let Some(state) = initial_state {
+                    let msg = json!({
+                        "type": "terminal_state_update",
+                        "workspacePath": &workspace_path,
+                        "worktreeName": &worktree_name,
+                        "activatedTerminals": state.activated_terminals,
+                        "activeTerminalTab": state.active_terminal_tab,
+                        "terminalVisible": state.terminal_visible,
+                        "sequence": state.sequence,
+                    });
+                    let mut sender = ws_sender.lock().await;
+                    let _ = sender.send(Message::text(msg.to_string())).await;
+                }
+
+                // Subscribe to terminal state broadcast
+                let mut rx = TERMINAL_STATE_BROADCAST.subscribe();
+                let sender = Arc::clone(&ws_sender);
+                let ws_path = workspace_path.clone();
+                let wt_name = worktree_name.clone();
+                let handle = tokio::spawn(async move {
+                    loop {
+                        match rx.recv().await {
+                            Ok(json_str) => {
+                                // Parse the broadcast to check if it's for our workspace/worktree
+                                if let Ok(val) = serde_json::from_str::<Value>(&json_str) {
+                                    if val["workspacePath"].as_str() == Some(&ws_path)
+                                        && val["worktreeName"].as_str() == Some(&wt_name) {
+                                        let msg = json!({
+                                            "type": "terminal_state_update",
+                                            "workspacePath": &ws_path,
+                                            "worktreeName": &wt_name,
+                                            "activatedTerminals": val["activatedTerminals"],
+                                            "activeTerminalTab": val["activeTerminalTab"],
+                                            "terminalVisible": val["terminalVisible"],
+                                            "sequence": val["sequence"],
+                                        });
+                                        let mut sender = sender.lock().await;
+                                        if sender.send(Message::text(msg.to_string())).await.is_err() {
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                                // Log lagged receiver warning - client is too slow
+                                log::warn!("Terminal state broadcast lagged, skipped {} messages for {}/{}",
+                                    skipped, ws_path, wt_name);
+                                continue;
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        }
+                    }
+                });
+                terminal_state_forwarder = Some(handle);
+            }
+
+            "broadcast_terminal_state" => {
+                let workspace_path = match parsed["workspacePath"].as_str() {
+                    Some(s) => s.to_string(),
+                    None => continue,
+                };
+                let worktree_name = match parsed["worktreeName"].as_str() {
+                    Some(s) => s.to_string(),
+                    None => continue,
+                };
+                let activated_terminals = parsed["activatedTerminals"].as_array().map(|arr| {
+                    arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect::<Vec<_>>()
+                }).unwrap_or_default();
+                let active_terminal_tab = parsed["activeTerminalTab"].as_str().map(|s| s.to_string());
+                let terminal_visible = parsed["terminalVisible"].as_bool().unwrap_or(false);
+                let sequence = parsed["sequence"].as_u64();
+
+                // Update cache with sequence number
+                if let Ok(mut states) = crate::TERMINAL_STATES.lock() {
+                    let key = (workspace_path.clone(), worktree_name.clone());
+                    states.insert(key, crate::TerminalState {
+                        activated_terminals: activated_terminals.clone(),
+                        active_terminal_tab: active_terminal_tab.clone(),
+                        terminal_visible,
+                        sequence,
+                    });
+                }
+
+                // Broadcast to all connected clients with sequence number
+                let broadcast_msg = json!({
+                    "workspacePath": workspace_path,
+                    "worktreeName": worktree_name,
+                    "activatedTerminals": activated_terminals,
+                    "activeTerminalTab": active_terminal_tab,
+                    "terminalVisible": terminal_visible,
+                    "sequence": sequence,
+                }).to_string();
+                let _ = TERMINAL_STATE_BROADCAST.send(broadcast_msg);
+
+                // Also emit Tauri event for PC端 to receive Web端 changes
+                if let Some(app_handle) = crate::APP_HANDLE.lock().ok().and_then(|h| h.as_ref().cloned()) {
+                    let _ = app_handle.emit("terminal-state-update", json!({
+                        "workspacePath": workspace_path,
+                        "worktreeName": worktree_name,
+                        "activatedTerminals": activated_terminals,
+                        "activeTerminalTab": active_terminal_tab,
+                        "terminalVisible": terminal_visible,
+                        "sequence": sequence,
+                    }));
+                }
+            }
+
             _ => {}
         }
     }
@@ -722,18 +1113,105 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
     if let Some(handle) = lock_forwarder {
         handle.abort();
     }
+    if let Some(handle) = collaborator_forwarder {
+        handle.abort();
+    }
+    if let Some(handle) = terminal_state_forwarder {
+        handle.abort();
+    }
+
+    // Mark WebSocket disconnected
+    if let Ok(mut clients) = CONNECTED_CLIENTS.lock() {
+        if let Some(client) = clients.get_mut(&session_id) {
+            client.ws_connected = false;
+        }
+    }
     log::info!("WebSocket disconnected for session {}", session_id);
+}
+
+// -- Connected clients --
+
+async fn h_get_connected_clients() -> Response {
+    match CONNECTED_CLIENTS.lock() {
+        Ok(clients) => {
+            let list: Vec<ConnectedClient> = clients.values().cloned().collect();
+            Json(json!(list)).into_response()
+        }
+        Err(_) => Json(json!(Vec::<ConnectedClient>::new())).into_response(),
+    }
+}
+
+// -- Collaboration --
+
+async fn h_join_collaboration(headers: HeaderMap, Json(args): Json<Value>) -> Response {
+    let sid = session_id(&headers);
+    let ws_path = args["workspacePath"].as_str().unwrap_or("").to_string();
+    let wt_name = args["worktreeName"].as_str().unwrap_or("").to_string();
+    result_json(join_collaboration_impl(&sid, ws_path, wt_name))
+}
+
+async fn h_leave_collaboration(headers: HeaderMap, Json(args): Json<Value>) -> Response {
+    let sid = session_id(&headers);
+    let ws_path = args["workspacePath"].as_str().unwrap_or("").to_string();
+    let wt_name = args["worktreeName"].as_str().unwrap_or("").to_string();
+    leave_collaboration_impl(&sid, ws_path, wt_name);
+    result_void_ok()
+}
+
+async fn h_get_collaboration_info(Json(args): Json<Value>) -> Response {
+    let ws_path = args["workspacePath"].as_str().unwrap_or("").to_string();
+    let wt_name = args["worktreeName"].as_str().unwrap_or("").to_string();
+    result_json(get_collaboration_info_impl(ws_path, wt_name))
 }
 
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
 
+/// Check if an origin is allowed (localhost, LAN, or active ngrok URL).
+fn is_allowed_origin(origin: &str) -> bool {
+    // Always allow localhost / loopback
+    if origin.starts_with("http://localhost")
+        || origin.starts_with("https://localhost")
+        || origin.starts_with("http://127.0.0.1")
+        || origin.starts_with("https://127.0.0.1")
+        || origin.starts_with("http://[::1]")
+        || origin.starts_with("https://[::1]")
+    {
+        return true;
+    }
+    // Allow LAN IPs (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
+    if let Some(host) = origin.split("//").nth(1).map(|s| s.split(':').next().unwrap_or(s)) {
+        if host.starts_with("192.168.")
+            || host.starts_with("10.")
+            || (host.starts_with("172.") && {
+                host.split('.').nth(1).and_then(|s| s.parse::<u8>().ok()).map_or(false, |n| (16..=31).contains(&n))
+            })
+        {
+            return true;
+        }
+    }
+    // Allow the active ngrok URL if one exists
+    if let Ok(state) = SHARE_STATE.lock() {
+        if let Some(ref ngrok_url) = state.ngrok_url {
+            if origin.starts_with(ngrok_url) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 pub fn create_router() -> Router {
     let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+        .allow_origin(tower_http::cors::AllowOrigin::predicate(|origin: &HeaderValue, _| {
+            origin.to_str().map_or(false, is_allowed_origin)
+        }))
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers([
+            header::CONTENT_TYPE,
+            header::HeaderName::from_static("x-session-id"),
+        ]);
 
     // Resolve the dist/ folder relative to the current executable
     let dist_path = std::env::current_exe()
@@ -752,7 +1230,7 @@ pub fn create_router() -> Router {
 
     let serve_dir = ServeDir::new(&dist_path)
         .append_index_html_on_directories(true)
-        .fallback(ServeDir::new(&dist_path).append_index_html_on_directories(true));
+        .fallback(ServeFile::new(dist_path.join("index.html")));
 
     Router::new()
         // Workspace management
@@ -805,6 +1283,12 @@ pub fn create_router() -> Router {
         .route("/api/auth", post(h_auth))
         // Share info
         .route("/api/get_share_info", get(h_get_share_info))
+        // Connected clients
+        .route("/api/get_connected_clients", post(h_get_connected_clients))
+        // Collaboration
+        .route("/api/join_collaboration", post(h_join_collaboration))
+        .route("/api/leave_collaboration", post(h_leave_collaboration))
+        .route("/api/get_collaboration_info", post(h_get_collaboration_info))
         // ngrok
         .route("/api/get_ngrok_token", post(h_get_ngrok_token))
         .route("/api/set_ngrok_token", post(h_set_ngrok_token))
@@ -815,6 +1299,10 @@ pub fn create_router() -> Router {
         // WebSocket (auth handled in upgrade handler via query param)
         .route("/ws", get(h_ws_upgrade))
         .layer(axum::middleware::from_fn(auth_middleware))
+        .layer(axum::middleware::from_fn(localhost_only_middleware))
+        .layer(axum::middleware::from_fn(security_headers_middleware))
+        // Limit request body to 1MB to prevent DoS via oversized payloads
+        .layer(RequestBodyLimitLayer::new(1024 * 1024))
         .fallback_service(serve_dir)
         .layer(cors)
 }
@@ -825,14 +1313,23 @@ pub async fn start_server(port: u16, mut shutdown_rx: tokio::sync::watch::Receiv
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     log::info!("HTTP API server listening on http://{}", addr);
 
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .expect("Failed to bind HTTP server");
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async move {
-            let _ = shutdown_rx.changed().await;
-            log::info!("HTTP server shutting down gracefully");
-        })
-        .await
-        .expect("HTTP server error");
+    let listener = match tokio::net::TcpListener::bind(addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            log::error!("Failed to bind HTTP server on {}: {}", addr, e);
+            return;
+        }
+    };
+    if let Err(e) = axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(async move {
+        let _ = shutdown_rx.changed().await;
+        log::info!("HTTP server shutting down gracefully");
+    })
+    .await
+    {
+        log::error!("HTTP server error: {}", e);
+    }
 }

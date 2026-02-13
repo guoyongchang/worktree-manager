@@ -1,5 +1,6 @@
 import { useState, useEffect, type FC } from 'react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Dialog,
   DialogContent,
@@ -45,6 +46,7 @@ import type {
   MainWorkspaceStatus,
 } from '../types';
 import type { UpdaterState } from '../hooks/useUpdater';
+import type { ConnectedClient } from '../lib/backend';
 import { callBackend, getAppVersion, getWindowLabel, isMainWindow as checkIsMainWindow, isTauri } from '../lib/backend';
 
 // ==================== ShareBar ====================
@@ -56,15 +58,19 @@ const ShareBar: FC<{
   password: string;
   ngrokAvailable: boolean;
   ngrokLoading: boolean;
+  connectedClients?: ConnectedClient[];
   onToggleNgrok?: () => void;
-  onStart?: () => void;
+  onStart?: (port: number) => void;
   onStop?: () => void;
   onUpdatePassword?: (password: string) => void;
-}> = ({ active, url, ngrokUrl, password, ngrokAvailable, ngrokLoading, onToggleNgrok, onStart, onStop, onUpdatePassword }) => {
+}> = ({ active, url, ngrokUrl, password, ngrokAvailable, ngrokLoading, connectedClients = [], onToggleNgrok, onStart, onStop, onUpdatePassword }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [editingPassword, setEditingPassword] = useState('');
   const [passwordDirty, setPasswordDirty] = useState(false);
   const [passwordConfirmed, setPasswordConfirmed] = useState(false);
+  const [showShareDialog, setShowShareDialog] = useState(false);
+  const [sharePort, setSharePort] = useState<number>(0);
+  const [portError, setPortError] = useState<string | null>(null);
 
   // Sync editing password when prop changes (e.g., on share start)
   useEffect(() => {
@@ -87,19 +93,96 @@ const ShareBar: FC<{
     setTimeout(() => setPasswordConfirmed(false), 2000);
   };
 
+  const generateRandomPort = () => {
+    return 49152 + Math.floor(Math.random() * (65535 - 49152));
+  };
+
+  const handleOpenShareDialog = async () => {
+    // Get last port or generate random
+    const { getLastSharePort } = await import('../lib/backend');
+    const lastPort = await getLastSharePort();
+    setSharePort(lastPort || generateRandomPort());
+    setPortError(null);
+    setShowShareDialog(true);
+  };
+
+  const handleStartShare = () => {
+    // Validate port
+    if (sharePort < 1024 || sharePort > 65535) {
+      setPortError('端口必须在 1024-65535 之间');
+      return;
+    }
+    setShowShareDialog(false);
+    onStart?.(sharePort);
+  };
+
   if (!active) {
     return (
-      <div className="px-3 py-2 border-t border-slate-700/50">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onStart}
-          className="w-full justify-center gap-2 h-8 text-slate-400 hover:text-slate-200"
-        >
-          <ShareIcon className="w-3.5 h-3.5" />
-          <span className="text-xs">分享</span>
-        </Button>
-      </div>
+      <>
+        <div className="px-3 py-2 border-t border-slate-700/50">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleOpenShareDialog}
+            className="w-full justify-center gap-2 h-8 text-slate-400 hover:text-slate-200"
+          >
+            <ShareIcon className="w-3.5 h-3.5" />
+            <span className="text-xs">分享</span>
+          </Button>
+        </div>
+
+        {/* Share Configuration Dialog */}
+        <Dialog open={showShareDialog} onOpenChange={setShowShareDialog}>
+          <DialogContent className="max-w-[400px]">
+            <DialogHeader>
+              <DialogTitle>分享设置</DialogTitle>
+              <DialogDescription>
+                配置分享端口，局域网内的其他设备可以通过此端口访问
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div>
+                <label className="block text-sm text-slate-400 mb-2">端口</label>
+                <div className="flex gap-2">
+                  <Input
+                    type="number"
+                    value={sharePort}
+                    onChange={(e) => {
+                      setSharePort(parseInt(e.target.value) || 0);
+                      setPortError(null);
+                    }}
+                    min={1024}
+                    max={65535}
+                    className="flex-1"
+                  />
+                  <Button
+                    variant="secondary"
+                    size="icon"
+                    onClick={() => setSharePort(generateRandomPort())}
+                    title="随机生成端口"
+                  >
+                    🎲
+                  </Button>
+                </div>
+                {portError && (
+                  <p className="text-sm text-red-400 mt-1">{portError}</p>
+                )}
+                <p className="text-xs text-slate-500 mt-1">
+                  推荐使用 49152-65535 范围内的端口
+                </p>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="secondary" onClick={() => setShowShareDialog(false)}>
+                取消
+              </Button>
+              <Button onClick={handleStartShare}>
+                开始分享
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </>
     );
   }
 
@@ -224,6 +307,25 @@ const ShareBar: FC<{
           </Button>
         )}
       </div>
+      {/* Connected clients */}
+      {connectedClients.length > 0 && (
+        <div className="space-y-0.5">
+          <span className="text-[10px] font-medium text-slate-500">
+            客户端 ({connectedClients.length})
+          </span>
+          <div className="max-h-[60px] overflow-y-auto space-y-0">
+            {connectedClients.map(c => (
+              <div key={c.session_id} className="flex items-center gap-1.5 py-px px-1 rounded hover:bg-slate-700/20 group" title={`${c.ip}\n${c.user_agent}\n认证: ${c.authenticated_at}`}>
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${c.ws_connected ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+                <span className="text-[11px] text-slate-400 truncate flex-1 font-mono">{c.ip}</span>
+                {c.ws_connected && (
+                  <span className="text-[9px] text-blue-400/70 shrink-0">WS</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -258,12 +360,13 @@ interface WorktreeSidebarProps {
   shareUrl?: string | null;
   shareNgrokUrl?: string | null;
   sharePassword?: string;
-  onStartShare?: () => void;
+  onStartShare?: (port: number) => void;
   onStopShare?: () => void;
   onUpdateSharePassword?: (password: string) => void;
   ngrokAvailable?: boolean;
   ngrokLoading?: boolean;
   onToggleNgrok?: () => void;
+  connectedClients?: ConnectedClient[];
 }
 
 export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
@@ -300,8 +403,18 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
   ngrokAvailable = false,
   ngrokLoading = false,
   onToggleNgrok,
+  connectedClients = [],
 }) => {
-  const activeWorktrees = worktrees.filter(w => !w.is_archived);
+  const _isTauri = isTauri();
+
+  // 网页端只显示被锁定的 worktree（正在被桌面端使用的）
+  // 桌面端显示所有活动的 worktree
+  const activeWorktrees = worktrees.filter(w => {
+    if (w.is_archived) return false;
+    if (_isTauri) return true; // 桌面端显示所有
+    // 网页端只显示被锁定的
+    return lockedWorktrees[w.name];
+  });
   const archivedWorktrees = worktrees.filter(w => w.is_archived);
 
   const [appVersion, setAppVersion] = useState('');
@@ -310,7 +423,6 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
   const [currentWindowLabel, setCurrentWindowLabel] = useState('main');
 
   const isDev = import.meta.env.DEV;
-  const _isTauri = isTauri();
 
   useEffect(() => {
     checkIsMainWindow().then(setIsMainWin);
@@ -407,13 +519,15 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
             {activeWorktrees.map(wt => {
               const lockedBy = lockedWorktrees[wt.name];
               const isLockedByOther = lockedBy && lockedBy !== currentWindowLabel;
+              // 网页端允许选择被锁定的工作区（远程查看模式）
+              const canSelect = !isLockedByOther || !_isTauri;
               return (
                 <Tooltip key={wt.name}>
                   <TooltipTrigger asChild>
                     <button
-                      onClick={() => !isLockedByOther && onSelectWorktree(wt)}
+                      onClick={() => canSelect && onSelectWorktree(wt)}
                       className={`h-8 w-8 flex items-center justify-center rounded-md transition-colors shrink-0 ${
-                        isLockedByOther
+                        isLockedByOther && _isTauri
                           ? 'opacity-30 cursor-not-allowed'
                           : selectedWorktree?.name === wt.name
                             ? 'bg-blue-500/20 text-blue-400'
@@ -623,24 +737,26 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
           activeWorktrees.map(wt => {
             const lockedBy = lockedWorktrees[wt.name];
             const isLockedByOther = lockedBy && lockedBy !== currentWindowLabel;
+            // 网页端允许选择被锁定的工作区（远程查看模式）
+            const canSelect = !isLockedByOther || !_isTauri;
             return (
             <div
               key={wt.name}
               className={`px-4 py-2.5 transition-colors border-l-2 ${
-                isLockedByOther
-                  ? "border-transparent opacity-40 cursor-not-allowed"
+                isLockedByOther && _isTauri
+                  ? "border-transparent opacity-50 cursor-not-allowed"
                   : selectedWorktree?.name === wt.name
                     ? "bg-slate-700/30 border-blue-500 cursor-pointer"
                     : "border-transparent hover:bg-slate-700/20 cursor-pointer"
               }`}
-              onClick={() => !isLockedByOther && onSelectWorktree(wt)}
-              onContextMenu={(e) => !isLockedByOther && onContextMenu(e, wt)}
+              onClick={() => canSelect && onSelectWorktree(wt)}
+              onContextMenu={(e) => canSelect && onContextMenu(e, wt)}
             >
               <div className="flex items-center gap-2.5">
                 <FolderIcon className={`w-4 h-4 ${isLockedByOther ? 'text-slate-500' : 'text-blue-400'}`} />
                 <span className="font-medium text-sm truncate flex-1">{wt.name}</span>
                 {isLockedByOther && (
-                  <span className="text-[10px] text-slate-500 bg-slate-700/50 px-1.5 py-0.5 rounded">已占用</span>
+                  <span className="text-[10px] text-slate-500 bg-slate-700/50 px-1.5 py-0.5 rounded shrink-0">已占用</span>
                 )}
                 {wt.projects.some(p => p.has_uncommitted) && !isLockedByOther && (
                   <WarningIcon className="w-3.5 h-3.5 text-amber-500" />
@@ -687,6 +803,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
           password={sharePassword}
           ngrokAvailable={ngrokAvailable}
           ngrokLoading={ngrokLoading}
+          connectedClients={connectedClients}
           onToggleNgrok={onToggleNgrok}
           onStart={onStartShare}
           onStop={onStopShare}
