@@ -56,14 +56,14 @@ const ShareBar: FC<{
   url: string | null;
   ngrokUrl: string | null;
   password: string;
-  ngrokAvailable: boolean;
   ngrokLoading: boolean;
   connectedClients?: ConnectedClient[];
   onToggleNgrok?: () => void;
   onStart?: (port: number) => void;
   onStop?: () => void;
   onUpdatePassword?: (password: string) => void;
-}> = ({ active, url, ngrokUrl, password, ngrokAvailable, ngrokLoading, connectedClients = [], onToggleNgrok, onStart, onStop, onUpdatePassword }) => {
+  onKickClient?: (sessionId: string) => void;
+}> = ({ active, url, ngrokUrl, password, ngrokLoading, connectedClients = [], onToggleNgrok, onStart, onStop, onUpdatePassword, onKickClient }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [editingPassword, setEditingPassword] = useState('');
   const [passwordDirty, setPasswordDirty] = useState(false);
@@ -71,6 +71,7 @@ const ShareBar: FC<{
   const [showShareDialog, setShowShareDialog] = useState(false);
   const [sharePort, setSharePort] = useState<number>(0);
   const [portError, setPortError] = useState<string | null>(null);
+  const [kickingSessionId, setKickingSessionId] = useState<string | null>(null);
 
   // Sync editing password when prop changes (e.g., on share start)
   useEffect(() => {
@@ -98,21 +99,45 @@ const ShareBar: FC<{
   };
 
   const handleOpenShareDialog = async () => {
-    // Get last port or generate random
-    const lastPort = await getLastSharePort();
-    setSharePort(lastPort || generateRandomPort());
+    // Get last port or extract from current URL or generate random
+    let port = 0;
+    if (url) {
+      // Extract port from current URL
+      try {
+        const urlObj = new URL(url);
+        port = parseInt(urlObj.port) || 0;
+      } catch {
+        // ignore
+      }
+    }
+    if (!port) {
+      const lastPort = await getLastSharePort();
+      port = lastPort || generateRandomPort();
+    }
+    setSharePort(port);
     setPortError(null);
     setShowShareDialog(true);
   };
 
-  const handleStartShare = () => {
+  const handleStartShare = async () => {
     // Validate port
     if (sharePort < 1024 || sharePort > 65535) {
       setPortError('端口必须在 1024-65535 之间');
       return;
     }
     setShowShareDialog(false);
+
+    // If already sharing, stop first then restart with new port
+    if (active && onStop) {
+      await onStop();
+    }
+
     onStart?.(sharePort);
+  };
+
+  const handleKickClient = async (sessionId: string) => {
+    setKickingSessionId(null);
+    onKickClient?.(sessionId);
   };
 
   if (!active) {
@@ -187,48 +212,46 @@ const ShareBar: FC<{
 
   return (
     <div className="px-3 py-2 border-t border-slate-700/50 space-y-1.5">
-      {/* ngrok row */}
-      {ngrokAvailable && (
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] font-medium text-slate-500 shrink-0">NGROK:</span>
-          {ngrokUrl ? (
-            <>
-              <span className="flex-1 text-xs text-blue-400 truncate min-w-0 select-all" title={ngrokUrl}>
-                {ngrokUrl.replace(/^https?:\/\//, '')}
-              </span>
-              <TooltipProvider delayDuration={300}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => navigator.clipboard.writeText(ngrokUrl)}
-                      className="h-5 w-5 shrink-0"
-                    >
-                      <CopyIcon className="w-2.5 h-2.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top">复制外网链接</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            </>
-          ) : (
-            <span className="flex-1" />
-          )}
-          <button
-            type="button"
-            onClick={onToggleNgrok}
-            disabled={ngrokLoading}
-            className={`relative inline-flex h-4 w-7 items-center rounded-full shrink-0 transition-colors ${
-              ngrokLoading ? 'opacity-50 cursor-wait' : 'cursor-pointer'
-            } ${ngrokUrl ? 'bg-blue-500' : 'bg-slate-600'}`}
-          >
-            <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${
-              ngrokUrl ? 'translate-x-3.5' : 'translate-x-0.5'
-            }`} />
-          </button>
-        </div>
-      )}
+      {/* ngrok row - always show */}
+      <div className="flex items-center gap-1.5">
+        <span className="text-[10px] font-medium text-slate-500 shrink-0">NGROK:</span>
+        {ngrokUrl ? (
+          <>
+            <span className="flex-1 text-xs text-blue-400 truncate min-w-0 select-all" title={ngrokUrl}>
+              {ngrokUrl.replace(/^https?:\/\//, '')}
+            </span>
+            <TooltipProvider delayDuration={300}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => navigator.clipboard.writeText(ngrokUrl)}
+                    className="h-5 w-5 shrink-0"
+                  >
+                    <CopyIcon className="w-2.5 h-2.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">复制外网链接</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </>
+        ) : (
+          <span className="flex-1 text-xs text-slate-500">未启动</span>
+        )}
+        <button
+          type="button"
+          onClick={onToggleNgrok}
+          disabled={ngrokLoading}
+          className={`relative inline-flex h-4 w-7 items-center rounded-full shrink-0 transition-colors ${
+            ngrokLoading ? 'opacity-50 cursor-wait' : 'cursor-pointer'
+          } ${ngrokUrl ? 'bg-blue-500' : 'bg-slate-600'}`}
+        >
+          <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${
+            ngrokUrl ? 'translate-x-3.5' : 'translate-x-0.5'
+          }`} />
+        </button>
+      </div>
       {/* LAN URL row */}
       <div className="flex items-center gap-1">
         <span className="text-[9px] font-bold px-1 py-0.5 rounded shrink-0 bg-slate-600/30 text-slate-500">
@@ -250,6 +273,20 @@ const ShareBar: FC<{
               </Button>
             </TooltipTrigger>
             <TooltipContent side="top">复制链接</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleOpenShareDialog}
+                className="h-5 w-5 shrink-0 text-slate-400 hover:text-slate-200"
+                title="更改端口"
+              >
+                <SettingsIcon className="w-2.5 h-2.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">更改端口</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -320,11 +357,92 @@ const ShareBar: FC<{
                 {c.ws_connected && (
                   <span className="text-[9px] text-blue-400/70 shrink-0">WS</span>
                 )}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setKickingSessionId(c.session_id)}
+                  className="h-4 w-4 shrink-0 opacity-0 group-hover:opacity-100 hover:bg-red-500/20 hover:text-red-400"
+                  title="踢出客户端"
+                >
+                  <span className="text-[10px]">✕</span>
+                </Button>
               </div>
             ))}
           </div>
         </div>
       )}
+
+      {/* Kick Confirmation Dialog */}
+      <Dialog open={kickingSessionId !== null} onOpenChange={(open) => !open && setKickingSessionId(null)}>
+        <DialogContent className="max-w-[360px]">
+          <DialogHeader>
+            <DialogTitle>确认踢出客户端</DialogTitle>
+            <DialogDescription>
+              确定要踢出此客户端吗？该客户端将被断开连接并需要重新认证。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setKickingSessionId(null)}>
+              取消
+            </Button>
+            <Button variant="destructive" onClick={() => kickingSessionId && handleKickClient(kickingSessionId)}>
+              踢出
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Share Configuration Dialog */}
+      <Dialog open={showShareDialog} onOpenChange={setShowShareDialog}>
+        <DialogContent className="max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>{active ? '更改端口' : '分享设置'}</DialogTitle>
+            <DialogDescription>
+              {active ? '更改端口将重启分享服务' : '配置分享端口，局域网内的其他设备可以通过此端口访问'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div>
+              <label className="block text-sm text-slate-400 mb-2">端口</label>
+              <div className="flex gap-2">
+                <Input
+                  type="number"
+                  value={sharePort}
+                  onChange={(e) => {
+                    setSharePort(parseInt(e.target.value) || 0);
+                    setPortError(null);
+                  }}
+                  min={1024}
+                  max={65535}
+                  className="flex-1"
+                />
+                <Button
+                  variant="secondary"
+                  size="icon"
+                  onClick={() => setSharePort(generateRandomPort())}
+                  title="随机生成端口"
+                >
+                  🎲
+                </Button>
+              </div>
+              {portError && (
+                <p className="text-sm text-red-400 mt-1">{portError}</p>
+              )}
+              <p className="text-xs text-slate-500 mt-1">
+                推荐使用 49152-65535 范围内的端口
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setShowShareDialog(false)}>
+              取消
+            </Button>
+            <Button onClick={handleStartShare}>
+              {active ? '确认更改' : '开始分享'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
@@ -362,10 +480,10 @@ interface WorktreeSidebarProps {
   onStartShare?: (port: number) => void;
   onStopShare?: () => void;
   onUpdateSharePassword?: (password: string) => void;
-  ngrokAvailable?: boolean;
   ngrokLoading?: boolean;
   onToggleNgrok?: () => void;
   connectedClients?: ConnectedClient[];
+  onKickClient?: (sessionId: string) => void;
 }
 
 export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
@@ -399,10 +517,10 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
   onStartShare,
   onStopShare,
   onUpdateSharePassword,
-  ngrokAvailable = false,
   ngrokLoading = false,
   onToggleNgrok,
   connectedClients = [],
+  onKickClient,
 }) => {
   const _isTauri = isTauri();
 
@@ -800,13 +918,13 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
           url={shareUrl || null}
           ngrokUrl={shareNgrokUrl || null}
           password={sharePassword}
-          ngrokAvailable={ngrokAvailable}
           ngrokLoading={ngrokLoading}
           connectedClients={connectedClients}
           onToggleNgrok={onToggleNgrok}
           onStart={onStartShare}
           onStop={onStopShare}
           onUpdatePassword={onUpdateSharePassword}
+          onKickClient={onKickClient}
         />
       )}
 

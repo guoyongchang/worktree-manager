@@ -19,6 +19,7 @@ import {
   PlusIcon,
   ExternalLinkIcon,
 } from './Icons';
+import { GitOperations } from './GitOperations';
 import { EDITORS } from '../constants';
 import type {
   WorktreeListItem,
@@ -43,6 +44,7 @@ interface WorktreeDetailProps {
   onDelete?: () => void;
   onAddProject?: () => void;
   onAddProjectToWorktree?: () => void;
+  onRefresh?: () => void;
   error: string | null;
   onClearError: () => void;
   restoring?: boolean;
@@ -80,6 +82,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
   onDelete,
   onAddProject,
   onAddProjectToWorktree,
+  onRefresh,
   error,
   onClearError,
   restoring = false,
@@ -396,6 +399,15 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                     </Button>
                   </div>
                 </div>
+              </div>
+              <div className="mt-3 pt-3 border-t border-slate-700/50">
+                <GitOperations
+                  projectPath={proj.path}
+                  baseBranch={proj.base_branch}
+                  testBranch={proj.test_branch}
+                  currentBranch={proj.current_branch}
+                  onRefresh={onRefresh}
+                />
               </div>
             </div>
           ))}

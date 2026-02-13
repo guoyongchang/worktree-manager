@@ -1018,6 +1018,11 @@ async fn h_get_connected_clients() -> Response {
     }
 }
 
+async fn h_kick_client(Json(args): Json<Value>) -> Response {
+    let session_id = args["sessionId"].as_str().unwrap_or("").to_string();
+    result_ok(crate::kick_client_internal(&session_id))
+}
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -1157,6 +1162,7 @@ pub fn create_router() -> Router {
         .route("/api/get_share_info", get(h_get_share_info))
         // Connected clients
         .route("/api/get_connected_clients", post(h_get_connected_clients))
+        .route("/api/kick_client", post(h_kick_client))
         // ngrok
         .route("/api/get_ngrok_token", post(h_get_ngrok_token))
         .route("/api/set_ngrok_token", post(h_set_ngrok_token))
