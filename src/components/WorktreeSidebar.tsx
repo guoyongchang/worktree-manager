@@ -47,7 +47,7 @@ import type {
 } from '../types';
 import type { UpdaterState } from '../hooks/useUpdater';
 import type { ConnectedClient } from '../lib/backend';
-import { callBackend, getAppVersion, getWindowLabel, isMainWindow as checkIsMainWindow, isTauri } from '../lib/backend';
+import { callBackend, getAppVersion, getLastSharePort, getWindowLabel, isMainWindow as checkIsMainWindow, isTauri } from '../lib/backend';
 
 // ==================== ShareBar ====================
 
@@ -99,7 +99,6 @@ const ShareBar: FC<{
 
   const handleOpenShareDialog = async () => {
     // Get last port or generate random
-    const { getLastSharePort } = await import('../lib/backend');
     const lastPort = await getLastSharePort();
     setSharePort(lastPort || generateRandomPort());
     setPortError(null);
