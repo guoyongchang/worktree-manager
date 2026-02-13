@@ -35,6 +35,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": {
+      "../dist": "dist"
+    },
     "publisher": "Worktree Manager Team",
     "homepage": "https://github.com/guoyongchang/worktree-manager",
     "license": "MIT"

@@ -1070,17 +1070,35 @@ pub fn create_router() -> Router {
     // Resolve the dist/ folder relative to the current executable
     let dist_path = std::env::current_exe()
         .ok()
-        .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
-        .map(|dir| dir.join("dist"))
-        .unwrap_or_else(|| std::path::PathBuf::from("dist"));
-
-    // If the bundled dist doesn't exist, try the project-level dist (for dev)
-    let dist_path = if dist_path.exists() {
-        dist_path
-    } else {
-        // Fallback: relative to cargo manifest / project root
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../dist")
-    };
+        .and_then(|exe| {
+            let exe_dir = exe.parent()?;
+            // On macOS, check if we're in an app bundle (Contents/MacOS/)
+            if cfg!(target_os = "macos") {
+                if let Some(contents_dir) = exe_dir.parent() {
+                    if contents_dir.file_name().and_then(|n| n.to_str()) == Some("Contents") {
+                        // In app bundle: dist is in Contents/Resources/dist
+                        let resources_dist = contents_dir.join("Resources").join("dist");
+                        if resources_dist.exists() {
+                            log::info!("Using dist path from app bundle: {:?}", resources_dist);
+                            return Some(resources_dist);
+                        }
+                    }
+                }
+            }
+            // Try dist next to executable
+            let exe_dist = exe_dir.join("dist");
+            if exe_dist.exists() {
+                log::info!("Using dist path next to executable: {:?}", exe_dist);
+                return Some(exe_dist);
+            }
+            None
+        })
+        .unwrap_or_else(|| {
+            // Fallback: relative to cargo manifest / project root (for dev)
+            let fallback = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../dist");
+            log::info!("Using fallback dist path: {:?}", fallback);
+            fallback
+        });
 
     let serve_dir = ServeDir::new(&dist_path)
         .append_index_html_on_directories(true)
