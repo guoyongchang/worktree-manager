@@ -2545,7 +2545,10 @@ fn broadcast_lock_state(workspace_path: &str) {
 
 #[tauri::command]
 fn open_devtools(webview_window: tauri::WebviewWindow) {
+    #[cfg(debug_assertions)]
     webview_window.open_devtools();
+    #[cfg(not(debug_assertions))]
+    let _ = webview_window;
 }
 
 // ==================== Tauri 入口 ====================
