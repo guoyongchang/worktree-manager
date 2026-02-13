@@ -8,9 +8,7 @@
 import { getSessionId } from './backend';
 
 type PtyCallback = (data: string) => void;
-type TmuxCallback = (data: string) => void;
 type LockCallback = (locks: Record<string, string>) => void;
-type CollaboratorCallback = (msg: { workspacePath: string; worktreeName: string; collaborators: string[]; owner?: string }) => void;
 type TerminalStateCallback = (msg: {
   workspacePath: string;
   worktreeName: string;
@@ -29,9 +27,7 @@ class WebSocketManager {
 
   // Callback registries
   private ptyCallbacks = new Map<string, PtyCallback>();
-  private tmuxCallbacks = new Map<string, TmuxCallback>();
   private lockCallback: LockCallback | null = null;
-  private collaboratorCallbacks: CollaboratorCallback[] = [];
   private terminalStateCallbacks: TerminalStateCallback[] = [];
 
   // Pending subscriptions to send after reconnect
@@ -100,22 +96,9 @@ class WebSocketManager {
         }
         break;
       }
-      case 'tmux_output': {
-        if (msg.tmuxSession && msg.data) {
-          const cb = this.tmuxCallbacks.get(msg.tmuxSession);
-          if (cb) cb(msg.data);
-        }
-        break;
-      }
       case 'lock_update': {
         if (msg.locks && this.lockCallback) {
           this.lockCallback(msg.locks);
-        }
-        break;
-      }
-      case 'collaborator_update': {
-        for (const cb of this.collaboratorCallbacks) {
-          cb(msg);
         }
         break;
       }
@@ -136,9 +119,7 @@ class WebSocketManager {
 
   private hasActiveSubscriptions(): boolean {
     return this.ptyCallbacks.size > 0
-      || this.tmuxCallbacks.size > 0
       || !!this.lockCallback
-      || this.collaboratorCallbacks.length > 0
       || this.terminalStateCallbacks.length > 0;
   }
 
@@ -166,33 +147,6 @@ class WebSocketManager {
 
   writePty(sessionId: string, data: string) {
     this.sendJson({ type: 'pty_write', sessionId, data });
-  }
-
-  subscribeTmux(tmuxSession: string, onData: TmuxCallback) {
-    this.tmuxCallbacks.set(tmuxSession, onData);
-  }
-
-  unsubscribeTmux(tmuxSession: string) {
-    this.tmuxCallbacks.delete(tmuxSession);
-  }
-
-  writeTmux(tmuxSession: string, data: string) {
-    this.sendJson({ type: 'tmux_input', tmuxSession, data });
-  }
-
-  resizeTmux(tmuxSession: string, cols: number, rows: number) {
-    this.sendJson({ type: 'tmux_resize', tmuxSession, cols, rows });
-  }
-
-  captureTmux(tmuxSession: string) {
-    this.sendJson({ type: 'tmux_capture', tmuxSession });
-  }
-
-  subscribeCollaborators(callback: CollaboratorCallback) {
-    this.collaboratorCallbacks.push(callback);
-    return () => {
-      this.collaboratorCallbacks = this.collaboratorCallbacks.filter(cb => cb !== callback);
-    };
   }
 
   subscribeTerminalState(workspacePath: string, worktreeName: string, callback: TerminalStateCallback) {
@@ -239,11 +193,9 @@ class WebSocketManager {
       this.reconnectTimer = null;
     }
     this.ptyCallbacks.clear();
-    this.tmuxCallbacks.clear();
     this.pendingPtySubscriptions.clear();
     this.lockCallback = null;
     this.pendingLockSubscription = null;
-    this.collaboratorCallbacks = [];
     this.terminalStateCallbacks = [];
     if (this.ws) {
       this.ws.close();

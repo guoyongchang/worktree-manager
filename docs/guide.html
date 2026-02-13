@@ -663,7 +663,7 @@ npm run tauri build</code></pre>
                 <li>浏览器会显示一个<strong>密码输入页面</strong>，输入你设置的密码即可进入</li>
                 <li>进入后看到与桌面端相同的界面，包括 Worktree 列表、分支状态等</li>
                 <li>可以使用<strong>内置终端</strong>（通过 WebSocket 实时传输）</li>
-                <li>可以<strong>加入协作</strong>，与桌面端用户共享同一个 tmux 终端会话</li>
+                <li>可以<strong>加入协作</strong>，与桌面端用户共享终端会话</li>
                 <li>所有操作通过 WebSocket 实时同步，延迟极低</li>
               </ol>
               <div class="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4 mt-4">
@@ -700,21 +700,6 @@ npm run tauri build</code></pre>
                 <span class="text-slate-500"># ngrok 外网地址示例</span><br>
                 <span class="text-green-400">外网地址: https://a1b2c3d4.ngrok-free.app</span><br>
                 <span class="text-slate-500"># 任何能上网的人都可以通过此地址访问</span>
-              </div>
-            </div>
-
-            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
-              <h3 class="text-xl font-semibold mb-4">协作模式（tmux 共享终端）</h3>
-              <p class="text-slate-300 mb-4">当多个用户同时访问同一个 Worktree 时，可以进入<strong>协作模式</strong>：</p>
-              <ul class="list-disc list-inside space-y-2 text-slate-300">
-                <li>第一个打开某个 Worktree 的用户成为<strong>"所有者"</strong></li>
-                <li>后续加入的用户成为<strong>"协作者"</strong>，共享同一个 tmux 终端会话</li>
-                <li>所有协作者能看到相同的终端输出，也可以输入命令</li>
-                <li>顶部会显示<strong>协作者栏</strong>，列出当前在线的所有用户</li>
-                <li>离开 Worktree 时会自动退出协作</li>
-              </ul>
-              <div class="bg-blue-900/20 border border-blue-700 rounded-lg p-4 mt-4">
-                <p class="text-blue-200 text-sm"><strong>&#x1F4A1; 前提条件：</strong>协作模式依赖 <code>tmux</code>。macOS 用户可通过 <code>brew install tmux</code> 安装，Linux 发行版通常自带或可通过包管理器安装。</p>
               </div>
             </div>
 
@@ -794,7 +779,6 @@ npm run tauri build</code></pre>
                       <li>检查 WebSocket 连接状态（浏览器开发者工具 &rarr; Network &rarr; WS）</li>
                       <li>如果使用 ngrok，确认 ngrok 隧道仍在运行</li>
                       <li>尝试刷新页面重新连接</li>
-                      <li>协作模式需要 tmux，确认分享者的机器上已安装 tmux</li>
                     </ul>
                   </div>
                 </details>

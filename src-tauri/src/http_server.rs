@@ -29,13 +29,11 @@ use crate::{
     delete_archived_worktree_impl, add_project_to_worktree_impl,
     clone_project_impl, unregister_window_impl,
     lock_worktree_impl, unlock_worktree_impl,
-    // Collaboration functions
-    join_collaboration_impl, leave_collaboration_impl, get_collaboration_info_impl,
     // Direct functions (no window context)
     WorkspaceConfig, CreateWorktreeRequest, AddProjectToWorktreeRequest,
     SwitchBranchRequest, CloneProjectRequest, OpenEditorRequest,
     PTY_MANAGER, SHARE_STATE, AUTHENTICATED_SESSIONS, CONNECTED_CLIENTS, LOCK_BROADCAST,
-    TMUX_MANAGER, COLLABORATOR_BROADCAST, AUTH_RATE_LIMITER, TERMINAL_STATE_BROADCAST,
+    AUTH_RATE_LIMITER, TERMINAL_STATE_BROADCAST,
     ConnectedClient, load_workspace_config,
 };
 
@@ -689,7 +687,6 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
     // Track spawned forwarder tasks so we can abort them on disconnect
     let mut pty_forwarders: HashMap<String, tokio::task::JoinHandle<()>> = HashMap::new();
     let mut lock_forwarder: Option<tokio::task::JoinHandle<()>> = None;
-    let mut collaborator_forwarder: Option<tokio::task::JoinHandle<()>> = None;
     let mut terminal_state_forwarder: Option<tokio::task::JoinHandle<()>> = None;
 
     // Process incoming messages
@@ -790,123 +787,6 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                         .map_err(|e| format!("Lock error: {}", e))
                         .and_then(|m| m.write_to_session(&pty_session_id, &data))
                 }).await;
-            }
-
-            "tmux_input" => {
-                let tmux_session = match parsed["tmuxSession"].as_str() {
-                    Some(s) => s.to_string(),
-                    None => continue,
-                };
-                let data = match parsed["data"].as_str() {
-                    Some(d) => d.to_string(),
-                    None => continue,
-                };
-                let _ = tokio::task::spawn_blocking(move || {
-                    TMUX_MANAGER
-                        .lock()
-                        .map_err(|e| format!("Lock error: {}", e))
-                        .and_then(|tmux| tmux.send_keys(&tmux_session, &data))
-                }).await;
-            }
-
-            "tmux_resize" => {
-                let tmux_session = match parsed["tmuxSession"].as_str() {
-                    Some(s) => s.to_string(),
-                    None => continue,
-                };
-                let cols = parsed["cols"].as_u64().unwrap_or(80) as u16;
-                let rows = parsed["rows"].as_u64().unwrap_or(24) as u16;
-                let _ = tokio::task::spawn_blocking(move || {
-                    TMUX_MANAGER
-                        .lock()
-                        .map_err(|e| format!("Lock error: {}", e))
-                        .and_then(|tmux| tmux.resize_session(&tmux_session, cols, rows))
-                }).await;
-            }
-
-            "tmux_capture" => {
-                let tmux_session = match parsed["tmuxSession"].as_str() {
-                    Some(s) => s.to_string(),
-                    None => continue,
-                };
-
-                // Run blocking tmux capture-pane on a dedicated thread
-                let ts = tmux_session.clone();
-                let output = tokio::task::spawn_blocking(move || {
-                    TMUX_MANAGER
-                        .lock()
-                        .map_err(|e| format!("Lock error: {}", e))
-                        .and_then(|tmux| tmux.capture_pane(&ts))
-                }).await.unwrap_or_else(|e| Err(format!("Task error: {}", e)));
-
-                if let Ok(output) = output {
-                    let msg = json!({
-                        "type": "tmux_output",
-                        "tmuxSession": tmux_session,
-                        "data": output,
-                    });
-                    let mut sender = ws_sender.lock().await;
-                    let _ = sender.send(Message::text(msg.to_string())).await;
-                }
-            }
-
-            "subscribe_collaborators" => {
-                let ws_path = match parsed["workspacePath"].as_str() {
-                    Some(s) => s.to_string(),
-                    None => continue,
-                };
-                let wt_name = match parsed["worktreeName"].as_str() {
-                    Some(s) => s.to_string(),
-                    None => continue,
-                };
-
-                // Send initial collaborator state
-                if let Ok(info) = get_collaboration_info_impl(ws_path.clone(), wt_name.clone()) {
-                    let msg = json!({
-                        "type": "collaborator_update",
-                        "workspacePath": ws_path,
-                        "worktreeName": wt_name,
-                        "collaborators": info.collaborators,
-                        "owner": info.owner,
-                    });
-                    let mut sender = ws_sender.lock().await;
-                    let _ = sender.send(Message::text(msg.to_string())).await;
-                }
-
-                // Abort existing collaborator forwarder if any
-                if let Some(handle) = collaborator_forwarder.take() {
-                    handle.abort();
-                }
-
-                // Subscribe to collaborator broadcast
-                let mut rx = COLLABORATOR_BROADCAST.subscribe();
-                let sender = Arc::clone(&ws_sender);
-                let handle = tokio::spawn(async move {
-                    loop {
-                        match rx.recv().await {
-                            Ok(json_str) => {
-                                if let Ok(val) = serde_json::from_str::<Value>(&json_str) {
-                                    if val["workspacePath"].as_str() == Some(&ws_path)
-                                        && val["worktreeName"].as_str() == Some(&wt_name) {
-                                        let msg = json!({
-                                            "type": "collaborator_update",
-                                            "workspacePath": &ws_path,
-                                            "worktreeName": &wt_name,
-                                            "collaborators": val["collaborators"],
-                                        });
-                                        let mut sender = sender.lock().await;
-                                        if sender.send(Message::text(msg.to_string())).await.is_err() {
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                        }
-                    }
-                });
-                collaborator_forwarder = Some(handle);
             }
 
             "subscribe_locks" => {
@@ -1113,9 +993,6 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
     if let Some(handle) = lock_forwarder {
         handle.abort();
     }
-    if let Some(handle) = collaborator_forwarder {
-        handle.abort();
-    }
     if let Some(handle) = terminal_state_forwarder {
         handle.abort();
     }
@@ -1139,29 +1016,6 @@ async fn h_get_connected_clients() -> Response {
         }
         Err(_) => Json(json!(Vec::<ConnectedClient>::new())).into_response(),
     }
-}
-
-// -- Collaboration --
-
-async fn h_join_collaboration(headers: HeaderMap, Json(args): Json<Value>) -> Response {
-    let sid = session_id(&headers);
-    let ws_path = args["workspacePath"].as_str().unwrap_or("").to_string();
-    let wt_name = args["worktreeName"].as_str().unwrap_or("").to_string();
-    result_json(join_collaboration_impl(&sid, ws_path, wt_name))
-}
-
-async fn h_leave_collaboration(headers: HeaderMap, Json(args): Json<Value>) -> Response {
-    let sid = session_id(&headers);
-    let ws_path = args["workspacePath"].as_str().unwrap_or("").to_string();
-    let wt_name = args["worktreeName"].as_str().unwrap_or("").to_string();
-    leave_collaboration_impl(&sid, ws_path, wt_name);
-    result_void_ok()
-}
-
-async fn h_get_collaboration_info(Json(args): Json<Value>) -> Response {
-    let ws_path = args["workspacePath"].as_str().unwrap_or("").to_string();
-    let wt_name = args["worktreeName"].as_str().unwrap_or("").to_string();
-    result_json(get_collaboration_info_impl(ws_path, wt_name))
 }
 
 // ---------------------------------------------------------------------------
@@ -1285,10 +1139,6 @@ pub fn create_router() -> Router {
         .route("/api/get_share_info", get(h_get_share_info))
         // Connected clients
         .route("/api/get_connected_clients", post(h_get_connected_clients))
-        // Collaboration
-        .route("/api/join_collaboration", post(h_join_collaboration))
-        .route("/api/leave_collaboration", post(h_leave_collaboration))
-        .route("/api/get_collaboration_info", post(h_get_collaboration_info))
         // ngrok
         .route("/api/get_ngrok_token", post(h_get_ngrok_token))
         .route("/api/set_ngrok_token", post(h_set_ngrok_token))

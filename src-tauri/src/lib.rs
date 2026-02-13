@@ -15,18 +15,13 @@ use tauri::Emitter;
 
 mod git_ops;
 mod pty_manager;
-mod tmux_manager;
 pub mod http_server;
 
 use git_ops::{get_worktree_info, get_branch_status, BranchStatus};
 use pty_manager::PtyManager;
-use tmux_manager::TmuxManager;
 
 // PTY Manager 全局实例
 pub static PTY_MANAGER: Lazy<Mutex<PtyManager>> = Lazy::new(|| Mutex::new(PtyManager::new()));
-
-// Tmux Manager 全局实例
-pub static TMUX_MANAGER: Lazy<Mutex<TmuxManager>> = Lazy::new(|| Mutex::new(TmuxManager::new()));
 
 // 多窗口 workspace 绑定：window_label -> workspace_path
 pub static WINDOW_WORKSPACES: Lazy<Mutex<HashMap<String, String>>> = Lazy::new(|| Mutex::new(HashMap::new()));
@@ -34,17 +29,6 @@ pub static WINDOW_WORKSPACES: Lazy<Mutex<HashMap<String, String>>> = Lazy::new(|
 // 多窗口 worktree 锁定：(workspace_path, worktree_name) -> window_label
 // 同一 worktree 只能被一个窗口独占选中
 pub static WORKTREE_LOCKS: Lazy<Mutex<HashMap<(String, String), String>>> = Lazy::new(|| Mutex::new(HashMap::new()));
-
-// Worktree 协作者映射：(workspace_path, worktree_name) -> Vec<session_id>
-// 允许多个会话同时协作同一个 worktree（通过 tmux 共享）
-pub static WORKTREE_COLLABORATORS: Lazy<Mutex<HashMap<(String, String), Vec<String>>>> = Lazy::new(|| Mutex::new(HashMap::new()));
-
-// Broadcast channel for collaborator changes (WebSocket push)
-// Increased capacity from 64 to 256 to reduce message lag and drops
-pub static COLLABORATOR_BROADCAST: Lazy<tokio::sync::broadcast::Sender<String>> = Lazy::new(|| {
-    let (tx, _) = tokio::sync::broadcast::channel(256);
-    tx
-});
 
 // ==================== 分享状态 ====================
 
@@ -2538,194 +2522,6 @@ fn get_connected_clients() -> Vec<ConnectedClient> {
     clients.values().cloned().collect()
 }
 
-// ==================== Worktree 协作功能 ====================
-
-#[derive(Debug, Serialize, Clone)]
-pub struct CollaborationInfo {
-    pub tmux_session: String,
-    pub collaborators: Vec<String>,
-    pub owner: String,
-}
-
-/// 加入 worktree 协作（创建或附加到 tmux session）
-pub fn join_collaboration_impl(
-    session_id: &str,
-    workspace_path: String,
-    worktree_name: String,
-) -> Result<CollaborationInfo, String> {
-    // 检查 tmux 是否可用
-    if !TmuxManager::is_available() {
-        return Err("tmux is not installed or not available".to_string());
-    }
-
-    let key = (workspace_path.clone(), worktree_name.clone());
-
-    // 获取 worktree 路径作为 cwd
-    let worktree_path = get_worktree_path_impl(&workspace_path, &worktree_name)?;
-
-    // 获取或创建 tmux session
-    let mut tmux = TMUX_MANAGER.lock()
-        .map_err(|e| format!("Failed to lock tmux manager: {}", e))?;
-    let tmux_session = tmux.get_or_create_session(&workspace_path, &worktree_name, &worktree_path)?;
-    drop(tmux);
-
-    // 添加到协作者列表
-    let mut collaborators = WORKTREE_COLLABORATORS.lock()
-        .map_err(|e| format!("Failed to lock collaborators: {}", e))?;
-    let collaborator_list = collaborators.entry(key.clone()).or_insert_with(Vec::new);
-
-    if !collaborator_list.contains(&session_id.to_string()) {
-        collaborator_list.push(session_id.to_string());
-    }
-
-    let owner = collaborator_list.first().cloned().unwrap_or_default();
-    let all_collaborators = collaborator_list.clone();
-    drop(collaborators);
-
-    // 广播协作者变化
-    broadcast_collaborator_update(&key, &all_collaborators);
-
-    log::info!("Session {} joined collaboration for worktree {}/{}", session_id, workspace_path, worktree_name);
-
-    Ok(CollaborationInfo {
-        tmux_session,
-        collaborators: all_collaborators,
-        owner,
-    })
-}
-
-/// 离开 worktree 协作
-pub fn leave_collaboration_impl(
-    session_id: &str,
-    workspace_path: String,
-    worktree_name: String,
-) {
-    let key = (workspace_path.clone(), worktree_name.clone());
-    let Ok(mut collaborators) = WORKTREE_COLLABORATORS.lock() else {
-        log::error!("Failed to lock collaborators in leave_collaboration");
-        return;
-    };
-
-    if let Some(list) = collaborators.get_mut(&key) {
-        list.retain(|s| s != session_id);
-        let remaining = list.clone();
-
-        // 如果没有协作者了，清理 tmux session
-        if remaining.is_empty() {
-            collaborators.remove(&key);
-            drop(collaborators);
-
-            let Ok(mut tmux) = TMUX_MANAGER.lock() else {
-                log::error!("Failed to lock tmux manager for cleanup");
-                return;
-            };
-            let session_name = format!(
-                "wt-{}-{}",
-                workspace_path.replace(['/', '\\'], "-"),
-                worktree_name.replace(['/', '\\'], "-")
-            );
-            let _ = tmux.kill_session(&session_name);
-        } else {
-            drop(collaborators);
-            broadcast_collaborator_update(&key, &remaining);
-        }
-    }
-
-    log::info!("Session {} left collaboration for worktree {}/{}", session_id, workspace_path, worktree_name);
-}
-
-/// 获取 worktree 的协作信息
-pub fn get_collaboration_info_impl(
-    workspace_path: String,
-    worktree_name: String,
-) -> Result<CollaborationInfo, String> {
-    let key = (workspace_path.clone(), worktree_name.clone());
-    let collaborators = WORKTREE_COLLABORATORS.lock()
-        .map_err(|e| format!("Failed to lock collaborators: {}", e))?;
-
-    let collaborator_list = collaborators.get(&key).cloned().unwrap_or_default();
-    let owner = collaborator_list.first().cloned().unwrap_or_default();
-
-    let tmux_session = format!(
-        "wt-{}-{}",
-        workspace_path.replace(['/', '\\'], "-"),
-        worktree_name.replace(['/', '\\'], "-")
-    );
-
-    Ok(CollaborationInfo {
-        tmux_session,
-        collaborators: collaborator_list,
-        owner,
-    })
-}
-
-// ==================== Tmux Commands (for desktop collaboration) ====================
-
-#[tauri::command]
-fn tmux_capture(tmux_session: String, cwd: Option<String>) -> Result<String, String> {
-    // Check if we need to create the session
-    if let Some(ref cwd_path) = cwd {
-        let tmux = TMUX_MANAGER.lock()
-            .map_err(|e| format!("Lock error: {}", e))?;
-        if !tmux.session_exists(&tmux_session) {
-            tmux.create_session_with_cwd(&tmux_session, Some(cwd_path))?;
-        }
-    }
-
-    // Capture the pane
-    let tmux = TMUX_MANAGER.lock()
-        .map_err(|e| format!("Lock error: {}", e))?;
-    tmux.capture_pane(&tmux_session)
-}
-
-#[tauri::command]
-fn tmux_input(tmux_session: String, data: String) -> Result<(), String> {
-    let tmux = TMUX_MANAGER.lock()
-        .map_err(|e| format!("Lock error: {}", e))?;
-    tmux.send_keys(&tmux_session, &data)
-}
-
-#[tauri::command]
-fn join_collaboration(
-    window: tauri::Window,
-    workspace_path: String,
-    worktree_name: String,
-) -> Result<CollaborationInfo, String> {
-    let session_id = window.label().to_string();
-    join_collaboration_impl(&session_id, workspace_path, worktree_name)
-}
-
-#[tauri::command]
-fn leave_collaboration(
-    window: tauri::Window,
-    workspace_path: String,
-    worktree_name: String,
-) {
-    let session_id = window.label().to_string();
-    leave_collaboration_impl(&session_id, workspace_path, worktree_name);
-}
-
-#[tauri::command]
-fn get_collaboration_info(
-    workspace_path: String,
-    worktree_name: String,
-) -> Result<CollaborationInfo, String> {
-    get_collaboration_info_impl(workspace_path, worktree_name)
-}
-
-/// 获取 worktree 的实际文件系统路径
-fn get_worktree_path_impl(workspace_path: &str, worktree_name: &str) -> Result<String, String> {
-    let _config = load_workspace_config(workspace_path);
-    let worktrees_dir = PathBuf::from(workspace_path).join("worktrees");
-    let worktree_path = worktrees_dir.join(worktree_name);
-
-    if !worktree_path.exists() {
-        return Err(format!("Worktree {} does not exist", worktree_name));
-    }
-
-    Ok(normalize_path(&worktree_path.to_string_lossy()))
-}
-
 /// Broadcast the current lock state for a given workspace to all WebSocket clients.
 /// `locks` must already be dropped before calling this to avoid deadlocks.
 fn broadcast_lock_state(workspace_path: &str) {
@@ -2742,18 +2538,6 @@ fn broadcast_lock_state(workspace_path: &str) {
         "locks": lock_snapshot,
     })) {
         let _ = LOCK_BROADCAST.send(json_str);
-    }
-}
-
-/// 广播协作者变化
-fn broadcast_collaborator_update(key: &(String, String), collaborators: &[String]) {
-    let (workspace_path, worktree_name) = key;
-    if let Ok(json_str) = serde_json::to_string(&serde_json::json!({
-        "workspacePath": workspace_path,
-        "worktreeName": worktree_name,
-        "collaborators": collaborators,
-    })) {
-        let _ = COLLABORATOR_BROADCAST.send(json_str);
     }
 }
 
@@ -2844,13 +2628,6 @@ pub fn run() {
             get_last_share_port,
             start_ngrok_tunnel,
             stop_ngrok_tunnel,
-            // Collaboration
-            join_collaboration,
-            leave_collaboration,
-            get_collaboration_info,
-            // Tmux (for desktop collaboration)
-            tmux_capture,
-            tmux_input,
             // DevTools
             open_devtools,
         ])
