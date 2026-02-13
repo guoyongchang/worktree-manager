@@ -210,6 +210,8 @@ pub struct GlobalConfig {
     pub ngrok_token: Option<String>,
     #[serde(default)]
     pub last_share_port: Option<u16>,  // 上次使用的分享端口
+    #[serde(default)]
+    pub last_share_password: Option<String>,  // 上次使用的分享密码
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -225,6 +227,7 @@ impl Default for GlobalConfig {
             current_workspace: None,
             ngrok_token: None,
             last_share_port: None,
+            last_share_password: None,
         }
     }
 }
@@ -1718,6 +1721,37 @@ fn parse_repo_url(url: &str) -> Result<String, String> {
     Err(format!("Invalid repository URL format: {}", url))
 }
 
+// ==================== Tauri 命令：Git 高级操作 ====================
+
+#[tauri::command]
+fn sync_with_base_branch(path: String, base_branch: String) -> Result<String, String> {
+    let normalized = normalize_path(&path);
+    git_ops::sync_with_base_branch(Path::new(&normalized), &base_branch)
+}
+
+#[tauri::command]
+fn merge_to_test_branch(path: String, test_branch: String) -> Result<String, String> {
+    let normalized = normalize_path(&path);
+    git_ops::merge_to_test_branch(Path::new(&normalized), &test_branch)
+}
+
+#[tauri::command]
+fn get_branch_diff_stats(path: String, base_branch: String) -> git_ops::BranchDiffStats {
+    let normalized = normalize_path(&path);
+    git_ops::get_branch_diff_stats(Path::new(&normalized), &base_branch)
+}
+
+#[tauri::command]
+fn create_pull_request(
+    path: String,
+    base_branch: String,
+    title: String,
+    body: String,
+) -> Result<String, String> {
+    let normalized = normalize_path(&path);
+    git_ops::create_pull_request(Path::new(&normalized), &base_branch, &title, &body)
+}
+
 // ==================== Tauri 命令：工具 ====================
 
 #[tauri::command]
@@ -2262,6 +2296,12 @@ async fn get_last_share_port() -> Result<Option<u16>, String> {
 }
 
 #[tauri::command]
+async fn get_last_share_password() -> Result<Option<String>, String> {
+    let config = load_global_config();
+    Ok(config.last_share_password)
+}
+
+#[tauri::command]
 async fn start_sharing(window: tauri::Window, port: u16, password: String) -> Result<String, String> {
     let workspace_path = get_window_workspace_path(window.label())
         .ok_or("No workspace selected")?;
@@ -2310,14 +2350,15 @@ async fn start_sharing(window: tauri::Window, port: u16, password: String) -> Re
         state.active = true;
         state.workspace_path = Some(workspace_path.clone());
         state.port = port;
-        state.password = Some(password);
+        state.password = Some(password.clone());
         state.shutdown_tx = Some(tx);
     }
 
-    // 保存端口到全局配置
+    // 保存端口和密码到全局配置
     {
         let mut config = load_global_config();
         config.last_share_port = Some(port);
+        config.last_share_password = Some(password.clone());
         let _ = save_global_config_internal(&config);
     }
 
@@ -2522,6 +2563,31 @@ fn get_connected_clients() -> Vec<ConnectedClient> {
     clients.values().cloned().collect()
 }
 
+/// Kick a client by session ID (disconnect and remove from authenticated sessions)
+pub fn kick_client_internal(session_id: &str) -> Result<(), String> {
+    log::info!("Kicking client with session ID: {}", session_id);
+
+    // Remove from authenticated sessions
+    if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() {
+        sessions.remove(session_id);
+    }
+
+    // Remove from connected clients
+    if let Ok(mut clients) = CONNECTED_CLIENTS.lock() {
+        clients.remove(session_id);
+    }
+
+    // Note: WebSocket connections will be automatically closed when the client
+    // tries to make the next request and fails authentication
+
+    Ok(())
+}
+
+#[tauri::command]
+fn kick_client(session_id: String) -> Result<(), String> {
+    kick_client_internal(&session_id)
+}
+
 /// Broadcast the current lock state for a given workspace to all WebSocket clients.
 /// `locks` must already be dropped before calling this to avoid deadlocks.
 fn broadcast_lock_state(workspace_path: &str) {
@@ -2595,6 +2661,10 @@ pub fn run() {
             // Git 操作
             switch_branch,
             clone_project,
+            sync_with_base_branch,
+            merge_to_test_branch,
+            get_branch_diff_stats,
+            create_pull_request,
             // 工具
             open_in_terminal,
             open_in_editor,
@@ -2625,10 +2695,12 @@ pub fn run() {
             get_share_state,
             update_share_password,
             get_connected_clients,
+            kick_client,
             // ngrok
             get_ngrok_token,
             set_ngrok_token,
             get_last_share_port,
+            get_last_share_password,
             start_ngrok_tunnel,
             stop_ngrok_tunnel,
             // DevTools

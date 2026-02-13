@@ -189,3 +189,15 @@ export const EyeIcon: FC<IconProps> = ({ className = "w-4 h-4" }) => (
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
   </svg>
 );
+
+export const GitMergeIcon: FC<IconProps> = ({ className = "w-4 h-4" }) => (
+  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 3v12m0 0a3 3 0 106 0m-6 0a3 3 0 100 6m12-9a3 3 0 10-3-3m3 3v3a3 3 0 01-3 3h-6" />
+  </svg>
+);
+
+export const GitPullRequestIcon: FC<IconProps> = ({ className = "w-4 h-4" }) => (
+  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 11.5V14m0-2.5v-6a1.5 1.5 0 113 0m-3 6a1.5 1.5 0 00-3 0v2a7.5 7.5 0 0015 0v-5a1.5 1.5 0 00-3 0m-6-3V11m0-5.5v-1a1.5 1.5 0 013 0v1m0 0V11m0-5.5a1.5 1.5 0 013 0v3m0 0V11" />
+  </svg>
+);

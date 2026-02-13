@@ -205,6 +205,11 @@ export async function getLastSharePort(): Promise<number | null> {
   return callBackend<number | null>('get_last_share_port');
 }
 
+/** Get the last used share password. */
+export async function getLastSharePassword(): Promise<string | null> {
+  return callBackend<string | null>('get_last_share_password');
+}
+
 // ---------------------------------------------------------------------------
 // Connected clients API
 // ---------------------------------------------------------------------------
@@ -220,6 +225,10 @@ export interface ConnectedClient {
 
 export async function getConnectedClients(): Promise<ConnectedClient[]> {
   return callBackend<ConnectedClient[]>('get_connected_clients');
+}
+
+export async function kickClient(sessionId: string): Promise<void> {
+  return callBackend('kick_client', { sessionId });
 }
 
 /** Browser mode: fetch info about the shared workspace from the HTTP server. */
@@ -266,4 +275,39 @@ export async function broadcastTerminalState(
     activeTerminalTab,
     terminalVisible,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Git Operations API
+// ---------------------------------------------------------------------------
+
+export interface BranchDiffStats {
+  ahead: number;
+  behind: number;
+  changed_files: number;
+}
+
+/** Sync with base branch (pull from base branch) */
+export async function syncWithBaseBranch(path: string, baseBranch: string): Promise<string> {
+  return callBackend<string>('sync_with_base_branch', { path, baseBranch });
+}
+
+/** Merge current branch to test branch */
+export async function mergeToTestBranch(path: string, testBranch: string): Promise<string> {
+  return callBackend<string>('merge_to_test_branch', { path, testBranch });
+}
+
+/** Get branch diff statistics */
+export async function getBranchDiffStats(path: string, baseBranch: string): Promise<BranchDiffStats> {
+  return callBackend<BranchDiffStats>('get_branch_diff_stats', { path, baseBranch });
+}
+
+/** Create a pull request using gh CLI */
+export async function createPullRequest(
+  path: string,
+  baseBranch: string,
+  title: string,
+  body: string
+): Promise<string> {
+  return callBackend<string>('create_pull_request', { path, baseBranch, title, body });
 }

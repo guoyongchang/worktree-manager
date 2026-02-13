@@ -31,7 +31,7 @@ import {
 } from "./components";
 import { useWorkspace, useTerminal, useUpdater } from "./hooks";
 import { Input } from "@/components/ui/input";
-import { callBackend, getWindowLabel, setWindowTitle, isTauri, getSessionId, clearSessionId, startSharing, stopSharing, getShareState, getShareInfo, authenticate, updateSharePassword, getNgrokToken, startNgrokTunnel, stopNgrokTunnel, getConnectedClients } from "./lib/backend";
+import { callBackend, getWindowLabel, setWindowTitle, isTauri, getSessionId, clearSessionId, startSharing, stopSharing, getShareState, getShareInfo, authenticate, updateSharePassword, getNgrokToken, setNgrokToken, startNgrokTunnel, stopNgrokTunnel, getConnectedClients, getLastSharePassword, kickClient } from "./lib/backend";
 import type { ConnectedClient } from "./lib/backend";
 import { getWebSocketManager } from "./lib/websocket";
 import type {
@@ -138,8 +138,10 @@ function App() {
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [shareNgrokUrl, setShareNgrokUrl] = useState<string | null>(null);
   const [sharePassword, setSharePassword] = useState('');
-  const [ngrokAvailable, setNgrokAvailable] = useState(false);
   const [ngrokLoading, setNgrokLoading] = useState(false);
+  const [showNgrokTokenDialog, setShowNgrokTokenDialog] = useState(false);
+  const [ngrokTokenInput, setNgrokTokenInput] = useState('');
+  const [savingNgrokToken, setSavingNgrokToken] = useState(false);
 
   // Connected clients tracking
   const [connectedClients, setConnectedClients] = useState<ConnectedClient[]>([]);
@@ -494,6 +496,13 @@ function App() {
         await stopNgrokTunnel();
         setShareNgrokUrl(null);
       } else {
+        // Check if ngrok token is configured
+        const token = await getNgrokToken();
+        if (!token) {
+          setNgrokLoading(false);
+          setShowNgrokTokenDialog(true);
+          return;
+        }
         const ngrokUrl = await startNgrokTunnel();
         setShareNgrokUrl(ngrokUrl);
       }
@@ -513,6 +522,36 @@ function App() {
     }
   }, [workspace]);
 
+  const handleKickClient = useCallback(async (sessionId: string) => {
+    try {
+      await kickClient(sessionId);
+      // Refresh connected clients list
+      const clients = await getConnectedClients();
+      setConnectedClients(clients);
+    } catch (e) {
+      workspace.setError(String(e));
+    }
+  }, [workspace]);
+
+  const handleSaveNgrokToken = useCallback(async () => {
+    if (!ngrokTokenInput.trim()) return;
+    setSavingNgrokToken(true);
+    try {
+      await setNgrokToken(ngrokTokenInput.trim());
+      setShowNgrokTokenDialog(false);
+      setNgrokTokenInput('');
+      // Try to start ngrok tunnel after saving token
+      setNgrokLoading(true);
+      const ngrokUrl = await startNgrokTunnel();
+      setShareNgrokUrl(ngrokUrl);
+    } catch (e) {
+      workspace.setError(String(e));
+    } finally {
+      setSavingNgrokToken(false);
+      setNgrokLoading(false);
+    }
+  }, [workspace, ngrokTokenInput]);
+
   // Restore share state and load ngrok token on mount (Tauri only)
   useEffect(() => {
     if (isTauri()) {
@@ -525,8 +564,11 @@ function App() {
           }
         }
       }).catch(() => {});
-      getNgrokToken().then(token => {
-        setNgrokAvailable(!!token);
+      // Load last password if available
+      getLastSharePassword().then(pwd => {
+        if (pwd) {
+          setSharePassword(pwd);
+        }
       }).catch(() => {});
     }
   }, []);
@@ -680,13 +722,6 @@ function App() {
     setEditingConfig(workspace.config ? JSON.parse(JSON.stringify(workspace.config)) : null);
     setViewMode('settings');
   }, [workspace.config]);
-
-  // Refresh ngrok availability when returning from settings
-  useEffect(() => {
-    if (viewMode === 'main' && isTauri()) {
-      getNgrokToken().then(token => setNgrokAvailable(!!token)).catch(() => {});
-    }
-  }, [viewMode]);
 
   const handleSaveConfig = useCallback(async () => {
     if (!editingConfig) return;
@@ -945,10 +980,10 @@ function App() {
           onStartShare={handleStartShare}
           onStopShare={handleStopShare}
           onUpdateSharePassword={handleUpdateSharePassword}
-          ngrokAvailable={ngrokAvailable}
           ngrokLoading={ngrokLoading}
           onToggleNgrok={handleToggleNgrok}
           connectedClients={connectedClients}
+          onKickClient={handleKickClient}
         />
         )}
 
@@ -1149,6 +1184,36 @@ function App() {
       />
 
       <UpToDateToast show={updater.showUpToDateToast} />
+
+      {/* Ngrok Token Dialog */}
+      <Dialog open={showNgrokTokenDialog} onOpenChange={setShowNgrokTokenDialog}>
+        <DialogContent className="max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>配置 Ngrok Token</DialogTitle>
+            <DialogDescription>
+              请输入您的 ngrok authtoken。您可以在 <a href="https://dashboard.ngrok.com/get-started/your-authtoken" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">ngrok 控制台</a> 获取。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Input
+              type="text"
+              placeholder="ngrok authtoken"
+              value={ngrokTokenInput}
+              onChange={(e) => setNgrokTokenInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleSaveNgrokToken(); }}
+              className="font-mono text-sm"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setShowNgrokTokenDialog(false)}>
+              取消
+            </Button>
+            <Button onClick={handleSaveNgrokToken} disabled={savingNgrokToken || !ngrokTokenInput.trim()}>
+              {savingNgrokToken ? '保存中...' : '保存并启动'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
     </>
   );
