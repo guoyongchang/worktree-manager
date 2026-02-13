@@ -12,8 +12,10 @@ dist
 dist-ssr
 *.local
 
-# Claude Code
-.claude/
+# Claude Code - track .claude/ for shared plugins/skills
+# but ignore ephemeral data
+.claude/teams/
+.claude/tasks/
 
 # Requirement docs (internal)
 requirement-docs/

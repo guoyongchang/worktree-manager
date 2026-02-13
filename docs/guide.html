@@ -132,10 +132,11 @@
           <a href="#terminal" class="block hover:text-blue-400 transition">6. 终端功能</a>
           <a href="#ide-integration" class="block hover:text-blue-400 transition">7. IDE 集成</a>
           <a href="#smart-scan" class="block hover:text-blue-400 transition">8. 智能文件夹扫描</a>
-          <a href="#configuration" class="block hover:text-blue-400 transition">9. 配置详解</a>
-          <a href="#keyboard-shortcuts" class="block hover:text-blue-400 transition">10. 快捷键</a>
-          <a href="#best-practices" class="block hover:text-blue-400 transition">11. 最佳实践</a>
-          <a href="#troubleshooting" class="block hover:text-blue-400 transition">12. 常见问题</a>
+          <a href="#remote-sharing" class="block hover:text-blue-400 transition">9. 远程分享与协作</a>
+          <a href="#configuration" class="block hover:text-blue-400 transition">10. 配置详解</a>
+          <a href="#keyboard-shortcuts" class="block hover:text-blue-400 transition">11. 快捷键</a>
+          <a href="#best-practices" class="block hover:text-blue-400 transition">12. 最佳实践</a>
+          <a href="#troubleshooting" class="block hover:text-blue-400 transition">13. 常见问题</a>
         </nav>
       </div>
 
@@ -615,10 +616,189 @@ npm run tauri build</code></pre>
           </div>
         </section>
 
-        <!-- 9. Configuration -->
-        <section id="configuration">
+        <!-- 9. Remote Sharing -->
+        <section id="remote-sharing">
           <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
             <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">9</span>
+            远程分享与协作
+          </h2>
+
+          <div class="space-y-6">
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">功能概述</h3>
+              <p class="text-slate-300 mb-4">远程分享功能允许你将当前工作区通过浏览器分享给同事，对方无需安装任何软件，只需打开链接即可查看你的 Worktree、使用终端，甚至进行协作开发。</p>
+              <div class="bg-blue-900/20 border border-blue-700 rounded-lg p-4 mb-4">
+                <p class="text-blue-200 text-sm"><strong>适用场景：</strong></p>
+                <ul class="list-disc list-inside space-y-1 text-blue-200 text-sm mt-2">
+                  <li>结对编程 -- 远程同事通过浏览器加入你的终端，实时协作</li>
+                  <li>代码演示 -- 让 PM 或测试人员在浏览器中查看你的分支状态</li>
+                  <li>远程协助 -- 帮同事排查问题，直接在他分享的终端里操作</li>
+                  <li>移动办公 -- 在平板或手机浏览器上临时查看工作区状态</li>
+                </ul>
+              </div>
+              <p class="text-slate-300 text-sm">分享功能支持两种模式：<strong>局域网分享</strong>（同一 Wi-Fi / 内网）和<strong>外网分享</strong>（通过 ngrok 穿透公网）。</p>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">开启分享</h3>
+              <p class="text-slate-300 mb-4">在桌面端应用中，按照以下步骤开启分享：</p>
+              <ol class="list-decimal list-inside space-y-3 text-slate-300">
+                <li>在侧边栏底部找到<strong>"分享"按钮</strong>，点击打开分享面板</li>
+                <li>设置<strong>端口号</strong>（默认推荐 49152-65535 范围，也支持 3000-9999 开发端口）</li>
+                <li>设置<strong>访问密码</strong>（必填，用于保护你的工作区）</li>
+                <li>点击<strong>"开启分享"</strong>，系统会启动一个内置 HTTP 服务器</li>
+                <li>分享成功后会显示一个<strong>局域网访问地址</strong>（如 <code>http://192.168.1.100:49152</code>）</li>
+              </ol>
+              <div class="bg-slate-950 rounded-lg p-4 mt-4 font-mono text-sm">
+                <span class="text-slate-500"># 分享成功后显示的地址示例</span><br>
+                <span class="text-green-400">局域网地址: http://192.168.1.100:49152</span><br>
+                <span class="text-slate-500"># 将此地址和密码发给同事即可</span>
+              </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">浏览器模式访问</h3>
+              <p class="text-slate-300 mb-4">协作者打开分享链接后：</p>
+              <ol class="list-decimal list-inside space-y-2 text-slate-300">
+                <li>浏览器会显示一个<strong>密码输入页面</strong>，输入你设置的密码即可进入</li>
+                <li>进入后看到与桌面端相同的界面，包括 Worktree 列表、分支状态等</li>
+                <li>可以使用<strong>内置终端</strong>（通过 WebSocket 实时传输）</li>
+                <li>可以<strong>加入协作</strong>，与桌面端用户共享终端会话</li>
+                <li>所有操作通过 WebSocket 实时同步，延迟极低</li>
+              </ol>
+              <div class="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4 mt-4">
+                <p class="text-yellow-200 text-sm"><strong>&#x26A0;&#xFE0F; 注意：</strong>浏览器端的终端操作会直接影响你本机的文件，请确保只分享给信任的人。</p>
+              </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">ngrok 外网穿透</h3>
+              <p class="text-slate-300 mb-4">如果协作者不在同一局域网，可以使用 ngrok 进行外网穿透，通过公网 URL 访问：</p>
+
+              <h4 class="text-lg font-semibold mb-3 text-slate-200">第一步：安装 ngrok 并获取 Token</h4>
+              <ol class="list-decimal list-inside space-y-2 text-slate-300 mb-4">
+                <li>前往 <a href="https://ngrok.com" class="text-blue-400 hover:underline">ngrok.com</a> 注册账号（免费）</li>
+                <li>在 <a href="https://dashboard.ngrok.com/get-started/your-authtoken" class="text-blue-400 hover:underline">ngrok Dashboard</a> 复制你的 Authtoken</li>
+              </ol>
+
+              <h4 class="text-lg font-semibold mb-3 text-slate-200">第二步：在应用中配置 Token</h4>
+              <ol class="list-decimal list-inside space-y-2 text-slate-300 mb-4">
+                <li>打开<strong>设置页面</strong>（齿轮图标）</li>
+                <li>滚动到底部找到 <strong>"外网分享 (ngrok)"</strong> 区域</li>
+                <li>将 Authtoken 粘贴到输入框中，点击<strong>"保存"</strong></li>
+              </ol>
+
+              <h4 class="text-lg font-semibold mb-3 text-slate-200">第三步：启用外网隧道</h4>
+              <ol class="list-decimal list-inside space-y-2 text-slate-300 mb-4">
+                <li>先按上述步骤开启<strong>局域网分享</strong></li>
+                <li>在分享面板中点击<strong>"开启外网"</strong>按钮</li>
+                <li>等待 ngrok 隧道建立成功（通常几秒内完成）</li>
+                <li>生成的公网地址（如 <code>https://xxxx.ngrok-free.app</code>）即可分享给任何人</li>
+              </ol>
+
+              <div class="bg-slate-950 rounded-lg p-4 font-mono text-sm">
+                <span class="text-slate-500"># ngrok 外网地址示例</span><br>
+                <span class="text-green-400">外网地址: https://a1b2c3d4.ngrok-free.app</span><br>
+                <span class="text-slate-500"># 任何能上网的人都可以通过此地址访问</span>
+              </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">安全注意事项</h3>
+              <div class="space-y-3">
+                <div class="flex items-start gap-3">
+                  <span class="text-green-400 mt-0.5">&#x2713;</span>
+                  <div>
+                    <p class="text-slate-200 font-medium">密码保护</p>
+                    <p class="text-slate-400 text-sm">所有分享都必须设置密码，浏览器端必须先认证才能访问 API</p>
+                  </div>
+                </div>
+                <div class="flex items-start gap-3">
+                  <span class="text-green-400 mt-0.5">&#x2713;</span>
+                  <div>
+                    <p class="text-slate-200 font-medium">防暴力破解</p>
+                    <p class="text-slate-400 text-sm">内置速率限制机制，同一 IP 每 60 秒最多尝试 5 次认证</p>
+                  </div>
+                </div>
+                <div class="flex items-start gap-3">
+                  <span class="text-green-400 mt-0.5">&#x2713;</span>
+                  <div>
+                    <p class="text-slate-200 font-medium">会话隔离</p>
+                    <p class="text-slate-400 text-sm">每个浏览器端获得独立的 session ID，服务端生成，无法伪造</p>
+                  </div>
+                </div>
+                <div class="flex items-start gap-3">
+                  <span class="text-green-400 mt-0.5">&#x2713;</span>
+                  <div>
+                    <p class="text-slate-200 font-medium">CORS 限制</p>
+                    <p class="text-slate-400 text-sm">仅允许来自 localhost、局域网 IP 和当前 ngrok URL 的跨域请求</p>
+                  </div>
+                </div>
+                <div class="flex items-start gap-3">
+                  <span class="text-green-400 mt-0.5">&#x2713;</span>
+                  <div>
+                    <p class="text-slate-200 font-medium">随时可控</p>
+                    <p class="text-slate-400 text-sm">分享者可随时修改密码（自动踢出所有已连接用户）、关闭外网隧道或完全停止分享</p>
+                  </div>
+                </div>
+              </div>
+              <div class="bg-red-900/20 border border-red-700 rounded-lg p-4 mt-4">
+                <p class="text-red-200 text-sm"><strong>&#x26A0;&#xFE0F; 重要提醒：</strong>分享功能会暴露你的工作区文件和终端。请使用强密码，且仅分享给你信任的人。使用 ngrok 外网模式时请格外注意，因为任何知道链接和密码的人都可以访问。不使用时请及时关闭分享。</p>
+              </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">分享问题排查</h3>
+              <div class="space-y-4">
+                <details class="border border-slate-600 rounded-lg p-4 cursor-pointer">
+                  <summary class="font-semibold text-slate-200">局域网分享后同事无法访问？</summary>
+                  <div class="mt-3 text-slate-300 text-sm space-y-2">
+                    <ul class="list-disc list-inside space-y-1">
+                      <li>确认双方在同一局域网 / Wi-Fi 下</li>
+                      <li>检查防火墙是否放行了对应端口（macOS 可能会弹出防火墙提示，点击"允许"）</li>
+                      <li>尝试用 <code>curl http://你的IP:端口/api/get_share_info</code> 测试连通性</li>
+                      <li>如果用的是公司 VPN，有可能网络隔离，建议使用 ngrok 外网模式</li>
+                    </ul>
+                  </div>
+                </details>
+                <details class="border border-slate-600 rounded-lg p-4 cursor-pointer">
+                  <summary class="font-semibold text-slate-200">ngrok 隧道启动失败？</summary>
+                  <div class="mt-3 text-slate-300 text-sm space-y-2">
+                    <ul class="list-disc list-inside space-y-1">
+                      <li>检查 ngrok token 是否正确配置（设置页面底部）</li>
+                      <li>确认网络能访问外网（ngrok 需要连接其服务器）</li>
+                      <li>免费版 ngrok 有同时隧道数限制，确保没有其他隧道在运行</li>
+                      <li>如果超时，重试一次，ngrok 偶尔会连接较慢</li>
+                    </ul>
+                  </div>
+                </details>
+                <details class="border border-slate-600 rounded-lg p-4 cursor-pointer">
+                  <summary class="font-semibold text-slate-200">浏览器端终端无响应？</summary>
+                  <div class="mt-3 text-slate-300 text-sm space-y-2">
+                    <ul class="list-disc list-inside space-y-1">
+                      <li>检查 WebSocket 连接状态（浏览器开发者工具 &rarr; Network &rarr; WS）</li>
+                      <li>如果使用 ngrok，确认 ngrok 隧道仍在运行</li>
+                      <li>尝试刷新页面重新连接</li>
+                    </ul>
+                  </div>
+                </details>
+                <details class="border border-slate-600 rounded-lg p-4 cursor-pointer">
+                  <summary class="font-semibold text-slate-200">端口被占用怎么办？</summary>
+                  <div class="mt-3 text-slate-300 text-sm space-y-2">
+                    <p>更换一个端口号即可。推荐使用 49152-65535 范围内的端口，这些是动态/私有端口，不太可能被其他程序占用。</p>
+                    <pre class="mt-2"><code># 查看端口占用情况（macOS/Linux）
+lsof -i :49152</code></pre>
+                  </div>
+                </details>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 10. Configuration -->
+        <section id="configuration">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">10</span>
             配置详解
           </h2>
 
@@ -630,8 +810,14 @@ npm run tauri build</code></pre>
   "workspaces": [
     { "name": "我的项目", "path": "/path/to/workspace" }
   ],
-  "current_workspace": "/path/to/workspace"
+  "current_workspace": "/path/to/workspace",
+  "ngrok_token": "2abc...xyz",
+  "last_share_port": 49152
 }</code></pre>
+              <div class="mt-4 space-y-2 text-sm">
+                <p class="text-slate-300"><strong>ngrok_token</strong>: 可选，ngrok Authtoken，用于外网穿透分享</p>
+                <p class="text-slate-300"><strong>last_share_port</strong>: 可选，上次使用的分享端口号，下次分享时自动填入</p>
+              </div>
             </div>
 
             <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
@@ -661,10 +847,10 @@ npm run tauri build</code></pre>
           </div>
         </section>
 
-        <!-- 10. Keyboard Shortcuts -->
+        <!-- 11. Keyboard Shortcuts -->
         <section id="keyboard-shortcuts">
           <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
-            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">10</span>
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">11</span>
             快捷键
           </h2>
 
@@ -700,10 +886,10 @@ npm run tauri build</code></pre>
           </div>
         </section>
 
-        <!-- 11. Best Practices -->
+        <!-- 12. Best Practices -->
         <section id="best-practices">
           <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
-            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">11</span>
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">12</span>
             最佳实践
           </h2>
 
@@ -731,10 +917,10 @@ npm run tauri build</code></pre>
           </div>
         </section>
 
-        <!-- 12. Troubleshooting -->
+        <!-- 13. Troubleshooting -->
         <section id="troubleshooting">
           <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
-            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">12</span>
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">13</span>
             常见问题
           </h2>
 

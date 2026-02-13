@@ -19,7 +19,7 @@ import {
 import { RefreshCw, Search } from 'lucide-react';
 import { BackIcon, PlusIcon, TrashIcon } from './Icons';
 import type { WorkspaceRef, WorkspaceConfig, ProjectConfig, ScannedFolder } from '../types';
-import { getVersion } from '@tauri-apps/api/app';
+import { getAppVersion, getNgrokToken, setNgrokToken as saveNgrokToken, isTauri } from '../lib/backend';
 
 interface SettingsViewProps {
   config: WorkspaceConfig;
@@ -73,8 +73,21 @@ export const SettingsView: FC<SettingsViewProps> = ({
   const [appVersion, setAppVersion] = useState('');
   const [removeConfirmWorkspace, setRemoveConfirmWorkspace] = useState<WorkspaceRef | null>(null);
 
+  // ngrok token state
+  const [ngrokToken, setNgrokToken] = useState('');
+  const [ngrokTokenLoaded, setNgrokTokenLoaded] = useState(false);
+  const [ngrokSaving, setNgrokSaving] = useState(false);
+  const [ngrokSaved, setNgrokSaved] = useState(false);
+  const [ngrokError, setNgrokError] = useState<string | null>(null);
+
   useEffect(() => {
-    getVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
+    getAppVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
+    if (isTauri()) {
+      getNgrokToken().then(t => {
+        setNgrokToken(t || '');
+        setNgrokTokenLoaded(true);
+      }).catch(() => setNgrokTokenLoaded(true));
+    }
   }, []);
   return (
     <div className="max-w-3xl mx-auto">
@@ -143,7 +156,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                   <button
                     type="button"
                     onClick={() => onRemoveLinkedItem(index)}
-                    className="text-slate-500 hover:text-red-400 text-xs"
+                    className="text-slate-500 hover:text-red-400 text-xs transition-colors"
                   >
                     删除
                   </button>
@@ -377,7 +390,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                             newFolders.splice(folderIdx, 1);
                             onUpdateProject(index, 'linked_folders', newFolders);
                           }}
-                          className="text-slate-500 hover:text-red-400 text-xs ml-2"
+                          className="text-slate-500 hover:text-red-400 text-xs ml-2 transition-colors"
                         >
                           删除
                         </button>
@@ -425,6 +438,68 @@ export const SettingsView: FC<SettingsViewProps> = ({
           ))}
         </div>
       </div>
+
+      {/* ngrok Config Section (Tauri only) */}
+      {isTauri() && ngrokTokenLoaded && (
+        <div className="mt-8 pt-8 border-t border-slate-700/50">
+          <h2 className="text-lg font-medium mb-4">外网分享 (ngrok)</h2>
+          <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 space-y-3">
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">ngrok Authtoken</label>
+              <div className="flex gap-2">
+                <Input
+                  type="password"
+                  value={ngrokToken}
+                  onChange={(e) => { setNgrokToken(e.target.value); setNgrokSaved(false); }}
+                  placeholder="粘贴你的 ngrok authtoken"
+                  className="flex-1"
+                />
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={ngrokSaving}
+                  onClick={async () => {
+                    setNgrokSaving(true);
+                    setNgrokError(null);
+                    try {
+                      await saveNgrokToken(ngrokToken.trim());
+                      setNgrokSaved(true);
+                      setTimeout(() => setNgrokSaved(false), 2000);
+                    } catch (e) {
+                      setNgrokError(String(e));
+                    } finally {
+                      setNgrokSaving(false);
+                    }
+                  }}
+                >
+                  {ngrokSaving ? '保存中...' : ngrokSaved ? '已保存' : '保存'}
+                </Button>
+              </div>
+              {ngrokError && (
+                <p className="text-sm text-red-400 mt-1">{ngrokError}</p>
+              )}
+            </div>
+            <p className="text-xs text-slate-500">
+              配置 ngrok token 后，分享时可选择"外网"模式，通过公网 URL 访问。
+              <button
+                type="button"
+                className="text-blue-400 hover:text-blue-300 ml-1 underline cursor-pointer transition-colors"
+                onClick={async () => {
+                  const url = 'https://dashboard.ngrok.com/get-started/your-authtoken';
+                  if (isTauri()) {
+                    const { openUrl } = await import('@tauri-apps/plugin-opener');
+                    await openUrl(url);
+                  } else {
+                    window.open(url, '_blank');
+                  }
+                }}
+              >
+                获取 token
+              </button>
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* About Section */}
       <div className="mt-8 pt-8 border-t border-slate-700/50">

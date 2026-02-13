@@ -1,5 +1,4 @@
 export { Terminal } from './Terminal';
-export type { TerminalHandle } from './Terminal';
 export { WorktreeSidebar } from './WorktreeSidebar';
 export { WorktreeDetail } from './WorktreeDetail';
 export { TerminalPanel } from './TerminalPanel';

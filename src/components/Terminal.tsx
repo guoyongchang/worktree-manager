@@ -2,7 +2,8 @@ import { useEffect, useRef, useCallback, forwardRef, useImperativeHandle, memo }
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
-import { invoke } from '@tauri-apps/api/core';
+import { callBackend, isTauri } from '../lib/backend';
+import { getWebSocketManager } from '../lib/websocket';
 import { TERMINAL } from '../constants';
 import '@xterm/xterm/css/xterm.css';
 
@@ -21,7 +22,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible 
   const fitAddonRef = useRef<FitAddon | null>(null);
   // Extract actual cwd (remove #timestamp suffix if present)
   const actualCwd = cwd.split('#')[0];
-  const sessionIdRef = useRef<string>(`pty-${cwd.replace(/[\/#]/g, '-')}-${Date.now()}`);
+  const sessionIdRef = useRef<string>(`pty-${cwd.replace(/[\/#]/g, '-')}`);
   const readerIntervalRef = useRef<number | null>(null);
   const initializedRef = useRef(false);
   const cwdRef = useRef(actualCwd);
@@ -98,10 +99,14 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible 
     // Handle user input
     term.onData(async (data) => {
       try {
-        await invoke('pty_write', {
-          sessionId: sessionIdRef.current,
-          data,
-        });
+        if (!isTauri()) {
+          getWebSocketManager().writePty(sessionIdRef.current, data);
+        } else {
+          await callBackend('pty_write', {
+            sessionId: sessionIdRef.current,
+            data,
+          });
+        }
       } catch {
         // PTY write failed silently
       }
@@ -130,7 +135,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible 
         const rows = term.rows;
 
         // Create PTY session
-        await invoke('pty_create', {
+        await callBackend('pty_create', {
           sessionId: sessionIdRef.current,
           cwd: cwdRef.current,
           cols,
@@ -153,41 +158,43 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible 
 
   // Start/stop reading based on visibility
   const startReading = useCallback(() => {
-    if (readerIntervalRef.current) return; // Already reading
-
-    const readLoop = async () => {
-      try {
-        const data = await invoke<string>('pty_read', {
-          sessionId: sessionIdRef.current,
-        });
+    if (!isTauri()) {
+      // Browser mode: subscribe to WebSocket PTY output (no polling)
+      getWebSocketManager().subscribePty(sessionIdRef.current, (data) => {
         if (data && xtermRef.current) {
           xtermRef.current.write(data);
         }
-      } catch {
-        // PTY read failed silently
-      }
-    };
+      });
+    } else {
+      // Tauri desktop mode: poll via invoke
+      if (readerIntervalRef.current) return; // Already reading
 
-    readerIntervalRef.current = window.setInterval(readLoop, TERMINAL.POLL_INTERVAL_MS);
+      const readLoop = async () => {
+        try {
+          const data = await callBackend<string>('pty_read', {
+            sessionId: sessionIdRef.current,
+          });
+          if (data && xtermRef.current) {
+            xtermRef.current.write(data);
+          }
+        } catch {
+          // PTY read failed silently
+        }
+      };
+
+      readerIntervalRef.current = window.setInterval(readLoop, TERMINAL.POLL_INTERVAL_MS);
+    }
   }, []);
 
   const stopReading = useCallback(() => {
+    if (!isTauri()) {
+      getWebSocketManager().unsubscribePty(sessionIdRef.current);
+    }
     if (readerIntervalRef.current) {
       clearInterval(readerIntervalRef.current);
       readerIntervalRef.current = null;
     }
   }, []);
-
-  // Manage reading based on visibility
-  useEffect(() => {
-    if (!initializedRef.current) return;
-
-    if (visible) {
-      startReading();
-    } else {
-      stopReading();
-    }
-  }, [visible, startReading, stopReading]);
 
   // Handle resize
   const handleResize = useCallback(() => {
@@ -197,7 +204,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible 
     const cols = xtermRef.current.cols;
     const rows = xtermRef.current.rows;
 
-    invoke('pty_resize', {
+    callBackend('pty_resize', {
       sessionId: sessionIdRef.current,
       cols,
       rows,
@@ -205,6 +212,23 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible 
       // PTY resize failed silently
     });
   }, [visible]);
+
+  // Manage reading based on visibility
+  useEffect(() => {
+    if (!initializedRef.current) return;
+
+    if (visible) {
+      startReading();
+      // Trigger resize when terminal becomes visible to ensure proper display
+      // Use a small delay to ensure DOM is fully rendered
+      const resizeTimer = setTimeout(() => {
+        handleResize();
+      }, 50);
+      return () => clearTimeout(resizeTimer);
+    } else {
+      stopReading();
+    }
+  }, [visible, startReading, stopReading, handleResize]);
 
   // ResizeObserver for container size changes (handles visibility, window resize, layout changes)
   useEffect(() => {
@@ -227,7 +251,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible 
   useEffect(() => {
     return () => {
       stopReading();
-      invoke('pty_close', { sessionId: sessionIdRef.current }).catch(() => {});
+      callBackend('pty_close', { sessionId: sessionIdRef.current }).catch(() => {});
     };
   }, [stopReading]);
 

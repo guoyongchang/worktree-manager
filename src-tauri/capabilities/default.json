@@ -10,6 +10,7 @@
     "dialog:allow-save",
     "updater:default",
     "process:allow-restart",
-    "log:default"
+    "log:default",
+    "opener:default"
   ]
 }

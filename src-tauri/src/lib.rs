@@ -4,26 +4,159 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::fs;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use once_cell::sync::Lazy;
 use wait_timeout::ChildExt;
 use log;
+use ngrok::config::ForwarderBuilder;  // trait import: provides listen_and_forward()
+use ngrok::forwarder::Forwarder;
+use ngrok::tunnel::{EndpointInfo, HttpTunnel};  // EndpointInfo trait import: provides url()
+use tauri::Emitter;
 
 mod git_ops;
 mod pty_manager;
+pub mod http_server;
 
 use git_ops::{get_worktree_info, get_branch_status, BranchStatus};
 use pty_manager::PtyManager;
 
 // PTY Manager 全局实例
-static PTY_MANAGER: Lazy<Mutex<PtyManager>> = Lazy::new(|| Mutex::new(PtyManager::new()));
+pub static PTY_MANAGER: Lazy<Mutex<PtyManager>> = Lazy::new(|| Mutex::new(PtyManager::new()));
 
 // 多窗口 workspace 绑定：window_label -> workspace_path
-static WINDOW_WORKSPACES: Lazy<Mutex<HashMap<String, String>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+pub static WINDOW_WORKSPACES: Lazy<Mutex<HashMap<String, String>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 // 多窗口 worktree 锁定：(workspace_path, worktree_name) -> window_label
 // 同一 worktree 只能被一个窗口独占选中
-static WORKTREE_LOCKS: Lazy<Mutex<HashMap<(String, String), String>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+pub static WORKTREE_LOCKS: Lazy<Mutex<HashMap<(String, String), String>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
+// ==================== 分享状态 ====================
+
+pub struct ShareState {
+    pub active: bool,
+    pub workspace_path: Option<String>,
+    pub port: u16,
+    pub password: Option<String>,
+    pub shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
+    pub ngrok_url: Option<String>,
+    pub ngrok_task: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl Default for ShareState {
+    fn default() -> Self {
+        Self {
+            active: false,
+            workspace_path: None,
+            port: 0,
+            password: None,
+            shutdown_tx: None,
+            ngrok_url: None,
+            ngrok_task: None,
+        }
+    }
+}
+
+pub static SHARE_STATE: Lazy<Mutex<ShareState>> = Lazy::new(|| Mutex::new(ShareState::default()));
+
+// 已认证的 session 集合
+pub static AUTHENTICATED_SESSIONS: Lazy<Mutex<std::collections::HashSet<String>>> =
+    Lazy::new(|| Mutex::new(std::collections::HashSet::new()));
+
+// 已连接的客户端追踪
+#[derive(Debug, Serialize, Clone)]
+pub struct ConnectedClient {
+    pub session_id: String,
+    pub ip: String,
+    pub user_agent: String,
+    pub authenticated_at: String,
+    pub last_active: String,
+    pub ws_connected: bool,
+}
+
+pub static CONNECTED_CLIENTS: Lazy<Mutex<HashMap<String, ConnectedClient>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+pub static TOKIO_RT: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
+    tokio::runtime::Runtime::new().expect("Failed to create tokio runtime for sharing")
+});
+
+// Broadcast channel for lock state changes (WebSocket push)
+// Increased capacity from 64 to 256 to reduce message lag and drops
+pub static LOCK_BROADCAST: Lazy<tokio::sync::broadcast::Sender<String>> = Lazy::new(|| {
+    let (tx, _) = tokio::sync::broadcast::channel(256);
+    tx
+});
+
+// Broadcast channel for terminal state changes (WebSocket push)
+// Increased capacity from 64 to 256 to reduce message lag and drops
+pub static TERMINAL_STATE_BROADCAST: Lazy<tokio::sync::broadcast::Sender<String>> = Lazy::new(|| {
+    let (tx, _) = tokio::sync::broadcast::channel(256);
+    tx
+});
+
+// Terminal state cache: (workspace_path, worktree_name) -> TerminalState
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TerminalState {
+    pub activated_terminals: Vec<String>,
+    pub active_terminal_tab: Option<String>,
+    pub terminal_visible: bool,
+    pub sequence: Option<u64>,
+}
+
+pub static TERMINAL_STATES: Lazy<Mutex<HashMap<(String, String), TerminalState>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+// Global AppHandle for emitting events from anywhere
+pub static APP_HANDLE: Lazy<Mutex<Option<tauri::AppHandle>>> = Lazy::new(|| Mutex::new(None));
+
+// Auth rate limiter: per-IP sliding window (max 5 attempts per 60 seconds)
+pub struct AuthRateLimiter {
+    attempts: HashMap<String, Vec<Instant>>,
+}
+
+impl AuthRateLimiter {
+    pub fn new() -> Self {
+        Self { attempts: HashMap::new() }
+    }
+
+    /// Returns true if the request is allowed, false if rate-limited.
+    pub fn check_and_record(&mut self, ip: &str) -> bool {
+        let window = Duration::from_secs(60);
+        let max_attempts = 5;
+        let now = Instant::now();
+
+        let attempts = self.attempts.entry(ip.to_string()).or_default();
+        // Remove expired entries
+        attempts.retain(|t| now.duration_since(*t) < window);
+
+        if attempts.len() >= max_attempts {
+            return false;
+        }
+        attempts.push(now);
+        true
+    }
+
+    /// Clean up stale entries (call periodically)
+    pub fn cleanup(&mut self) {
+        let window = Duration::from_secs(60);
+        let now = Instant::now();
+        self.attempts.retain(|_, attempts| {
+            attempts.retain(|t| now.duration_since(*t) < window);
+            !attempts.is_empty()
+        });
+    }
+}
+
+pub static AUTH_RATE_LIMITER: Lazy<Mutex<AuthRateLimiter>> =
+    Lazy::new(|| Mutex::new(AuthRateLimiter::new()));
+
+#[derive(Debug, Serialize, Clone)]
+pub struct ShareStateInfo {
+    pub active: bool,
+    pub url: Option<String>,
+    pub ngrok_url: Option<String>,
+    pub workspace_path: Option<String>,
+}
 
 // Git command timeout (30 seconds)
 const GIT_COMMAND_TIMEOUT_SECS: u64 = 30;
@@ -71,6 +204,12 @@ fn run_git_command_with_timeout(args: &[&str], cwd: &str) -> Result<std::process
 pub struct GlobalConfig {
     pub workspaces: Vec<WorkspaceRef>,
     pub current_workspace: Option<String>,  // 当前选中的 workspace 路径
+    // TODO(security): ngrok_token is stored in plaintext in the config file.
+    // Consider using the OS keychain (e.g., keytar/keyring crate) for sensitive credentials.
+    #[serde(default)]
+    pub ngrok_token: Option<String>,
+    #[serde(default)]
+    pub last_share_port: Option<u16>,  // 上次使用的分享端口
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -84,6 +223,8 @@ impl Default for GlobalConfig {
         Self {
             workspaces: vec![],
             current_workspace: None,
+            ngrok_token: None,
+            last_share_port: None,
         }
     }
 }
@@ -172,7 +313,7 @@ static WORKSPACE_CONFIG_CACHE: Lazy<Mutex<Option<(String, WorkspaceConfig)>>> = 
 
 // ==================== 全局配置加载/保存 ====================
 
-fn load_global_config() -> GlobalConfig {
+pub fn load_global_config() -> GlobalConfig {
     {
         let cache = GLOBAL_CONFIG_CACHE.lock().unwrap();
         if let Some(ref config) = *cache {
@@ -211,7 +352,7 @@ fn load_global_config() -> GlobalConfig {
     config
 }
 
-fn save_global_config_internal(config: &GlobalConfig) -> Result<(), String> {
+pub fn save_global_config_internal(config: &GlobalConfig) -> Result<(), String> {
     let config_path = get_global_config_path();
 
     if let Some(parent) = config_path.parent() {
@@ -247,21 +388,15 @@ fn load_workspace_config(workspace_path: &str) -> WorkspaceConfig {
 
     let config_path = get_workspace_config_path(workspace_path);
     let config = if config_path.exists() {
-        match fs::read_to_string(&config_path) {
-            Ok(content) => {
-                match serde_json::from_str::<WorkspaceConfig>(&content) {
-                    Ok(cfg) => cfg,
-                    Err(e) => {
-                        log::warn!("Failed to parse workspace config at {:?}: {}", config_path, e);
-                        WorkspaceConfig::default()
-                    }
-                }
-            }
-            Err(e) => {
-                log::warn!("Failed to read workspace config at {:?}: {}", config_path, e);
-                WorkspaceConfig::default()
-            }
-        }
+        fs::read_to_string(&config_path)
+            .map_err(|e| log::warn!("Failed to read workspace config at {:?}: {}", config_path, e))
+            .ok()
+            .and_then(|content| {
+                serde_json::from_str::<WorkspaceConfig>(&content)
+                    .map_err(|e| log::warn!("Failed to parse workspace config at {:?}: {}", config_path, e))
+                    .ok()
+            })
+            .unwrap_or_default()
     } else {
         let default_config = WorkspaceConfig::default();
         let _ = save_workspace_config_internal(workspace_path, &default_config);
@@ -496,33 +631,18 @@ fn scan_dir_for_linkable_folders(
 
 #[tauri::command]
 async fn scan_linked_folders(project_path: String) -> Result<Vec<ScannedFolder>, String> {
-    let path = PathBuf::from(&project_path);
-    if !path.exists() {
-        return Err(format!("Path does not exist: {}", project_path));
-    }
-
-    let mut results = Vec::new();
-    scan_dir_for_linkable_folders(&path, &path, &mut results);
-
-    // Sort: recommended first, then by size descending
-    results.sort_by(|a, b| {
-        b.is_recommended
-            .cmp(&a.is_recommended)
-            .then_with(|| b.size_bytes.cmp(&a.size_bytes))
-    });
-
-    Ok(results)
+    scan_linked_folders_sync(&project_path)
 }
 
 // ==================== Worktree 操作数据结构 ====================
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CreateWorktreeRequest {
     pub name: String,
     pub projects: Vec<CreateProjectRequest>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CreateProjectRequest {
     pub name: String,
     pub base_branch: String,
@@ -536,17 +656,20 @@ fn list_workspaces() -> Vec<WorkspaceRef> {
     global.workspaces
 }
 
-#[tauri::command]
-fn get_current_workspace(window: tauri::Window) -> Option<WorkspaceRef> {
+pub fn get_current_workspace_impl(window_label: &str) -> Option<WorkspaceRef> {
     let global = load_global_config();
-    let current_path = get_window_workspace_path(window.label())?;
+    let current_path = get_window_workspace_path(window_label)?;
     global.workspaces.iter()
         .find(|w| w.path == current_path)
         .cloned()
 }
 
 #[tauri::command]
-fn switch_workspace(window: tauri::Window, path: String) -> Result<(), String> {
+fn get_current_workspace(window: tauri::Window) -> Option<WorkspaceRef> {
+    get_current_workspace_impl(window.label())
+}
+
+pub fn switch_workspace_impl(window_label: &str, path: String) -> Result<(), String> {
     let mut global = load_global_config();
 
     // 验证 workspace 存在
@@ -560,7 +683,7 @@ fn switch_workspace(window: tauri::Window, path: String) -> Result<(), String> {
     // 绑定窗口 workspace
     {
         let mut map = WINDOW_WORKSPACES.lock().unwrap();
-        map.insert(window.label().to_string(), path);
+        map.insert(window_label.to_string(), path);
     }
 
     // 清除 workspace 配置缓存
@@ -570,6 +693,11 @@ fn switch_workspace(window: tauri::Window, path: String) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[tauri::command]
+fn switch_workspace(window: tauri::Window, path: String) -> Result<(), String> {
+    switch_workspace_impl(window.label(), path)
 }
 
 #[tauri::command]
@@ -655,34 +783,45 @@ fn create_workspace(name: String, path: String) -> Result<(), String> {
 
 // ==================== Tauri 命令：Workspace 配置 ====================
 
-#[tauri::command]
-fn get_workspace_config(window: tauri::Window) -> Result<WorkspaceConfig, String> {
-    let (_, config) = get_window_workspace_config(window.label())
+pub fn get_workspace_config_impl(window_label: &str) -> Result<WorkspaceConfig, String> {
+    let (_, config) = get_window_workspace_config(window_label)
         .ok_or("No workspace selected")?;
     Ok(config)
 }
 
 #[tauri::command]
-fn save_workspace_config(window: tauri::Window, config: WorkspaceConfig) -> Result<(), String> {
-    let workspace_path = get_window_workspace_path(window.label())
+fn get_workspace_config(window: tauri::Window) -> Result<WorkspaceConfig, String> {
+    get_workspace_config_impl(window.label())
+}
+
+pub fn save_workspace_config_impl(window_label: &str, config: WorkspaceConfig) -> Result<(), String> {
+    let workspace_path = get_window_workspace_path(window_label)
         .ok_or("No workspace selected")?;
     save_workspace_config_internal(&workspace_path, &config)
 }
 
 #[tauri::command]
-fn get_config_path_info(window: tauri::Window) -> String {
-    if let Some(workspace_path) = get_window_workspace_path(window.label()) {
+fn save_workspace_config(window: tauri::Window, config: WorkspaceConfig) -> Result<(), String> {
+    save_workspace_config_impl(window.label(), config)
+}
+
+pub fn get_config_path_info_impl(window_label: &str) -> String {
+    if let Some(workspace_path) = get_window_workspace_path(window_label) {
         normalize_path(&get_workspace_config_path(&workspace_path).to_string_lossy())
     } else {
         normalize_path(&get_global_config_path().to_string_lossy())
     }
 }
 
+#[tauri::command]
+fn get_config_path_info(window: tauri::Window) -> String {
+    get_config_path_info_impl(window.label())
+}
+
 // ==================== Tauri 命令：Worktree 操作 ====================
 
-#[tauri::command]
-fn list_worktrees(window: tauri::Window, include_archived: bool) -> Result<Vec<WorktreeListItem>, String> {
-    let (workspace_path, config) = get_window_workspace_config(window.label())
+pub fn list_worktrees_impl(window_label: &str, include_archived: bool) -> Result<Vec<WorktreeListItem>, String> {
+    let (workspace_path, config) = get_window_workspace_config(window_label)
         .ok_or("No workspace selected")?;
 
     let worktrees_path = PathBuf::from(&workspace_path).join(&config.worktrees_dir);
@@ -692,6 +831,11 @@ fn list_worktrees(window: tauri::Window, include_archived: bool) -> Result<Vec<W
     }
 
     scan_worktrees_dir(&worktrees_path, &config, include_archived)
+}
+
+#[tauri::command]
+fn list_worktrees(window: tauri::Window, include_archived: bool) -> Result<Vec<WorktreeListItem>, String> {
+    list_worktrees_impl(window.label(), include_archived)
 }
 
 fn scan_worktrees_dir(dir: &PathBuf, config: &WorkspaceConfig, include_archived: bool) -> Result<Vec<WorktreeListItem>, String> {
@@ -781,9 +925,8 @@ fn scan_worktrees_dir(dir: &PathBuf, config: &WorkspaceConfig, include_archived:
     Ok(result)
 }
 
-#[tauri::command]
-fn get_main_workspace_status(window: tauri::Window) -> Result<MainWorkspaceStatus, String> {
-    let (workspace_path, config) = get_window_workspace_config(window.label())
+pub fn get_main_workspace_status_impl(window_label: &str) -> Result<MainWorkspaceStatus, String> {
+    let (workspace_path, config) = get_window_workspace_config(window_label)
         .ok_or("No workspace selected")?;
 
     let root_path = PathBuf::from(&workspace_path);
@@ -817,8 +960,12 @@ fn get_main_workspace_status(window: tauri::Window) -> Result<MainWorkspaceStatu
 }
 
 #[tauri::command]
-fn create_worktree(window: tauri::Window, request: CreateWorktreeRequest) -> Result<String, String> {
-    let (workspace_path, config) = get_window_workspace_config(window.label())
+fn get_main_workspace_status(window: tauri::Window) -> Result<MainWorkspaceStatus, String> {
+    get_main_workspace_status_impl(window.label())
+}
+
+pub fn create_worktree_impl(window_label: &str, request: CreateWorktreeRequest) -> Result<String, String> {
+    let (workspace_path, config) = get_window_workspace_config(window_label)
         .ok_or("No workspace selected")?;
 
     let root = PathBuf::from(&workspace_path);
@@ -926,8 +1073,12 @@ fn create_worktree(window: tauri::Window, request: CreateWorktreeRequest) -> Res
 }
 
 #[tauri::command]
-fn archive_worktree(window: tauri::Window, name: String) -> Result<(), String> {
-    let (workspace_path, config) = get_window_workspace_config(window.label())
+fn create_worktree(window: tauri::Window, request: CreateWorktreeRequest) -> Result<String, String> {
+    create_worktree_impl(window.label(), request)
+}
+
+pub fn archive_worktree_impl(window_label: &str, name: String) -> Result<(), String> {
+    let (workspace_path, config) = get_window_workspace_config(window_label)
         .ok_or("No workspace selected")?;
 
     let root = PathBuf::from(&workspace_path);
@@ -982,6 +1133,11 @@ fn archive_worktree(window: tauri::Window, name: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn archive_worktree(window: tauri::Window, name: String) -> Result<(), String> {
+    archive_worktree_impl(window.label(), name)
+}
+
 #[derive(Debug, Serialize)]
 pub struct WorktreeArchiveStatus {
     pub name: String,
@@ -991,9 +1147,8 @@ pub struct WorktreeArchiveStatus {
     pub projects: Vec<BranchStatus>,
 }
 
-#[tauri::command]
-fn check_worktree_status(window: tauri::Window, name: String) -> Result<WorktreeArchiveStatus, String> {
-    let (workspace_path, config) = get_window_workspace_config(window.label())
+pub fn check_worktree_status_impl(window_label: &str, name: String) -> Result<WorktreeArchiveStatus, String> {
+    let (workspace_path, config) = get_window_workspace_config(window_label)
         .ok_or("No workspace selected")?;
 
     let root = PathBuf::from(&workspace_path);
@@ -1068,8 +1223,12 @@ fn check_worktree_status(window: tauri::Window, name: String) -> Result<Worktree
 }
 
 #[tauri::command]
-fn restore_worktree(window: tauri::Window, name: String) -> Result<(), String> {
-    let (workspace_path, config) = get_window_workspace_config(window.label())
+fn check_worktree_status(window: tauri::Window, name: String) -> Result<WorktreeArchiveStatus, String> {
+    check_worktree_status_impl(window.label(), name)
+}
+
+pub fn restore_worktree_impl(window_label: &str, name: String) -> Result<(), String> {
+    let (workspace_path, config) = get_window_workspace_config(window_label)
         .ok_or("No workspace selected")?;
 
     let root = PathBuf::from(&workspace_path);
@@ -1217,8 +1376,12 @@ fn restore_worktree(window: tauri::Window, name: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn delete_archived_worktree(window: tauri::Window, name: String) -> Result<(), String> {
-    let (workspace_path, config) = get_window_workspace_config(window.label())
+fn restore_worktree(window: tauri::Window, name: String) -> Result<(), String> {
+    restore_worktree_impl(window.label(), name)
+}
+
+pub fn delete_archived_worktree_impl(window_label: &str, name: String) -> Result<(), String> {
+    let (workspace_path, config) = get_window_workspace_config(window_label)
         .ok_or("No workspace selected")?;
 
     let root = PathBuf::from(&workspace_path);
@@ -1283,18 +1446,22 @@ fn delete_archived_worktree(window: tauri::Window, name: String) -> Result<(), S
     Ok(())
 }
 
+#[tauri::command]
+fn delete_archived_worktree(window: tauri::Window, name: String) -> Result<(), String> {
+    delete_archived_worktree_impl(window.label(), name)
+}
+
 // ==================== Tauri 命令：向已有 Worktree 添加项目 ====================
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AddProjectToWorktreeRequest {
     pub worktree_name: String,
     pub project_name: String,
     pub base_branch: String,
 }
 
-#[tauri::command]
-fn add_project_to_worktree(window: tauri::Window, request: AddProjectToWorktreeRequest) -> Result<(), String> {
-    let (workspace_path, config) = get_window_workspace_config(window.label())
+pub fn add_project_to_worktree_impl(window_label: &str, request: AddProjectToWorktreeRequest) -> Result<(), String> {
+    let (workspace_path, config) = get_window_workspace_config(window_label)
         .ok_or("No workspace selected")?;
 
     let root = PathBuf::from(&workspace_path);
@@ -1402,9 +1569,14 @@ fn add_project_to_worktree(window: tauri::Window, request: AddProjectToWorktreeR
     Ok(())
 }
 
+#[tauri::command]
+fn add_project_to_worktree(window: tauri::Window, request: AddProjectToWorktreeRequest) -> Result<(), String> {
+    add_project_to_worktree_impl(window.label(), request)
+}
+
 // ==================== Tauri 命令：Git 操作 ====================
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SwitchBranchRequest {
     pub project_path: String,
     pub branch: String,
@@ -1457,7 +1629,7 @@ fn switch_branch(request: SwitchBranchRequest) -> Result<(), String> {
     Ok(())
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CloneProjectRequest {
     pub name: String,
     pub repo_url: String,
@@ -1467,9 +1639,8 @@ pub struct CloneProjectRequest {
     pub linked_folders: Vec<String>,
 }
 
-#[tauri::command]
-fn clone_project(window: tauri::Window, request: CloneProjectRequest) -> Result<(), String> {
-    let (workspace_path, mut config) = get_window_workspace_config(window.label())
+pub fn clone_project_impl(window_label: &str, request: CloneProjectRequest) -> Result<(), String> {
+    let (workspace_path, mut config) = get_window_workspace_config(window_label)
         .ok_or("No workspace selected")?;
 
     let projects_path = PathBuf::from(&workspace_path).join("projects");
@@ -1517,6 +1688,11 @@ fn clone_project(window: tauri::Window, request: CloneProjectRequest) -> Result<
     save_workspace_config_internal(&workspace_path, &config)?;
 
     Ok(())
+}
+
+#[tauri::command]
+fn clone_project(window: tauri::Window, request: CloneProjectRequest) -> Result<(), String> {
+    clone_project_impl(window.label(), request)
 }
 
 // Parse different repo URL formats
@@ -1598,66 +1774,58 @@ fn open_in_terminal(path: String) -> Result<(), String> {
     Ok(())
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct OpenEditorRequest {
     pub path: String,
     pub editor: String,
 }
 
-#[tauri::command]
-fn open_in_editor(request: OpenEditorRequest) -> Result<(), String> {
+fn editor_cli_command(editor: &str) -> &'static str {
+    match editor {
+        "vscode" => "code",
+        "cursor" => "cursor",
+        "idea" => "idea",
+        _ => "code",
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn editor_app_name(editor: &str) -> &'static str {
+    match editor {
+        "vscode" => "Visual Studio Code",
+        "cursor" => "Cursor",
+        "idea" => "IntelliJ IDEA",
+        _ => "Visual Studio Code",
+    }
+}
+
+fn open_editor_at_path(request: &OpenEditorRequest) -> Result<(), String> {
     let path = &request.path;
 
-    // On macOS, try `open -a` first since CLI commands may not be in PATH
-    // when the app is launched from Finder
     #[cfg(target_os = "macos")]
     {
-        let app_name = match request.editor.as_str() {
-            "vscode" => "Visual Studio Code",
-            "cursor" => "Cursor",
-            "idea" => "IntelliJ IDEA",
-            _ => "Visual Studio Code",
-        };
-
-        // Try `open -a "App Name" path` first
-        let result = Command::new("open")
-            .args(["-a", app_name, path])
-            .spawn();
-
-        if result.is_ok() {
+        let app_name = editor_app_name(&request.editor);
+        if Command::new("open").args(["-a", app_name, path]).spawn().is_ok() {
             return Ok(());
         }
-
-        // Fallback: try CLI command directly (in case user has it in PATH)
-        let cmd = match request.editor.as_str() {
-            "vscode" => "code",
-            "cursor" => "cursor",
-            "idea" => "idea",
-            _ => "code",
-        };
-
-        Command::new(cmd)
-            .arg(path)
-            .spawn()
+        let cmd = editor_cli_command(&request.editor);
+        Command::new(cmd).arg(path).spawn()
             .map_err(|_| format!("无法打开 {}，请确认已安装该编辑器", app_name))?;
     }
 
     #[cfg(not(target_os = "macos"))]
     {
-        let cmd = match request.editor.as_str() {
-            "vscode" => "code",
-            "cursor" => "cursor",
-            "idea" => "idea",
-            _ => "code",
-        };
-
-        Command::new(cmd)
-            .arg(path)
-            .spawn()
+        let cmd = editor_cli_command(&request.editor);
+        Command::new(cmd).arg(path).spawn()
             .map_err(|e| format!("无法打开编辑器 {}: {}", cmd, e))?;
     }
 
     Ok(())
+}
+
+#[tauri::command]
+fn open_in_editor(request: OpenEditorRequest) -> Result<(), String> {
+    open_editor_at_path(&request)
 }
 
 
@@ -1759,6 +1927,9 @@ fn pty_exists(session_id: String) -> Result<bool, String> {
     Ok(manager.has_session(&session_id))
 }
 
+/// Close all PTY sessions whose working directory starts with the given path prefix.
+/// Used internally when archiving/deleting worktrees (see archive_worktree, delete_archived_worktree)
+/// and exposed via the HTTP server for remote access mode.
 #[tauri::command]
 fn pty_close_by_path(path_prefix: String) -> Result<Vec<String>, String> {
     let mut manager = PTY_MANAGER.lock().map_err(|e| format!("Lock error: {}", e))?;
@@ -1767,16 +1938,20 @@ fn pty_close_by_path(path_prefix: String) -> Result<Vec<String>, String> {
 
 // ==================== 多窗口管理 ====================
 
-#[tauri::command]
-fn set_window_workspace(window: tauri::Window, workspace_path: String) -> Result<(), String> {
+pub fn set_window_workspace_impl(window_label: &str, workspace_path: String) -> Result<(), String> {
     let global = load_global_config();
     if !global.workspaces.iter().any(|w| w.path == workspace_path) {
         return Err("Workspace not found".to_string());
     }
 
     let mut map = WINDOW_WORKSPACES.lock().unwrap();
-    map.insert(window.label().to_string(), workspace_path);
+    map.insert(window_label.to_string(), workspace_path);
     Ok(())
+}
+
+#[tauri::command]
+fn set_window_workspace(window: tauri::Window, workspace_path: String) -> Result<(), String> {
+    set_window_workspace_impl(window.label(), workspace_path)
 }
 
 #[tauri::command]
@@ -1785,47 +1960,74 @@ fn get_opened_workspaces() -> Vec<String> {
     map.values().cloned().collect()
 }
 
-#[tauri::command]
-fn unregister_window(window: tauri::Window) {
-    let label = window.label().to_string();
+pub fn unregister_window_impl(window_label: &str) {
+    let label = window_label.to_string();
     {
         let mut map = WINDOW_WORKSPACES.lock().unwrap();
         map.remove(&label);
     }
     // 同时释放该窗口持有的所有 worktree 锁
-    {
+    let affected_workspaces: Vec<String> = {
         let mut locks = WORKTREE_LOCKS.lock().unwrap();
+        let affected: Vec<String> = locks
+            .iter()
+            .filter(|(_, v)| **v == label)
+            .map(|((ws_path, _), _)| ws_path.clone())
+            .collect();
         locks.retain(|_, v| *v != label);
+        affected
+    };
+    for ws_path in affected_workspaces {
+        broadcast_lock_state(&ws_path);
     }
+}
+
+#[tauri::command]
+fn unregister_window(window: tauri::Window) {
+    unregister_window_impl(window.label())
 }
 
 /// 锁定 worktree 到当前窗口，如果该 worktree 已被其他窗口锁定则返回错误
-#[tauri::command]
-fn lock_worktree(window: tauri::Window, workspace_path: String, worktree_name: String) -> Result<(), String> {
-    let label = window.label().to_string();
-    let mut locks = WORKTREE_LOCKS.lock().unwrap();
-    let key = (workspace_path, worktree_name.clone());
+pub fn lock_worktree_impl(window_label: &str, workspace_path: String, worktree_name: String) -> Result<(), String> {
+    let label = window_label.to_string();
+    {
+        let mut locks = WORKTREE_LOCKS.lock().unwrap();
+        let key = (workspace_path.clone(), worktree_name.clone());
 
-    if let Some(existing_label) = locks.get(&key) {
-        if *existing_label != label {
-            return Err(format!("Worktree \"{}\" 已在其他窗口中打开", worktree_name));
+        if let Some(existing_label) = locks.get(&key) {
+            if *existing_label != label {
+                return Err(format!("Worktree \"{}\" 已在其他窗口中打开", worktree_name));
+            }
         }
+        locks.insert(key, label);
     }
-    locks.insert(key, label);
+    broadcast_lock_state(&workspace_path);
     Ok(())
 }
 
-/// 解锁当前窗口持有的指定 worktree
 #[tauri::command]
-fn unlock_worktree(window: tauri::Window, workspace_path: String, worktree_name: String) {
-    let label = window.label().to_string();
-    let mut locks = WORKTREE_LOCKS.lock().unwrap();
-    let key = (workspace_path, worktree_name);
-    if let Some(existing_label) = locks.get(&key) {
-        if *existing_label == label {
-            locks.remove(&key);
+fn lock_worktree(window: tauri::Window, workspace_path: String, worktree_name: String) -> Result<(), String> {
+    lock_worktree_impl(window.label(), workspace_path, worktree_name)
+}
+
+/// 解锁当前窗口持有的指定 worktree
+pub fn unlock_worktree_impl(window_label: &str, workspace_path: String, worktree_name: String) {
+    let label = window_label.to_string();
+    {
+        let mut locks = WORKTREE_LOCKS.lock().unwrap();
+        let key = (workspace_path.clone(), worktree_name);
+        if let Some(existing_label) = locks.get(&key) {
+            if *existing_label == label {
+                locks.remove(&key);
+            }
         }
     }
+    broadcast_lock_state(&workspace_path);
+}
+
+#[tauri::command]
+fn unlock_worktree(window: tauri::Window, workspace_path: String, worktree_name: String) {
+    unlock_worktree_impl(window.label(), workspace_path, worktree_name)
 }
 
 /// 获取指定 workspace 中所有被锁定的 worktree 列表 (worktree_name -> window_label)
@@ -1836,6 +2038,49 @@ fn get_locked_worktrees(workspace_path: String) -> HashMap<String, String> {
         .filter(|((ws_path, _), _)| *ws_path == workspace_path)
         .map(|((_, wt_name), label)| (wt_name.clone(), label.clone()))
         .collect()
+}
+
+/// 广播终端状态变化（用于桌面端同步到网页端）
+#[tauri::command]
+fn broadcast_terminal_state(
+    app: tauri::AppHandle,
+    workspace_path: String,
+    worktree_name: String,
+    activated_terminals: Vec<String>,
+    active_terminal_tab: Option<String>,
+    terminal_visible: bool,
+) {
+    let key = (workspace_path.clone(), worktree_name.clone());
+
+    // 更新缓存
+    if let Ok(mut states) = TERMINAL_STATES.lock() {
+        states.insert(key, TerminalState {
+            activated_terminals: activated_terminals.clone(),
+            active_terminal_tab: active_terminal_tab.clone(),
+            terminal_visible,
+            sequence: None,
+        });
+    }
+
+    // 广播给所有连接的客户端（WebSocket）
+    if let Ok(json_str) = serde_json::to_string(&serde_json::json!({
+        "workspacePath": workspace_path,
+        "worktreeName": worktree_name,
+        "activatedTerminals": activated_terminals,
+        "activeTerminalTab": active_terminal_tab,
+        "terminalVisible": terminal_visible,
+    })) {
+        let _ = TERMINAL_STATE_BROADCAST.send(json_str);
+    }
+
+    // 同时通过 Tauri 事件发送给所有桌面端窗口
+    let _ = app.emit("terminal-state-update", serde_json::json!({
+        "workspacePath": workspace_path,
+        "worktreeName": worktree_name,
+        "activatedTerminals": activated_terminals,
+        "activeTerminalTab": active_terminal_tab,
+        "terminalVisible": terminal_visible,
+    }));
 }
 
 #[tauri::command]
@@ -1877,27 +2122,450 @@ async fn open_workspace_window(app: tauri::AppHandle, workspace_path: String) ->
     Ok(window_label)
 }
 
+// ==================== HTTP Server 共享接口 ====================
+// 以下函数供 http_server 模块调用（对应无 window 参数的 Tauri 命令）
+
+pub fn add_workspace_internal(name: &str, path: &str) -> Result<(), String> {
+    let mut global = load_global_config();
+    if global.workspaces.iter().any(|w| w.path == path) {
+        return Err("Workspace with this path already exists".to_string());
+    }
+    let workspace_path = PathBuf::from(path);
+    if !workspace_path.exists() {
+        return Err("Path does not exist".to_string());
+    }
+    global.workspaces.push(WorkspaceRef {
+        name: name.to_string(),
+        path: path.to_string(),
+    });
+    if global.current_workspace.is_none() {
+        global.current_workspace = Some(path.to_string());
+    }
+    save_global_config_internal(&global)?;
+    let ws_config_path = get_workspace_config_path(path);
+    if !ws_config_path.exists() {
+        let mut default_ws_config = WorkspaceConfig::default();
+        default_ws_config.name = name.to_string();
+        save_workspace_config_internal(path, &default_ws_config)?;
+    }
+    Ok(())
+}
+
+pub fn remove_workspace_internal(path: &str) -> Result<(), String> {
+    let mut global = load_global_config();
+    global.workspaces.retain(|w| w.path != path);
+    if global.current_workspace.as_ref().map(|s| s.as_str()) == Some(path) {
+        global.current_workspace = global.workspaces.first().map(|w| w.path.clone());
+    }
+    save_global_config_internal(&global)?;
+    Ok(())
+}
+
+pub fn create_workspace_internal(name: &str, path: &str) -> Result<(), String> {
+    let workspace_path = PathBuf::from(path);
+    fs::create_dir_all(workspace_path.join("projects"))
+        .map_err(|e| format!("Failed to create workspace directory: {}", e))?;
+    fs::create_dir_all(workspace_path.join("worktrees"))
+        .map_err(|e| format!("Failed to create worktrees directory: {}", e))?;
+    let ws_config = WorkspaceConfig {
+        name: name.to_string(),
+        worktrees_dir: "worktrees".to_string(),
+        projects: vec![],
+        linked_workspace_items: default_linked_workspace_items(),
+    };
+    save_workspace_config_internal(path, &ws_config)?;
+    add_workspace_internal(name, path)?;
+    Ok(())
+}
+
+pub fn switch_branch_internal(request: &SwitchBranchRequest) -> Result<(), String> {
+    let path = PathBuf::from(&request.project_path);
+    if !path.exists() {
+        return Err(format!("Project path does not exist: {}", request.project_path));
+    }
+    let _ = Command::new("git")
+        .args(["fetch", "origin"])
+        .current_dir(&path)
+        .output();
+    let checkout_output = Command::new("git")
+        .args(["checkout", &request.branch])
+        .current_dir(&path)
+        .output()
+        .map_err(|e| format!("Failed to checkout: {}", e))?;
+    if !checkout_output.status.success() {
+        let stderr = String::from_utf8_lossy(&checkout_output.stderr);
+        return Err(format!("Failed to checkout {}: {}", request.branch, stderr));
+    }
+    let _ = Command::new("git")
+        .args(["pull", "origin", &request.branch])
+        .current_dir(&path)
+        .output();
+    Ok(())
+}
+
+pub fn scan_linked_folders_internal(project_path: &str) -> Result<Vec<ScannedFolder>, String> {
+    // Delegate to the async version's inner logic (same implementation)
+    scan_linked_folders_sync(project_path)
+}
+
+fn scan_linked_folders_sync(project_path: &str) -> Result<Vec<ScannedFolder>, String> {
+    let path = PathBuf::from(project_path);
+    if !path.exists() {
+        return Err(format!("Path does not exist: {}", project_path));
+    }
+    let mut results = Vec::new();
+    scan_dir_for_linkable_folders(&path, &path, &mut results);
+    results.sort_by(|a, b| {
+        b.is_recommended
+            .cmp(&a.is_recommended)
+            .then_with(|| b.size_bytes.cmp(&a.size_bytes))
+    });
+    Ok(results)
+}
+
+pub fn open_in_terminal_internal(path: &str) -> Result<(), String> {
+    open_in_terminal(path.to_string())
+}
+
+pub fn open_in_editor_internal(request: &OpenEditorRequest) -> Result<(), String> {
+    open_editor_at_path(request)
+}
+
+pub fn reveal_in_finder_internal(path: &str) -> Result<(), String> {
+    reveal_in_finder(path.to_string())
+}
+
+pub fn open_log_dir_internal() -> Result<(), String> {
+    open_log_dir()
+}
+
+// ==================== 分享功能命令 ====================
+
+#[tauri::command]
+async fn get_ngrok_token() -> Result<Option<String>, String> {
+    let config = load_global_config();
+    Ok(config.ngrok_token)
+}
+
+#[tauri::command]
+async fn set_ngrok_token(token: String) -> Result<(), String> {
+    let mut config = load_global_config();
+    config.ngrok_token = if token.is_empty() { None } else { Some(token) };
+    save_global_config_internal(&config)?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_last_share_port() -> Result<Option<u16>, String> {
+    let config = load_global_config();
+    Ok(config.last_share_port)
+}
+
+#[tauri::command]
+async fn start_sharing(window: tauri::Window, port: u16, password: String) -> Result<String, String> {
+    let workspace_path = get_window_workspace_path(window.label())
+        .ok_or("No workspace selected")?;
+
+    // SECURITY: Validate password is not empty (required for remote access security)
+    if password.trim().is_empty() {
+        return Err("分享密码不能为空".to_string());
+    }
+
+    // Validate port range (recommended dynamic/private ports: 49152-65535)
+    // Allow common development ports (3000-9999) for convenience
+    if port < 3000 {
+        return Err(format!("端口 {} 过小。推荐使用 49152-65535 范围内的端口，或 3000-9999 开发端口", port));
+    }
+
+    // Check if already sharing
+    {
+        let state = SHARE_STATE.lock()
+            .map_err(|_| "Internal state error".to_string())?;
+        if state.active {
+            return Err("Already sharing. Stop current sharing first.".to_string());
+        }
+    }
+
+    // Check if port is available
+    // Bind to 0.0.0.0 to allow LAN access (security handled by password auth)
+    let bind_addr = format!("0.0.0.0:{}", port);
+    if let Err(e) = tokio::net::TcpListener::bind(&bind_addr).await {
+        return Err(format!("端口 {} 已被占用: {}", port, e));
+    }
+
+    // Determine local IP for the share URL
+    let local_ip = local_ip_address::local_ip()
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(|_| "0.0.0.0".to_string());
+
+    let share_url = format!("http://{}:{}", local_ip, port);
+
+    // Create shutdown channel
+    let (tx, rx) = tokio::sync::watch::channel(false);
+
+    // Update share state
+    {
+        let mut state = SHARE_STATE.lock()
+            .map_err(|_| "Internal state error".to_string())?;
+        state.active = true;
+        state.workspace_path = Some(workspace_path.clone());
+        state.port = port;
+        state.password = Some(password);
+        state.shutdown_tx = Some(tx);
+    }
+
+    // 保存端口到全局配置
+    {
+        let mut config = load_global_config();
+        config.last_share_port = Some(port);
+        let _ = save_global_config_internal(&config);
+    }
+
+    // Clear any previous authenticated sessions
+    if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() {
+        sessions.clear();
+    }
+
+    // Spawn the HTTP server on the shared tokio runtime
+    TOKIO_RT.spawn(http_server::start_server(port, rx));
+
+    log::info!("Sharing started on {} for workspace {}", share_url, workspace_path);
+
+    Ok(share_url)
+}
+
+pub async fn start_ngrok_tunnel_internal() -> Result<String, String> {
+    let port = {
+        let state = SHARE_STATE.lock()
+            .map_err(|_| "Internal state error".to_string())?;
+        if !state.active {
+            return Err("请先开启分享".to_string());
+        }
+        if state.ngrok_url.is_some() {
+            return Err("ngrok 隧道已在运行".to_string());
+        }
+        state.port
+    };
+
+    let ngrok_token = load_global_config().ngrok_token
+        .ok_or("未配置 ngrok token，请先在设置中配置".to_string())?;
+
+    let (url_tx, url_rx) = std::sync::mpsc::channel::<Result<String, String>>();
+
+    let ngrok_handle = TOKIO_RT.spawn(async move {
+        let result = async {
+            let session = ngrok::Session::builder()
+                .authtoken(ngrok_token)
+                .connect()
+                .await
+                .map_err(|e| format!("ngrok 连接失败: {}", e))?;
+
+            let forwarder = session
+                .http_endpoint()
+                .listen_and_forward(
+                    url::Url::parse(&format!("http://localhost:{}", port))
+                        .map_err(|e| format!("URL 解析失败: {}", e))?
+                )
+                .await
+                .map_err(|e| format!("ngrok 隧道创建失败: {}", e))?;
+
+            let ngrok_url = forwarder.url().to_string();
+            Ok::<(String, Forwarder<HttpTunnel>), String>((ngrok_url, forwarder))
+        }.await;
+
+        match result {
+            Ok((url, mut forwarder)) => {
+                let _ = url_tx.send(Ok(url));
+                // join() keeps the forwarder actively forwarding traffic
+                let _ = forwarder.join().await;
+            }
+            Err(e) => {
+                let _ = url_tx.send(Err(e));
+            }
+        }
+    });
+
+    // Wait for the ngrok URL (with timeout)
+    match url_rx.recv_timeout(std::time::Duration::from_secs(30)) {
+        Ok(Ok(ngrok_url)) => {
+            let mut state = SHARE_STATE.lock()
+                .map_err(|_| "Internal state error".to_string())?;
+            state.ngrok_url = Some(ngrok_url.clone());
+            state.ngrok_task = Some(ngrok_handle);
+            log::info!("ngrok tunnel started: {}", ngrok_url);
+            Ok(ngrok_url)
+        }
+        Ok(Err(e)) => {
+            ngrok_handle.abort();
+            Err(e)
+        }
+        Err(_) => {
+            ngrok_handle.abort();
+            Err("ngrok 隧道启动超时".to_string())
+        }
+    }
+}
+
+#[tauri::command]
+async fn start_ngrok_tunnel() -> Result<String, String> {
+    start_ngrok_tunnel_internal().await
+}
+
+#[tauri::command]
+async fn stop_ngrok_tunnel() -> Result<(), String> {
+    let mut state = SHARE_STATE.lock()
+        .map_err(|_| "Internal state error".to_string())?;
+    if let Some(handle) = state.ngrok_task.take() {
+        // abort() is intentional: the ngrok crate's Forwarder does not expose a graceful
+        // shutdown API. Aborting the task triggers its Drop impl, which handles cleanup.
+        handle.abort();
+    }
+    state.ngrok_url = None;
+    log::info!("ngrok tunnel stopped");
+    Ok(())
+}
+
+#[tauri::command]
+async fn stop_sharing() -> Result<(), String> {
+    // Single lock scope: check active, stop ngrok, extract shutdown_tx, and reset state
+    let shutdown_tx = {
+        let mut state = SHARE_STATE.lock()
+            .map_err(|_| "Internal state error".to_string())?;
+        if !state.active {
+            return Err("Not currently sharing".to_string());
+        }
+
+        // Stop ngrok tunnel if active
+        // NOTE: abort() is intentional here -- the ngrok crate's Forwarder does not expose
+        // a graceful shutdown API; aborting the task triggers its Drop impl for cleanup.
+        if let Some(handle) = state.ngrok_task.take() {
+            handle.abort();
+        }
+        state.ngrok_url = None;
+
+        // Extract shutdown_tx and reset all state atomically
+        let tx = state.shutdown_tx.take();
+        state.active = false;
+        state.workspace_path = None;
+        state.port = 0;
+        state.password = None;
+        tx
+    };
+
+    // Stop HTTP server (outside SHARE_STATE lock to avoid holding it during send)
+    if let Some(tx) = shutdown_tx {
+        let _ = tx.send(true);
+    }
+
+    // Clear authenticated sessions and connected clients
+    if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() {
+        sessions.clear();
+    }
+    if let Ok(mut clients) = CONNECTED_CLIENTS.lock() {
+        clients.clear();
+    }
+
+    log::info!("Sharing stopped");
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_share_state() -> Result<ShareStateInfo, String> {
+    let state = SHARE_STATE.lock()
+        .map_err(|_| "Internal state error".to_string())?;
+    let url = if state.active {
+        let local_ip = local_ip_address::local_ip()
+            .map(|ip| ip.to_string())
+            .unwrap_or_else(|_| "0.0.0.0".to_string());
+        Some(format!("http://{}:{}", local_ip, state.port))
+    } else {
+        None
+    };
+
+    Ok(ShareStateInfo {
+        active: state.active,
+        url,
+        ngrok_url: state.ngrok_url.clone(),
+        workspace_path: state.workspace_path.clone(),
+    })
+}
+
+#[tauri::command]
+async fn update_share_password(password: String) -> Result<(), String> {
+    // SECURITY: Validate password is not empty
+    if password.trim().is_empty() {
+        return Err("分享密码不能为空".to_string());
+    }
+    let mut state = SHARE_STATE.lock()
+        .map_err(|_| "Internal state error".to_string())?;
+    if !state.active {
+        return Err("Not currently sharing".to_string());
+    }
+    state.password = Some(password);
+    drop(state);
+
+    // Clear authenticated sessions and connected clients so everyone must re-auth with the new password
+    if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() { sessions.clear(); }
+    if let Ok(mut clients) = CONNECTED_CLIENTS.lock() { clients.clear(); }
+
+    log::info!("Share password updated");
+    Ok(())
+}
+
+// ==================== Connected Clients ====================
+
+#[tauri::command]
+fn get_connected_clients() -> Vec<ConnectedClient> {
+    let Ok(clients) = CONNECTED_CLIENTS.lock() else {
+        return vec![];
+    };
+    clients.values().cloned().collect()
+}
+
+/// Broadcast the current lock state for a given workspace to all WebSocket clients.
+/// `locks` must already be dropped before calling this to avoid deadlocks.
+fn broadcast_lock_state(workspace_path: &str) {
+    let lock_snapshot: HashMap<String, String> = {
+        let locks = WORKTREE_LOCKS.lock().unwrap();
+        locks
+            .iter()
+            .filter(|((wp, _), _)| *wp == workspace_path)
+            .map(|((_, wt), lbl)| (wt.clone(), lbl.clone()))
+            .collect()
+    };
+    if let Ok(json_str) = serde_json::to_string(&serde_json::json!({
+        "workspacePath": workspace_path,
+        "locks": lock_snapshot,
+    })) {
+        let _ = LOCK_BROADCAST.send(json_str);
+    }
+}
+
+// ==================== DevTools ====================
+
+#[tauri::command]
+fn open_devtools(webview_window: tauri::WebviewWindow) {
+    webview_window.open_devtools();
+}
+
 // ==================== Tauri 入口 ====================
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Install rustls CryptoProvider before any TLS usage (required by rustls 0.23+)
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_log::Builder::new().build())
+        .plugin(tauri_plugin_log::Builder::new()
+            .level(log::LevelFilter::Info)
+            .build())
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
-                let label = window.label().to_string();
-                {
-                    let mut map = WINDOW_WORKSPACES.lock().unwrap();
-                    map.remove(&label);
-                }
-                {
-                    let mut locks = WORKTREE_LOCKS.lock().unwrap();
-                    locks.retain(|_, v| *v != label);
-                }
+                unregister_window_impl(window.label());
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -1937,6 +2605,7 @@ pub fn run() {
             lock_worktree,
             unlock_worktree,
             get_locked_worktrees,
+            broadcast_terminal_state,
             // 智能扫描
             scan_linked_folders,
             // PTY 终端
@@ -1947,7 +2616,26 @@ pub fn run() {
             pty_close,
             pty_exists,
             pty_close_by_path,
+            // 分享功能
+            start_sharing,
+            stop_sharing,
+            get_share_state,
+            update_share_password,
+            get_connected_clients,
+            // ngrok
+            get_ngrok_token,
+            set_ngrok_token,
+            get_last_share_port,
+            start_ngrok_tunnel,
+            stop_ngrok_tunnel,
+            // DevTools
+            open_devtools,
         ])
+        .setup(|app| {
+            // Initialize APP_HANDLE for use in WebSocket handlers
+            *APP_HANDLE.lock().unwrap() = Some(app.handle().clone());
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
