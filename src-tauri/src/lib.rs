@@ -1778,6 +1778,16 @@ fn create_pull_request(
 }
 
 #[tauri::command]
+async fn fetch_project_remote(path: String) -> Result<(), String> {
+    let normalized = normalize_path(&path);
+    tokio::task::spawn_blocking(move || {
+        git_ops::fetch_remote(Path::new(&normalized))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
+#[tauri::command]
 fn check_remote_branch_exists(path: String, branch_name: String) -> Result<bool, String> {
     let normalized = normalize_path(&path);
     git_ops::check_remote_branch_exists(Path::new(&normalized), &branch_name)
@@ -2707,6 +2717,7 @@ pub fn run() {
             merge_to_base_branch,
             get_branch_diff_stats,
             create_pull_request,
+            fetch_project_remote,
             check_remote_branch_exists,
             get_remote_branches,
             // 工具

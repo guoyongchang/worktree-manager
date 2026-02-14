@@ -1,4 +1,4 @@
-import { useState, useEffect, type FC } from 'react';
+import { useState, useEffect, useRef, type FC } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   RefreshIcon,
@@ -16,6 +16,7 @@ import {
   getBranchDiffStats,
   createPullRequest,
   checkRemoteBranchExists,
+  fetchProjectRemote,
   type BranchDiffStats,
 } from '@/lib/backend';
 
@@ -36,6 +37,7 @@ export const GitOperations: FC<GitOperationsProps> = ({
 }) => {
   const [stats, setStats] = useState<BranchDiffStats | null>(null);
   const [loading, setLoading] = useState(false);
+  const [fetchingSyncing, setFetchingSyncing] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [pushing, setPushing] = useState(false);
   const [mergingToTest, setMergingToTest] = useState(false);
@@ -45,17 +47,18 @@ export const GitOperations: FC<GitOperationsProps> = ({
   const [success, setSuccess] = useState<string | null>(null);
   const [testBranchExists, setTestBranchExists] = useState<boolean | null>(null);
   const [baseBranchExists, setBaseBranchExists] = useState<boolean | null>(null);
+  const mountedRef = useRef(true);
 
   const loadStats = async () => {
     setLoading(true);
     setError(null);
     try {
       const diffStats = await getBranchDiffStats(projectPath, baseBranch);
-      setStats(diffStats);
+      if (mountedRef.current) setStats(diffStats);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (mountedRef.current) setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   };
 
@@ -65,16 +68,44 @@ export const GitOperations: FC<GitOperationsProps> = ({
         checkRemoteBranchExists(projectPath, testBranch),
         checkRemoteBranchExists(projectPath, baseBranch),
       ]);
-      setTestBranchExists(testExists);
-      setBaseBranchExists(baseExists);
+      if (mountedRef.current) {
+        setTestBranchExists(testExists);
+        setBaseBranchExists(baseExists);
+      }
     } catch (err) {
       console.error('Failed to check branches:', err);
     }
   };
 
   useEffect(() => {
-    loadStats();
-    checkBranches();
+    mountedRef.current = true;
+
+    // Phase 1: Instant local data (milliseconds)
+    const rafId = requestAnimationFrame(() => {
+      loadStats();
+      checkBranches();
+
+      // Phase 2: Background fetch from remote (3-6s), then refresh branch state
+      setFetchingSyncing(true);
+      fetchProjectRemote(projectPath)
+        .then(() => {
+          if (mountedRef.current) {
+            // Re-check branches with updated remote-tracking refs
+            return Promise.all([checkBranches(), loadStats()]);
+          }
+        })
+        .catch((err) => {
+          console.error('Background fetch failed:', err);
+        })
+        .finally(() => {
+          if (mountedRef.current) setFetchingSyncing(false);
+        });
+    });
+
+    return () => {
+      mountedRef.current = false;
+      cancelAnimationFrame(rafId);
+    };
   }, [projectPath, baseBranch, testBranch]);
 
   const handleSync = async () => {
@@ -167,6 +198,8 @@ export const GitOperations: FC<GitOperationsProps> = ({
     onRefresh?.();
   };
 
+  const actionsDisabled = fetchingSyncing;
+
   return (
     <div className="space-y-3">
       {error && (
@@ -212,7 +245,7 @@ export const GitOperations: FC<GitOperationsProps> = ({
             variant="secondary"
             size="sm"
             onClick={handleSync}
-            disabled={syncing || loading || baseBranchExists === false}
+            disabled={syncing || loading || baseBranchExists === false || actionsDisabled}
             className="flex-1 text-xs"
             title={baseBranchExists === false ? `远程分支 ${baseBranch} 不存在` : ''}
           >
@@ -224,7 +257,7 @@ export const GitOperations: FC<GitOperationsProps> = ({
             variant="secondary"
             size="sm"
             onClick={handlePush}
-            disabled={pushing || loading}
+            disabled={pushing || loading || actionsDisabled}
             className="flex-1 text-xs"
           >
             <UploadIcon className="w-3 h-3 mr-1" />
@@ -235,7 +268,7 @@ export const GitOperations: FC<GitOperationsProps> = ({
             variant="secondary"
             size="sm"
             onClick={handleCreatePR}
-            disabled={creatingPR || loading || baseBranchExists === false}
+            disabled={creatingPR || loading || baseBranchExists === false || actionsDisabled}
             className="flex-1 text-xs"
             title={baseBranchExists === false ? `远程分支 ${baseBranch} 不存在` : ''}
           >
@@ -249,7 +282,7 @@ export const GitOperations: FC<GitOperationsProps> = ({
             variant="secondary"
             size="sm"
             onClick={handleMergeToTest}
-            disabled={mergingToTest || loading || testBranchExists === false}
+            disabled={mergingToTest || loading || testBranchExists === false || actionsDisabled}
             className="flex-1 text-xs"
             title={testBranchExists === false ? `远程分支 ${testBranch} 不存在` : ''}
           >
@@ -261,7 +294,7 @@ export const GitOperations: FC<GitOperationsProps> = ({
             variant="secondary"
             size="sm"
             onClick={handleMergeToBase}
-            disabled={mergingToBase || loading || baseBranchExists === false}
+            disabled={mergingToBase || loading || baseBranchExists === false || actionsDisabled}
             className="flex-1 text-xs"
             title={baseBranchExists === false ? `远程分支 ${baseBranch} 不存在` : ''}
           >
@@ -270,6 +303,15 @@ export const GitOperations: FC<GitOperationsProps> = ({
           </Button>
         </div>
       </div>
+
+      {fetchingSyncing && (
+        <div className="flex items-center gap-2 text-xs text-blue-400/80">
+          <div className="flex-1 h-1 bg-slate-700 rounded-full overflow-hidden">
+            <div className="h-full bg-blue-500 rounded-full animate-progress-indeterminate" />
+          </div>
+          <span className="whitespace-nowrap">同步远程仓库中...</span>
+        </div>
+      )}
 
       {(testBranchExists === false || baseBranchExists === false) && (
         <div className="text-xs text-amber-400/80 flex items-center gap-1">

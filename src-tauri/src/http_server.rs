@@ -242,6 +242,18 @@ async fn h_check_remote_branch_exists(Json(args): Json<Value>) -> Response {
     result_json(git_ops::check_remote_branch_exists(std::path::Path::new(&normalized), &branch_name))
 }
 
+async fn h_fetch_project_remote(Json(args): Json<Value>) -> Response {
+    let path = args["path"].as_str().unwrap_or("").to_string();
+    let normalized = normalize_path(&path);
+    let result = tokio::task::spawn_blocking(move || {
+        git_ops::fetch_remote(std::path::Path::new(&normalized))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))
+    .and_then(|r| r);
+    result_json(result)
+}
+
 
 // -- Scan --
 
@@ -1152,6 +1164,7 @@ pub fn create_router() -> Router {
         .route("/api/clone_project", post(h_clone_project))
         .route("/api/get_branch_diff_stats", post(h_get_branch_diff_stats))
         .route("/api/check_remote_branch_exists", post(h_check_remote_branch_exists))
+        .route("/api/fetch_project_remote", post(h_fetch_project_remote))
         // Scan
         .route("/api/scan_linked_folders", post(h_scan_linked_folders))
         // System utilities
