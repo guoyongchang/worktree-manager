@@ -157,6 +157,8 @@ jobs:
         with:
           workspaces: src-tauri
           cache-on-failure: true
+          shared-key: release-build
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Add macOS targets
         if: runner.os == 'macOS'
