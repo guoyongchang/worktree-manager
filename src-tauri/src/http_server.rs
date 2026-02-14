@@ -34,7 +34,7 @@ use crate::{
     SwitchBranchRequest, CloneProjectRequest, OpenEditorRequest,
     PTY_MANAGER, SHARE_STATE, AUTHENTICATED_SESSIONS, CONNECTED_CLIENTS, LOCK_BROADCAST,
     AUTH_RATE_LIMITER, TERMINAL_STATE_BROADCAST,
-    ConnectedClient, load_workspace_config,
+    ConnectedClient, load_workspace_config, git_ops, normalize_path,
 };
 
 // ---------------------------------------------------------------------------
@@ -226,6 +226,22 @@ async fn h_switch_branch(Json(args): Json<Value>) -> Response {
     };
     result_ok(crate::switch_branch_internal(&request))
 }
+
+async fn h_get_branch_diff_stats(Json(args): Json<Value>) -> Response {
+    let path = args["path"].as_str().unwrap_or("").to_string();
+    let base_branch = args["baseBranch"].as_str().unwrap_or("").to_string();
+    let normalized = normalize_path(&path);
+    let stats = git_ops::get_branch_diff_stats(std::path::Path::new(&normalized), &base_branch);
+    Json(json!(stats)).into_response()
+}
+
+async fn h_check_remote_branch_exists(Json(args): Json<Value>) -> Response {
+    let path = args["path"].as_str().unwrap_or("").to_string();
+    let branch_name = args["branchName"].as_str().unwrap_or("").to_string();
+    let normalized = normalize_path(&path);
+    result_json(git_ops::check_remote_branch_exists(std::path::Path::new(&normalized), &branch_name))
+}
+
 
 // -- Scan --
 
@@ -1134,6 +1150,8 @@ pub fn create_router() -> Router {
         // Git operations
         .route("/api/switch_branch", post(h_switch_branch))
         .route("/api/clone_project", post(h_clone_project))
+        .route("/api/get_branch_diff_stats", post(h_get_branch_diff_stats))
+        .route("/api/check_remote_branch_exists", post(h_check_remote_branch_exists))
         // Scan
         .route("/api/scan_linked_folders", post(h_scan_linked_folders))
         // System utilities
