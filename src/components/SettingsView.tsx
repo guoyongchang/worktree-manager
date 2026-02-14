@@ -93,7 +93,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
   return (
     <div className="max-w-3xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-8 sticky top-0 z-10 bg-slate-900/95 backdrop-blur-sm py-3 -mx-4 px-4 border-b border-slate-700/30">
         <div className="flex items-center gap-3">
           <Button
             variant="ghost"
@@ -245,7 +245,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
       )}
 
       {/* Projects */}
-      <div>
+      <div className="pt-6 border-t border-slate-700/50">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-medium">项目配置</h2>
           <Button
@@ -262,6 +262,9 @@ export const SettingsView: FC<SettingsViewProps> = ({
           {config.projects.map((proj, index) => (
             <div key={index} className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4">
               <div className="flex items-start gap-3 mb-3">
+                <div className="w-6 h-6 rounded-md bg-slate-700/50 flex items-center justify-center shrink-0 mt-5">
+                  <span className="text-xs font-mono text-slate-400">{index + 1}</span>
+                </div>
                 <div className="flex-1 grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs text-slate-500 mb-1">项目名称</label>

@@ -17,7 +17,6 @@ import {
   FolderIcon,
   ArchiveIcon,
   WarningIcon,
-  StatusDot,
   GitBranchIcon,
   TerminalIcon,
   ChevronDownIcon,
@@ -65,6 +64,13 @@ function getProjectStatus(project: ProjectStatus): 'success' | 'warning' | 'info
   if (project.behind_base > 0) return 'sync';
   return 'success';
 }
+
+const statusBorderColor: Record<ReturnType<typeof getProjectStatus>, string> = {
+  success: 'border-l-emerald-500',
+  warning: 'border-l-amber-500',
+  info: 'border-l-blue-500',
+  sync: 'border-l-blue-400',
+};
 
 function getStatusText(project: ProjectStatus): string {
   const parts: string[] = [];
@@ -139,7 +145,11 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
 
   if (!selectedWorktree && !mainWorkspace) {
     return (
-      <div className="text-slate-500 text-center py-20">选择一个 Worktree 查看详情</div>
+      <div className="flex flex-col items-center justify-center h-full text-center py-20">
+        <FolderIcon className="w-12 h-12 text-slate-700 mb-4" />
+        <p className="text-slate-500 text-sm">选择一个 Worktree 查看详情</p>
+        <p className="text-slate-600 text-xs mt-1">从左侧边栏选择工作区或 Worktree</p>
+      </div>
     );
   }
 
@@ -246,7 +256,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
             };
 
             return (
-              <div key={proj.name} className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 group hover:border-slate-600 transition-colors">
+              <div key={proj.name} className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 group hover:border-slate-600 hover:shadow-md hover:shadow-black/10 hover:-translate-y-px transition-all duration-150">
                 <div className="flex items-center justify-between">
                   <span className="font-medium text-slate-200">{proj.name}</span>
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -418,10 +428,9 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
         </div>
         <div className="space-y-2">
           {selectedWorktree.projects.map(proj => (
-            <div key={proj.name} className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 group hover:border-slate-600 transition-colors">
+            <div key={proj.name} className={`bg-slate-800/50 border border-slate-700/50 border-l-2 ${statusBorderColor[getProjectStatus(proj)]} rounded-lg p-4 group hover:border-t-slate-600 hover:border-r-slate-600 hover:border-b-slate-600 hover:shadow-md hover:shadow-black/10 hover:-translate-y-px transition-all duration-150`}>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <StatusDot status={getProjectStatus(proj)} />
                   <div>
                     <div className="font-medium text-slate-200">{proj.name}</div>
                     <div className="flex items-center gap-1.5 text-slate-400 text-sm mt-0.5">

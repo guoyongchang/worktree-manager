@@ -714,7 +714,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
                   >
                     {/* Left: click to switch in current window */}
                     <button
-                      className={`flex-1 min-w-0 text-left px-2 py-1.5 rounded-l-sm transition-colors ${
+                      className={`flex-1 min-w-0 text-left px-2.5 py-2 rounded-l-sm transition-colors ${
                         isCurrent ? 'cursor-default' : 'cursor-pointer hover:bg-slate-700/60'
                       }`}
                       onClick={() => handleSwitchClick(ws.path)}
@@ -810,8 +810,8 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
       {/* Main Workspace */}
       {mainWorkspace && (
         <div
-          className={`px-4 py-3 border-b border-slate-700/50 cursor-pointer transition-colors ${
-            !selectedWorktree ? "bg-slate-700/30" : "hover:bg-slate-700/20"
+          className={`px-4 py-3 border-b border-slate-700/50 cursor-pointer transition-all duration-150 border-l-2 ${
+            !selectedWorktree ? "bg-slate-700/30 border-l-blue-500" : "border-l-transparent hover:bg-slate-700/20"
           }`}
           onClick={() => onSelectWorktree(null)}
         >
@@ -861,7 +861,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
             return (
             <div
               key={wt.name}
-              className={`px-4 py-2.5 transition-colors border-l-2 ${
+              className={`px-4 py-2.5 transition-all duration-150 border-l-2 ${
                 isLockedByOther && _isTauri
                   ? "border-transparent opacity-50 cursor-not-allowed"
                   : selectedWorktree?.name === wt.name
@@ -888,13 +888,13 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
         )}
 
         <div
-          className="px-4 py-2 cursor-pointer hover:bg-slate-700/20 flex items-center justify-between transition-colors"
+          className="px-4 py-2 cursor-pointer hover:bg-slate-700/30 flex items-center justify-between transition-colors group"
           onClick={onToggleArchived}
         >
-          <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
+          <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider group-hover:text-slate-400 transition-colors">
             归档 ({archivedWorktrees.length})
           </span>
-          <ChevronIcon expanded={showArchived} className="w-3.5 h-3.5 text-slate-500" />
+          <ChevronIcon expanded={showArchived} className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-400 transition-colors" />
         </div>
 
         {showArchived && archivedWorktrees.map(wt => (
@@ -964,7 +964,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
         ) : (
           <div />
         )}
-        <div className="flex items-center gap-0.5">
+        <div className="flex items-center gap-1">
           {_isTauri && (
             <TooltipProvider delayDuration={300}>
               <Tooltip>

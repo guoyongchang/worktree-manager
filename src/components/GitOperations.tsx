@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type FC } from 'react';
+import { useState, useEffect, useRef, useCallback, type FC } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   RefreshIcon,
@@ -47,7 +47,34 @@ export const GitOperations: FC<GitOperationsProps> = ({
   const [success, setSuccess] = useState<string | null>(null);
   const [testBranchExists, setTestBranchExists] = useState<boolean | null>(null);
   const [baseBranchExists, setBaseBranchExists] = useState<boolean | null>(null);
+  const [dismissing, setDismissing] = useState<'error' | 'success' | null>(null);
   const mountedRef = useRef(true);
+  const errorTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const successTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  const setErrorWithAutoDismiss = useCallback((msg: string | null) => {
+    clearTimeout(errorTimerRef.current);
+    setDismissing(null);
+    setError(msg);
+    if (msg) {
+      errorTimerRef.current = setTimeout(() => {
+        setDismissing('error');
+        setTimeout(() => { setError(null); setDismissing(null); }, 200);
+      }, 5000);
+    }
+  }, []);
+
+  const setSuccessWithAutoDismiss = useCallback((msg: string | null) => {
+    clearTimeout(successTimerRef.current);
+    setDismissing(null);
+    setSuccess(msg);
+    if (msg) {
+      successTimerRef.current = setTimeout(() => {
+        setDismissing('success');
+        setTimeout(() => { setSuccess(null); setDismissing(null); }, 200);
+      }, 3000);
+    }
+  }, []);
 
   const loadStats = async () => {
     setLoading(true);
@@ -105,20 +132,22 @@ export const GitOperations: FC<GitOperationsProps> = ({
     return () => {
       mountedRef.current = false;
       cancelAnimationFrame(rafId);
+      clearTimeout(errorTimerRef.current);
+      clearTimeout(successTimerRef.current);
     };
   }, [projectPath, baseBranch, testBranch]);
 
   const handleSync = async () => {
     setSyncing(true);
-    setError(null);
-    setSuccess(null);
+    setErrorWithAutoDismiss(null);
+    setSuccessWithAutoDismiss(null);
     try {
       const result = await syncWithBaseBranch(projectPath, baseBranch);
-      setSuccess(result);
+      setSuccessWithAutoDismiss(result);
       await loadStats();
       onRefresh?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setErrorWithAutoDismiss(err instanceof Error ? err.message : String(err));
     } finally {
       setSyncing(false);
     }
@@ -126,15 +155,15 @@ export const GitOperations: FC<GitOperationsProps> = ({
 
   const handlePush = async () => {
     setPushing(true);
-    setError(null);
-    setSuccess(null);
+    setErrorWithAutoDismiss(null);
+    setSuccessWithAutoDismiss(null);
     try {
       const result = await pushToRemote(projectPath);
-      setSuccess(result);
+      setSuccessWithAutoDismiss(result);
       await loadStats();
       onRefresh?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setErrorWithAutoDismiss(err instanceof Error ? err.message : String(err));
     } finally {
       setPushing(false);
     }
@@ -142,15 +171,15 @@ export const GitOperations: FC<GitOperationsProps> = ({
 
   const handleMergeToTest = async () => {
     setMergingToTest(true);
-    setError(null);
-    setSuccess(null);
+    setErrorWithAutoDismiss(null);
+    setSuccessWithAutoDismiss(null);
     try {
       const result = await mergeToTestBranch(projectPath, testBranch);
-      setSuccess(result);
+      setSuccessWithAutoDismiss(result);
       await loadStats();
       onRefresh?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setErrorWithAutoDismiss(err instanceof Error ? err.message : String(err));
     } finally {
       setMergingToTest(false);
     }
@@ -158,15 +187,15 @@ export const GitOperations: FC<GitOperationsProps> = ({
 
   const handleMergeToBase = async () => {
     setMergingToBase(true);
-    setError(null);
-    setSuccess(null);
+    setErrorWithAutoDismiss(null);
+    setSuccessWithAutoDismiss(null);
     try {
       const result = await mergeToBaseBranch(projectPath, baseBranch);
-      setSuccess(result);
+      setSuccessWithAutoDismiss(result);
       await loadStats();
       onRefresh?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setErrorWithAutoDismiss(err instanceof Error ? err.message : String(err));
     } finally {
       setMergingToBase(false);
     }
@@ -187,12 +216,12 @@ export const GitOperations: FC<GitOperationsProps> = ({
   return (
     <div className="space-y-3">
       {error && (
-        <div className="p-2 bg-red-900/30 border border-red-800/50 rounded text-red-300 text-xs">
+        <div className={`p-2 bg-red-900/30 border border-red-800/50 rounded text-red-300 text-xs transition-opacity duration-200 ${dismissing === 'error' ? 'opacity-0' : 'opacity-100'}`}>
           {error}
         </div>
       )}
       {success && (
-        <div className="p-2 bg-green-900/30 border border-green-800/50 rounded text-green-300 text-xs">
+        <div className={`p-2 bg-green-900/30 border border-green-800/50 rounded text-green-300 text-xs transition-opacity duration-200 ${dismissing === 'success' ? 'opacity-0' : 'opacity-100'}`}>
           {success}
         </div>
       )}
@@ -224,7 +253,7 @@ export const GitOperations: FC<GitOperationsProps> = ({
       </div>
 
       <div className="flex flex-col gap-2">
-        <div className="flex gap-2">
+        <div className="flex gap-2" title="同步操作">
           <Button
             variant="secondary"
             size="sm"
@@ -261,7 +290,7 @@ export const GitOperations: FC<GitOperationsProps> = ({
           </Button>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex gap-2" title="合并操作">
           <Button
             variant="secondary"
             size="sm"
@@ -291,7 +320,7 @@ export const GitOperations: FC<GitOperationsProps> = ({
       {fetchingSyncing && (
         <div className="flex items-center gap-2 text-xs text-blue-400/80">
           <div className="flex-1 h-1 bg-slate-700 rounded-full overflow-hidden">
-            <div className="h-full bg-blue-500 rounded-full animate-progress-indeterminate" />
+            <div className="h-full rounded-full animate-progress-indeterminate animate-gradient" />
           </div>
           <span className="whitespace-nowrap">同步远程仓库中...</span>
         </div>

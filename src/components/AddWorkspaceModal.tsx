@@ -66,6 +66,8 @@ export const AddWorkspaceModal: FC<AddWorkspaceModalProps> = ({
                 onChange={(e) => onPathChange(e.target.value)}
                 placeholder="/Users/xxx/Work/my-workspace"
                 className="flex-1"
+                autoFocus
+                onKeyDown={(e) => { if (e.key === 'Enter' && name.trim() && path.trim() && !loading) onSubmit(); }}
               />
               <Button variant="secondary" onClick={handleSelectFolder}>
                 <FolderIcon className="w-4 h-4" />
@@ -80,6 +82,7 @@ export const AddWorkspaceModal: FC<AddWorkspaceModalProps> = ({
               value={name}
               onChange={(e) => onNameChange(e.target.value)}
               placeholder="My Workspace"
+              onKeyDown={(e) => { if (e.key === 'Enter' && name.trim() && path.trim() && !loading) onSubmit(); }}
             />
           </div>
         </div>
@@ -144,6 +147,8 @@ export const CreateWorkspaceModal: FC<CreateWorkspaceModalProps> = ({
               value={name}
               onChange={(e) => onNameChange(e.target.value)}
               placeholder="my-workspace"
+              autoFocus
+              onKeyDown={(e) => { if (e.key === 'Enter' && name.trim() && path.trim() && !loading) onSubmit(); }}
             />
           </div>
           <div>
@@ -155,6 +160,7 @@ export const CreateWorkspaceModal: FC<CreateWorkspaceModalProps> = ({
                 onChange={(e) => onPathChange(e.target.value)}
                 placeholder="/Users/xxx/Work"
                 className="flex-1"
+                onKeyDown={(e) => { if (e.key === 'Enter' && name.trim() && path.trim() && !loading) onSubmit(); }}
               />
               <Button variant="secondary" onClick={handleSelectFolder}>
                 <FolderIcon className="w-4 h-4" />

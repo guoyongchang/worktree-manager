@@ -79,6 +79,8 @@ export const CreateWorktreeModal: FC<CreateWorktreeModalProps> = ({
               value={worktreeName}
               onChange={(e) => onWorktreeNameChange(e.target.value)}
               placeholder="feature-login-page"
+              autoFocus
+              onKeyDown={(e) => { if (e.key === 'Enter' && canSubmit) onSubmit(); }}
               className={nameValidation.error ? 'border-red-500 focus:border-red-500' : ''}
             />
             {nameValidation.error && (
