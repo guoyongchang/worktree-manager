@@ -139,8 +139,8 @@ export function useWorkspace(ready = true): UseWorkspaceReturn {
     setError(null);
     try {
       await callBackend("switch_workspace", { path });
-      await loadWorkspaces();
-      await loadData();
+      // loadWorkspaces and loadData are independent after switch — run in parallel
+      await Promise.all([loadWorkspaces(), loadData()]);
     } catch (e) {
       setError(String(e));
       setLoading(false);

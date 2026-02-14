@@ -201,8 +201,11 @@ function App() {
         }
 
         // 桌面端：自动选择第一个未被锁定的工作区
-        const locks: Record<string, string> = await workspace.getLockedWorktrees(wsPath).catch(() => ({} as Record<string, string>));
-        const windowLabel = await getWindowLabel();
+        // Run both IPC calls in parallel
+        const [locks, windowLabel] = await Promise.all([
+          workspace.getLockedWorktrees(wsPath).catch(() => ({} as Record<string, string>)),
+          getWindowLabel(),
+        ]);
         const activeWorktree = workspace.worktrees.find(w => {
           if (w.is_archived) return false;
           const lockedBy = locks[w.name];
@@ -291,16 +294,17 @@ function App() {
 
   // Workspace handlers
   const handleSwitchWorkspace = useCallback(async (path: string) => {
+    // Clear UI state immediately — don't wait for unlock
+    setShowWorkspaceMenu(false);
+    setSelectedWorktree(null);
+    setHasUserSelected(false);
     setSwitchingWorkspace(true);
+    // Fire-and-forget unlock (don't block the switch)
+    if (selectedWorktree && workspace.currentWorkspace) {
+      workspace.unlockWorktree(workspace.currentWorkspace.path, selectedWorktree.name).catch(() => {});
+    }
     try {
-      // Unlock current worktree before switching workspace
-      if (selectedWorktree && workspace.currentWorkspace) {
-        await workspace.unlockWorktree(workspace.currentWorkspace.path, selectedWorktree.name).catch(() => {});
-      }
       await workspace.switchWorkspace(path);
-      setShowWorkspaceMenu(false);
-      setSelectedWorktree(null);
-      setHasUserSelected(false);
     } finally {
       setSwitchingWorkspace(false);
     }
