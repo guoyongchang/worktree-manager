@@ -40,7 +40,7 @@ interface SettingsViewProps {
   checkingUpdate?: boolean;
   onScanProject?: (projectName: string) => void;
   scanningProject?: string | null;
-  scanResults?: ScannedFolder[];
+  scanResultsMap?: Record<string, ScannedFolder[]>;
   workspaces?: WorkspaceRef[];
   currentWorkspace?: WorkspaceRef | null;
   onRemoveWorkspace?: (path: string) => void;
@@ -64,7 +64,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
   checkingUpdate = false,
   onScanProject,
   scanningProject = null,
-  scanResults = [],
+  scanResultsMap = {},
   workspaces = [],
   currentWorkspace = null,
   onRemoveWorkspace,
@@ -354,9 +354,10 @@ export const SettingsView: FC<SettingsViewProps> = ({
                 </div>
 
                 {/* Scan Results Panel */}
-                {scanResults.length > 0 && scanningProject === null && proj.name && (() => {
+                {proj.name && (scanResultsMap[proj.name]?.length ?? 0) > 0 && scanningProject !== proj.name && (() => {
+                  const projScanResults = scanResultsMap[proj.name] || [];
                   const existingFolders = new Set(proj.linked_folders || []);
-                  const filteredResults = scanResults.filter(r => !existingFolders.has(r.relative_path));
+                  const filteredResults = projScanResults.filter(r => !existingFolders.has(r.relative_path));
                   if (filteredResults.length === 0) return null;
                   return (
                     <div className="mb-2 p-2 bg-blue-900/20 border border-blue-800/30 rounded-lg">

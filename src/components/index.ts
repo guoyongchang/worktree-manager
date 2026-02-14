@@ -18,3 +18,4 @@ export {
   UpdateErrorDialog,
   UpToDateToast,
 } from './UpdaterDialogs';
+export { ToastProvider, useToast } from './Toast';

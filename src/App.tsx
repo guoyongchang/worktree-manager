@@ -28,12 +28,11 @@ import {
   UpdateSuccessDialog,
   UpdateErrorDialog,
   UpToDateToast,
+  ToastProvider,
 } from "./components";
-import { useWorkspace, useTerminal, useUpdater } from "./hooks";
+import { useWorkspace, useTerminal, useUpdater, useShareFeature, useBrowserAuth, useWorktreeLocks, useModals } from "./hooks";
 import { Input } from "@/components/ui/input";
-import { callBackend, getWindowLabel, setWindowTitle, isTauri, getSessionId, clearSessionId, startSharing, stopSharing, getShareState, getShareInfo, authenticate, updateSharePassword, getNgrokToken, setNgrokToken, startNgrokTunnel, stopNgrokTunnel, getConnectedClients, getLastSharePassword, kickClient } from "./lib/backend";
-import type { ConnectedClient } from "./lib/backend";
-import { getWebSocketManager } from "./lib/websocket";
+import { callBackend, getWindowLabel, isTauri, setWindowTitle, getShareInfo } from "./lib/backend";
 import type {
   WorktreeListItem,
   ViewMode,
@@ -62,26 +61,35 @@ if (typeof window !== 'undefined' && isTauri()) {
 }
 
 function App() {
-  // Browser auth state (declared early so useWorkspace can depend on it)
-  const [browserAuthenticated, setBrowserAuthenticated] = useState(isTauri());
+  // Browser auth (declared early so useWorkspace can depend on it)
+  const browserAuth = useBrowserAuth();
 
-  const workspace = useWorkspace(browserAuthenticated);
+  const workspace = useWorkspace(browserAuth.browserAuthenticated);
+
+  // Browser: after authentication, bind to the shared workspace THEN load data
+  useEffect(() => {
+    if (!isTauri() && browserAuth.browserAuthenticated) {
+      getShareInfo().then(async (info) => {
+        await callBackend('set_window_workspace', { workspacePath: info.workspace_path });
+        await workspace.loadWorkspaces();
+        await workspace.loadData();
+      }).catch(() => {});
+    }
+  }, [browserAuth.browserAuthenticated]);
+
   const [selectedWorktree, setSelectedWorktree] = useState<WorktreeListItem | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('main');
 
   const terminal = useTerminal(selectedWorktree, workspace.mainWorkspace, workspace.currentWorkspace?.path);
   const updater = useUpdater();
 
-  // Modal states
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showAddWorkspaceModal, setShowAddWorkspaceModal] = useState(false);
-  const [showCreateWorkspaceModal, setShowCreateWorkspaceModal] = useState(false);
-  const [showAddProjectModal, setShowAddProjectModal] = useState(false);
-  const [showAddProjectToWorktreeModal, setShowAddProjectToWorktreeModal] = useState(false);
+  // Custom hooks for extracted state
+  const modals = useModals();
+  const share = useShareFeature(workspace.setError);
+  const locks = useWorktreeLocks(workspace.currentWorkspace?.path, workspace.getLockedWorktrees);
+
+  // Non-modal UI states that remain in App
   const [addingProjectToWorktree, setAddingProjectToWorktree] = useState(false);
-  const [showArchived, setShowArchived] = useState(false);
-  const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
-  const [showEditorMenu, setShowEditorMenu] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Loading states for async operations
@@ -130,64 +138,9 @@ function App() {
   // Track if user has manually selected (including main workspace)
   const [hasUserSelected, setHasUserSelected] = useState(false);
 
-  // Scan state (for SettingsView)
+  // Scan state (for SettingsView) — per-project scan results
   const [scanningProject, setScanningProject] = useState<string | null>(null);
-  const [settingsScanResults, setSettingsScanResults] = useState<ScannedFolder[]>([]);
-
-  // Share state
-  const [shareActive, setShareActive] = useState(false);
-  const [shareUrl, setShareUrl] = useState<string | null>(null);
-  const [shareNgrokUrl, setShareNgrokUrl] = useState<string | null>(null);
-  const [sharePassword, setSharePassword] = useState('');
-  const [ngrokLoading, setNgrokLoading] = useState(false);
-  const [showNgrokTokenDialog, setShowNgrokTokenDialog] = useState(false);
-  const [ngrokTokenInput, setNgrokTokenInput] = useState('');
-  const [savingNgrokToken, setSavingNgrokToken] = useState(false);
-
-  // Connected clients tracking
-  const [connectedClients, setConnectedClients] = useState<ConnectedClient[]>([]);
-
-  const [browserLoginPassword, setBrowserLoginPassword] = useState('');
-  const [browserLoginError, setBrowserLoginError] = useState<string | null>(null);
-  const [browserLoggingIn, setBrowserLoggingIn] = useState(false);
-
-  // Worktree lock state (for multi-window)
-  const [lockedWorktrees, setLockedWorktrees] = useState<Record<string, string>>({});
-
-  // Refresh worktree locks periodically
-  const currentWorkspacePath = workspace.currentWorkspace?.path;
-  const getLockedWorktreesFn = workspace.getLockedWorktrees;
-
-  // Update locks only when content actually changes (avoids unnecessary re-renders)
-  const updateLocksIfChanged = useCallback((locks: Record<string, string>) => {
-    setLockedWorktrees(prev => {
-      const next = JSON.stringify(locks);
-      return next === JSON.stringify(prev) ? prev : locks;
-    });
-  }, []);
-
-  const refreshLockedWorktrees = useCallback(async () => {
-    if (!currentWorkspacePath) return;
-    try {
-      const locks = await getLockedWorktreesFn(currentWorkspacePath);
-      updateLocksIfChanged(locks);
-    } catch {
-      // ignore
-    }
-  }, [currentWorkspacePath, getLockedWorktreesFn, updateLocksIfChanged]);
-
-  useEffect(() => {
-    if (!isTauri() && currentWorkspacePath) {
-      const wsManager = getWebSocketManager();
-      wsManager.subscribeLocks(currentWorkspacePath, updateLocksIfChanged);
-      refreshLockedWorktrees();
-      return () => { wsManager.unsubscribeLocks(); };
-    } else {
-      refreshLockedWorktrees();
-      const interval = setInterval(refreshLockedWorktrees, 3000);
-      return () => clearInterval(interval);
-    }
-  }, [refreshLockedWorktrees, currentWorkspacePath, updateLocksIfChanged]);
+  const [scanResultsMap, setScanResultsMap] = useState<Record<string, ScannedFolder[]>>({});
 
   // Set initial selected worktree when data loads (only on first load)
   useEffect(() => {
@@ -203,13 +156,13 @@ function App() {
 
         // 桌面端：自动选择第一个未被锁定的工作区
         // Run both IPC calls in parallel
-        const [locks, windowLabel] = await Promise.all([
+        const [lockedMap, windowLabel] = await Promise.all([
           workspace.getLockedWorktrees(wsPath).catch(() => ({} as Record<string, string>)),
           getWindowLabel(),
         ]);
         const activeWorktree = workspace.worktrees.find(w => {
           if (w.is_archived) return false;
-          const lockedBy = locks[w.name];
+          const lockedBy = lockedMap[w.name];
           return !lockedBy || lockedBy === windowLabel;
         });
         if (activeWorktree) {
@@ -270,11 +223,11 @@ function App() {
 
       setHasUserSelected(true);
       setSelectedWorktree(worktree);
-      refreshLockedWorktrees();
+      locks.refreshLockedWorktrees();
     } finally {
       setSwitchingWorktree(false);
     }
-  }, [workspace, selectedWorktree, refreshLockedWorktrees]);
+  }, [workspace, selectedWorktree, locks.refreshLockedWorktrees]);
 
   // Reset terminal active tab when worktree changes
   useEffect(() => {
@@ -299,7 +252,7 @@ function App() {
     const t0 = performance.now();
     console.log(`[app] handleSwitchWorkspace → ${path}`);
     // Clear UI state immediately — don't wait for unlock
-    setShowWorkspaceMenu(false);
+    modals.setModal('showWorkspaceMenu', false);
     setSelectedWorktree(null);
     setHasUserSelected(false);
     setSwitchingWorkspace(true);
@@ -313,20 +266,20 @@ function App() {
       setSwitchingWorkspace(false);
       console.log(`[app] handleSwitchWorkspace done: ${(performance.now() - t0).toFixed(1)}ms`);
     }
-  }, [workspace, selectedWorktree]);
+  }, [workspace, selectedWorktree, modals]);
 
   const handleAddWorkspace = useCallback(async () => {
     if (!newWorkspaceName.trim() || !newWorkspacePath.trim()) return;
     setAddingWorkspace(true);
     try {
       await workspace.addWorkspace(newWorkspaceName.trim(), newWorkspacePath.trim());
-      setShowAddWorkspaceModal(false);
+      modals.setModal('showAddWorkspaceModal', false);
       setNewWorkspaceName("");
       setNewWorkspacePath("");
     } finally {
       setAddingWorkspace(false);
     }
-  }, [workspace, newWorkspaceName, newWorkspacePath]);
+  }, [workspace, newWorkspaceName, newWorkspacePath, modals]);
 
   const handleCreateWorkspace = useCallback(async () => {
     if (!createWorkspaceName.trim() || !createWorkspacePath.trim()) return;
@@ -334,20 +287,20 @@ function App() {
     try {
       const fullPath = `${createWorkspacePath.trim()}/${createWorkspaceName.trim()}`;
       await workspace.createWorkspace(createWorkspaceName.trim(), fullPath);
-      setShowCreateWorkspaceModal(false);
+      modals.setModal('showCreateWorkspaceModal', false);
       setCreateWorkspaceName("");
       setCreateWorkspacePath("");
     } finally {
       setCreatingWorkspace(false);
     }
-  }, [workspace, createWorkspaceName, createWorkspacePath]);
+  }, [workspace, createWorkspaceName, createWorkspacePath, modals]);
 
   // Create worktree handlers
   const openCreateModal = useCallback(() => {
     setNewWorktreeName("");
     setSelectedProjects(new Map());
-    setShowCreateModal(true);
-  }, []);
+    modals.setModal('showCreateModal', true);
+  }, [modals]);
 
   const toggleProjectSelection = useCallback((name: string, baseBranch: string) => {
     setSelectedProjects(prev => {
@@ -378,13 +331,13 @@ function App() {
         ([name, base_branch]) => ({ name, base_branch })
       );
       await workspace.createWorktree(newWorktreeName.trim(), projects);
-      setShowCreateModal(false);
+      modals.setModal('showCreateModal', false);
     } catch (e) {
       workspace.setError(String(e));
     } finally {
       setCreating(false);
     }
-  }, [workspace, newWorktreeName, selectedProjects]);
+  }, [workspace, newWorktreeName, selectedProjects, modals]);
 
   // Add project handlers
   const handleAddProject = useCallback(async (project: {
@@ -440,23 +393,23 @@ function App() {
         project_name: projectName,
         base_branch: baseBranch,
       });
-      setShowAddProjectToWorktreeModal(false);
+      modals.setModal('showAddProjectToWorktreeModal', false);
     } catch (e) {
       workspace.setError(String(e));
     } finally {
       setAddingProjectToWorktree(false);
     }
-  }, [workspace, selectedWorktree]);
+  }, [workspace, selectedWorktree, modals]);
 
   // Scan project folders (for SettingsView)
   const handleScanProject = useCallback(async (projectName: string) => {
     if (!workspace.currentWorkspace) return;
     setScanningProject(projectName);
-    setSettingsScanResults([]);
+    setScanResultsMap(prev => ({ ...prev, [projectName]: [] }));
     try {
       const projectPath = `${workspace.currentWorkspace.path}/projects/${projectName}`;
       const results = await workspace.scanLinkedFolders(projectPath);
-      setSettingsScanResults(results);
+      setScanResultsMap(prev => ({ ...prev, [projectName]: results }));
     } catch (e) {
       workspace.setError(String(e));
     } finally {
@@ -472,181 +425,6 @@ function App() {
       workspace.setError(String(e));
     }
   }, [workspace]);
-
-  // Share handlers
-  const generatePassword = useCallback(() => {
-    const chars = 'abcdefghijkmnpqrstuvwxyz23456789';
-    return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-  }, []);
-
-  const handleStartShare = useCallback(async (port: number) => {
-    try {
-      const pwd = sharePassword || generatePassword();
-      const url = await startSharing(port, pwd);
-      setShareActive(true);
-      setShareUrl(url);
-      setSharePassword(pwd);
-    } catch (e) {
-      workspace.setError(String(e));
-    }
-  }, [workspace, generatePassword, sharePassword]);
-
-  const handleStopShare = useCallback(async () => {
-    try {
-      await stopSharing();
-      setShareActive(false);
-      setShareUrl(null);
-      setShareNgrokUrl(null);
-      setConnectedClients([]);
-    } catch (e) {
-      workspace.setError(String(e));
-    }
-  }, [workspace]);
-
-  const handleToggleNgrok = useCallback(async () => {
-    if (ngrokLoading) return;
-    setNgrokLoading(true);
-    try {
-      if (shareNgrokUrl) {
-        await stopNgrokTunnel();
-        setShareNgrokUrl(null);
-      } else {
-        // Check if ngrok token is configured
-        const token = await getNgrokToken();
-        if (!token) {
-          setNgrokLoading(false);
-          setShowNgrokTokenDialog(true);
-          return;
-        }
-        const ngrokUrl = await startNgrokTunnel();
-        setShareNgrokUrl(ngrokUrl);
-      }
-    } catch (e) {
-      workspace.setError(String(e));
-    } finally {
-      setNgrokLoading(false);
-    }
-  }, [workspace, shareNgrokUrl, ngrokLoading]);
-
-  const handleUpdateSharePassword = useCallback(async (newPassword: string) => {
-    try {
-      await updateSharePassword(newPassword);
-      setSharePassword(newPassword);
-    } catch (e) {
-      workspace.setError(String(e));
-    }
-  }, [workspace]);
-
-  const handleKickClient = useCallback(async (sessionId: string) => {
-    try {
-      await kickClient(sessionId);
-      // Refresh connected clients list
-      const clients = await getConnectedClients();
-      setConnectedClients(clients);
-    } catch (e) {
-      workspace.setError(String(e));
-    }
-  }, [workspace]);
-
-  const handleSaveNgrokToken = useCallback(async () => {
-    if (!ngrokTokenInput.trim()) return;
-    setSavingNgrokToken(true);
-    try {
-      await setNgrokToken(ngrokTokenInput.trim());
-      setShowNgrokTokenDialog(false);
-      setNgrokTokenInput('');
-      // Try to start ngrok tunnel after saving token
-      setNgrokLoading(true);
-      const ngrokUrl = await startNgrokTunnel();
-      setShareNgrokUrl(ngrokUrl);
-    } catch (e) {
-      workspace.setError(String(e));
-    } finally {
-      setSavingNgrokToken(false);
-      setNgrokLoading(false);
-    }
-  }, [workspace, ngrokTokenInput]);
-
-  // Restore share state and load ngrok token on mount (Tauri only)
-  useEffect(() => {
-    if (isTauri()) {
-      getShareState().then(state => {
-        if (state.active && state.url) {
-          setShareActive(true);
-          setShareUrl(state.url);
-          if (state.ngrok_url) {
-            setShareNgrokUrl(state.ngrok_url);
-          }
-        }
-      }).catch(() => {});
-      // Load last password if available
-      getLastSharePassword().then(pwd => {
-        if (pwd) {
-          setSharePassword(pwd);
-        }
-      }).catch(() => {});
-    }
-  }, []);
-
-  // Poll connected clients when sharing is active (Tauri only)
-  useEffect(() => {
-    if (!isTauri() || !shareActive) {
-      setConnectedClients([]);
-      return;
-    }
-    // Fetch immediately, then poll every 5s
-    const fetchClients = () => {
-      getConnectedClients()
-        .then(setConnectedClients)
-        .catch(() => {});
-    };
-    fetchClients();
-    const interval = setInterval(fetchClients, 5000);
-    return () => clearInterval(interval);
-  }, [shareActive]);
-
-  // Browser: validate stored session on startup (avoids re-auth on refresh)
-  useEffect(() => {
-    if (isTauri()) return;
-    const sid = getSessionId();
-    if (!sid) return;
-    // Try an authenticated call to check if session is still valid
-    callBackend('list_workspaces')
-      .then(() => setBrowserAuthenticated(true))
-      .catch(() => {
-        // Only clear if session hasn't been replaced by a fresh auth in the meantime
-        if (getSessionId() === sid) {
-          clearSessionId();
-        }
-      });
-  }, []);
-
-  // Browser: after authentication, bind to the shared workspace THEN load data
-  useEffect(() => {
-    if (!isTauri() && browserAuthenticated) {
-      getShareInfo().then(async (info) => {
-        await callBackend('set_window_workspace', { workspacePath: info.workspace_path });
-        await workspace.loadWorkspaces();
-        await workspace.loadData();
-      }).catch(() => {});
-    }
-  }, [browserAuthenticated]);
-
-  // Browser login handler
-  const handleBrowserLogin = useCallback(async () => {
-    if (!browserLoginPassword.trim()) return;
-    setBrowserLoggingIn(true);
-    setBrowserLoginError(null);
-    try {
-      await authenticate(browserLoginPassword.trim());
-      setBrowserAuthenticated(true);
-      setBrowserLoginPassword('');
-    } catch (e) {
-      setBrowserLoginError(String(e));
-    } finally {
-      setBrowserLoggingIn(false);
-    }
-  }, [browserLoginPassword]);
 
   // Archive handlers
   const handleContextMenu = useCallback((e: React.MouseEvent, worktree: WorktreeListItem) => {
@@ -809,8 +587,8 @@ function App() {
         }
         setContextMenu(null);
         setArchiveModal(null);
-        setShowEditorMenu(false);
-        setShowWorkspaceMenu(false);
+        modals.setModal('showEditorMenu', false);
+        modals.setModal('showWorkspaceMenu', false);
         setTerminalTabMenu(null);
       }
       // Cmd/Ctrl+N: Open create worktree modal (Tauri only)
@@ -844,10 +622,10 @@ function App() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('click', handleClick);
     };
-  }, [viewMode, workspace.config, openCreateModal, openSettings, terminalFullscreen]);
+  }, [viewMode, workspace.config, openCreateModal, openSettings, terminalFullscreen, modals]);
 
   // Browser mode: show login screen if not authenticated
-  if (!isTauri() && !browserAuthenticated) {
+  if (!isTauri() && !browserAuth.browserAuthenticated) {
     return (
       <div className="min-h-screen bg-slate-900 text-slate-100 flex items-center justify-center">
         <div className="w-80 space-y-4">
@@ -855,24 +633,24 @@ function App() {
             <h1 className="text-xl font-semibold">Worktree Manager</h1>
             <p className="text-sm text-slate-400">请输入访问密码</p>
           </div>
-          <form onSubmit={(e) => { e.preventDefault(); handleBrowserLogin(); }} className="space-y-3">
+          <form onSubmit={(e) => { e.preventDefault(); browserAuth.handleBrowserLogin(); }} className="space-y-3">
             <Input
               type="password"
               placeholder="密码"
-              value={browserLoginPassword}
-              onChange={(e) => setBrowserLoginPassword(e.target.value)}
+              value={browserAuth.browserLoginPassword}
+              onChange={(e) => browserAuth.setBrowserLoginPassword(e.target.value)}
               autoFocus
               className="bg-slate-800 border-slate-700"
             />
-            {browserLoginError && (
-              <p className="text-sm text-red-400">{browserLoginError}</p>
+            {browserAuth.browserLoginError && (
+              <p className="text-sm text-red-400">{browserAuth.browserLoginError}</p>
             )}
             <Button
               type="submit"
               className="w-full"
-              disabled={browserLoggingIn || !browserLoginPassword.trim()}
+              disabled={browserAuth.browserLoggingIn || !browserAuth.browserLoginPassword.trim()}
             >
-              {browserLoggingIn ? '验证中...' : '进入'}
+              {browserAuth.browserLoggingIn ? '验证中...' : '进入'}
             </Button>
           </form>
         </div>
@@ -885,12 +663,12 @@ function App() {
     return (
       <>
         <WelcomeView
-          onAddWorkspace={() => setShowAddWorkspaceModal(true)}
-          onCreateWorkspace={() => setShowCreateWorkspaceModal(true)}
+          onAddWorkspace={() => modals.setModal('showAddWorkspaceModal', true)}
+          onCreateWorkspace={() => modals.setModal('showCreateWorkspaceModal', true)}
         />
         <AddWorkspaceModal
-          open={showAddWorkspaceModal}
-          onOpenChange={setShowAddWorkspaceModal}
+          open={modals.showAddWorkspaceModal}
+          onOpenChange={(v) => modals.setModal('showAddWorkspaceModal', v)}
           name={newWorkspaceName}
           onNameChange={setNewWorkspaceName}
           path={newWorkspacePath}
@@ -899,8 +677,8 @@ function App() {
           loading={addingWorkspace}
         />
         <CreateWorkspaceModal
-          open={showCreateWorkspaceModal}
-          onOpenChange={setShowCreateWorkspaceModal}
+          open={modals.showCreateWorkspaceModal}
+          onOpenChange={(v) => modals.setModal('showCreateWorkspaceModal', v)}
           name={createWorkspaceName}
           onNameChange={setCreateWorkspaceName}
           path={createWorkspacePath}
@@ -913,6 +691,7 @@ function App() {
   }
 
   return (
+    <ToastProvider>
     <>
       {/* Loading overlay — keeps main UI mounted to avoid unmount/remount storm */}
       {workspace.loading && (
@@ -948,7 +727,7 @@ function App() {
             checkingUpdate={updater.state === 'checking'}
             onScanProject={handleScanProject}
             scanningProject={scanningProject}
-            scanResults={settingsScanResults}
+            scanResultsMap={scanResultsMap}
             workspaces={workspace.workspaces}
             currentWorkspace={workspace.currentWorkspace}
             onRemoveWorkspace={workspace.removeWorkspace}
@@ -965,16 +744,16 @@ function App() {
           <WorktreeSidebar
           workspaces={workspace.workspaces}
           currentWorkspace={workspace.currentWorkspace}
-          showWorkspaceMenu={showWorkspaceMenu}
-          onShowWorkspaceMenu={setShowWorkspaceMenu}
+          showWorkspaceMenu={modals.showWorkspaceMenu}
+          onShowWorkspaceMenu={(v) => modals.setModal('showWorkspaceMenu', v)}
           onSwitchWorkspace={handleSwitchWorkspace}
-          onAddWorkspace={() => setShowAddWorkspaceModal(true)}
+          onAddWorkspace={() => modals.setModal('showAddWorkspaceModal', true)}
           mainWorkspace={workspace.mainWorkspace}
           worktrees={workspace.worktrees}
           selectedWorktree={selectedWorktree}
           onSelectWorktree={handleSelectWorktree}
-          showArchived={showArchived}
-          onToggleArchived={() => setShowArchived(prev => !prev)}
+          showArchived={modals.showArchived}
+          onToggleArchived={() => modals.toggleModal('showArchived')}
           onContextMenu={handleContextMenu}
           onRefresh={workspace.loadData}
           onOpenSettings={openSettings}
@@ -982,21 +761,21 @@ function App() {
           updaterState={updater.state}
           onCheckUpdate={() => updater.checkForUpdates(false)}
           onOpenInNewWindow={isTauri() ? handleOpenInNewWindow : undefined}
-          lockedWorktrees={lockedWorktrees}
+          lockedWorktrees={locks.lockedWorktrees}
           collapsed={sidebarCollapsed}
           onToggleCollapsed={() => setSidebarCollapsed(prev => !prev)}
           switchingWorkspace={switchingWorkspace}
-          shareActive={shareActive}
-          shareUrl={shareUrl}
-          shareNgrokUrl={shareNgrokUrl}
-          sharePassword={sharePassword}
-          onStartShare={handleStartShare}
-          onStopShare={handleStopShare}
-          onUpdateSharePassword={handleUpdateSharePassword}
-          ngrokLoading={ngrokLoading}
-          onToggleNgrok={handleToggleNgrok}
-          connectedClients={connectedClients}
-          onKickClient={handleKickClient}
+          shareActive={share.shareActive}
+          shareUrl={share.shareUrl}
+          shareNgrokUrl={share.shareNgrokUrl}
+          sharePassword={share.sharePassword}
+          onStartShare={share.handleStartShare}
+          onStopShare={share.handleStopShare}
+          onUpdateSharePassword={share.handleUpdateSharePassword}
+          ngrokLoading={share.ngrokLoading}
+          onToggleNgrok={share.handleToggleNgrok}
+          connectedClients={share.connectedClients}
+          onKickClient={share.handleKickClient}
         />
         )}
 
@@ -1007,8 +786,8 @@ function App() {
               selectedWorktree={selectedWorktree}
               mainWorkspace={workspace.mainWorkspace}
               selectedEditor={selectedEditor}
-              showEditorMenu={showEditorMenu}
-              onShowEditorMenu={setShowEditorMenu}
+              showEditorMenu={modals.showEditorMenu}
+              onShowEditorMenu={(v) => modals.setModal('showEditorMenu', v)}
               onSelectEditor={setSelectedEditor}
               onOpenInEditor={handleOpenInEditor}
               onOpenInTerminal={workspace.openInTerminal}
@@ -1029,8 +808,8 @@ function App() {
               restoring={restoringWorktree}
               switching={switchingWorktree}
               onDelete={selectedWorktree?.is_archived ? () => setDeleteConfirmWorktree(selectedWorktree) : undefined}
-              onAddProject={() => setShowAddProjectModal(true)}
-              onAddProjectToWorktree={() => setShowAddProjectToWorktreeModal(true)}
+              onAddProject={() => modals.setModal('showAddProjectModal', true)}
+              onAddProjectToWorktree={() => modals.setModal('showAddProjectToWorktreeModal', true)}
               error={workspace.error}
               onClearError={() => workspace.setError(null)}
             />
@@ -1062,8 +841,8 @@ function App() {
 
         {/* Modals */}
         <CreateWorktreeModal
-          open={showCreateModal && !!workspace.config}
-          onOpenChange={setShowCreateModal}
+          open={modals.showCreateModal && !!workspace.config}
+          onOpenChange={(v) => modals.setModal('showCreateModal', v)}
           config={workspace.config}
           worktreeName={newWorktreeName}
           onWorktreeNameChange={setNewWorktreeName}
@@ -1076,8 +855,8 @@ function App() {
 
         {isTauri() && (
           <AddWorkspaceModal
-            open={showAddWorkspaceModal}
-            onOpenChange={setShowAddWorkspaceModal}
+            open={modals.showAddWorkspaceModal}
+            onOpenChange={(v) => modals.setModal('showAddWorkspaceModal', v)}
             name={newWorkspaceName}
             onNameChange={setNewWorkspaceName}
             path={newWorkspacePath}
@@ -1088,8 +867,8 @@ function App() {
         )}
 
         <AddProjectModal
-          open={showAddProjectModal}
-          onOpenChange={setShowAddProjectModal}
+          open={modals.showAddProjectModal}
+          onOpenChange={(v) => modals.setModal('showAddProjectModal', v)}
           onSubmit={handleAddProject}
           loading={cloningProject}
           scanLinkedFolders={workspace.scanLinkedFolders}
@@ -1098,8 +877,8 @@ function App() {
         />
 
         <AddProjectToWorktreeModal
-          open={showAddProjectToWorktreeModal}
-          onOpenChange={setShowAddProjectToWorktreeModal}
+          open={modals.showAddProjectToWorktreeModal}
+          onOpenChange={(v) => modals.setModal('showAddProjectToWorktreeModal', v)}
           config={workspace.config}
           worktree={selectedWorktree}
           onSubmit={handleAddProjectToWorktree}
@@ -1200,7 +979,7 @@ function App() {
       <UpToDateToast show={updater.showUpToDateToast} />
 
       {/* Ngrok Token Dialog */}
-      <Dialog open={showNgrokTokenDialog} onOpenChange={setShowNgrokTokenDialog}>
+      <Dialog open={share.showNgrokTokenDialog} onOpenChange={share.setShowNgrokTokenDialog}>
         <DialogContent className="max-w-[500px]">
           <DialogHeader>
             <DialogTitle>配置 Ngrok Token</DialogTitle>
@@ -1212,24 +991,25 @@ function App() {
             <Input
               type="text"
               placeholder="ngrok authtoken"
-              value={ngrokTokenInput}
-              onChange={(e) => setNgrokTokenInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleSaveNgrokToken(); }}
+              value={share.ngrokTokenInput}
+              onChange={(e) => share.setNgrokTokenInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') share.handleSaveNgrokToken(); }}
               className="font-mono text-sm"
             />
           </div>
           <DialogFooter>
-            <Button variant="secondary" onClick={() => setShowNgrokTokenDialog(false)}>
+            <Button variant="secondary" onClick={() => share.setShowNgrokTokenDialog(false)}>
               取消
             </Button>
-            <Button onClick={handleSaveNgrokToken} disabled={savingNgrokToken || !ngrokTokenInput.trim()}>
-              {savingNgrokToken ? '保存中...' : '保存并启动'}
+            <Button onClick={share.handleSaveNgrokToken} disabled={share.savingNgrokToken || !share.ngrokTokenInput.trim()}>
+              {share.savingNgrokToken ? '保存中...' : '保存并启动'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
     </>
+    </ToastProvider>
   );
 }
 
