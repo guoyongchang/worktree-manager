@@ -86,6 +86,7 @@ function App() {
 
   // Loading states for async operations
   const [switchingWorkspace, setSwitchingWorkspace] = useState(false);
+  const [switchingWorktree, setSwitchingWorktree] = useState(false);
   const [addingWorkspace, setAddingWorkspace] = useState(false);
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
   const [archiving, setArchiving] = useState(false);
@@ -233,36 +234,41 @@ function App() {
     const wsPath = workspace.currentWorkspace?.path;
     if (!wsPath) return;
 
-    // 网页端：直接查看，不需要锁定（因为已经被桌面端锁定了）
-    if (!isTauri()) {
+    setSwitchingWorktree(true);
+    try {
+      // 网页端：直接查看，不需要锁定（因为已经被桌面端锁定了）
+      if (!isTauri()) {
+        setHasUserSelected(true);
+        setSelectedWorktree(worktree);
+        return;
+      }
+
+      // 桌面端：需要锁定/解锁逻辑
+      // Unlock previous worktree
+      if (selectedWorktree) {
+        try {
+          await workspace.unlockWorktree(wsPath, selectedWorktree.name);
+        } catch {
+          // ignore unlock errors
+        }
+      }
+
+      // Lock new worktree
+      if (worktree) {
+        try {
+          await workspace.lockWorktree(wsPath, worktree.name);
+        } catch (e) {
+          workspace.setError(String(e));
+          return; // Don't select if lock fails
+        }
+      }
+
       setHasUserSelected(true);
       setSelectedWorktree(worktree);
-      return;
+      refreshLockedWorktrees();
+    } finally {
+      setSwitchingWorktree(false);
     }
-
-    // 桌面端：需要锁定/解锁逻辑
-    // Unlock previous worktree
-    if (selectedWorktree) {
-      try {
-        await workspace.unlockWorktree(wsPath, selectedWorktree.name);
-      } catch {
-        // ignore unlock errors
-      }
-    }
-
-    // Lock new worktree
-    if (worktree) {
-      try {
-        await workspace.lockWorktree(wsPath, worktree.name);
-      } catch (e) {
-        workspace.setError(String(e));
-        return; // Don't select if lock fails
-      }
-    }
-
-    setHasUserSelected(true);
-    setSelectedWorktree(worktree);
-    refreshLockedWorktrees();
   }, [workspace, selectedWorktree, refreshLockedWorktrees]);
 
   // Reset terminal active tab when worktree changes
@@ -1014,6 +1020,7 @@ function App() {
                 }
               }}
               restoring={restoringWorktree}
+              switching={switchingWorktree}
               onDelete={selectedWorktree?.is_archived ? () => setDeleteConfirmWorktree(selectedWorktree) : undefined}
               onAddProject={() => setShowAddProjectModal(true)}
               onAddProjectToWorktree={() => setShowAddProjectToWorktreeModal(true)}

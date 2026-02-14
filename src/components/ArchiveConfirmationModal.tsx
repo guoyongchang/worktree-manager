@@ -111,7 +111,10 @@ export const ArchiveConfirmationModal: FC<ArchiveConfirmationModalProps> = ({
                             )}
                           </div>
                         ) : (
-                          <div className="mt-1 text-xs text-emerald-400">✓ 无问题</div>
+                          <div className="mt-1 text-xs text-emerald-400 flex items-center gap-1">
+                            <CheckIcon className="w-3 h-3" />
+                            <span>无问题</span>
+                          </div>
                         )}
                       </div>
                     );

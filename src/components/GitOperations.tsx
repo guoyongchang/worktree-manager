@@ -2,15 +2,20 @@ import { useState, useEffect, type FC } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   RefreshIcon,
-  GitBranchIcon,
+  SyncIcon,
   GitMergeIcon,
   GitPullRequestIcon,
+  UploadIcon,
+  WarningIcon,
 } from './Icons';
 import {
   syncWithBaseBranch,
+  pushToRemote,
   mergeToTestBranch,
+  mergeToBaseBranch,
   getBranchDiffStats,
   createPullRequest,
+  checkRemoteBranchExists,
   type BranchDiffStats,
 } from '@/lib/backend';
 
@@ -32,10 +37,14 @@ export const GitOperations: FC<GitOperationsProps> = ({
   const [stats, setStats] = useState<BranchDiffStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [merging, setMerging] = useState(false);
+  const [pushing, setPushing] = useState(false);
+  const [mergingToTest, setMergingToTest] = useState(false);
+  const [mergingToBase, setMergingToBase] = useState(false);
   const [creatingPR, setCreatingPR] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [testBranchExists, setTestBranchExists] = useState<boolean | null>(null);
+  const [baseBranchExists, setBaseBranchExists] = useState<boolean | null>(null);
 
   const loadStats = async () => {
     setLoading(true);
@@ -50,9 +59,23 @@ export const GitOperations: FC<GitOperationsProps> = ({
     }
   };
 
+  const checkBranches = async () => {
+    try {
+      const [testExists, baseExists] = await Promise.all([
+        checkRemoteBranchExists(projectPath, testBranch),
+        checkRemoteBranchExists(projectPath, baseBranch),
+      ]);
+      setTestBranchExists(testExists);
+      setBaseBranchExists(baseExists);
+    } catch (err) {
+      console.error('Failed to check branches:', err);
+    }
+  };
+
   useEffect(() => {
     loadStats();
-  }, [projectPath, baseBranch]);
+    checkBranches();
+  }, [projectPath, baseBranch, testBranch]);
 
   const handleSync = async () => {
     setSyncing(true);
@@ -70,8 +93,24 @@ export const GitOperations: FC<GitOperationsProps> = ({
     }
   };
 
-  const handleMerge = async () => {
-    setMerging(true);
+  const handlePush = async () => {
+    setPushing(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const result = await pushToRemote(projectPath);
+      setSuccess(result);
+      await loadStats();
+      onRefresh?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPushing(false);
+    }
+  };
+
+  const handleMergeToTest = async () => {
+    setMergingToTest(true);
     setError(null);
     setSuccess(null);
     try {
@@ -82,22 +121,38 @@ export const GitOperations: FC<GitOperationsProps> = ({
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setMerging(false);
+      setMergingToTest(false);
+    }
+  };
+
+  const handleMergeToBase = async () => {
+    setMergingToBase(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const result = await mergeToBaseBranch(projectPath, baseBranch);
+      setSuccess(result);
+      await loadStats();
+      onRefresh?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setMergingToBase(false);
     }
   };
 
   const handleCreatePR = async () => {
-    const title = window.prompt(`创建 PR 标题 (${currentBranch} -> ${baseBranch}):`);
+    const title = window.prompt(`创建 PR/MR 标题 (${currentBranch} -> ${baseBranch}):`);
     if (!title) return;
 
-    const body = window.prompt('PR 描述 (可选):') || '';
+    const body = window.prompt('PR/MR 描述 (可选):') || '';
 
     setCreatingPR(true);
     setError(null);
     setSuccess(null);
     try {
       const prUrl = await createPullRequest(projectPath, baseBranch, title, body);
-      setSuccess(`PR 创建成功: ${prUrl}`);
+      setSuccess(`PR/MR 创建成功: ${prUrl}`);
       onRefresh?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -108,6 +163,7 @@ export const GitOperations: FC<GitOperationsProps> = ({
 
   const handleRefresh = async () => {
     await loadStats();
+    await checkBranches();
     onRefresh?.();
   };
 
@@ -150,40 +206,81 @@ export const GitOperations: FC<GitOperationsProps> = ({
         </Button>
       </div>
 
-      <div className="flex gap-2">
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={handleSync}
-          disabled={syncing || loading}
-          className="flex-1 text-xs"
-        >
-          <GitBranchIcon className="w-3 h-3 mr-1" />
-          {syncing ? '同步中...' : `同步 ${baseBranch}`}
-        </Button>
+      <div className="flex flex-col gap-2">
+        <div className="flex gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleSync}
+            disabled={syncing || loading || baseBranchExists === false}
+            className="flex-1 text-xs"
+            title={baseBranchExists === false ? `远程分支 ${baseBranch} 不存在` : ''}
+          >
+            <SyncIcon className="w-3 h-3 mr-1" />
+            {syncing ? '同步中...' : `同步 ${baseBranch}`}
+          </Button>
 
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={handleMerge}
-          disabled={merging || loading}
-          className="flex-1 text-xs"
-        >
-          <GitMergeIcon className="w-3 h-3 mr-1" />
-          {merging ? '合并中...' : `合并到 ${testBranch}`}
-        </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handlePush}
+            disabled={pushing || loading}
+            className="flex-1 text-xs"
+          >
+            <UploadIcon className="w-3 h-3 mr-1" />
+            {pushing ? '推送中...' : '推送'}
+          </Button>
 
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={handleCreatePR}
-          disabled={creatingPR || loading}
-          className="flex-1 text-xs"
-        >
-          <GitPullRequestIcon className="w-3 h-3 mr-1" />
-          {creatingPR ? '创建中...' : '创建 PR'}
-        </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleCreatePR}
+            disabled={creatingPR || loading || baseBranchExists === false}
+            className="flex-1 text-xs"
+            title={baseBranchExists === false ? `远程分支 ${baseBranch} 不存在` : ''}
+          >
+            <GitPullRequestIcon className="w-3 h-3 mr-1" />
+            {creatingPR ? '创建中...' : '创建 PR/MR'}
+          </Button>
+        </div>
+
+        <div className="flex gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleMergeToTest}
+            disabled={mergingToTest || loading || testBranchExists === false}
+            className="flex-1 text-xs"
+            title={testBranchExists === false ? `远程分支 ${testBranch} 不存在` : ''}
+          >
+            <GitMergeIcon className="w-3 h-3 mr-1" />
+            {mergingToTest ? '合并中...' : `合并到 ${testBranch}`}
+          </Button>
+
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleMergeToBase}
+            disabled={mergingToBase || loading || baseBranchExists === false}
+            className="flex-1 text-xs"
+            title={baseBranchExists === false ? `远程分支 ${baseBranch} 不存在` : ''}
+          >
+            <GitMergeIcon className="w-3 h-3 mr-1" />
+            {mergingToBase ? '合并中...' : `合并到 ${baseBranch}`}
+          </Button>
+        </div>
       </div>
+
+      {(testBranchExists === false || baseBranchExists === false) && (
+        <div className="text-xs text-amber-400/80 flex items-center gap-1">
+          <WarningIcon className="w-3.5 h-3.5 text-amber-500" />
+          <span>
+            {testBranchExists === false && `远程分支 ${testBranch} 不存在`}
+            {testBranchExists === false && baseBranchExists === false && '，'}
+            {baseBranchExists === false && `远程分支 ${baseBranch} 不存在`}
+          </span>
+        </div>
+      )}
     </div>
   );
 };

@@ -292,9 +292,19 @@ export async function syncWithBaseBranch(path: string, baseBranch: string): Prom
   return callBackend<string>('sync_with_base_branch', { path, baseBranch });
 }
 
+/** Push current branch to remote */
+export async function pushToRemote(path: string): Promise<string> {
+  return callBackend<string>('push_to_remote', { path });
+}
+
 /** Merge current branch to test branch */
 export async function mergeToTestBranch(path: string, testBranch: string): Promise<string> {
   return callBackend<string>('merge_to_test_branch', { path, testBranch });
+}
+
+/** Merge current branch to base branch */
+export async function mergeToBaseBranch(path: string, baseBranch: string): Promise<string> {
+  return callBackend<string>('merge_to_base_branch', { path, baseBranch });
 }
 
 /** Get branch diff statistics */
@@ -310,4 +320,17 @@ export async function createPullRequest(
   body: string
 ): Promise<string> {
   return callBackend<string>('create_pull_request', { path, baseBranch, title, body });
+}
+
+/** Check if a remote branch exists */
+export async function checkRemoteBranchExists(
+  path: string,
+  branchName: string
+): Promise<boolean> {
+  return callBackend<boolean>('check_remote_branch_exists', { path, branchName });
+}
+
+/** Get list of remote branches */
+export async function getRemoteBranches(path: string): Promise<string[]> {
+  return callBackend<string[]>('get_remote_branches', { path });
 }

@@ -1730,9 +1730,21 @@ fn sync_with_base_branch(path: String, base_branch: String) -> Result<String, St
 }
 
 #[tauri::command]
+fn push_to_remote(path: String) -> Result<String, String> {
+    let normalized = normalize_path(&path);
+    git_ops::push_to_remote(Path::new(&normalized))
+}
+
+#[tauri::command]
 fn merge_to_test_branch(path: String, test_branch: String) -> Result<String, String> {
     let normalized = normalize_path(&path);
     git_ops::merge_to_test_branch(Path::new(&normalized), &test_branch)
+}
+
+#[tauri::command]
+fn merge_to_base_branch(path: String, base_branch: String) -> Result<String, String> {
+    let normalized = normalize_path(&path);
+    git_ops::merge_to_base_branch(Path::new(&normalized), &base_branch)
 }
 
 #[tauri::command]
@@ -1750,6 +1762,18 @@ fn create_pull_request(
 ) -> Result<String, String> {
     let normalized = normalize_path(&path);
     git_ops::create_pull_request(Path::new(&normalized), &base_branch, &title, &body)
+}
+
+#[tauri::command]
+fn check_remote_branch_exists(path: String, branch_name: String) -> Result<bool, String> {
+    let normalized = normalize_path(&path);
+    git_ops::check_remote_branch_exists(Path::new(&normalized), &branch_name)
+}
+
+#[tauri::command]
+fn get_remote_branches(path: String) -> Result<Vec<String>, String> {
+    let normalized = normalize_path(&path);
+    git_ops::get_remote_branches(Path::new(&normalized))
 }
 
 // ==================== Tauri 命令：工具 ====================
@@ -2662,9 +2686,13 @@ pub fn run() {
             switch_branch,
             clone_project,
             sync_with_base_branch,
+            push_to_remote,
             merge_to_test_branch,
+            merge_to_base_branch,
             get_branch_diff_stats,
             create_pull_request,
+            check_remote_branch_exists,
+            get_remote_branches,
             // 工具
             open_in_terminal,
             open_in_editor,

@@ -1,4 +1,5 @@
 import { useState, useEffect, type FC } from 'react';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -38,6 +39,7 @@ import {
   ShareIcon,
   StopIcon,
   CopyIcon,
+  GithubIcon,
   CheckCircleIcon,
 } from './Icons';
 import type {
@@ -980,6 +982,21 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
               </Tooltip>
             </TooltipProvider>
           )}
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => openUrl('https://github.com/guoyongchang/worktree-manager')}
+                  className="h-7 w-7"
+                >
+                  <GithubIcon className="w-3.5 h-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">GitHub</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
       </div>
 
