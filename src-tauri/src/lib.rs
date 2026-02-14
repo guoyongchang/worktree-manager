@@ -824,6 +824,7 @@ fn get_config_path_info(window: tauri::Window) -> String {
 // ==================== Tauri 命令：Worktree 操作 ====================
 
 pub fn list_worktrees_impl(window_label: &str, include_archived: bool) -> Result<Vec<WorktreeListItem>, String> {
+    let start = std::time::Instant::now();
     let (workspace_path, config) = get_window_workspace_config(window_label)
         .ok_or("No workspace selected")?;
 
@@ -833,7 +834,9 @@ pub fn list_worktrees_impl(window_label: &str, include_archived: bool) -> Result
         return Ok(vec![]);
     }
 
-    scan_worktrees_dir(&worktrees_path, &config, include_archived)
+    let result = scan_worktrees_dir(&worktrees_path, &config, include_archived);
+    log::info!("list_worktrees took {:?}", start.elapsed());
+    result
 }
 
 #[tauri::command]
@@ -929,6 +932,7 @@ fn scan_worktrees_dir(dir: &PathBuf, config: &WorkspaceConfig, include_archived:
 }
 
 pub fn get_main_workspace_status_impl(window_label: &str) -> Result<MainWorkspaceStatus, String> {
+    let start = std::time::Instant::now();
     let (workspace_path, config) = get_window_workspace_config(window_label)
         .ok_or("No workspace selected")?;
 
@@ -955,11 +959,13 @@ pub fn get_main_workspace_status_impl(window_label: &str) -> Result<MainWorkspac
         });
     }
 
-    Ok(MainWorkspaceStatus {
+    let result = MainWorkspaceStatus {
         path: normalize_path(&root_path.to_string_lossy()),
         name: config.name.clone(),
         projects,
-    })
+    };
+    log::info!("get_main_workspace_status took {:?}", start.elapsed());
+    Ok(result)
 }
 
 #[tauri::command]
@@ -2662,6 +2668,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_log::Builder::new()
             .level(log::LevelFilter::Info)
+            .target(tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout))
             .build())
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
