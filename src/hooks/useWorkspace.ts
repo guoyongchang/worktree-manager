@@ -64,6 +64,7 @@ export function useWorkspace(ready = true): UseWorkspaceReturn {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const initialLoadDone = useRef(false);
+  const loadVersion = useRef(0);
 
   // 初始化时注册窗口 workspace 绑定（从 URL 参数获取）
   useEffect(() => {
@@ -94,6 +95,7 @@ export function useWorkspace(ready = true): UseWorkspaceReturn {
   }, []);
 
   const loadData = useCallback(async () => {
+    const version = ++loadVersion.current;
     setLoading(true);
     setError(null);
     try {
@@ -103,14 +105,19 @@ export function useWorkspace(ready = true): UseWorkspaceReturn {
         callBackend<MainWorkspaceStatus>("get_main_workspace_status"),
         callBackend<string>("get_config_path_info"),
       ]);
+      // Discard stale results if a newer load has started
+      if (version !== loadVersion.current) return;
       setConfig(cfg);
       setWorktrees(wts);
       setMainWorkspace(main);
       setConfigPath(path);
     } catch (e) {
+      if (version !== loadVersion.current) return;
       setError(String(e));
     } finally {
-      setLoading(false);
+      if (version === loadVersion.current) {
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -122,6 +129,8 @@ export function useWorkspace(ready = true): UseWorkspaceReturn {
   }, [ready, loadWorkspaces, loadData]);
 
   const switchWorkspace = useCallback(async (path: string) => {
+    // Bump version to cancel any in-flight loadData
+    ++loadVersion.current;
     // Immediately show loading and clear stale data
     setLoading(true);
     setConfig(null);
