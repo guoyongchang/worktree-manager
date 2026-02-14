@@ -880,20 +880,8 @@ function App() {
     );
   }
 
-  // Loading state
-  if (workspace.loading) {
-    return (
-      <div className="min-h-screen bg-slate-900 text-slate-100 flex items-center justify-center">
-        <div className="flex items-center gap-3">
-          <RefreshIcon className="w-5 h-5 animate-spin text-slate-400" />
-          <span className="text-slate-400">加载中...</span>
-        </div>
-      </div>
-    );
-  }
-
-  // No workspace - show welcome view
-  if (workspace.workspaces.length === 0) {
+  // No workspace - show welcome view (only after loading completes)
+  if (!workspace.loading && workspace.workspaces.length === 0) {
     return (
       <>
         <WelcomeView
@@ -926,6 +914,16 @@ function App() {
 
   return (
     <>
+      {/* Loading overlay — keeps main UI mounted to avoid unmount/remount storm */}
+      {workspace.loading && (
+        <div className="fixed inset-0 z-50 bg-slate-900 flex items-center justify-center">
+          <div className="flex items-center gap-3">
+            <RefreshIcon className="w-5 h-5 animate-spin text-slate-400" />
+            <span className="text-slate-400">加载中...</span>
+          </div>
+        </div>
+      )}
+
       {/* Settings View */}
       <div
         className="h-screen bg-slate-900 text-slate-100 p-6 overflow-y-auto"

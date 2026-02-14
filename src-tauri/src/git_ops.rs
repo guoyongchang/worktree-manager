@@ -704,10 +704,9 @@ pub fn create_pull_request(
     }
 }
 
-/// Check if a remote branch exists
-pub fn check_remote_branch_exists(path: &Path, branch_name: &str) -> Result<bool, String> {
-    // First, fetch from remote to ensure we have the latest branch info
-    let fetch_output = Command::new("git")
+/// Fetch from remote origin (updates remote-tracking branches)
+pub fn fetch_remote(path: &Path) -> Result<(), String> {
+    let output = Command::new("git")
         .arg("-C")
         .arg(path)
         .arg("fetch")
@@ -715,32 +714,39 @@ pub fn check_remote_branch_exists(path: &Path, branch_name: &str) -> Result<bool
         .output()
         .map_err(|e| format!("Failed to execute git fetch: {}", e))?;
 
-    if !fetch_output.status.success() {
+    if !output.status.success() {
         return Err(format!(
             "Git fetch failed: {}",
-            String::from_utf8_lossy(&fetch_output.stderr)
+            String::from_utf8_lossy(&output.stderr)
         ));
     }
 
-    // Check if the remote branch exists
-    let check_output = Command::new("git")
+    Ok(())
+}
+
+/// Check if a remote branch exists
+pub fn check_remote_branch_exists(path: &Path, branch_name: &str) -> Result<bool, String> {
+    // Check locally if the remote-tracking branch exists (no network call).
+    // Remote-tracking branches are updated by git fetch/pull/push operations,
+    // so this is accurate enough for UI button state.
+    let output = Command::new("git")
         .arg("-C")
         .arg(path)
-        .arg("ls-remote")
-        .arg("--heads")
-        .arg("origin")
-        .arg(branch_name)
+        .arg("branch")
+        .arg("-r")
+        .arg("--list")
+        .arg(format!("origin/{}", branch_name))
         .output()
-        .map_err(|e| format!("Failed to execute git ls-remote: {}", e))?;
+        .map_err(|e| format!("Failed to execute git branch: {}", e))?;
 
-    if !check_output.status.success() {
+    if !output.status.success() {
         return Err(format!(
-            "Git ls-remote failed: {}",
-            String::from_utf8_lossy(&check_output.stderr)
+            "Git branch check failed: {}",
+            String::from_utf8_lossy(&output.stderr)
         ));
     }
 
-    let output_str = String::from_utf8_lossy(&check_output.stdout);
+    let output_str = String::from_utf8_lossy(&output.stdout);
     Ok(!output_str.trim().is_empty())
 }
 

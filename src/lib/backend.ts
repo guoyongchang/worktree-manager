@@ -54,9 +54,19 @@ export async function callBackend<T = unknown>(
   command: string,
   args?: Record<string, unknown>,
 ): Promise<T> {
+  const t0 = performance.now();
+  const logResult = (result: T) => {
+    console.log(`[ipc] ${command}: ${(performance.now() - t0).toFixed(1)}ms`);
+    return result;
+  };
+  const logError = (err: unknown) => {
+    console.error(`[ipc] ${command} FAILED (${(performance.now() - t0).toFixed(1)}ms):`, err);
+    throw err;
+  };
+
   if (isTauri()) {
     const { invoke } = await import('@tauri-apps/api/core');
-    return invoke<T>(command, args);
+    return invoke<T>(command, args).then(logResult, logError);
   }
 
   const res = await fetch(`${getApiBase()}/${command}`, {
@@ -70,15 +80,16 @@ export async function callBackend<T = unknown>(
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
+    logError(new Error(text || `HTTP ${res.status}`));
   }
 
   // Some commands return empty 204
   if (res.status === 204 || res.headers.get('content-length') === '0') {
-    return undefined as T;
+    return logResult(undefined as T);
   }
 
-  return res.json() as Promise<T>;
+  const data = await res.json() as T;
+  return logResult(data);
 }
 
 // ---------------------------------------------------------------------------
@@ -320,6 +331,11 @@ export async function createPullRequest(
   body: string
 ): Promise<string> {
   return callBackend<string>('create_pull_request', { path, baseBranch, title, body });
+}
+
+/** Fetch from remote origin (updates remote-tracking branches) */
+export async function fetchProjectRemote(path: string): Promise<void> {
+  return callBackend<void>('fetch_project_remote', { path });
 }
 
 /** Check if a remote branch exists */

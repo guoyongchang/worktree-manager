@@ -166,8 +166,8 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
           </div>
         )}
         <div className="flex items-center justify-between mb-6">
-          <div>
-            <h2 className="text-xl font-semibold text-slate-100">主工作区 - {mainWorkspace.name}</h2>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-xl font-semibold text-slate-100 truncate">主工作区 - {mainWorkspace.name}</h2>
             <PathDisplay path={mainWorkspace.path} />
           </div>
           <div className="flex gap-2 items-center">
@@ -340,10 +340,10 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
           </div>
         )}
         <div className="flex items-center justify-between mb-6">
-          <div>
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               {selectedWorktree.is_archived ? <ArchiveIcon className="w-5 h-5 text-slate-500" /> : <FolderIcon className="w-5 h-5 text-blue-400" />}
-              <h2 className="text-xl font-semibold text-slate-100">{selectedWorktree.name}</h2>
+              <h2 className="text-xl font-semibold text-slate-100 truncate">{selectedWorktree.name}</h2>
             </div>
             <PathDisplay path={selectedWorktree.path} />
           </div>
