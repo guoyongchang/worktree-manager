@@ -170,7 +170,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
             <h2 className="text-xl font-semibold text-slate-100 truncate">主工作区 - {mainWorkspace.name}</h2>
             <PathDisplay path={mainWorkspace.path} />
           </div>
-          <div className="flex gap-2 items-center">
+          <div className="flex gap-2 items-center shrink-0 ml-3">
             {onAddProject && (
               <Button onClick={onAddProject} variant="default">
                 <PlusIcon className="w-4 h-4 mr-1.5" />
@@ -347,7 +347,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
             </div>
             <PathDisplay path={selectedWorktree.path} />
           </div>
-          <div className="flex gap-2 items-center">
+          <div className="flex gap-2 items-center shrink-0 ml-3">
             {selectedWorktree.is_archived ? (
               <>
                 <Button variant="default" className="bg-emerald-600 hover:bg-emerald-500" onClick={onRestore} disabled={restoring}>

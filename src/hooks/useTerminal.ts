@@ -33,8 +33,9 @@ export function useTerminal(
   const [activatedTerminals, setActivatedTerminals] = useState<Set<string>>(new Set());
   const [activeTerminalTab, setActiveTerminalTab] = useState<string | null>(null);
 
-  // Remember active tab per workspace root, so switching back restores it
+  // Remember active tab & activated terminals per workspace root, so switching back restores them
   const activeTabPerWorkspace = useRef<Map<string, string>>(new Map());
+  const activatedPerWorkspace = useRef<Map<string, Set<string>>>(new Map());
   const prevWorkspaceRoot = useRef<string>('');
 
   // Prevent broadcast loops: track if receiving external updates
@@ -95,19 +96,26 @@ export function useTerminal(
 
   const terminalTabs = [...baseTabs, ...duplicatedTabs];
 
-  // Save/restore active tab when workspace root changes
+  // Save/restore terminal state when workspace root changes
   useEffect(() => {
     const prev = prevWorkspaceRoot.current;
 
-    if (prev && prev !== currentWorkspaceRoot && activeTerminalTab) {
-      // Save current active tab for the previous workspace
-      activeTabPerWorkspace.current.set(prev, activeTerminalTab);
+    if (prev && prev !== currentWorkspaceRoot) {
+      // Save current state for the previous workspace
+      const currentTab = activeTerminalTabRef.current;
+      if (currentTab) {
+        activeTabPerWorkspace.current.set(prev, currentTab);
+      }
+      activatedPerWorkspace.current.set(prev, new Set(activatedTerminalsRef.current));
     }
 
     if (currentWorkspaceRoot && currentWorkspaceRoot !== prev) {
-      // Restore saved active tab for the new workspace (if any)
+      // Restore state for the new workspace (or reset to empty)
+      const savedActivated = activatedPerWorkspace.current.get(currentWorkspaceRoot);
       const savedTab = activeTabPerWorkspace.current.get(currentWorkspaceRoot);
-      if (savedTab && activatedTerminals.has(savedTab)) {
+
+      setActivatedTerminals(savedActivated || new Set());
+      if (savedTab && savedActivated?.has(savedTab)) {
         setActiveTerminalTab(savedTab);
       } else {
         setActiveTerminalTab(null);
