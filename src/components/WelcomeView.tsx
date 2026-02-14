@@ -12,7 +12,7 @@ export const WelcomeView: FC<WelcomeViewProps> = ({ onAddWorkspace, onCreateWork
     <div className="min-h-screen bg-slate-900 text-slate-100 flex items-center justify-center">
       <div className="max-w-lg w-full mx-auto text-center p-8">
         <div className="mb-8">
-          <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
+          <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20 animate-subtle-pulse">
             <WorkspaceIcon className="w-10 h-10 text-white" />
           </div>
           <h1 className="text-2xl font-bold mb-3">欢迎使用 Worktree Manager</h1>
@@ -22,7 +22,7 @@ export const WelcomeView: FC<WelcomeViewProps> = ({ onAddWorkspace, onCreateWork
         </div>
 
         <div className="space-y-4">
-          <div className="p-4 rounded-lg bg-slate-800/50 border border-slate-700/50 text-left">
+          <div className="p-4 rounded-lg bg-slate-800/50 border border-slate-700/50 text-left hover:border-slate-600/80 hover:bg-slate-800/70 transition-all duration-200">
             <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
               <FolderIcon className="w-4 h-4 text-blue-400" />
               什么是 Workspace？
@@ -42,14 +42,14 @@ export const WelcomeView: FC<WelcomeViewProps> = ({ onAddWorkspace, onCreateWork
           <div className="grid grid-cols-2 gap-3">
             <Button
               variant="secondary"
-              className="h-12"
+              className="h-12 hover:-translate-y-0.5 transition-transform duration-150"
               onClick={onAddWorkspace}
             >
               <FolderIcon className="w-4 h-4 mr-2" />
               导入现有目录
             </Button>
             <Button
-              className="h-12"
+              className="h-12 hover:-translate-y-0.5 transition-transform duration-150"
               onClick={onCreateWorkspace}
             >
               <PlusIcon className="w-4 h-4 mr-2" />

@@ -580,7 +580,14 @@ function App() {
   // Global keyboard shortcuts
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent): void {
+      // Skip global ESC when a Radix Dialog is open (let it close the dialog first)
+      const hasOpenDialog = document.querySelector('[role="dialog"][data-state="open"]');
       if (e.key === 'Escape') {
+        if (hasOpenDialog) return;
+        if (viewMode === 'settings') {
+          setViewMode('main');
+          return;
+        }
         if (terminalFullscreen) {
           setTerminalFullscreen(false);
           return;
@@ -603,6 +610,13 @@ function App() {
         e.preventDefault();
         if (viewMode === 'main') {
           openSettings();
+        }
+      }
+      // Cmd/Ctrl+[: Navigate back (settings -> main)
+      if ((e.metaKey || e.ctrlKey) && e.key === '[') {
+        e.preventDefault();
+        if (viewMode === 'settings') {
+          setViewMode('main');
         }
       }
       // Cmd/Ctrl+B: Toggle sidebar

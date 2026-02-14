@@ -304,6 +304,8 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
                   value={repoUrl}
                   onChange={(e) => handleRepoUrlChange(e.target.value)}
                   placeholder={getPlaceholder()}
+                  autoFocus
+                  onKeyDown={(e) => { if (e.key === 'Enter' && name.trim() && repoUrl.trim() && !loading) handleSubmit(); }}
                 />
                 <p className="text-xs text-slate-500 mt-1">
                   {urlFormat === 'gh' && 'GitHub 简写格式'}

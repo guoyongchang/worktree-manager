@@ -43,6 +43,21 @@
   to { transform: translateY(0); }
 }
 
+@keyframes slide-in-from-bottom-4 {
+  from { transform: translateY(1rem); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes slide-out-to-right {
+  from { transform: translateX(0); opacity: 1; }
+  to { transform: translateX(100%); opacity: 0; }
+}
+
+@keyframes toast-countdown {
+  from { width: 100%; }
+  to { width: 0%; }
+}
+
 .animate-in {
   animation: animate-in 0.2s ease-out;
 }
@@ -73,6 +88,18 @@
 
 .slide-in-from-bottom-2 {
   animation: slide-in-from-bottom 0.15s ease-out;
+}
+
+.slide-in-from-bottom-4 {
+  animation: slide-in-from-bottom-4 0.3s ease-out;
+}
+
+.slide-out-to-right {
+  animation: slide-out-to-right 0.2s ease-in forwards;
+}
+
+.toast-countdown {
+  animation: toast-countdown 3s linear forwards;
 }
 
 /* Indeterminate progress bar animation */
@@ -169,12 +196,34 @@ img {
   pointer-events: none;
 }
 
-/* Button press effect */
+/* Button press effect - use scale3d to compose with translate transforms */
 button:active:not(:disabled) {
-  transform: scale(0.98);
+  scale: 0.98;
 }
 
 /* Disable double-click zoom on buttons */
 button {
   touch-action: manipulation;
+}
+
+/* Subtle breathing animation for icons */
+@keyframes subtle-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.03); }
+}
+
+.animate-subtle-pulse {
+  animation: subtle-pulse 3s ease-in-out infinite;
+}
+
+/* Progress bar gradient animation */
+@keyframes gradient-shift {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+
+.animate-gradient {
+  background: linear-gradient(90deg, #3b82f6, #6366f1, #3b82f6);
+  background-size: 200% 100%;
+  animation: gradient-shift 2s linear infinite;
 }
