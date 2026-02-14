@@ -8,6 +8,12 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import {
   FolderIcon,
   ArchiveIcon,
   WarningIcon,
@@ -17,7 +23,11 @@ import {
   ChevronDownIcon,
   RefreshIcon,
   PlusIcon,
+  ExternalLinkIcon,
+  CopyIcon,
+  CheckIcon,
 } from './Icons';
+import { GitOperations } from './GitOperations';
 import { EDITORS } from '../constants';
 import type {
   WorktreeListItem,
@@ -35,12 +45,18 @@ interface WorktreeDetailProps {
   onSelectEditor: (editor: EditorType) => void;
   onOpenInEditor: (path: string, editor?: EditorType) => void;
   onOpenInTerminal: (path: string) => void;
+  onRevealInFinder: (path: string) => void;
   onSwitchBranch: (projectPath: string, branch: string) => void;
   onArchive: () => void;
   onRestore: () => void;
+  onDelete?: () => void;
   onAddProject?: () => void;
+  onAddProjectToWorktree?: () => void;
+  onRefresh?: () => void;
   error: string | null;
   onClearError: () => void;
+  restoring?: boolean;
+  switching?: boolean;
 }
 
 function getProjectStatus(project: ProjectStatus): 'success' | 'warning' | 'info' | 'sync' {
@@ -59,6 +75,43 @@ function getStatusText(project: ProjectStatus): string {
   return parts.length === 0 ? "干净" : parts.join(" · ");
 }
 
+const PathDisplay: FC<{ path: string }> = ({ path }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(path);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy path:', err);
+    }
+  };
+
+  return (
+    <TooltipProvider delayDuration={300}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={handleCopy}
+            className="text-slate-500 text-sm mt-1 select-text hover:text-slate-400 transition-colors flex items-center gap-1.5 max-w-full group"
+          >
+            <span className="truncate block">{path}</span>
+            {copied ? (
+              <CheckIcon className="w-3 h-3 text-green-400 shrink-0" />
+            ) : (
+              <CopyIcon className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+            )}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" align="start">
+          <p className="max-w-md break-all">{path}</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+};
+
 export const WorktreeDetail: FC<WorktreeDetailProps> = ({
   selectedWorktree,
   mainWorkspace,
@@ -68,12 +121,18 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
   onSelectEditor,
   onOpenInEditor,
   onOpenInTerminal,
+  onRevealInFinder,
   onSwitchBranch,
   onArchive,
   onRestore,
+  onDelete,
   onAddProject,
+  onAddProjectToWorktree,
+  onRefresh,
   error,
   onClearError,
+  restoring = false,
+  switching = false,
 }) => {
   const selectedEditorName = EDITORS.find(e => e.id === selectedEditor)?.name || 'VS Code';
   const [switchingBranch, setSwitchingBranch] = useState<string | null>(null);
@@ -84,20 +143,32 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
     );
   }
 
+  // Show loading overlay when switching
+  if (switching) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="flex flex-col items-center gap-3">
+          <RefreshIcon className="w-8 h-8 text-blue-400 animate-spin" />
+          <div className="text-slate-400 text-sm">切换中...</div>
+        </div>
+      </div>
+    );
+  }
+
   // Main Workspace View
   if (!selectedWorktree && mainWorkspace) {
     return (
       <div>
         {error && (
           <div className="mb-4 p-4 bg-red-900/30 border border-red-800/50 rounded-lg">
-            <div className="text-red-300 text-sm">{error}</div>
-            <button onClick={onClearError} className="text-red-400 hover:text-red-200 text-xs mt-2 underline">关闭</button>
+            <div className="text-red-300 text-sm select-text">{error}</div>
+            <Button variant="link" size="sm" onClick={onClearError} className="text-red-400 hover:text-red-200 mt-1 p-0 h-auto">关闭</Button>
           </div>
         )}
         <div className="flex items-center justify-between mb-6">
           <div>
             <h2 className="text-xl font-semibold text-slate-100">主工作区 - {mainWorkspace.name}</h2>
-            <p className="text-slate-500 text-sm mt-1">{mainWorkspace.path}</p>
+            <PathDisplay path={mainWorkspace.path} />
           </div>
           <div className="flex gap-2 items-center">
             {onAddProject && (
@@ -106,28 +177,57 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                 添加项目
               </Button>
             )}
-            <DropdownMenu open={showEditorMenu} onOpenChange={onShowEditorMenu}>
-              <DropdownMenuTrigger asChild>
-                <Button>
-                  {selectedEditorName}
-                  <ChevronDownIcon className="w-3.5 h-3.5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {EDITORS.map(editor => (
-                  <DropdownMenuItem
-                    key={editor.id}
-                    onClick={() => {
-                      onSelectEditor(editor.id);
-                      onOpenInEditor(mainWorkspace.path, editor.id);
-                      onShowEditorMenu(false);
-                    }}
-                  >
-                    {editor.name}
+            <div className="inline-flex rounded-md">
+              <Button
+                className="rounded-r-none border-r border-blue-700/50"
+                onClick={() => onOpenInEditor(mainWorkspace.path)}
+              >
+                {selectedEditorName}
+              </Button>
+              <DropdownMenu open={showEditorMenu} onOpenChange={onShowEditorMenu}>
+                <DropdownMenuTrigger asChild>
+                  <Button className="rounded-l-none px-2 min-w-0">
+                    <ChevronDownIcon className="w-3.5 h-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {EDITORS.map(editor => (
+                    <div
+                      key={editor.id}
+                      className="flex items-stretch rounded-sm text-sm"
+                    >
+                      <button
+                        className="flex-1 min-w-0 text-left px-2 py-1.5 rounded-l-sm hover:bg-slate-700/60 transition-colors flex items-center gap-1.5"
+                        onClick={() => {
+                          onSelectEditor(editor.id);
+                          onShowEditorMenu(false);
+                        }}
+                      >
+                        {editor.name}
+                        {editor.id === selectedEditor && (
+                          <CheckIcon className="w-3 h-3 text-green-400" />
+                        )}
+                      </button>
+                      <button
+                        className="px-2 flex items-center text-slate-500 hover:text-blue-400 hover:bg-slate-600/40 rounded-r-sm transition-colors shrink-0 border-l border-slate-700/50"
+                        title={`用 ${editor.name} 打开`}
+                        onClick={() => {
+                          onOpenInEditor(mainWorkspace.path, editor.id);
+                          onShowEditorMenu(false);
+                        }}
+                      >
+                        <ExternalLinkIcon className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => onRevealInFinder(mainWorkspace.path)}>
+                    <FolderIcon className="w-4 h-4 mr-1.5 text-slate-400" />
+                    在文件夹中打开
                   </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
             <Button variant="secondary" onClick={() => onOpenInTerminal(mainWorkspace.path)}>外部终端</Button>
           </div>
         </div>
@@ -151,10 +251,10 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                   <span className="font-medium text-slate-200">{proj.name}</span>
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
-                      onClick={() => onOpenInEditor(projectPath)}
-                      className="p-1 hover:bg-slate-600 rounded text-slate-400 hover:text-slate-200"
-                      title={`在 ${selectedEditorName} 中打开`}
-                      aria-label={`在 ${selectedEditorName} 中打开 ${proj.name}`}
+                      onClick={() => onRevealInFinder(projectPath)}
+                      className="p-1 hover:bg-slate-600 rounded text-slate-400 hover:text-slate-200 transition-colors"
+                      title="在 Finder 中打开"
+                      aria-label={`在 Finder 中打开 ${proj.name}`}
                     >
                       <FolderIcon className="w-3.5 h-3.5" />
                     </button>
@@ -164,7 +264,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                 <div className="flex items-center justify-between mt-2">
                   <div className="flex items-center gap-1.5 text-slate-400 text-sm">
                     <GitBranchIcon className="w-3.5 h-3.5" />
-                    <span>{proj.current_branch}</span>
+                    <span className="select-text">{proj.current_branch}</span>
                     {isSwitching && <RefreshIcon className="w-3 h-3 animate-spin ml-1" />}
                   </div>
                   <div className="flex items-center gap-1">
@@ -188,7 +288,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                           <GitBranchIcon className="w-3.5 h-3.5 mr-2" />
                           <span>BASE: {proj.base_branch}</span>
                           {proj.current_branch === proj.base_branch && (
-                            <span className="ml-2 text-xs text-green-400">✓</span>
+                            <CheckIcon className="w-3 h-3 ml-2 text-green-400" />
                           )}
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
@@ -199,13 +299,28 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                           <GitBranchIcon className="w-3.5 h-3.5 mr-2" />
                           <span>TEST: {proj.test_branch}</span>
                           {proj.current_branch === proj.test_branch && (
-                            <span className="ml-2 text-xs text-green-400">✓</span>
+                            <CheckIcon className="w-3 h-3 ml-2 text-green-400" />
                           )}
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
                 </div>
+                {proj.linked_folders && proj.linked_folders.length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-slate-700/50">
+                    <div className="text-xs text-slate-500 mb-1">链接文件夹</div>
+                    <div className="flex flex-wrap gap-1">
+                      {proj.linked_folders.map((folder, idx) => (
+                        <span
+                          key={idx}
+                          className="inline-flex items-center px-1.5 py-0.5 bg-slate-700/50 rounded text-xs text-slate-400 select-text"
+                        >
+                          {folder}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -220,8 +335,8 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
       <div>
         {error && (
           <div className="mb-4 p-4 bg-red-900/30 border border-red-800/50 rounded-lg">
-            <div className="text-red-300 text-sm">{error}</div>
-            <button onClick={onClearError} className="text-red-400 hover:text-red-200 text-xs mt-2 underline">关闭</button>
+            <div className="text-red-300 text-sm select-text">{error}</div>
+            <Button variant="link" size="sm" onClick={onClearError} className="text-red-400 hover:text-red-200 mt-1 p-0 h-auto">关闭</Button>
           </div>
         )}
         <div className="flex items-center justify-between mb-6">
@@ -230,35 +345,71 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
               {selectedWorktree.is_archived ? <ArchiveIcon className="w-5 h-5 text-slate-500" /> : <FolderIcon className="w-5 h-5 text-blue-400" />}
               <h2 className="text-xl font-semibold text-slate-100">{selectedWorktree.name}</h2>
             </div>
-            <p className="text-slate-500 text-sm mt-1">{selectedWorktree.path}</p>
+            <PathDisplay path={selectedWorktree.path} />
           </div>
           <div className="flex gap-2 items-center">
             {selectedWorktree.is_archived ? (
-              <Button variant="default" className="bg-emerald-600 hover:bg-emerald-500" onClick={onRestore}>恢复</Button>
+              <>
+                <Button variant="default" className="bg-emerald-600 hover:bg-emerald-500" onClick={onRestore} disabled={restoring}>
+                  {restoring ? "恢复中..." : "恢复"}
+                </Button>
+                {onDelete && (
+                  <Button variant="destructive" onClick={onDelete}>删除</Button>
+                )}
+              </>
             ) : (
               <>
-                <DropdownMenu open={showEditorMenu} onOpenChange={onShowEditorMenu}>
-                  <DropdownMenuTrigger asChild>
-                    <Button>
-                      {selectedEditorName}
-                      <ChevronDownIcon className="w-3.5 h-3.5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    {EDITORS.map(editor => (
-                      <DropdownMenuItem
-                        key={editor.id}
-                        onClick={() => {
-                          onSelectEditor(editor.id);
-                          onOpenInEditor(selectedWorktree.path, editor.id);
-                          onShowEditorMenu(false);
-                        }}
-                      >
-                        {editor.name}
+                <div className="inline-flex rounded-md">
+                  <Button
+                    className="rounded-r-none border-r border-blue-700/50"
+                    onClick={() => onOpenInEditor(selectedWorktree.path)}
+                  >
+                    {selectedEditorName}
+                  </Button>
+                  <DropdownMenu open={showEditorMenu} onOpenChange={onShowEditorMenu}>
+                    <DropdownMenuTrigger asChild>
+                      <Button className="rounded-l-none px-2 min-w-0">
+                        <ChevronDownIcon className="w-3.5 h-3.5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      {EDITORS.map(editor => (
+                        <div
+                          key={editor.id}
+                          className="flex items-stretch rounded-sm text-sm"
+                        >
+                          <button
+                            className="flex-1 min-w-0 text-left px-2 py-1.5 rounded-l-sm hover:bg-slate-700/60 transition-colors flex items-center gap-1.5"
+                            onClick={() => {
+                              onSelectEditor(editor.id);
+                              onShowEditorMenu(false);
+                            }}
+                          >
+                            {editor.name}
+                            {editor.id === selectedEditor && (
+                              <CheckIcon className="w-3 h-3 text-green-400" />
+                            )}
+                          </button>
+                          <button
+                            className="px-2 flex items-center text-slate-500 hover:text-blue-400 hover:bg-slate-600/40 rounded-r-sm transition-colors shrink-0 border-l border-slate-700/50"
+                            title={`用 ${editor.name} 打开`}
+                            onClick={() => {
+                              onOpenInEditor(selectedWorktree.path, editor.id);
+                              onShowEditorMenu(false);
+                            }}
+                          >
+                            <ExternalLinkIcon className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => onRevealInFinder(selectedWorktree.path)}>
+                        <FolderIcon className="w-4 h-4 mr-1.5 text-slate-400" />
+                        在文件夹中打开
                       </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
                 <Button variant="secondary" onClick={() => onOpenInTerminal(selectedWorktree.path)}>外部终端</Button>
                 <Button variant="warning" onClick={onArchive}>归档</Button>
               </>
@@ -275,14 +426,14 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                     <div className="font-medium text-slate-200">{proj.name}</div>
                     <div className="flex items-center gap-1.5 text-slate-400 text-sm mt-0.5">
                       <GitBranchIcon className="w-3.5 h-3.5" />
-                      <span>{proj.current_branch}</span>
+                      <span className="select-text">{proj.current_branch}</span>
                     </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="text-right">
-                    <div className="text-sm text-slate-300">{getStatusText(proj)}</div>
-                    <div className="text-xs text-slate-500 mt-0.5">base: {proj.base_branch} · test: {proj.test_branch}</div>
+                    <div className="text-sm text-slate-300 select-text">{getStatusText(proj)}</div>
+                    <div className="text-xs text-slate-500 mt-0.5 select-text">base: {proj.base_branch} · test: {proj.test_branch}</div>
                   </div>
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <Button
@@ -308,8 +459,26 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                   </div>
                 </div>
               </div>
+              <div className="mt-3 pt-3 border-t border-slate-700/50">
+                <GitOperations
+                  projectPath={proj.path}
+                  baseBranch={proj.base_branch}
+                  testBranch={proj.test_branch}
+                  currentBranch={proj.current_branch}
+                  onRefresh={onRefresh}
+                />
+              </div>
             </div>
           ))}
+          {!selectedWorktree.is_archived && onAddProjectToWorktree && (
+            <button
+              onClick={onAddProjectToWorktree}
+              className="w-full p-3 rounded-lg border border-dashed border-slate-700 hover:border-slate-500 hover:bg-slate-800/30 transition-colors flex items-center justify-center gap-2 text-slate-500 hover:text-slate-300"
+            >
+              <PlusIcon className="w-4 h-4" />
+              <span className="text-sm">添加项目</span>
+            </button>
+          )}
         </div>
       </div>
     );

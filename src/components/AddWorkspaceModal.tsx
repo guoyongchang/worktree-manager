@@ -1,5 +1,5 @@
 import { type FC, useCallback } from 'react';
-import { open } from '@tauri-apps/plugin-dialog';
+import { openDirectoryDialog } from '../lib/backend';
 import {
   Dialog,
   DialogContent,
@@ -20,6 +20,7 @@ interface AddWorkspaceModalProps {
   path: string;
   onPathChange: (path: string) => void;
   onSubmit: () => void;
+  loading?: boolean;
 }
 
 export const AddWorkspaceModal: FC<AddWorkspaceModalProps> = ({
@@ -30,14 +31,11 @@ export const AddWorkspaceModal: FC<AddWorkspaceModalProps> = ({
   path,
   onPathChange,
   onSubmit,
+  loading = false,
 }) => {
   const handleSelectFolder = useCallback(async () => {
-    const selected = await open({
-      directory: true,
-      multiple: false,
-      title: '选择 Workspace 目录',
-    });
-    if (selected && typeof selected === 'string') {
+    const selected = await openDirectoryDialog('选择 Workspace 目录');
+    if (selected) {
       onPathChange(selected);
       // Auto-fill name from folder name if empty
       if (!name) {
@@ -89,9 +87,9 @@ export const AddWorkspaceModal: FC<AddWorkspaceModalProps> = ({
           <Button variant="secondary" onClick={() => onOpenChange(false)}>取消</Button>
           <Button
             onClick={onSubmit}
-            disabled={!name.trim() || !path.trim()}
+            disabled={!name.trim() || !path.trim() || loading}
           >
-            导入
+            {loading ? "导入中..." : "导入"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -107,6 +105,7 @@ interface CreateWorkspaceModalProps {
   path: string;
   onPathChange: (path: string) => void;
   onSubmit: () => void;
+  loading?: boolean;
 }
 
 export const CreateWorkspaceModal: FC<CreateWorkspaceModalProps> = ({
@@ -117,14 +116,11 @@ export const CreateWorkspaceModal: FC<CreateWorkspaceModalProps> = ({
   path,
   onPathChange,
   onSubmit,
+  loading = false,
 }) => {
   const handleSelectFolder = useCallback(async () => {
-    const selected = await open({
-      directory: true,
-      multiple: false,
-      title: '选择父目录',
-    });
-    if (selected && typeof selected === 'string') {
+    const selected = await openDirectoryDialog('选择父目录');
+    if (selected) {
       onPathChange(selected);
     }
   }, [onPathChange]);
@@ -168,7 +164,7 @@ export const CreateWorkspaceModal: FC<CreateWorkspaceModalProps> = ({
           {fullPath && (
             <div className="p-3 rounded bg-slate-800/50 border border-slate-700/50">
               <p className="text-xs text-slate-400 mb-1">将创建目录：</p>
-              <p className="text-sm font-mono text-slate-300">{fullPath}</p>
+              <p className="text-sm font-mono text-slate-300 select-text">{fullPath}</p>
             </div>
           )}
         </div>
@@ -176,9 +172,9 @@ export const CreateWorkspaceModal: FC<CreateWorkspaceModalProps> = ({
           <Button variant="secondary" onClick={() => onOpenChange(false)}>取消</Button>
           <Button
             onClick={onSubmit}
-            disabled={!name.trim() || !path.trim()}
+            disabled={!name.trim() || !path.trim() || loading}
           >
-            创建
+            {loading ? "创建中..." : "创建"}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -39,6 +39,7 @@ export interface MainProjectStatus {
   has_uncommitted: boolean;
   base_branch: string;
   test_branch: string;
+  linked_folders: string[];
 }
 
 export interface MainWorkspaceStatus {
@@ -57,6 +58,12 @@ export interface WorktreeListItem {
 
 export interface CreateProjectRequest {
   name: string;
+  base_branch: string;
+}
+
+export interface AddProjectToWorktreeRequest {
+  worktree_name: string;
+  project_name: string;
   base_branch: string;
 }
 
@@ -120,4 +127,13 @@ export interface ArchiveModalState {
   status: WorktreeArchiveStatus | null;
   loading: boolean;
   confirmedIssues: Set<string>;
+}
+
+// Scanned folder type (from smart scan)
+export interface ScannedFolder {
+  relative_path: string;
+  display_name: string;
+  size_bytes: number;
+  size_display: string;
+  is_recommended: boolean;
 }

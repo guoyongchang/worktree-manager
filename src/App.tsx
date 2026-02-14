@@ -1,5 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogFooter,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import {
   WorktreeSidebar,
   WorktreeDetail,
   TerminalPanel,
@@ -9,6 +18,7 @@ import {
   AddWorkspaceModal,
   CreateWorkspaceModal,
   AddProjectModal,
+  AddProjectToWorktreeModal,
   ArchiveConfirmationModal,
   WorktreeContextMenu,
   TerminalTabContextMenu,
@@ -20,6 +30,10 @@ import {
   UpToDateToast,
 } from "./components";
 import { useWorkspace, useTerminal, useUpdater } from "./hooks";
+import { Input } from "@/components/ui/input";
+import { callBackend, getWindowLabel, setWindowTitle, isTauri, getSessionId, clearSessionId, startSharing, stopSharing, getShareState, getShareInfo, authenticate, updateSharePassword, getNgrokToken, setNgrokToken, startNgrokTunnel, stopNgrokTunnel, getConnectedClients, getLastSharePassword, kickClient } from "./lib/backend";
+import type { ConnectedClient } from "./lib/backend";
+import { getWebSocketManager } from "./lib/websocket";
 import type {
   WorktreeListItem,
   ViewMode,
@@ -30,11 +44,12 @@ import type {
   TerminalTabMenuState,
   ArchiveModalState,
   CreateProjectRequest,
+  ScannedFolder,
 } from "./types";
 import "./index.css";
 
-// Disable browser-like behaviors
-if (typeof window !== 'undefined') {
+// Disable browser-like behaviors (only in Tauri desktop mode)
+if (typeof window !== 'undefined' && isTauri()) {
   window.addEventListener('contextmenu', (e) => e.preventDefault());
   window.addEventListener('keydown', (e) => {
     if (e.key === 'F5' || (e.metaKey && e.key === 'r') || (e.ctrlKey && e.key === 'r')) {
@@ -47,11 +62,14 @@ if (typeof window !== 'undefined') {
 }
 
 function App() {
-  const workspace = useWorkspace();
+  // Browser auth state (declared early so useWorkspace can depend on it)
+  const [browserAuthenticated, setBrowserAuthenticated] = useState(isTauri());
+
+  const workspace = useWorkspace(browserAuthenticated);
   const [selectedWorktree, setSelectedWorktree] = useState<WorktreeListItem | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('main');
 
-  const terminal = useTerminal(selectedWorktree, workspace.mainWorkspace);
+  const terminal = useTerminal(selectedWorktree, workspace.mainWorkspace, workspace.currentWorkspace?.path);
   const updater = useUpdater();
 
   // Modal states
@@ -59,9 +77,24 @@ function App() {
   const [showAddWorkspaceModal, setShowAddWorkspaceModal] = useState(false);
   const [showCreateWorkspaceModal, setShowCreateWorkspaceModal] = useState(false);
   const [showAddProjectModal, setShowAddProjectModal] = useState(false);
+  const [showAddProjectToWorktreeModal, setShowAddProjectToWorktreeModal] = useState(false);
+  const [addingProjectToWorktree, setAddingProjectToWorktree] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
   const [showEditorMenu, setShowEditorMenu] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // Loading states for async operations
+  const [switchingWorkspace, setSwitchingWorkspace] = useState(false);
+  const [switchingWorktree, setSwitchingWorktree] = useState(false);
+  const [addingWorkspace, setAddingWorkspace] = useState(false);
+  const [creatingWorkspace, setCreatingWorkspace] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const [deletingArchived, setDeletingArchived] = useState(false);
+  const [restoringWorktree, setRestoringWorktree] = useState(false);
+
+  // Terminal fullscreen state
+  const [terminalFullscreen, setTerminalFullscreen] = useState(false);
 
   // Create modal state
   const [newWorktreeName, setNewWorktreeName] = useState("");
@@ -84,6 +117,9 @@ function App() {
   // Archive modal state
   const [archiveModal, setArchiveModal] = useState<ArchiveModalState | null>(null);
 
+  // Delete archived worktree confirmation
+  const [deleteConfirmWorktree, setDeleteConfirmWorktree] = useState<WorktreeListItem | null>(null);
+
   // Settings state
   const [editingConfig, setEditingConfig] = useState<WorkspaceConfig | null>(null);
   const [saving, setSaving] = useState(false);
@@ -94,50 +130,207 @@ function App() {
   // Track if user has manually selected (including main workspace)
   const [hasUserSelected, setHasUserSelected] = useState(false);
 
+  // Scan state (for SettingsView)
+  const [scanningProject, setScanningProject] = useState<string | null>(null);
+  const [settingsScanResults, setSettingsScanResults] = useState<ScannedFolder[]>([]);
+
+  // Share state
+  const [shareActive, setShareActive] = useState(false);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [shareNgrokUrl, setShareNgrokUrl] = useState<string | null>(null);
+  const [sharePassword, setSharePassword] = useState('');
+  const [ngrokLoading, setNgrokLoading] = useState(false);
+  const [showNgrokTokenDialog, setShowNgrokTokenDialog] = useState(false);
+  const [ngrokTokenInput, setNgrokTokenInput] = useState('');
+  const [savingNgrokToken, setSavingNgrokToken] = useState(false);
+
+  // Connected clients tracking
+  const [connectedClients, setConnectedClients] = useState<ConnectedClient[]>([]);
+
+  const [browserLoginPassword, setBrowserLoginPassword] = useState('');
+  const [browserLoginError, setBrowserLoginError] = useState<string | null>(null);
+  const [browserLoggingIn, setBrowserLoggingIn] = useState(false);
+
+  // Worktree lock state (for multi-window)
+  const [lockedWorktrees, setLockedWorktrees] = useState<Record<string, string>>({});
+
+  // Refresh worktree locks periodically
+  const currentWorkspacePath = workspace.currentWorkspace?.path;
+  const getLockedWorktreesFn = workspace.getLockedWorktrees;
+
+  // Update locks only when content actually changes (avoids unnecessary re-renders)
+  const updateLocksIfChanged = useCallback((locks: Record<string, string>) => {
+    setLockedWorktrees(prev => {
+      const next = JSON.stringify(locks);
+      return next === JSON.stringify(prev) ? prev : locks;
+    });
+  }, []);
+
+  const refreshLockedWorktrees = useCallback(async () => {
+    if (!currentWorkspacePath) return;
+    try {
+      const locks = await getLockedWorktreesFn(currentWorkspacePath);
+      updateLocksIfChanged(locks);
+    } catch {
+      // ignore
+    }
+  }, [currentWorkspacePath, getLockedWorktreesFn, updateLocksIfChanged]);
+
+  useEffect(() => {
+    if (!isTauri() && currentWorkspacePath) {
+      const wsManager = getWebSocketManager();
+      wsManager.subscribeLocks(currentWorkspacePath, updateLocksIfChanged);
+      refreshLockedWorktrees();
+      return () => { wsManager.unsubscribeLocks(); };
+    } else {
+      refreshLockedWorktrees();
+      const interval = setInterval(refreshLockedWorktrees, 3000);
+      return () => clearInterval(interval);
+    }
+  }, [refreshLockedWorktrees, currentWorkspacePath, updateLocksIfChanged]);
+
   // Set initial selected worktree when data loads (only on first load)
   useEffect(() => {
-    if (!hasUserSelected && !selectedWorktree && workspace.worktrees.length > 0) {
-      const activeWorktree = workspace.worktrees.find(w => !w.is_archived);
-      if (activeWorktree) {
-        setSelectedWorktree(activeWorktree);
+    if (!hasUserSelected && !selectedWorktree && workspace.worktrees.length > 0 && workspace.currentWorkspace) {
+      const wsPath = workspace.currentWorkspace.path;
+      // Find first active worktree that is not locked by another window
+      const tryAutoSelect = async () => {
+        // 网页端：不自动选择和锁定，等待用户手动选择
+        if (!isTauri()) {
+          return;
+        }
+
+        // 桌面端：自动选择第一个未被锁定的工作区
+        const locks: Record<string, string> = await workspace.getLockedWorktrees(wsPath).catch(() => ({} as Record<string, string>));
+        const windowLabel = await getWindowLabel();
+        const activeWorktree = workspace.worktrees.find(w => {
+          if (w.is_archived) return false;
+          const lockedBy = locks[w.name];
+          return !lockedBy || lockedBy === windowLabel;
+        });
+        if (activeWorktree) {
+          try {
+            await workspace.lockWorktree(wsPath, activeWorktree.name);
+            setSelectedWorktree(activeWorktree);
+          } catch {
+            // If lock fails, still select main workspace (null)
+            setSelectedWorktree(null);
+          }
+        }
+      };
+      tryAutoSelect();
+    }
+    // Also update the selected worktree data when worktrees refresh
+    if (selectedWorktree) {
+      const updated = workspace.worktrees.find(w => w.name === selectedWorktree.name);
+      if (updated && JSON.stringify(updated) !== JSON.stringify(selectedWorktree)) {
+        setSelectedWorktree(updated);
       }
     }
-  }, [workspace.worktrees, selectedWorktree, hasUserSelected]);
+  }, [workspace.worktrees, selectedWorktree, hasUserSelected, workspace.currentWorkspace]);
 
-  // Wrap setSelectedWorktree to track user selection
-  const handleSelectWorktree = useCallback((worktree: WorktreeListItem | null) => {
-    setHasUserSelected(true);
-    setSelectedWorktree(worktree);
-  }, []);
+  // Wrap setSelectedWorktree to track user selection and lock worktree
+  const handleSelectWorktree = useCallback(async (worktree: WorktreeListItem | null) => {
+    const wsPath = workspace.currentWorkspace?.path;
+    if (!wsPath) return;
+
+    setSwitchingWorktree(true);
+    try {
+      // 网页端：直接查看，不需要锁定（因为已经被桌面端锁定了）
+      if (!isTauri()) {
+        setHasUserSelected(true);
+        setSelectedWorktree(worktree);
+        return;
+      }
+
+      // 桌面端：需要锁定/解锁逻辑
+      // Unlock previous worktree
+      if (selectedWorktree) {
+        try {
+          await workspace.unlockWorktree(wsPath, selectedWorktree.name);
+        } catch {
+          // ignore unlock errors
+        }
+      }
+
+      // Lock new worktree
+      if (worktree) {
+        try {
+          await workspace.lockWorktree(wsPath, worktree.name);
+        } catch (e) {
+          workspace.setError(String(e));
+          return; // Don't select if lock fails
+        }
+      }
+
+      setHasUserSelected(true);
+      setSelectedWorktree(worktree);
+      refreshLockedWorktrees();
+    } finally {
+      setSwitchingWorktree(false);
+    }
+  }, [workspace, selectedWorktree, refreshLockedWorktrees]);
 
   // Reset terminal active tab when worktree changes
   useEffect(() => {
     terminal.resetActiveTab();
   }, [selectedWorktree?.path]);
 
+  // Update window title based on workspace and worktree
+  useEffect(() => {
+    const wsName = workspace.currentWorkspace?.name;
+    let title: string;
+    if (!wsName) {
+      title = 'Worktree Manager';
+    } else {
+      const wtName = selectedWorktree ? selectedWorktree.name : '主工作区';
+      title = `${wsName} - ${wtName}`;
+    }
+    setWindowTitle(title);
+  }, [workspace.currentWorkspace?.name, selectedWorktree]);
+
   // Workspace handlers
   const handleSwitchWorkspace = useCallback(async (path: string) => {
-    await workspace.switchWorkspace(path);
-    setShowWorkspaceMenu(false);
-    setSelectedWorktree(null);
-    setHasUserSelected(false); // Reset so auto-selection works on new workspace
-  }, [workspace]);
+    setSwitchingWorkspace(true);
+    try {
+      // Unlock current worktree before switching workspace
+      if (selectedWorktree && workspace.currentWorkspace) {
+        await workspace.unlockWorktree(workspace.currentWorkspace.path, selectedWorktree.name).catch(() => {});
+      }
+      await workspace.switchWorkspace(path);
+      setShowWorkspaceMenu(false);
+      setSelectedWorktree(null);
+      setHasUserSelected(false);
+    } finally {
+      setSwitchingWorkspace(false);
+    }
+  }, [workspace, selectedWorktree]);
 
   const handleAddWorkspace = useCallback(async () => {
     if (!newWorkspaceName.trim() || !newWorkspacePath.trim()) return;
-    await workspace.addWorkspace(newWorkspaceName.trim(), newWorkspacePath.trim());
-    setShowAddWorkspaceModal(false);
-    setNewWorkspaceName("");
-    setNewWorkspacePath("");
+    setAddingWorkspace(true);
+    try {
+      await workspace.addWorkspace(newWorkspaceName.trim(), newWorkspacePath.trim());
+      setShowAddWorkspaceModal(false);
+      setNewWorkspaceName("");
+      setNewWorkspacePath("");
+    } finally {
+      setAddingWorkspace(false);
+    }
   }, [workspace, newWorkspaceName, newWorkspacePath]);
 
   const handleCreateWorkspace = useCallback(async () => {
     if (!createWorkspaceName.trim() || !createWorkspacePath.trim()) return;
-    const fullPath = `${createWorkspacePath.trim()}/${createWorkspaceName.trim()}`;
-    await workspace.createWorkspace(createWorkspaceName.trim(), fullPath);
-    setShowCreateWorkspaceModal(false);
-    setCreateWorkspaceName("");
-    setCreateWorkspacePath("");
+    setCreatingWorkspace(true);
+    try {
+      const fullPath = `${createWorkspacePath.trim()}/${createWorkspaceName.trim()}`;
+      await workspace.createWorkspace(createWorkspaceName.trim(), fullPath);
+      setShowCreateWorkspaceModal(false);
+      setCreateWorkspaceName("");
+      setCreateWorkspacePath("");
+    } finally {
+      setCreatingWorkspace(false);
+    }
   }, [workspace, createWorkspaceName, createWorkspacePath]);
 
   // Create worktree handlers
@@ -196,13 +389,255 @@ function App() {
     setCloningProject(true);
     try {
       await workspace.cloneProject(project);
-      setShowAddProjectModal(false);
+      // Don't close modal here — let AddProjectModal handle the scan phase
     } catch (e) {
       workspace.setError(String(e));
+      throw e; // Re-throw so AddProjectModal knows clone failed
     } finally {
       setCloningProject(false);
     }
   }, [workspace]);
+
+  // Update linked folders for a project (used after scanning)
+  const handleUpdateLinkedFolders = useCallback(async (projectName: string, folders: string[]) => {
+    if (!editingConfig && workspace.config) {
+      // Direct update from AddProjectModal
+      const updatedConfig = JSON.parse(JSON.stringify(workspace.config)) as WorkspaceConfig;
+      const project = updatedConfig.projects.find(p => p.name === projectName);
+      if (project) {
+        project.linked_folders = folders;
+        await workspace.saveConfig(updatedConfig);
+      }
+    } else if (editingConfig) {
+      // From SettingsView context
+      const updatedConfig = {
+        ...editingConfig,
+        projects: editingConfig.projects.map(p =>
+          p.name === projectName ? { ...p, linked_folders: folders } : p
+        ),
+      };
+      setEditingConfig(updatedConfig);
+      await workspace.saveConfig(updatedConfig);
+    }
+  }, [workspace, editingConfig]);
+
+  // Add project to existing worktree handler
+  const handleAddProjectToWorktree = useCallback(async (projectName: string, baseBranch: string) => {
+    if (!selectedWorktree) return;
+    setAddingProjectToWorktree(true);
+    try {
+      await workspace.addProjectToWorktree({
+        worktree_name: selectedWorktree.name,
+        project_name: projectName,
+        base_branch: baseBranch,
+      });
+      setShowAddProjectToWorktreeModal(false);
+    } catch (e) {
+      workspace.setError(String(e));
+    } finally {
+      setAddingProjectToWorktree(false);
+    }
+  }, [workspace, selectedWorktree]);
+
+  // Scan project folders (for SettingsView)
+  const handleScanProject = useCallback(async (projectName: string) => {
+    if (!workspace.currentWorkspace) return;
+    setScanningProject(projectName);
+    setSettingsScanResults([]);
+    try {
+      const projectPath = `${workspace.currentWorkspace.path}/projects/${projectName}`;
+      const results = await workspace.scanLinkedFolders(projectPath);
+      setSettingsScanResults(results);
+    } catch (e) {
+      workspace.setError(String(e));
+    } finally {
+      setScanningProject(null);
+    }
+  }, [workspace]);
+
+  // Open workspace in new window
+  const handleOpenInNewWindow = useCallback(async (workspacePath: string) => {
+    try {
+      await workspace.openWorkspaceInNewWindow(workspacePath);
+    } catch (e) {
+      workspace.setError(String(e));
+    }
+  }, [workspace]);
+
+  // Share handlers
+  const generatePassword = useCallback(() => {
+    const chars = 'abcdefghijkmnpqrstuvwxyz23456789';
+    return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+  }, []);
+
+  const handleStartShare = useCallback(async (port: number) => {
+    try {
+      const pwd = sharePassword || generatePassword();
+      const url = await startSharing(port, pwd);
+      setShareActive(true);
+      setShareUrl(url);
+      setSharePassword(pwd);
+    } catch (e) {
+      workspace.setError(String(e));
+    }
+  }, [workspace, generatePassword, sharePassword]);
+
+  const handleStopShare = useCallback(async () => {
+    try {
+      await stopSharing();
+      setShareActive(false);
+      setShareUrl(null);
+      setShareNgrokUrl(null);
+      setConnectedClients([]);
+    } catch (e) {
+      workspace.setError(String(e));
+    }
+  }, [workspace]);
+
+  const handleToggleNgrok = useCallback(async () => {
+    if (ngrokLoading) return;
+    setNgrokLoading(true);
+    try {
+      if (shareNgrokUrl) {
+        await stopNgrokTunnel();
+        setShareNgrokUrl(null);
+      } else {
+        // Check if ngrok token is configured
+        const token = await getNgrokToken();
+        if (!token) {
+          setNgrokLoading(false);
+          setShowNgrokTokenDialog(true);
+          return;
+        }
+        const ngrokUrl = await startNgrokTunnel();
+        setShareNgrokUrl(ngrokUrl);
+      }
+    } catch (e) {
+      workspace.setError(String(e));
+    } finally {
+      setNgrokLoading(false);
+    }
+  }, [workspace, shareNgrokUrl, ngrokLoading]);
+
+  const handleUpdateSharePassword = useCallback(async (newPassword: string) => {
+    try {
+      await updateSharePassword(newPassword);
+      setSharePassword(newPassword);
+    } catch (e) {
+      workspace.setError(String(e));
+    }
+  }, [workspace]);
+
+  const handleKickClient = useCallback(async (sessionId: string) => {
+    try {
+      await kickClient(sessionId);
+      // Refresh connected clients list
+      const clients = await getConnectedClients();
+      setConnectedClients(clients);
+    } catch (e) {
+      workspace.setError(String(e));
+    }
+  }, [workspace]);
+
+  const handleSaveNgrokToken = useCallback(async () => {
+    if (!ngrokTokenInput.trim()) return;
+    setSavingNgrokToken(true);
+    try {
+      await setNgrokToken(ngrokTokenInput.trim());
+      setShowNgrokTokenDialog(false);
+      setNgrokTokenInput('');
+      // Try to start ngrok tunnel after saving token
+      setNgrokLoading(true);
+      const ngrokUrl = await startNgrokTunnel();
+      setShareNgrokUrl(ngrokUrl);
+    } catch (e) {
+      workspace.setError(String(e));
+    } finally {
+      setSavingNgrokToken(false);
+      setNgrokLoading(false);
+    }
+  }, [workspace, ngrokTokenInput]);
+
+  // Restore share state and load ngrok token on mount (Tauri only)
+  useEffect(() => {
+    if (isTauri()) {
+      getShareState().then(state => {
+        if (state.active && state.url) {
+          setShareActive(true);
+          setShareUrl(state.url);
+          if (state.ngrok_url) {
+            setShareNgrokUrl(state.ngrok_url);
+          }
+        }
+      }).catch(() => {});
+      // Load last password if available
+      getLastSharePassword().then(pwd => {
+        if (pwd) {
+          setSharePassword(pwd);
+        }
+      }).catch(() => {});
+    }
+  }, []);
+
+  // Poll connected clients when sharing is active (Tauri only)
+  useEffect(() => {
+    if (!isTauri() || !shareActive) {
+      setConnectedClients([]);
+      return;
+    }
+    // Fetch immediately, then poll every 5s
+    const fetchClients = () => {
+      getConnectedClients()
+        .then(setConnectedClients)
+        .catch(() => {});
+    };
+    fetchClients();
+    const interval = setInterval(fetchClients, 5000);
+    return () => clearInterval(interval);
+  }, [shareActive]);
+
+  // Browser: validate stored session on startup (avoids re-auth on refresh)
+  useEffect(() => {
+    if (isTauri()) return;
+    const sid = getSessionId();
+    if (!sid) return;
+    // Try an authenticated call to check if session is still valid
+    callBackend('list_workspaces')
+      .then(() => setBrowserAuthenticated(true))
+      .catch(() => {
+        // Only clear if session hasn't been replaced by a fresh auth in the meantime
+        if (getSessionId() === sid) {
+          clearSessionId();
+        }
+      });
+  }, []);
+
+  // Browser: after authentication, bind to the shared workspace THEN load data
+  useEffect(() => {
+    if (!isTauri() && browserAuthenticated) {
+      getShareInfo().then(async (info) => {
+        await callBackend('set_window_workspace', { workspacePath: info.workspace_path });
+        await workspace.loadWorkspaces();
+        await workspace.loadData();
+      }).catch(() => {});
+    }
+  }, [browserAuthenticated]);
+
+  // Browser login handler
+  const handleBrowserLogin = useCallback(async () => {
+    if (!browserLoginPassword.trim()) return;
+    setBrowserLoggingIn(true);
+    setBrowserLoginError(null);
+    try {
+      await authenticate(browserLoginPassword.trim());
+      setBrowserAuthenticated(true);
+      setBrowserLoginPassword('');
+    } catch (e) {
+      setBrowserLoginError(String(e));
+    } finally {
+      setBrowserLoggingIn(false);
+    }
+  }, [browserLoginPassword]);
 
   // Archive handlers
   const handleContextMenu = useCallback((e: React.MouseEvent, worktree: WorktreeListItem) => {
@@ -251,6 +686,7 @@ function App() {
 
   const handleArchiveWorktree = useCallback(async () => {
     if (!archiveModal) return;
+    setArchiving(true);
     try {
       await workspace.archiveWorktree(archiveModal.worktree.name);
       if (selectedWorktree?.name === archiveModal.worktree.name) {
@@ -259,8 +695,26 @@ function App() {
       setArchiveModal(null);
     } catch (e) {
       workspace.setError(String(e));
+    } finally {
+      setArchiving(false);
     }
   }, [workspace, archiveModal, selectedWorktree]);
+
+  const handleDeleteArchivedWorktree = useCallback(async () => {
+    if (!deleteConfirmWorktree) return;
+    setDeletingArchived(true);
+    try {
+      await workspace.deleteArchivedWorktree(deleteConfirmWorktree.name);
+      if (selectedWorktree?.name === deleteConfirmWorktree.name) {
+        setSelectedWorktree(null);
+      }
+      setDeleteConfirmWorktree(null);
+    } catch (e) {
+      workspace.setError(String(e));
+    } finally {
+      setDeletingArchived(false);
+    }
+  }, [workspace, deleteConfirmWorktree, selectedWorktree]);
 
   // Terminal tab context menu
   const handleTerminalTabContextMenu = useCallback((e: React.MouseEvent, path: string, name: string) => {
@@ -293,7 +747,7 @@ function App() {
     setEditingConfig({ ...editingConfig, [field]: value });
   }, [editingConfig]);
 
-  const updateEditingProject = useCallback((index: number, field: keyof ProjectConfig, value: string | boolean) => {
+  const updateEditingProject = useCallback((index: number, field: keyof ProjectConfig, value: string | boolean | string[]) => {
     if (!editingConfig) return;
     const newProjects = [...editingConfig.projects];
     newProjects[index] = { ...newProjects[index], [field]: value };
@@ -340,24 +794,35 @@ function App() {
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent): void {
       if (e.key === 'Escape') {
+        if (terminalFullscreen) {
+          setTerminalFullscreen(false);
+          return;
+        }
         setContextMenu(null);
         setArchiveModal(null);
         setShowEditorMenu(false);
         setShowWorkspaceMenu(false);
         setTerminalTabMenu(null);
       }
-      // Cmd/Ctrl+N: Open create worktree modal
-      if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+      // Cmd/Ctrl+N: Open create worktree modal (Tauri only)
+      if ((e.metaKey || e.ctrlKey) && e.key === 'n' && isTauri()) {
         e.preventDefault();
         if (viewMode === 'main' && workspace.config) {
           openCreateModal();
         }
       }
-      // Cmd/Ctrl+,: Open settings
-      if ((e.metaKey || e.ctrlKey) && e.key === ',') {
+      // Cmd/Ctrl+,: Open settings (Tauri only)
+      if ((e.metaKey || e.ctrlKey) && e.key === ',' && isTauri()) {
         e.preventDefault();
         if (viewMode === 'main') {
           openSettings();
+        }
+      }
+      // Cmd/Ctrl+B: Toggle sidebar
+      if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
+        e.preventDefault();
+        if (viewMode === 'main') {
+          setSidebarCollapsed(prev => !prev);
         }
       }
     }
@@ -370,7 +835,41 @@ function App() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('click', handleClick);
     };
-  }, [viewMode, workspace.config, openCreateModal, openSettings]);
+  }, [viewMode, workspace.config, openCreateModal, openSettings, terminalFullscreen]);
+
+  // Browser mode: show login screen if not authenticated
+  if (!isTauri() && !browserAuthenticated) {
+    return (
+      <div className="min-h-screen bg-slate-900 text-slate-100 flex items-center justify-center">
+        <div className="w-80 space-y-4">
+          <div className="text-center space-y-2">
+            <h1 className="text-xl font-semibold">Worktree Manager</h1>
+            <p className="text-sm text-slate-400">请输入访问密码</p>
+          </div>
+          <form onSubmit={(e) => { e.preventDefault(); handleBrowserLogin(); }} className="space-y-3">
+            <Input
+              type="password"
+              placeholder="密码"
+              value={browserLoginPassword}
+              onChange={(e) => setBrowserLoginPassword(e.target.value)}
+              autoFocus
+              className="bg-slate-800 border-slate-700"
+            />
+            {browserLoginError && (
+              <p className="text-sm text-red-400">{browserLoginError}</p>
+            )}
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={browserLoggingIn || !browserLoginPassword.trim()}
+            >
+              {browserLoggingIn ? '验证中...' : '进入'}
+            </Button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   // Loading state
   if (workspace.loading) {
@@ -400,6 +899,7 @@ function App() {
           path={newWorkspacePath}
           onPathChange={setNewWorkspacePath}
           onSubmit={handleAddWorkspace}
+          loading={addingWorkspace}
         />
         <CreateWorkspaceModal
           open={showCreateWorkspaceModal}
@@ -409,6 +909,7 @@ function App() {
           path={createWorkspacePath}
           onPathChange={setCreateWorkspacePath}
           onSubmit={handleCreateWorkspace}
+          loading={creatingWorkspace}
         />
       </>
     );
@@ -418,7 +919,7 @@ function App() {
     <>
       {/* Settings View */}
       <div
-        className="min-h-screen bg-slate-900 text-slate-100 p-6 overflow-y-auto"
+        className="h-screen bg-slate-900 text-slate-100 p-6 overflow-y-auto"
         style={{ display: viewMode === 'settings' && editingConfig ? 'block' : 'none' }}
       >
         {editingConfig && (
@@ -438,23 +939,29 @@ function App() {
             onClearError={() => workspace.setError(null)}
             onCheckUpdate={() => updater.checkForUpdates(false)}
             checkingUpdate={updater.state === 'checking'}
+            onScanProject={handleScanProject}
+            scanningProject={scanningProject}
+            scanResults={settingsScanResults}
+            workspaces={workspace.workspaces}
+            currentWorkspace={workspace.currentWorkspace}
+            onRemoveWorkspace={workspace.removeWorkspace}
           />
         )}
       </div>
 
       {/* Main View */}
       <div
-        className="min-h-screen bg-slate-900 text-slate-100 flex"
+        className="h-screen bg-slate-900 text-slate-100 flex overflow-hidden"
         style={{ display: viewMode === 'main' ? 'flex' : 'none' }}
       >
-        <WorktreeSidebar
+        {!terminalFullscreen && (
+          <WorktreeSidebar
           workspaces={workspace.workspaces}
           currentWorkspace={workspace.currentWorkspace}
           showWorkspaceMenu={showWorkspaceMenu}
           onShowWorkspaceMenu={setShowWorkspaceMenu}
           onSwitchWorkspace={handleSwitchWorkspace}
-          onRemoveWorkspace={workspace.removeWorkspace}
-          onAddWorkspace={() => { setShowWorkspaceMenu(false); setShowAddWorkspaceModal(true); }}
+          onAddWorkspace={() => setShowAddWorkspaceModal(true)}
           mainWorkspace={workspace.mainWorkspace}
           worktrees={workspace.worktrees}
           selectedWorktree={selectedWorktree}
@@ -465,9 +972,29 @@ function App() {
           onRefresh={workspace.loadData}
           onOpenSettings={openSettings}
           onOpenCreateModal={openCreateModal}
+          updaterState={updater.state}
+          onCheckUpdate={() => updater.checkForUpdates(false)}
+          onOpenInNewWindow={isTauri() ? handleOpenInNewWindow : undefined}
+          lockedWorktrees={lockedWorktrees}
+          collapsed={sidebarCollapsed}
+          onToggleCollapsed={() => setSidebarCollapsed(prev => !prev)}
+          switchingWorkspace={switchingWorkspace}
+          shareActive={shareActive}
+          shareUrl={shareUrl}
+          shareNgrokUrl={shareNgrokUrl}
+          sharePassword={sharePassword}
+          onStartShare={handleStartShare}
+          onStopShare={handleStopShare}
+          onUpdateSharePassword={handleUpdateSharePassword}
+          ngrokLoading={ngrokLoading}
+          onToggleNgrok={handleToggleNgrok}
+          connectedClients={connectedClients}
+          onKickClient={handleKickClient}
         />
+        )}
 
         <div className="flex-1 flex flex-col bg-slate-900">
+          {!terminalFullscreen && (
           <div className="flex-1 p-6 overflow-y-auto min-h-0">
             <WorktreeDetail
               selectedWorktree={selectedWorktree}
@@ -478,14 +1005,30 @@ function App() {
               onSelectEditor={setSelectedEditor}
               onOpenInEditor={handleOpenInEditor}
               onOpenInTerminal={workspace.openInTerminal}
+              onRevealInFinder={workspace.revealInFinder}
               onSwitchBranch={workspace.switchBranch}
               onArchive={() => selectedWorktree && openArchiveModal(selectedWorktree)}
-              onRestore={() => selectedWorktree && workspace.restoreWorktree(selectedWorktree.name)}
+              onRestore={async () => {
+                if (!selectedWorktree) return;
+                setRestoringWorktree(true);
+                try {
+                  await workspace.restoreWorktree(selectedWorktree.name);
+                } catch (e) {
+                  workspace.setError(String(e));
+                } finally {
+                  setRestoringWorktree(false);
+                }
+              }}
+              restoring={restoringWorktree}
+              switching={switchingWorktree}
+              onDelete={selectedWorktree?.is_archived ? () => setDeleteConfirmWorktree(selectedWorktree) : undefined}
               onAddProject={() => setShowAddProjectModal(true)}
+              onAddProjectToWorktree={() => setShowAddProjectToWorktreeModal(true)}
               error={workspace.error}
               onClearError={() => workspace.setError(null)}
             />
           </div>
+          )}
 
           <TerminalPanel
             visible={terminal.terminalVisible}
@@ -499,6 +1042,14 @@ function App() {
             onCloseTab={terminal.handleCloseTerminalTab}
             onToggle={terminal.handleToggleTerminal}
             onCollapse={() => terminal.setTerminalVisible(false)}
+            isFullscreen={terminalFullscreen}
+            onToggleFullscreen={() => {
+              const next = !terminalFullscreen;
+              setTerminalFullscreen(next);
+              if (next && !terminal.terminalVisible) {
+                terminal.handleToggleTerminal();
+              }
+            }}
           />
         </div>
 
@@ -516,21 +1067,36 @@ function App() {
           creating={creating}
         />
 
-        <AddWorkspaceModal
-          open={showAddWorkspaceModal}
-          onOpenChange={setShowAddWorkspaceModal}
-          name={newWorkspaceName}
-          onNameChange={setNewWorkspaceName}
-          path={newWorkspacePath}
-          onPathChange={setNewWorkspacePath}
-          onSubmit={handleAddWorkspace}
-        />
+        {isTauri() && (
+          <AddWorkspaceModal
+            open={showAddWorkspaceModal}
+            onOpenChange={setShowAddWorkspaceModal}
+            name={newWorkspaceName}
+            onNameChange={setNewWorkspaceName}
+            path={newWorkspacePath}
+            onPathChange={setNewWorkspacePath}
+            onSubmit={handleAddWorkspace}
+            loading={addingWorkspace}
+          />
+        )}
 
         <AddProjectModal
           open={showAddProjectModal}
           onOpenChange={setShowAddProjectModal}
           onSubmit={handleAddProject}
           loading={cloningProject}
+          scanLinkedFolders={workspace.scanLinkedFolders}
+          workspacePath={workspace.currentWorkspace?.path}
+          onUpdateLinkedFolders={handleUpdateLinkedFolders}
+        />
+
+        <AddProjectToWorktreeModal
+          open={showAddProjectToWorktreeModal}
+          onOpenChange={setShowAddProjectToWorktreeModal}
+          config={workspace.config}
+          worktree={selectedWorktree}
+          onSubmit={handleAddProjectToWorktree}
+          adding={addingProjectToWorktree}
         />
 
         {/* Context Menus */}
@@ -563,8 +1129,29 @@ function App() {
             onConfirmIssue={confirmArchiveIssue}
             onArchive={handleArchiveWorktree}
             areAllIssuesConfirmed={areAllIssuesConfirmed()}
+            archiving={archiving}
           />
         )}
+
+        {/* Delete Archived Worktree Confirmation */}
+        <Dialog open={!!deleteConfirmWorktree} onOpenChange={(open) => !open && setDeleteConfirmWorktree(null)}>
+          <DialogContent className="max-w-[400px]">
+            <DialogHeader>
+              <DialogTitle>删除归档 Worktree</DialogTitle>
+              <DialogDescription>
+                确定要永久删除归档 "{deleteConfirmWorktree?.name}" 吗？此操作将同时删除关联的本地分支和所有文件，且无法恢复。
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="secondary" onClick={() => setDeleteConfirmWorktree(null)}>
+                取消
+              </Button>
+              <Button variant="destructive" onClick={handleDeleteArchivedWorktree} disabled={deletingArchived}>
+                {deletingArchived ? "删除中..." : "确认删除"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
 
       {/* Updater Dialogs */}
@@ -604,6 +1191,37 @@ function App() {
       />
 
       <UpToDateToast show={updater.showUpToDateToast} />
+
+      {/* Ngrok Token Dialog */}
+      <Dialog open={showNgrokTokenDialog} onOpenChange={setShowNgrokTokenDialog}>
+        <DialogContent className="max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>配置 Ngrok Token</DialogTitle>
+            <DialogDescription>
+              请输入您的 ngrok authtoken。您可以在 <a href="https://dashboard.ngrok.com/get-started/your-authtoken" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">ngrok 控制台</a> 获取。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Input
+              type="text"
+              placeholder="ngrok authtoken"
+              value={ngrokTokenInput}
+              onChange={(e) => setNgrokTokenInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleSaveNgrokToken(); }}
+              className="font-mono text-sm"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setShowNgrokTokenDialog(false)}>
+              取消
+            </Button>
+            <Button onClick={handleSaveNgrokToken} disabled={savingNgrokToken || !ngrokTokenInput.trim()}>
+              {savingNgrokToken ? '保存中...' : '保存并启动'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </>
   );
 }

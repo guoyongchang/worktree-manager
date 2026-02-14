@@ -95,6 +95,13 @@ select,
   user-select: text;
 }
 
+/* Allow text selection for specific elements */
+.select-text {
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+}
+
 /* Disable context menu visual feedback */
 :focus {
   outline: none;

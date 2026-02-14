@@ -1,6 +1,14 @@
-import { useState, type FC } from 'react';
+import { useState, useEffect, type FC } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogFooter,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 import {
   Select,
   SelectContent,
@@ -8,9 +16,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, Search } from 'lucide-react';
 import { BackIcon, PlusIcon, TrashIcon } from './Icons';
-import type { WorkspaceConfig, ProjectConfig } from '../types';
+import { BranchCombobox } from './BranchCombobox';
+import type { WorkspaceRef, WorkspaceConfig, ProjectConfig, ScannedFolder } from '../types';
+import { getAppVersion, getNgrokToken, setNgrokToken as saveNgrokToken, isTauri, getRemoteBranches } from '../lib/backend';
 
 interface SettingsViewProps {
   config: WorkspaceConfig;
@@ -20,7 +30,7 @@ interface SettingsViewProps {
   onBack: () => void;
   onSave: () => void;
   onUpdateField: (field: 'name' | 'worktrees_dir', value: string) => void;
-  onUpdateProject: (index: number, field: keyof ProjectConfig, value: string | boolean) => void;
+  onUpdateProject: (index: number, field: keyof ProjectConfig, value: string | boolean | string[]) => void;
   onAddProject: () => void;
   onRemoveProject: (index: number) => void;
   onAddLinkedItem: (item: string) => void;
@@ -28,6 +38,12 @@ interface SettingsViewProps {
   onClearError: () => void;
   onCheckUpdate?: () => void;
   checkingUpdate?: boolean;
+  onScanProject?: (projectName: string) => void;
+  scanningProject?: string | null;
+  scanResults?: ScannedFolder[];
+  workspaces?: WorkspaceRef[];
+  currentWorkspace?: WorkspaceRef | null;
+  onRemoveWorkspace?: (path: string) => void;
 }
 
 export const SettingsView: FC<SettingsViewProps> = ({
@@ -46,8 +62,34 @@ export const SettingsView: FC<SettingsViewProps> = ({
   onClearError,
   onCheckUpdate,
   checkingUpdate = false,
+  onScanProject,
+  scanningProject = null,
+  scanResults = [],
+  workspaces = [],
+  currentWorkspace = null,
+  onRemoveWorkspace,
 }) => {
   const [newLinkedItem, setNewLinkedItem] = useState('');
+  const [newProjectLinkedFolder, setNewProjectLinkedFolder] = useState<Record<number, string>>({});
+  const [appVersion, setAppVersion] = useState('');
+  const [removeConfirmWorkspace, setRemoveConfirmWorkspace] = useState<WorkspaceRef | null>(null);
+
+  // ngrok token state
+  const [ngrokToken, setNgrokToken] = useState('');
+  const [ngrokTokenLoaded, setNgrokTokenLoaded] = useState(false);
+  const [ngrokSaving, setNgrokSaving] = useState(false);
+  const [ngrokSaved, setNgrokSaved] = useState(false);
+  const [ngrokError, setNgrokError] = useState<string | null>(null);
+
+  useEffect(() => {
+    getAppVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
+    if (isTauri()) {
+      getNgrokToken().then(t => {
+        setNgrokToken(t || '');
+        setNgrokTokenLoaded(true);
+      }).catch(() => setNgrokTokenLoaded(true));
+    }
+  }, []);
   return (
     <div className="max-w-3xl mx-auto">
       {/* Header */}
@@ -73,7 +115,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
 
       {error && (
         <div className="mb-4 p-4 bg-red-900/30 border border-red-800/50 rounded-lg">
-          <div className="text-red-300 text-sm">{error}</div>
+          <div className="text-red-300 text-sm select-text">{error}</div>
           <Button variant="link" size="sm" onClick={onClearError} className="text-red-400 hover:text-red-200 mt-1 p-0 h-auto">关闭</Button>
         </div>
       )}
@@ -81,7 +123,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
       {/* Config Path Info */}
       <div className="mb-6 p-3 bg-slate-800/50 rounded-lg border border-slate-700/50">
         <div className="text-xs text-slate-500">配置文件路径</div>
-        <div className="text-sm text-slate-300 mt-1 font-mono">{configPath}</div>
+        <div className="text-sm text-slate-300 mt-1 font-mono select-text">{configPath}</div>
       </div>
 
       {/* Workspace Settings */}
@@ -111,11 +153,11 @@ export const SettingsView: FC<SettingsViewProps> = ({
             <div className="space-y-2">
               {config.linked_workspace_items.map((item, index) => (
                 <div key={index} className="flex items-center gap-2 bg-slate-800 border border-slate-700 rounded px-3 py-2">
-                  <span className="flex-1 text-sm text-slate-300">{item}</span>
+                  <span className="flex-1 text-sm text-slate-300 select-text">{item}</span>
                   <button
                     type="button"
                     onClick={() => onRemoveLinkedItem(index)}
-                    className="text-slate-500 hover:text-red-400 text-xs"
+                    className="text-slate-500 hover:text-red-400 text-xs transition-colors"
                   >
                     删除
                   </button>
@@ -158,6 +200,50 @@ export const SettingsView: FC<SettingsViewProps> = ({
         </div>
       </div>
 
+      {/* Workspace Management */}
+      {workspaces.length > 0 && onRemoveWorkspace && (
+        <div className="mb-8">
+          <h2 className="text-lg font-medium mb-4">Workspace 管理</h2>
+          <div className="space-y-2">
+            {workspaces.map(ws => (
+              <div
+                key={ws.path}
+                className={`flex items-center justify-between p-3 bg-slate-800/50 border rounded-lg ${
+                  currentWorkspace?.path === ws.path
+                    ? 'border-blue-500/50'
+                    : 'border-slate-700/50'
+                }`}
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-slate-200">{ws.name}</span>
+                    {currentWorkspace?.path === ws.path && (
+                      <span className="text-[10px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded">当前</span>
+                    )}
+                  </div>
+                  <div className="text-xs text-slate-500 truncate mt-0.5 select-text">{ws.path}</div>
+                </div>
+                {workspaces.length > 1 && currentWorkspace?.path !== ws.path && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setRemoveConfirmWorkspace(ws)}
+                    className="h-8 w-8 text-slate-500 hover:text-red-400 hover:bg-red-900/20 shrink-0 ml-2"
+                    title="移除工作区"
+                    aria-label={`移除工作区 ${ws.name}`}
+                  >
+                    <TrashIcon className="w-4 h-4" />
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-slate-500 mt-2">
+            移除工作区仅从列表中删除，不会删除实际文件。当前使用中的工作区无法移除。
+          </p>
+        </div>
+      )}
+
       {/* Projects */}
       <div>
         <div className="flex items-center justify-between mb-4">
@@ -175,7 +261,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
         <div className="space-y-3">
           {config.projects.map((proj, index) => (
             <div key={index} className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4">
-              <div className="flex items-start gap-4">
+              <div className="flex items-start gap-3 mb-3">
                 <div className="flex-1 grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs text-slate-500 mb-1">项目名称</label>
@@ -189,22 +275,26 @@ export const SettingsView: FC<SettingsViewProps> = ({
                   </div>
                   <div>
                     <label className="block text-xs text-slate-500 mb-1">基准分支</label>
-                    <Input
-                      type="text"
+                    <BranchCombobox
                       value={proj.base_branch}
-                      onChange={(e) => onUpdateProject(index, 'base_branch', e.target.value)}
-                      placeholder="uat"
-                      className="h-8 text-sm"
+                      onChange={(value) => onUpdateProject(index, 'base_branch', value)}
+                      onLoadBranches={async () => {
+                        const projectPath = `${configPath.replace('/.worktree-manager.json', '')}/projects/${proj.name}`;
+                        return await getRemoteBranches(projectPath);
+                      }}
+                      placeholder="main"
                     />
                   </div>
                   <div>
                     <label className="block text-xs text-slate-500 mb-1">测试分支</label>
-                    <Input
-                      type="text"
+                    <BranchCombobox
                       value={proj.test_branch}
-                      onChange={(e) => onUpdateProject(index, 'test_branch', e.target.value)}
+                      onChange={(value) => onUpdateProject(index, 'test_branch', value)}
+                      onLoadBranches={async () => {
+                        const projectPath = `${configPath.replace('/.worktree-manager.json', '')}/projects/${proj.name}`;
+                        return await getRemoteBranches(projectPath);
+                      }}
                       placeholder="test"
-                      className="h-8 text-sm"
                     />
                   </div>
                   <div>
@@ -219,20 +309,133 @@ export const SettingsView: FC<SettingsViewProps> = ({
                       <SelectContent>
                         <SelectItem value="merge">merge</SelectItem>
                         <SelectItem value="cherry-pick">cherry-pick</SelectItem>
+                        <SelectItem value="rebase">rebase</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => onRemoveProject(index)}
+                  className="h-8 w-8 text-red-400 hover:text-red-300 hover:bg-red-900/30 shrink-0"
+                  title="删除项目"
+                  aria-label={`删除项目 ${proj.name || '未命名'}`}
+                >
+                  <TrashIcon className="w-4 h-4" />
+                </Button>
+              </div>
+              {/* Linked Folders */}
+              <div className="border-t border-slate-700/50 pt-3">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-xs text-slate-500">链接文件夹</label>
+                  {onScanProject && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 text-xs gap-1 text-slate-400 hover:text-slate-200"
+                      onClick={() => onScanProject(proj.name)}
+                      disabled={scanningProject === proj.name || !proj.name}
+                    >
+                      {scanningProject === proj.name ? (
+                        <>
+                          <div className="w-3 h-3 border border-blue-500 border-t-transparent rounded-full animate-spin" />
+                          扫描中...
+                        </>
+                      ) : (
+                        <>
+                          <Search className="w-3 h-3" />
+                          扫描
+                        </>
+                      )}
+                    </Button>
+                  )}
+                </div>
+
+                {/* Scan Results Panel */}
+                {scanResults.length > 0 && scanningProject === null && proj.name && (() => {
+                  const existingFolders = new Set(proj.linked_folders || []);
+                  const filteredResults = scanResults.filter(r => !existingFolders.has(r.relative_path));
+                  if (filteredResults.length === 0) return null;
+                  return (
+                    <div className="mb-2 p-2 bg-blue-900/20 border border-blue-800/30 rounded-lg">
+                      <div className="text-[10px] font-medium text-blue-400 mb-1.5">扫描结果 (点击添加)</div>
+                      <div className="space-y-1">
+                        {filteredResults.map(result => (
+                          <button
+                            key={result.relative_path}
+                            type="button"
+                            className="w-full flex items-center justify-between px-2 py-1 text-left rounded hover:bg-blue-900/30 transition-colors"
+                            onClick={() => {
+                              const newFolders = [...(proj.linked_folders || []), result.relative_path];
+                              onUpdateProject(index, 'linked_folders', newFolders);
+                            }}
+                          >
+                            <span className="text-xs text-slate-300 font-mono">{result.relative_path}</span>
+                            <span className="text-[10px] text-slate-500 ml-2">{result.size_display}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+                {(proj.linked_folders || []).length > 0 && (
+                  <div className="space-y-1.5 mb-2">
+                    {(proj.linked_folders || []).map((folder, folderIdx) => (
+                      <div
+                        key={folderIdx}
+                        className="flex items-center justify-between px-3 py-1.5 bg-slate-700/50 border border-slate-600/50 rounded text-sm text-slate-300"
+                      >
+                        <span className="select-text">{folder}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const newFolders = [...(proj.linked_folders || [])];
+                            newFolders.splice(folderIdx, 1);
+                            onUpdateProject(index, 'linked_folders', newFolders);
+                          }}
+                          className="text-slate-500 hover:text-red-400 text-xs ml-2 transition-colors"
+                        >
+                          删除
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <Input
+                    type="text"
+                    value={newProjectLinkedFolder[index] || ''}
+                    onChange={(e) => setNewProjectLinkedFolder(prev => ({ ...prev, [index]: e.target.value }))}
+                    placeholder="例如: node_modules"
+                    className="h-7 text-xs"
+                    onKeyDown={(e) => {
+                      const val = (newProjectLinkedFolder[index] || '').trim();
+                      if (e.key === 'Enter' && val) {
+                        e.preventDefault();
+                        const newFolders = [...(proj.linked_folders || []), val];
+                        onUpdateProject(index, 'linked_folders', newFolders);
+                        setNewProjectLinkedFolder(prev => ({ ...prev, [index]: '' }));
+                      }
+                    }}
+                  />
                   <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => onRemoveProject(index)}
-                    className="h-8 w-8 text-red-400 hover:text-red-300 hover:bg-red-900/30"
-                    title="删除项目"
-                    aria-label={`删除项目 ${proj.name || '未命名'}`}
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => {
+                      const val = (newProjectLinkedFolder[index] || '').trim();
+                      if (val) {
+                        const newFolders = [...(proj.linked_folders || []), val];
+                        onUpdateProject(index, 'linked_folders', newFolders);
+                        setNewProjectLinkedFolder(prev => ({ ...prev, [index]: '' }));
+                      }
+                    }}
+                    disabled={!(newProjectLinkedFolder[index] || '').trim()}
                   >
-                    <TrashIcon className="w-4 h-4" />
+                    添加
                   </Button>
                 </div>
               </div>
@@ -241,6 +444,68 @@ export const SettingsView: FC<SettingsViewProps> = ({
         </div>
       </div>
 
+      {/* ngrok Config Section (Tauri only) */}
+      {isTauri() && ngrokTokenLoaded && (
+        <div className="mt-8 pt-8 border-t border-slate-700/50">
+          <h2 className="text-lg font-medium mb-4">外网分享 (ngrok)</h2>
+          <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 space-y-3">
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">ngrok Authtoken</label>
+              <div className="flex gap-2">
+                <Input
+                  type="password"
+                  value={ngrokToken}
+                  onChange={(e) => { setNgrokToken(e.target.value); setNgrokSaved(false); }}
+                  placeholder="粘贴你的 ngrok authtoken"
+                  className="flex-1"
+                />
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={ngrokSaving}
+                  onClick={async () => {
+                    setNgrokSaving(true);
+                    setNgrokError(null);
+                    try {
+                      await saveNgrokToken(ngrokToken.trim());
+                      setNgrokSaved(true);
+                      setTimeout(() => setNgrokSaved(false), 2000);
+                    } catch (e) {
+                      setNgrokError(String(e));
+                    } finally {
+                      setNgrokSaving(false);
+                    }
+                  }}
+                >
+                  {ngrokSaving ? '保存中...' : ngrokSaved ? '已保存' : '保存'}
+                </Button>
+              </div>
+              {ngrokError && (
+                <p className="text-sm text-red-400 mt-1">{ngrokError}</p>
+              )}
+            </div>
+            <p className="text-xs text-slate-500">
+              配置 ngrok token 后，分享时可选择"外网"模式，通过公网 URL 访问。
+              <button
+                type="button"
+                className="text-blue-400 hover:text-blue-300 ml-1 underline cursor-pointer transition-colors"
+                onClick={async () => {
+                  const url = 'https://dashboard.ngrok.com/get-started/your-authtoken';
+                  if (isTauri()) {
+                    const { openUrl } = await import('@tauri-apps/plugin-opener');
+                    await openUrl(url);
+                  } else {
+                    window.open(url, '_blank');
+                  }
+                }}
+              >
+                获取 token
+              </button>
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* About Section */}
       <div className="mt-8 pt-8 border-t border-slate-700/50">
         <h2 className="text-lg font-medium mb-4">关于</h2>
@@ -248,7 +513,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
           <div className="flex items-center gap-4 mb-3">
             <div>
               <h3 className="text-base font-semibold text-slate-100">Worktree Manager</h3>
-              <p className="text-xs text-slate-400 mt-0.5">版本: v{config.name ? '0.1.0' : '0.1.0'}</p>
+              <p className="text-xs text-slate-400 mt-0.5 select-text">版本: v{appVersion}</p>
             </div>
           </div>
           <p className="text-sm text-slate-400 mb-4">Git Worktree 可视化管理工具</p>
@@ -265,6 +530,31 @@ export const SettingsView: FC<SettingsViewProps> = ({
           )}
         </div>
       </div>
+
+      {/* Remove Workspace Confirmation Dialog */}
+      <Dialog open={!!removeConfirmWorkspace} onOpenChange={(open) => !open && setRemoveConfirmWorkspace(null)}>
+        <DialogContent className="max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>移除工作区</DialogTitle>
+            <DialogDescription>
+              确定要移除工作区 "{removeConfirmWorkspace?.name}" 吗？此操作仅从列表中移除，不会删除实际文件。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setRemoveConfirmWorkspace(null)}>
+              取消
+            </Button>
+            <Button variant="warning" onClick={() => {
+              if (removeConfirmWorkspace && onRemoveWorkspace) {
+                onRemoveWorkspace(removeConfirmWorkspace.path);
+                setRemoveConfirmWorkspace(null);
+              }
+            }}>
+              确认移除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

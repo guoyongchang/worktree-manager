@@ -1,5 +1,6 @@
 use git2::{Repository, StatusOptions};
 use std::path::Path;
+use std::process::Command;
 use serde::Serialize;
 
 #[derive(Debug, Serialize, Clone)]
@@ -215,4 +216,582 @@ pub fn get_branch_status(path: &Path, project_name: &str) -> BranchStatus {
     }
 
     status
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct BranchDiffStats {
+    pub ahead: usize,
+    pub behind: usize,
+    pub changed_files: usize,
+}
+
+/// Sync with base branch (pull from base branch)
+pub fn sync_with_base_branch(path: &Path, base_branch: &str) -> Result<String, String> {
+    // First, fetch from remote
+    let fetch_output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .arg("fetch")
+        .arg("origin")
+        .arg(base_branch)
+        .output()
+        .map_err(|e| format!("Failed to execute git fetch: {}", e))?;
+
+    if !fetch_output.status.success() {
+        return Err(format!(
+            "Git fetch failed: {}",
+            String::from_utf8_lossy(&fetch_output.stderr)
+        ));
+    }
+
+    // Then, merge origin/base_branch into current branch
+    let merge_output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .arg("merge")
+        .arg(format!("origin/{}", base_branch))
+        .output()
+        .map_err(|e| format!("Failed to execute git merge: {}", e))?;
+
+    if !merge_output.status.success() {
+        return Err(format!(
+            "Git merge failed: {}",
+            String::from_utf8_lossy(&merge_output.stderr)
+        ));
+    }
+
+    Ok(format!("Successfully synced with {}", base_branch))
+}
+
+/// Push current branch to remote
+pub fn push_to_remote(path: &Path) -> Result<String, String> {
+    // Get current branch
+    let branch_output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .arg("rev-parse")
+        .arg("--abbrev-ref")
+        .arg("HEAD")
+        .output()
+        .map_err(|e| format!("Failed to get current branch: {}", e))?;
+
+    if !branch_output.status.success() {
+        return Err("Failed to get current branch".to_string());
+    }
+
+    let current_branch = String::from_utf8_lossy(&branch_output.stdout).trim().to_string();
+
+    // Push to remote
+    let push_output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .arg("push")
+        .arg("-u")
+        .arg("origin")
+        .arg(&current_branch)
+        .output()
+        .map_err(|e| format!("Failed to execute git push: {}", e))?;
+
+    if !push_output.status.success() {
+        return Err(format!(
+            "Git push failed: {}",
+            String::from_utf8_lossy(&push_output.stderr)
+        ));
+    }
+
+    Ok(format!("Successfully pushed {} to origin", current_branch))
+}
+
+/// Merge current branch to test branch
+pub fn merge_to_test_branch(path: &Path, test_branch: &str) -> Result<String, String> {
+    let repo = Repository::open(path)
+        .map_err(|e| format!("Failed to open repository: {}", e))?;
+
+    // Get current branch name
+    let head = repo.head()
+        .map_err(|e| format!("Failed to get HEAD: {}", e))?;
+    let current_branch = head.shorthand()
+        .ok_or_else(|| "Failed to get current branch name".to_string())?;
+
+    // Checkout test branch
+    let checkout_output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .arg("checkout")
+        .arg(test_branch)
+        .output()
+        .map_err(|e| format!("Failed to execute git checkout: {}", e))?;
+
+    if !checkout_output.status.success() {
+        return Err(format!(
+            "Git checkout failed: {}",
+            String::from_utf8_lossy(&checkout_output.stderr)
+        ));
+    }
+
+    // Pull latest test branch
+    let pull_output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .arg("pull")
+        .arg("origin")
+        .arg(test_branch)
+        .output()
+        .map_err(|e| format!("Failed to execute git pull: {}", e))?;
+
+    if !pull_output.status.success() {
+        // Try to checkout back to original branch
+        let _ = Command::new("git")
+            .arg("-C")
+            .arg(path)
+            .arg("checkout")
+            .arg(current_branch)
+            .output();
+
+        return Err(format!(
+            "Git pull failed: {}",
+            String::from_utf8_lossy(&pull_output.stderr)
+        ));
+    }
+
+    // Merge current branch into test
+    let merge_output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .arg("merge")
+        .arg(current_branch)
+        .output()
+        .map_err(|e| format!("Failed to execute git merge: {}", e))?;
+
+    if !merge_output.status.success() {
+        // Try to checkout back to original branch
+        let _ = Command::new("git")
+            .arg("-C")
+            .arg(path)
+            .arg("checkout")
+            .arg(current_branch)
+            .output();
+
+        return Err(format!(
+            "Git merge failed: {}",
+            String::from_utf8_lossy(&merge_output.stderr)
+        ));
+    }
+
+    // Push test branch
+    let push_output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .arg("push")
+        .arg("origin")
+        .arg(test_branch)
+        .output()
+        .map_err(|e| format!("Failed to execute git push: {}", e))?;
+
+    // Checkout back to original branch
+    let _ = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .arg("checkout")
+        .arg(current_branch)
+        .output();
+
+    if !push_output.status.success() {
+        return Err(format!(
+            "Git push failed: {}",
+            String::from_utf8_lossy(&push_output.stderr)
+        ));
+    }
+
+    Ok(format!("Successfully merged {} into {}", current_branch, test_branch))
+}
+
+/// Merge current branch to base branch
+pub fn merge_to_base_branch(path: &Path, base_branch: &str) -> Result<String, String> {
+    let repo = Repository::open(path)
+        .map_err(|e| format!("Failed to open repository: {}", e))?;
+
+    // Get current branch name
+    let head = repo.head()
+        .map_err(|e| format!("Failed to get HEAD: {}", e))?;
+    let current_branch = head.shorthand()
+        .ok_or_else(|| "Failed to get current branch name".to_string())?;
+
+    // Checkout base branch
+    let checkout_output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .arg("checkout")
+        .arg(base_branch)
+        .output()
+        .map_err(|e| format!("Failed to execute git checkout: {}", e))?;
+
+    if !checkout_output.status.success() {
+        return Err(format!(
+            "Git checkout failed: {}",
+            String::from_utf8_lossy(&checkout_output.stderr)
+        ));
+    }
+
+    // Pull latest base branch
+    let pull_output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .arg("pull")
+        .arg("origin")
+        .arg(base_branch)
+        .output()
+        .map_err(|e| format!("Failed to execute git pull: {}", e))?;
+
+    if !pull_output.status.success() {
+        // Try to checkout back to original branch
+        let _ = Command::new("git")
+            .arg("-C")
+            .arg(path)
+            .arg("checkout")
+            .arg(current_branch)
+            .output();
+
+        return Err(format!(
+            "Git pull failed: {}",
+            String::from_utf8_lossy(&pull_output.stderr)
+        ));
+    }
+
+    // Merge current branch into base
+    let merge_output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .arg("merge")
+        .arg(current_branch)
+        .output()
+        .map_err(|e| format!("Failed to execute git merge: {}", e))?;
+
+    if !merge_output.status.success() {
+        // Try to checkout back to original branch
+        let _ = Command::new("git")
+            .arg("-C")
+            .arg(path)
+            .arg("checkout")
+            .arg(current_branch)
+            .output();
+
+        return Err(format!(
+            "Git merge failed: {}",
+            String::from_utf8_lossy(&merge_output.stderr)
+        ));
+    }
+
+    // Push base branch
+    let push_output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .arg("push")
+        .arg("origin")
+        .arg(base_branch)
+        .output()
+        .map_err(|e| format!("Failed to execute git push: {}", e))?;
+
+    // Checkout back to original branch
+    let _ = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .arg("checkout")
+        .arg(current_branch)
+        .output();
+
+    if !push_output.status.success() {
+        return Err(format!(
+            "Git push failed: {}",
+            String::from_utf8_lossy(&push_output.stderr)
+        ));
+    }
+
+    Ok(format!("Successfully merged {} into {}", current_branch, base_branch))
+}
+
+/// Get branch diff statistics
+pub fn get_branch_diff_stats(path: &Path, base_branch: &str) -> BranchDiffStats {
+    let repo = match Repository::open(path) {
+        Ok(r) => r,
+        Err(_) => return BranchDiffStats { ahead: 0, behind: 0, changed_files: 0 },
+    };
+
+    let mut stats = BranchDiffStats {
+        ahead: 0,
+        behind: 0,
+        changed_files: 0,
+    };
+
+    // Get ahead/behind count
+    if let Ok(base_ref) = repo.find_reference(&format!("refs/remotes/origin/{}", base_branch)) {
+        if let Ok(head) = repo.head() {
+            if let (Ok(base_oid), Ok(head_oid)) = (
+                base_ref.target().ok_or(()),
+                head.target().ok_or(()),
+            ) {
+                if let Ok((ahead, behind)) = repo.graph_ahead_behind(head_oid, base_oid) {
+                    stats.ahead = ahead;
+                    stats.behind = behind;
+                }
+            }
+        }
+    }
+
+    // Get changed files count
+    let mut opts = StatusOptions::new();
+    opts.include_untracked(true)
+        .recurse_untracked_dirs(false);
+
+    if let Ok(statuses) = repo.statuses(Some(&mut opts)) {
+        stats.changed_files = statuses.len();
+    }
+
+    stats
+}
+
+/// Detect git platform (GitHub or GitLab)
+#[derive(Debug, PartialEq)]
+pub enum GitPlatform {
+    GitHub,
+    GitLab,
+    Unknown,
+}
+
+pub fn detect_git_platform(path: &Path) -> Result<GitPlatform, String> {
+    let remote_output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .arg("remote")
+        .arg("-v")
+        .output()
+        .map_err(|e| format!("Failed to execute git remote: {}", e))?;
+
+    if !remote_output.status.success() {
+        return Err(format!(
+            "Git remote failed: {}",
+            String::from_utf8_lossy(&remote_output.stderr)
+        ));
+    }
+
+    let output_str = String::from_utf8_lossy(&remote_output.stdout);
+
+    // Check for GitHub
+    if output_str.contains("github.com") {
+        return Ok(GitPlatform::GitHub);
+    }
+
+    // Check for GitLab
+    if output_str.contains("gitlab.com") || output_str.contains("gitlab") {
+        return Ok(GitPlatform::GitLab);
+    }
+
+    Ok(GitPlatform::Unknown)
+}
+
+/// Create a pull request using gh CLI (GitHub) or git push options (GitLab)
+pub fn create_pull_request(
+    path: &Path,
+    base_branch: &str,
+    title: &str,
+    body: &str,
+) -> Result<String, String> {
+    // Detect platform
+    let platform = detect_git_platform(path)?;
+
+    match platform {
+        GitPlatform::GitHub => {
+            // Check if gh CLI is available
+            let gh_check = Command::new("gh")
+                .arg("--version")
+                .output()
+                .map_err(|_| "gh CLI is not installed. Please install it from https://cli.github.com/".to_string())?;
+
+            if !gh_check.status.success() {
+                return Err("gh CLI is not available".to_string());
+            }
+
+            // Create PR using gh CLI
+            let pr_output = Command::new("gh")
+                .arg("pr")
+                .arg("create")
+                .arg("--base")
+                .arg(base_branch)
+                .arg("--title")
+                .arg(title)
+                .arg("--body")
+                .arg(body)
+                .current_dir(path)
+                .output()
+                .map_err(|e| format!("Failed to execute gh pr create: {}", e))?;
+
+            if !pr_output.status.success() {
+                return Err(format!(
+                    "Failed to create PR: {}",
+                    String::from_utf8_lossy(&pr_output.stderr)
+                ));
+            }
+
+            let pr_url = String::from_utf8_lossy(&pr_output.stdout).trim().to_string();
+            Ok(pr_url)
+        }
+        GitPlatform::GitLab => {
+            // Get current branch
+            let branch_output = Command::new("git")
+                .arg("-C")
+                .arg(path)
+                .arg("rev-parse")
+                .arg("--abbrev-ref")
+                .arg("HEAD")
+                .output()
+                .map_err(|e| format!("Failed to get current branch: {}", e))?;
+
+            if !branch_output.status.success() {
+                return Err("Failed to get current branch".to_string());
+            }
+
+            let current_branch = String::from_utf8_lossy(&branch_output.stdout).trim().to_string();
+
+            // Push with merge request creation options
+            // GitLab supports creating MR via git push options
+            let push_output = Command::new("git")
+                .arg("-C")
+                .arg(path)
+                .arg("push")
+                .arg("-u")
+                .arg("origin")
+                .arg(&current_branch)
+                .arg("-o")
+                .arg("merge_request.create")
+                .arg("-o")
+                .arg(format!("merge_request.target={}", base_branch))
+                .arg("-o")
+                .arg(format!("merge_request.title={}", title))
+                .arg("-o")
+                .arg(format!("merge_request.description={}", body))
+                .output()
+                .map_err(|e| format!("Failed to push and create MR: {}", e))?;
+
+            if !push_output.status.success() {
+                let stderr = String::from_utf8_lossy(&push_output.stderr);
+                return Err(format!("Failed to create MR: {}", stderr));
+            }
+
+            // Extract MR URL from output
+            let output_str = String::from_utf8_lossy(&push_output.stderr);
+
+            // GitLab outputs the MR URL in stderr, look for it
+            for line in output_str.lines() {
+                if line.contains("merge_request") || line.contains("/merge_requests/") {
+                    // Try to extract URL
+                    if let Some(url_start) = line.find("http") {
+                        let url_part = &line[url_start..];
+                        if let Some(url_end) = url_part.find(char::is_whitespace) {
+                            return Ok(url_part[..url_end].to_string());
+                        } else {
+                            return Ok(url_part.to_string());
+                        }
+                    }
+                }
+            }
+
+            // If we can't find the URL, return a success message
+            Ok(format!("MR created successfully for branch {} -> {}", current_branch, base_branch))
+        }
+        GitPlatform::Unknown => {
+            Err("Unknown git platform. Only GitHub and GitLab are supported.".to_string())
+        }
+    }
+}
+
+/// Check if a remote branch exists
+pub fn check_remote_branch_exists(path: &Path, branch_name: &str) -> Result<bool, String> {
+    // First, fetch from remote to ensure we have the latest branch info
+    let fetch_output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .arg("fetch")
+        .arg("origin")
+        .output()
+        .map_err(|e| format!("Failed to execute git fetch: {}", e))?;
+
+    if !fetch_output.status.success() {
+        return Err(format!(
+            "Git fetch failed: {}",
+            String::from_utf8_lossy(&fetch_output.stderr)
+        ));
+    }
+
+    // Check if the remote branch exists
+    let check_output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .arg("ls-remote")
+        .arg("--heads")
+        .arg("origin")
+        .arg(branch_name)
+        .output()
+        .map_err(|e| format!("Failed to execute git ls-remote: {}", e))?;
+
+    if !check_output.status.success() {
+        return Err(format!(
+            "Git ls-remote failed: {}",
+            String::from_utf8_lossy(&check_output.stderr)
+        ));
+    }
+
+    let output_str = String::from_utf8_lossy(&check_output.stdout);
+    Ok(!output_str.trim().is_empty())
+}
+
+/// Get list of remote branches
+pub fn get_remote_branches(path: &Path) -> Result<Vec<String>, String> {
+    // Fetch from remote to ensure we have the latest branch info
+    let fetch_output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .arg("fetch")
+        .arg("origin")
+        .output()
+        .map_err(|e| format!("Failed to execute git fetch: {}", e))?;
+
+    if !fetch_output.status.success() {
+        return Err(format!(
+            "Git fetch failed: {}",
+            String::from_utf8_lossy(&fetch_output.stderr)
+        ));
+    }
+
+    // Get list of remote branches
+    let ls_remote_output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .arg("ls-remote")
+        .arg("--heads")
+        .arg("origin")
+        .output()
+        .map_err(|e| format!("Failed to execute git ls-remote: {}", e))?;
+
+    if !ls_remote_output.status.success() {
+        return Err(format!(
+            "Git ls-remote failed: {}",
+            String::from_utf8_lossy(&ls_remote_output.stderr)
+        ));
+    }
+
+    let output_str = String::from_utf8_lossy(&ls_remote_output.stdout);
+    let branches: Vec<String> = output_str
+        .lines()
+        .filter_map(|line| {
+            // Format: <hash>\trefs/heads/<branch-name>
+            let parts: Vec<&str> = line.split('\t').collect();
+            if parts.len() == 2 {
+                parts[1].strip_prefix("refs/heads/").map(|s| s.to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    Ok(branches)
 }

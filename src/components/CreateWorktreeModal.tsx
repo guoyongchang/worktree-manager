@@ -18,7 +18,9 @@ import {
 } from '@/components/ui/select';
 import type { WorkspaceConfig } from '../types';
 
-const WORKTREE_NAME_PATTERN = /^[a-zA-Z0-9._-]+$/;
+// Git branch name rules: no spaces, ~, ^, :, \, .., *, ?, [, leading/trailing dots, @{
+const WORKTREE_NAME_INVALID_CHARS = /[\s~^:*?\[\\]/;
+const WORKTREE_NAME_INVALID_PATTERNS = /(?:\.\.)|(?:^\.)|(?:\.$)|(?:@\{)|(?:\.lock$)/;
 
 interface CreateWorktreeModalProps {
   open: boolean;
@@ -50,8 +52,11 @@ export const CreateWorktreeModal: FC<CreateWorktreeModalProps> = ({
     if (!trimmed) {
       return { valid: false, error: '' };
     }
-    if (!WORKTREE_NAME_PATTERN.test(trimmed)) {
-      return { valid: false, error: 'Only letters, numbers, dots, underscores, and hyphens are allowed' };
+    if (WORKTREE_NAME_INVALID_CHARS.test(trimmed)) {
+      return { valid: false, error: '不能包含空格、~ ^ : * ? [ \\ 等特殊字符' };
+    }
+    if (WORKTREE_NAME_INVALID_PATTERNS.test(trimmed)) {
+      return { valid: false, error: '不能包含连续的点(..)、以点开头/结尾、或包含 @{ 等模式' };
     }
     return { valid: true, error: '' };
   }, [worktreeName]);

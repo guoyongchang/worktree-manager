@@ -1,0 +1,50 @@
+#!/bin/bash
+set -e
+
+echo "🔍 Pre-commit checks..."
+
+# 1. Check package-lock.json only contains official npm registry
+echo "  Checking npm registry..."
+if grep -qE '"resolved":\s*"https?://' package-lock.json 2>/dev/null; then
+  if grep -E '"resolved":\s*"https?://' package-lock.json | grep -vq 'registry.npmjs.org'; then
+    echo "❌ package-lock.json contains non-official npm registry URLs."
+    echo "   Only https://registry.npmjs.org/ is allowed."
+    echo "   Run: rm package-lock.json && npm install"
+    exit 1
+  fi
+fi
+
+# 2. Check .npmrc if exists
+if [ -f .npmrc ]; then
+  if grep -qE '^registry=' .npmrc && ! grep -q 'registry=https://registry.npmjs.org' .npmrc; then
+    echo "❌ .npmrc contains non-official npm registry."
+    echo "   Only https://registry.npmjs.org/ is allowed."
+    exit 1
+  fi
+fi
+
+# 3. TypeScript type check (only if node_modules exists)
+if [ -d node_modules ]; then
+  echo "  TypeScript type check..."
+  npx tsc --noEmit
+  if [ $? -ne 0 ]; then
+    echo "❌ TypeScript type check failed."
+    exit 1
+  fi
+else
+  echo "  ⚠️  Skipping tsc (node_modules not installed)"
+fi
+
+# 4. Vite build check (only if node_modules exists)
+if [ -d node_modules ]; then
+  echo "  Frontend build check..."
+  npx vite build
+  if [ $? -ne 0 ]; then
+    echo "❌ Frontend build failed."
+    exit 1
+  fi
+else
+  echo "  ⚠️  Skipping build (node_modules not installed)"
+fi
+
+echo "✅ Pre-commit checks passed."

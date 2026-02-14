@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Worktree Manager",
         "width": 1100,
         "height": 700,
@@ -34,6 +35,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": {
+      "../dist": "dist"
+    },
     "publisher": "Worktree Manager Team",
     "homepage": "https://github.com/guoyongchang/worktree-manager",
     "license": "MIT"

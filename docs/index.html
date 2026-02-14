@@ -111,6 +111,16 @@
       color: #94a3b8;
       line-height: 1.625;
     }
+    .step ul {
+      color: #94a3b8;
+      line-height: 1.625;
+      margin-top: 0.5rem;
+      list-style: disc;
+      padding-left: 1.25rem;
+    }
+    .step ul li {
+      margin-bottom: 0.25rem;
+    }
 
     /* Directory Tree */
     .tree-section {
@@ -236,6 +246,73 @@
       font-size: 1.125rem;
       margin-bottom: 3rem;
     }
+
+    /* Download section */
+    .download-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 1rem 2rem;
+      background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+      color: white;
+      border-radius: 0.75rem;
+      font-size: 1.125rem;
+      font-weight: 600;
+      transition: all 0.3s;
+      box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+    }
+    .download-btn:hover {
+      box-shadow: 0 6px 20px rgba(59, 130, 246, 0.5);
+      transform: translateY(-1px);
+    }
+    .platform-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      background-color: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 0.5rem;
+      color: #94a3b8;
+      font-size: 0.875rem;
+      transition: border-color 0.2s;
+    }
+    .platform-badge:hover {
+      border-color: rgba(59, 130, 246, 0.5);
+    }
+
+    /* Collapsible build from source */
+    details.build-source summary {
+      cursor: pointer;
+      color: #94a3b8;
+      font-size: 0.875rem;
+    }
+    details.build-source summary:hover {
+      color: #cbd5e1;
+    }
+    details.build-source[open] summary {
+      margin-bottom: 1rem;
+    }
+
+    /* Install steps */
+    .install-step {
+      display: flex;
+      gap: 0.75rem;
+      align-items: flex-start;
+    }
+    .install-step-num {
+      flex-shrink: 0;
+      width: 1.75rem;
+      height: 1.75rem;
+      border-radius: 9999px;
+      background-color: #334155;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #94a3b8;
+      font-weight: 600;
+      font-size: 0.75rem;
+    }
   </style>
 </head>
 <body class="bg-slate-900 text-slate-100">
@@ -276,9 +353,13 @@
   <header class="pt-32 pb-20 px-4 text-center bg-gradient-to-b from-slate-800 to-slate-900">
     <img src="icons/app-icon.svg" alt="Worktree Manager" class="w-24 h-24 mx-auto mb-6">
     <h1 class="text-4xl md:text-5xl font-bold mb-4">Git Worktree Manager</h1>
-    <p class="text-xl text-slate-400 max-w-2xl mx-auto mb-8">一个优雅的 Git Worktree 可视化管理工具，让多分支并行开发变得简单高效</p>
+    <p class="text-xl text-slate-400 max-w-2xl mx-auto mb-8">一个优雅的 Git Worktree 可视化管理工具，让多分支并行开发变得简单高效。支持远程分享与实时协作。</p>
     <div class="flex gap-3 justify-center flex-wrap">
-      <a href="https://github.com/guoyongchang/worktree-manager" class="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition">
+      <a href="https://github.com/guoyongchang/worktree-manager/releases/latest" class="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+        下载最新版
+      </a>
+      <a href="https://github.com/guoyongchang/worktree-manager" class="inline-flex items-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white rounded-lg font-medium transition">
         <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
         GitHub
       </a>
@@ -286,24 +367,153 @@
     </div>
   </header>
 
+  <!-- Download -->
+  <section class="py-16 bg-gradient-to-b from-slate-900 via-slate-800/50 to-slate-900">
+    <div class="max-w-5xl mx-auto px-4 text-center">
+      <h2 class="text-3xl md:text-4xl font-bold mb-3">下载安装</h2>
+      <p class="text-slate-400 text-lg mb-8">开箱即用，支持自动更新</p>
+
+      <!-- Download button -->
+      <div class="mb-8">
+        <a href="https://github.com/guoyongchang/worktree-manager/releases/latest" class="download-btn">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+          下载最新版本
+        </a>
+      </div>
+
+      <!-- Platform badges -->
+      <div class="flex gap-3 justify-center flex-wrap mb-8">
+        <div class="platform-badge">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+          macOS (Intel + ARM)
+        </div>
+        <div class="platform-badge">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M3,12V6.75L9,5.43V11.91L3,12M20,3V11.75L10,11.9V5.21L20,3M3,13L9,13.09V19.9L3,18.75V13M10,13.25L20,13.5V22L10,20.09V13.25Z"/></svg>
+          Windows
+        </div>
+        <div class="platform-badge">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M20.581 19.049c-.55-.446-.336-1.431-.907-1.917.553-3.365-.997-6.331-2.845-8.232-1.551-1.595-1.051-3.147-1.051-4.49 0-2.146-.881-4.41-3.55-4.41C9.56 0 8.903 2.261 8.903 4.41c0 1.343.5 2.895-1.051 4.49-1.848 1.901-3.398 4.867-2.845 8.232-.571.486-.357 1.471-.907 1.917-1.407 1.142.647 1.792 1.144 1.234.497-.558 1.837-.14 2.442.39.604.53 2.048.392 2.048-.233 0-.625-.817-1.648-1.155-2.092-.338-.444-.56-1.727.203-2.236 1.028-.684 2.403.387 3.446.387 1.043 0 2.418-1.071 3.446-.387.764.509.541 1.792.203 2.236-.338.444-1.155 1.467-1.155 2.092 0 .625 1.444.763 2.048.233.605-.53 1.945-.948 2.442-.39.497.558 2.551-.092 1.144-1.234z"/></svg>
+          Linux
+        </div>
+      </div>
+
+      <!-- Auto-update note -->
+      <div class="inline-flex items-center gap-2 px-4 py-2 bg-green-900/20 border border-green-700/50 rounded-lg text-green-300 text-sm mb-10">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        内置自动更新 -- 安装后新版本会自动推送，无需手动下载
+      </div>
+
+      <!-- macOS installation instructions -->
+      <div class="max-w-2xl mx-auto text-left">
+        <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+          <h3 class="text-lg font-semibold mb-4 flex items-center gap-2">
+            <svg class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+            macOS 安装说明
+          </h3>
+          <div class="space-y-4">
+            <div class="install-step">
+              <div class="install-step-num">1</div>
+              <p class="text-slate-300 text-sm">下载 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono text-green-400">.dmg</code> 文件，打开后将应用拖入 Applications 文件夹完成安装。</p>
+            </div>
+            <div class="install-step">
+              <div class="install-step-num">2</div>
+              <p class="text-slate-300 text-sm">首次打开如提示"无法验证开发者"，请<strong class="text-slate-100">右键点击 app</strong>，然后选择<strong class="text-slate-100">"打开"</strong>。</p>
+            </div>
+            <div class="install-step">
+              <div class="install-step-num">3</div>
+              <p class="text-slate-300 text-sm">如仍无法打开，前往<strong class="text-slate-100">系统设置 &rarr; 隐私与安全性</strong>，在底部找到提示并点击<strong class="text-slate-100">"仍要打开"</strong>。</p>
+            </div>
+            <div class="install-step">
+              <div class="install-step-num">4</div>
+              <div class="text-slate-300 text-sm">
+                <p>以上方法均无效时，打开终端执行：</p>
+                <code class="block mt-2 bg-slate-950 px-3 py-2 rounded text-xs font-mono text-blue-400">xattr -cr "/Applications/Worktree Manager.app"</code>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- Pain Points -->
   <section class="py-16">
     <div class="max-w-5xl mx-auto px-4">
-      <h2 class="text-3xl font-bold mb-3">你是否遇到过这些烦恼？</h2>
-      <p class="text-slate-400 mb-10 text-lg">多分支开发中的常见痛点</p>
-      <div class="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
-        <div class="p-6 border-b border-slate-700">
-          <div class="font-semibold mb-2 flex items-center gap-2">🔥 紧急修 Bug</div>
-          <p class="text-slate-400 text-sm">正在开发新功能，突然要切到 hotfix 分支修线上 bug。<code class="bg-slate-950 px-2 py-0.5 rounded text-sm font-mono">git stash</code> 暂存代码，修完再切回来，结果 <code class="bg-slate-950 px-2 py-0.5 rounded text-sm font-mono">node_modules</code> 要重新装一遍...</p>
+      <h2 class="text-3xl font-bold mb-3">这些场景，是不是似曾相识？</h2>
+      <p class="text-slate-400 mb-10 text-lg">每个开发者都经历过的崩溃瞬间</p>
+      <div class="space-y-4">
+
+        <!-- Scenario 1 -->
+        <div class="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+          <div class="p-6">
+            <div class="font-semibold mb-3 text-lg flex items-center gap-2 text-red-400">&#x1F525; "线上炸了，赶紧修！"</div>
+            <div class="text-slate-300 text-sm leading-relaxed space-y-2">
+              <p>周三下午三点，你正在 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">feature/new-dashboard</code> 分支上写得正嗨，CSS 调了半天终于对齐了，十几个文件改了一半还没提交。</p>
+              <p>群里突然 @所有人：<strong>"生产环境登录接口 500，紧急修复！"</strong></p>
+              <p>你只能赶紧 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">git stash</code>，切到 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">hotfix</code> 分支。修完 bug，切回来一看 -- stash 里的改动和当前代码冲突了，CSS 也全乱了。更惨的是，<code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">node_modules</code> 因为两个分支的 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">package.json</code> 不同，又要重新装一遍依赖...</p>
+            </div>
+            <div class="mt-4 p-3 bg-green-900/20 border border-green-700/50 rounded-lg">
+              <p class="text-green-300 text-sm"><strong>用了 Worktree Manager：</strong>直接点"+"新建一个 hotfix worktree，两秒钟搞定。原来的代码一行不动，两个分支各跑各的，修完 bug 归档 hotfix 就好。</p>
+            </div>
+          </div>
         </div>
-        <div class="p-6 border-b border-slate-700">
-          <div class="font-semibold mb-2 flex items-center gap-2">⏳ 多任务并行</div>
-          <p class="text-slate-400 text-sm">同时负责两个需求，来回切换分支，每次都要等 <code class="bg-slate-950 px-2 py-0.5 rounded text-sm font-mono">npm install</code>、等构建缓存重建。一天下来光等编译就花了一小时。</p>
+
+        <!-- Scenario 2 -->
+        <div class="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+          <div class="p-6">
+            <div class="font-semibold mb-3 text-lg flex items-center gap-2 text-amber-400">&#x23F3; "又要等 npm install..."</div>
+            <div class="text-slate-300 text-sm leading-relaxed space-y-2">
+              <p>你同时在做登录模块重构和首页性能优化。两个需求在不同分支上，每天在它们之间切换三四次。</p>
+              <p>每次 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">git checkout</code> 之后：<code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">npm install</code> 跑两分钟，Webpack 构建缓存全部失效再等三分钟，TypeScript 类型检查重新跑一遍... 一天下来，光等编译就花了一个多小时。泡咖啡的次数都不够填这些空档。</p>
+            </div>
+            <div class="mt-4 p-3 bg-green-900/20 border border-green-700/50 rounded-lg">
+              <p class="text-green-300 text-sm"><strong>用了 Worktree Manager：</strong>两个 worktree 同时存在，<code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">node_modules</code> 自动从主仓库链接共享，切换 worktree 只是在列表里点一下，零等待。两个 VS Code 窗口并排开着，左边改登录，右边优化首页。</p>
+            </div>
+          </div>
         </div>
-        <div class="p-6">
-          <div class="font-semibold mb-2 flex items-center gap-2">💾 磁盘空间浪费</div>
-          <p class="text-slate-400 text-sm">为了同时运行两个分支，只能 clone 两份代码。磁盘空间翻倍不说，还得维护两套环境。</p>
+
+        <!-- Scenario 3 -->
+        <div class="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+          <div class="p-6">
+            <div class="font-semibold mb-3 text-lg flex items-center gap-2 text-blue-400">&#x1F440; "帮我看一下这个分支的实现？"</div>
+            <div class="text-slate-300 text-sm leading-relaxed space-y-2">
+              <p>Code Review 的时候，同事说："我在 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">feature/payment</code> 分支上有个奇怪的 bug，你能帮我看看吗？"</p>
+              <p>你当前分支还有一堆未提交的改动。为了看他的代码，要么 stash + checkout（回来还得解冲突），要么新 clone 一份仓库。等终于切好了，同事已经去开会了...</p>
+            </div>
+            <div class="mt-4 p-3 bg-green-900/20 border border-green-700/50 rounded-lg">
+              <p class="text-green-300 text-sm"><strong>用了 Worktree Manager：</strong>新建一个 worktree 检出同事的分支，秒级完成。或者更酷的方式 -- 让同事开启"远程分享"，你直接在浏览器里打开他的工作区，连终端都能共用，一起实时排查问题。</p>
+            </div>
+          </div>
         </div>
+
+        <!-- Scenario 4 -->
+        <div class="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+          <div class="p-6">
+            <div class="font-semibold mb-3 text-lg flex items-center gap-2 text-purple-400">&#x1F4BE; "磁盘快满了..."</div>
+            <div class="text-slate-300 text-sm leading-relaxed space-y-2">
+              <p>团队有个大型 monorepo，光 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">node_modules</code> 就 2GB。为了同时跑两个分支的开发服务器，你 clone 了两份。4GB 依赖 + 两份代码 + 两份构建产物，256GB 的 SSD 已经亮红灯了。</p>
+              <p>更痛苦的是，每次有依赖更新，两边都要跑一遍 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">npm install</code>。</p>
+            </div>
+            <div class="mt-4 p-3 bg-green-900/20 border border-green-700/50 rounded-lg">
+              <p class="text-green-300 text-sm"><strong>用了 Worktree Manager：</strong>所有 worktree 共享同一个 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">.git</code> 仓库数据，<code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">node_modules</code> 通过软链接从主仓库共享。10 个分支并行开发，磁盘只占一份依赖的空间。</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Scenario 5 (NEW - remote sharing) -->
+        <div class="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+          <div class="p-6">
+            <div class="font-semibold mb-3 text-lg flex items-center gap-2 text-cyan-400">&#x1F310; "你能共享一下你的屏幕吗？"</div>
+            <div class="text-slate-300 text-sm leading-relaxed space-y-2">
+              <p>远程办公中，新同事遇到了环境配置问题。你想帮忙排查，但腾讯会议的屏幕共享延迟高、画面糊，看不清终端输出。他说了半天 "报错了"，你问 "什么报错"，截图发过来一看只截了半屏...</p>
+              <p>又或者，你想给异地的产品经理演示一下新功能的开发进度。为了这五分钟的演示，先开会议、共享屏幕、调分辨率，忙活了十分钟。</p>
+            </div>
+            <div class="mt-4 p-3 bg-green-900/20 border border-green-700/50 rounded-lg">
+              <p class="text-green-300 text-sm"><strong>用了 Worktree Manager：</strong>点一下"分享"，把链接和密码发给对方。他在浏览器里打开就能看到你的完整工作区 -- 所有分支状态、代码目录、终端输出，全都实时同步。如果需要，还能直接在共享终端里一起敲命令，比屏幕共享好用一百倍。通过 ngrok 外网穿透，不在同一个网络也没问题。</p>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
   </section>
@@ -313,7 +523,7 @@
     <div class="max-w-5xl mx-auto px-4 text-center">
       <h2 class="text-3xl font-bold mb-3">Git Worktree Manager 让这些问题迎刃而解</h2>
       <p class="text-slate-400 text-lg max-w-2xl mx-auto mt-3">
-        利用 Git 原生的 <a href="https://git-scm.com/docs/git-worktree" class="text-blue-400 hover:underline">worktree</a> 功能，在同一个仓库中同时检出多个分支。每个分支有独立的工作目录，共享 <code class="bg-slate-950 px-2 py-0.5 rounded text-sm font-mono">.git</code> 数据，还能自动链接 <code class="bg-slate-950 px-2 py-0.5 rounded text-sm font-mono">node_modules</code> 等大文件夹，节省磁盘空间。
+        利用 Git 原生的 <a href="https://git-scm.com/docs/git-worktree" class="text-blue-400 hover:underline">worktree</a> 功能，在同一个仓库中同时检出多个分支。每个分支有独立的工作目录，共享 <code class="bg-slate-950 px-2 py-0.5 rounded text-sm font-mono">.git</code> 数据，还能自动链接 <code class="bg-slate-950 px-2 py-0.5 rounded text-sm font-mono">node_modules</code> 等大文件夹，节省磁盘空间。更有一键远程分享和浏览器内置终端，让团队协作不受空间限制。
       </p>
     </div>
   </section>
@@ -325,45 +535,103 @@
       <p class="text-slate-400 text-lg mb-12 text-center">为多分支开发量身打造</p>
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <div class="feature-card">
-          <div class="feature-icon">🔀</div>
+          <div class="feature-icon">&#x1F500;</div>
           <h3>多分支并行工作</h3>
           <p>一个项目同时打开多个分支，互不干扰。不用 stash，不用 clone 多份。</p>
         </div>
         <div class="feature-card">
-          <div class="feature-icon">🔗</div>
+          <div class="feature-icon">&#x1F517;</div>
           <h3>智能文件夹链接</h3>
           <p>自动链接 node_modules、.next、vendor 等构建产物，避免重复安装依赖。支持自定义路径。</p>
         </div>
         <div class="feature-card">
-          <div class="feature-icon">📂</div>
+          <div class="feature-icon">&#x1F4C2;</div>
           <h3>全局文件共享</h3>
           <p>.claude、CLAUDE.md、requirement-docs 等文件可配置为全局链接，在所有 worktree 中共享。</p>
         </div>
         <div class="feature-card">
-          <div class="feature-icon">📊</div>
+          <div class="feature-icon">&#x1F4CA;</div>
           <h3>分支状态监控</h3>
           <p>实时显示提交数、未提交更改、是否合并到测试分支等信息，一目了然。</p>
         </div>
         <div class="feature-card">
-          <div class="feature-icon">🚀</div>
+          <div class="feature-icon">&#x1F680;</div>
           <h3>快速打开 IDE</h3>
-          <p>一键用 VS Code、Cursor 或 IntelliJ IDEA 打开任意 worktree。</p>
+          <p>一键用 VS Code、Cursor、IntelliJ IDEA、Zed、Sublime Text 等打开任意 worktree。</p>
         </div>
         <div class="feature-card">
-          <div class="feature-icon">💻</div>
+          <div class="feature-icon">&#x1F4BB;</div>
           <h3>内置终端</h3>
-          <p>每个 worktree 有独立的终端会话，无需在多个窗口之间切换。</p>
+          <p>每个 worktree 有独立的终端会话，支持多标签页和全屏模式，无需在多个窗口之间切换。</p>
         </div>
         <div class="feature-card">
-          <div class="feature-icon">📦</div>
+          <div class="feature-icon">&#x1F4E6;</div>
           <h3>安全归档</h3>
           <p>归档前自动检查未提交和未推送的代码，防止丢失。支持一键恢复。</p>
         </div>
         <div class="feature-card">
-          <div class="feature-icon">🔌</div>
+          <div class="feature-icon">&#x1F50C;</div>
           <h3>多种克隆方式</h3>
           <p>支持 GitHub 简写、SSH 和 HTTPS 三种方式添加项目。</p>
         </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#x1FA9F;</div>
+          <h3>多窗口支持</h3>
+          <p>每个 Workspace 可以在独立窗口中打开，同时操作多个工作区，互不干扰。</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#x1F50D;</div>
+          <h3>智能文件夹扫描</h3>
+          <p>自动扫描项目中可以被链接的大文件夹（如 node_modules、.next、dist 等），一键添加到链接配置。</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#x2328;&#xFE0F;</div>
+          <h3>快捷键支持</h3>
+          <p>Escape 退出全屏/关闭菜单，终端支持全屏模式，操作更高效。</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#x1F504;</div>
+          <h3>自动更新</h3>
+          <p>内置自动更新功能，新版本自动推送通知，一键升级到最新版本。</p>
+        </div>
+        <div class="feature-card" style="border-color: rgba(59, 130, 246, 0.3); background: linear-gradient(135deg, #1e293b 0%, #172554 100%);">
+          <div class="feature-icon">&#x1F310;</div>
+          <h3>远程分享与协作</h3>
+          <p>一键分享工作区，同事通过浏览器即可访问。支持局域网直连和 ngrok 外网穿透，内置密码保护和浏览器终端。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Remote Sharing Highlight -->
+  <section class="py-20 bg-gradient-to-b from-slate-900 via-blue-950/30 to-slate-900">
+    <div class="max-w-5xl mx-auto px-4">
+      <div class="text-center mb-12">
+        <h2 class="text-3xl md:text-4xl font-bold mb-3">远程分享 &amp; 实时协作</h2>
+        <p class="text-slate-400 text-lg">无需安装，浏览器打开即用</p>
+      </div>
+      <div class="grid md:grid-cols-3 gap-6">
+        <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-6 text-center">
+          <div class="text-4xl mb-4">&#x1F4E1;</div>
+          <h3 class="text-lg font-semibold mb-2 text-slate-100">一键分享</h3>
+          <p class="text-slate-400 text-sm">在桌面端点击"分享"，生成一个带密码保护的链接。同事打开浏览器即可看到你的工作区，无需安装任何软件。</p>
+        </div>
+        <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-6 text-center">
+          <div class="text-4xl mb-4">&#x1F30D;</div>
+          <h3 class="text-lg font-semibold mb-2 text-slate-100">ngrok 外网穿透</h3>
+          <p class="text-slate-400 text-sm">不在同一网络？配置 ngrok token 后一键开启外网隧道，生成公网地址，随时随地远程访问。</p>
+        </div>
+        <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-6 text-center">
+          <div class="text-4xl mb-4">&#x1F469;&#x200D;&#x1F4BB;</div>
+          <h3 class="text-lg font-semibold mb-2 text-slate-100">浏览器内置终端</h3>
+          <p class="text-slate-400 text-sm">通过 WebSocket 实时传输的 PTY 终端，直接在浏览器中执行命令。结对编程、代码演示、远程教学，无需额外工具。</p>
+        </div>
+      </div>
+      <div class="mt-8 text-center">
+        <a href="guide.html#remote-sharing" class="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition">
+          查看远程分享指南
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>
+        </a>
       </div>
     </div>
   </section>
@@ -377,22 +645,39 @@
         <div class="step">
           <div class="step-number">1</div>
           <div>
-            <h3>创建工作区</h3>
-            <p>启动应用后，导入你的项目目录，或者新建一个 Workspace。应用会自动识别目录中的 Git 项目。</p>
+            <h3>创建工作区（Workspace）</h3>
+            <p>启动应用后，点击左上角的"新建 Workspace"按钮，选择一个目录作为工作区根目录。应用会自动初始化目录结构并识别其中的 Git 项目。</p>
+            <ul>
+              <li><strong>新建工作区</strong>：选择一个空目录，应用会自动创建 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">projects/</code> 和 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">worktrees/</code> 目录</li>
+              <li><strong>导入已有项目</strong>：选择包含 Git 项目的目录，应用会自动检测并导入</li>
+              <li>也可以通过 GitHub 简写（如 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">owner/repo</code>）、SSH 或 HTTPS 地址添加新项目</li>
+            </ul>
           </div>
         </div>
         <div class="step">
           <div class="step-number">2</div>
           <div>
-            <h3>新建 Worktree</h3>
-            <p>点击侧边栏的 "+" 按钮，输入分支名（如 feature/login），选择需要包含的项目，一键创建。node_modules 等文件夹会自动链接。</p>
+            <h3>新建 Worktree（工作分支）</h3>
+            <p>点击侧边栏的"+"按钮，在弹出的对话框中完成以下设置：</p>
+            <ul>
+              <li>输入分支名（如 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">feature/login</code>），支持 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">feature/</code>、<code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">hotfix/</code> 等命名规范</li>
+              <li>选择需要包含的项目（可以多选）</li>
+              <li>选择基于哪个分支创建（默认 main）</li>
+              <li><code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">node_modules</code> 等配置好的文件夹会自动从主仓库链接，无需重新安装依赖</li>
+            </ul>
           </div>
         </div>
         <div class="step">
           <div class="step-number">3</div>
           <div>
             <h3>开始开发</h3>
-            <p>在列表中切换 worktree，用你喜欢的 IDE 打开。各分支的代码、依赖、终端完全隔离，互不干扰。</p>
+            <p>在列表中点击切换 worktree，用你喜欢的 IDE 一键打开。各分支的代码、依赖、终端完全隔离，互不干扰。</p>
+            <ul>
+              <li>点击 IDE 按钮，快速用 VS Code、Cursor、IDEA 等打开项目</li>
+              <li>使用内置终端运行命令，无需切换窗口</li>
+              <li>实时查看分支状态：提交数、未推送变更、是否已合并到测试分支</li>
+              <li>完成开发后归档 worktree，保持工作区整洁</li>
+            </ul>
           </div>
         </div>
       </div>
@@ -403,26 +688,32 @@
         <div class="tree">
 <pre>
 <span class="dir">workspace/</span>
-├── .worktree-manager.json        <span class="comment"># 工作区配置</span>
-├── <span class="dir">projects/</span>                     <span class="comment"># 主仓库（main 分支）</span>
-│   ├── <span class="dir">frontend/</span>
-│   └── <span class="dir">backend/</span>
-├── <span class="dir">worktrees/</span>                    <span class="comment"># Worktree 目录（自动创建）</span>
-│   ├── <span class="dir">feature-login/</span>
-│   │   ├── <span class="dir">projects/</span>
-│   │   │   ├── <span class="dir">frontend/</span>         <span class="comment"># 独立分支的工作目录</span>
-│   │   │   └── <span class="dir">backend/</span>
-│   │   ├── <span class="link">.claude → ../../.claude</span>   <span class="comment"># 自动链接</span>
-│   │   └── <span class="link">CLAUDE.md → ../../CLAUDE.md</span>
-│   └── <span class="dir">hotfix-bug/</span>
-│       └── ...
-├── <span class="dir">.claude/</span>
-└── CLAUDE.md</pre>
+&#x251C;&#x2500;&#x2500; .worktree-manager.json        <span class="comment"># 工作区配置</span>
+&#x251C;&#x2500;&#x2500; <span class="dir">projects/</span>                     <span class="comment"># 主仓库（main 分支）</span>
+&#x2502;   &#x251C;&#x2500;&#x2500; <span class="dir">frontend/</span>
+&#x2502;   &#x2514;&#x2500;&#x2500; <span class="dir">backend/</span>
+&#x251C;&#x2500;&#x2500; <span class="dir">worktrees/</span>                    <span class="comment"># Worktree 目录（自动创建）</span>
+&#x2502;   &#x251C;&#x2500;&#x2500; <span class="dir">feature-login/</span>
+&#x2502;   &#x2502;   &#x251C;&#x2500;&#x2500; <span class="dir">projects/</span>
+&#x2502;   &#x2502;   &#x2502;   &#x251C;&#x2500;&#x2500; <span class="dir">frontend/</span>         <span class="comment"># 独立分支的工作目录</span>
+&#x2502;   &#x2502;   &#x2502;   &#x2514;&#x2500;&#x2500; <span class="dir">backend/</span>
+&#x2502;   &#x2502;   &#x251C;&#x2500;&#x2500; <span class="link">.claude &rarr; ../../.claude</span>   <span class="comment"># 自动链接</span>
+&#x2502;   &#x2502;   &#x2514;&#x2500;&#x2500; <span class="link">CLAUDE.md &rarr; ../../CLAUDE.md</span>
+&#x2502;   &#x2514;&#x2500;&#x2500; <span class="dir">hotfix-bug/</span>
+&#x2502;       &#x2514;&#x2500;&#x2500; ...
+&#x251C;&#x2500;&#x2500; <span class="dir">.claude/</span>
+&#x2514;&#x2500;&#x2500; CLAUDE.md</pre>
         </div>
       </div>
 
-      <!-- Install -->
-      <div class="code-block">
+      <!-- Build from source (collapsible) -->
+      <details class="build-source mt-8 bg-slate-800/50 border border-slate-700 rounded-xl p-6">
+        <summary class="font-semibold text-slate-300 text-base cursor-pointer hover:text-blue-400 transition">
+          &#x1F6E0;&#xFE0F; 从源码构建（面向开发者）
+        </summary>
+        <div class="code-block mt-4" style="margin-top: 1rem;">
+<span class="code-comment"># 环境要求：Node.js 20+、Rust 1.70+、Git 2.0+</span>
+
 <span class="code-comment"># 克隆项目</span>
 <span class="code-cmd">git clone https://github.com/guoyongchang/worktree-manager.git</span>
 <span class="code-cmd">cd worktree-manager</span>
@@ -432,7 +723,11 @@
 
 <span class="code-comment"># 开发模式运行</span>
 <span class="code-cmd">npm run tauri dev</span>
-      </div>
+
+<span class="code-comment"># 构建生产版本</span>
+<span class="code-cmd">npm run tauri build</span>
+        </div>
+      </details>
     </div>
   </section>
 
@@ -475,15 +770,15 @@
     <div class="max-w-5xl mx-auto">
       <p class="text-slate-400">
         <a href="https://github.com/guoyongchang/worktree-manager" class="text-blue-400 hover:text-blue-300">GitHub</a>
-        <span class="mx-2">·</span>
+        <span class="mx-2">&middot;</span>
         <a href="https://github.com/guoyongchang/worktree-manager/issues" class="text-blue-400 hover:text-blue-300">反馈问题</a>
-        <span class="mx-2">·</span>
+        <span class="mx-2">&middot;</span>
         <a href="guide.html" class="text-blue-400 hover:text-blue-300">使用指南</a>
-        <span class="mx-2">·</span>
+        <span class="mx-2">&middot;</span>
         <span>MIT License</span>
       </p>
-      <p class="mt-4 text-slate-500">Made with ❤️ using Tauri + React + Rust</p>
-      <p class="mt-2 text-xs text-slate-600">© 2024 Worktree Manager Team</p>
+      <p class="mt-4 text-slate-500">Made with &#x2764;&#xFE0F; using Tauri + React + Rust</p>
+      <p class="mt-2 text-xs text-slate-600">&copy; 2025 Worktree Manager Team</p>
     </div>
   </footer>
 

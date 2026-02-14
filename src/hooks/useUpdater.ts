@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { check, type Update, type DownloadEvent } from '@tauri-apps/plugin-updater';
-import { relaunch } from '@tauri-apps/plugin-process';
+import { isTauri } from '../lib/backend';
 
 export type UpdaterState =
   | 'idle'
@@ -49,11 +48,13 @@ export function useUpdater(): UseUpdaterReturn {
   const [errorMessage, setErrorMessage] = useState('');
   const [showUpToDateToast, setShowUpToDateToast] = useState(false);
 
-  const updateRef = useRef<Update | null>(null);
+  // Store the native Update object (Tauri only)
+  const updateRef = useRef<unknown>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Auto check on mount with a 3-second delay (silent mode)
+  // Auto check on mount with a 3-second delay (silent mode), skip in dev mode and browser mode
   useEffect(() => {
+    if (import.meta.env.DEV || !isTauri()) return;
     const timer = setTimeout(() => {
       checkForUpdates(true);
     }, 3000);
@@ -70,18 +71,28 @@ export function useUpdater(): UseUpdaterReturn {
   }, []);
 
   const checkForUpdates = useCallback(async (silent = false) => {
+    // Updater is only available in Tauri desktop mode
+    if (!isTauri()) {
+      if (!silent) {
+        setShowUpToDateToast(true);
+        toastTimerRef.current = setTimeout(() => setShowUpToDateToast(false), 3000);
+      }
+      return;
+    }
+
     if (!silent) {
       setState('checking');
     }
 
     try {
+      const { check } = await import('@tauri-apps/plugin-updater');
       const update = await check();
 
       if (update) {
         updateRef.current = update;
 
         const notes = update.body
-          ? update.body.split('\n').filter((line) => line.trim())
+          ? update.body.split('\n').filter((line: string) => line.trim())
           : [];
 
         setUpdateInfo({
@@ -112,7 +123,10 @@ export function useUpdater(): UseUpdaterReturn {
   }, []);
 
   const startDownload = useCallback(async () => {
-    const update = updateRef.current;
+    const update = updateRef.current as {
+      version: string;
+      downloadAndInstall: (cb: (event: { event: string; data: Record<string, number> }) => void) => Promise<void>;
+    } | null;
     if (!update) return;
 
     setState('downloading');
@@ -120,7 +134,7 @@ export function useUpdater(): UseUpdaterReturn {
     let downloadedBytes = 0;
 
     try {
-      await update.downloadAndInstall((event: DownloadEvent) => {
+      await update.downloadAndInstall((event: { event: string; data: Record<string, number> }) => {
         switch (event.event) {
           case 'Started':
             totalBytes = event.data.contentLength ?? 0;
@@ -134,15 +148,17 @@ export function useUpdater(): UseUpdaterReturn {
             break;
           case 'Progress':
             downloadedBytes += event.data.chunkLength;
-            const percentage = totalBytes > 0
-              ? Math.min(Math.round((downloadedBytes / totalBytes) * 100), 100)
-              : 0;
-            setDownloadProgress({
-              version: update.version,
-              downloadedBytes,
-              totalBytes,
-              percentage,
-            });
+            {
+              const percentage = totalBytes > 0
+                ? Math.min(Math.round((downloadedBytes / totalBytes) * 100), 100)
+                : 0;
+              setDownloadProgress({
+                version: update.version,
+                downloadedBytes,
+                totalBytes,
+                percentage,
+              });
+            }
             break;
           case 'Finished':
             setDownloadProgress({
@@ -164,7 +180,9 @@ export function useUpdater(): UseUpdaterReturn {
   }, []);
 
   const restartApp = useCallback(async () => {
+    if (!isTauri()) return;
     try {
+      const { relaunch } = await import('@tauri-apps/plugin-process');
       await relaunch();
     } catch (err) {
       console.error('Failed to relaunch:', err);

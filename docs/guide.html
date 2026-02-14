@@ -57,6 +57,18 @@
       padding: 0;
       color: #e2e8f0;
     }
+
+    .kbd {
+      display: inline-block;
+      padding: 2px 8px;
+      font-family: ui-monospace, monospace;
+      font-size: 0.85em;
+      color: #e2e8f0;
+      background: #1e293b;
+      border: 1px solid #475569;
+      border-radius: 4px;
+      box-shadow: 0 1px 0 #475569;
+    }
   </style>
 </head>
 <body class="bg-slate-900 text-slate-100">
@@ -66,14 +78,10 @@
     <div class="max-w-6xl mx-auto px-4 sm:px-6">
       <div class="flex items-center justify-between h-16">
         <div class="flex items-center gap-3">
-          <svg class="w-8 h-8" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
-            <defs><linearGradient id="nav-bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#1d4ed8"/></linearGradient></defs>
-            <rect width="512" height="512" rx="100" fill="url(#nav-bg)"/>
-            <circle cx="256" cy="280" r="12" fill="white"/>
-            <circle cx="256" cy="340" r="12" fill="white"/>
-            <line x1="256" y1="292" x2="256" y2="328" stroke="white" stroke-width="3"/>
-          </svg>
-          <span class="text-xl font-bold">Worktree Manager</span>
+          <a href="index.html" class="flex items-center gap-3">
+            <img src="icons/app-icon.svg" alt="Worktree Manager" class="w-8 h-8">
+            <span class="text-xl font-bold">Worktree Manager</span>
+          </a>
         </div>
         <div class="hidden md:flex items-center gap-6">
           <a href="index.html" class="text-slate-300 hover:text-blue-300 transition">首页</a>
@@ -120,16 +128,22 @@
           <a href="#getting-started" class="block hover:text-blue-400 transition">2. 快速上手</a>
           <a href="#workspace" class="block hover:text-blue-400 transition">3. 工作区管理</a>
           <a href="#worktree" class="block hover:text-blue-400 transition">4. Worktree 操作</a>
-          <a href="#configuration" class="block hover:text-blue-400 transition">5. 配置详解</a>
-          <a href="#best-practices" class="block hover:text-blue-400 transition">6. 最佳实践</a>
-          <a href="#troubleshooting" class="block hover:text-blue-400 transition">7. 常见问题</a>
+          <a href="#multi-window" class="block hover:text-blue-400 transition">5. 多窗口与工作区切换</a>
+          <a href="#terminal" class="block hover:text-blue-400 transition">6. 终端功能</a>
+          <a href="#ide-integration" class="block hover:text-blue-400 transition">7. IDE 集成</a>
+          <a href="#smart-scan" class="block hover:text-blue-400 transition">8. 智能文件夹扫描</a>
+          <a href="#remote-sharing" class="block hover:text-blue-400 transition">9. 远程分享与协作</a>
+          <a href="#configuration" class="block hover:text-blue-400 transition">10. 配置详解</a>
+          <a href="#keyboard-shortcuts" class="block hover:text-blue-400 transition">11. 快捷键</a>
+          <a href="#best-practices" class="block hover:text-blue-400 transition">12. 最佳实践</a>
+          <a href="#troubleshooting" class="block hover:text-blue-400 transition">13. 常见问题</a>
         </nav>
       </div>
 
       <!-- Content Sections -->
       <div class="prose prose-invert max-w-none space-y-16">
 
-        <!-- Installation -->
+        <!-- 1. Installation -->
         <section id="installation">
           <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
             <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">1</span>
@@ -137,25 +151,72 @@
           </h2>
 
           <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 mb-6">
-            <h3 class="text-xl font-semibold mb-4">环境要求</h3>
-            <ul class="space-y-2 text-slate-300">
-              <li class="flex items-start gap-2">
-                <span class="text-green-400 mt-1">✓</span>
-                <span><strong>Node.js</strong> 20+ (<a href="https://nodejs.org" class="text-blue-400 hover:underline">下载安装</a>)</span>
-              </li>
-              <li class="flex items-start gap-2">
-                <span class="text-green-400 mt-1">✓</span>
-                <span><strong>Rust</strong> 1.70+ (<a href="https://rustup.rs" class="text-blue-400 hover:underline">安装指南</a>)</span>
-              </li>
-              <li class="flex items-start gap-2">
-                <span class="text-green-400 mt-1">✓</span>
-                <span><strong>Git</strong> 2.0+（命令行可用）</span>
-              </li>
-            </ul>
+            <h3 class="text-xl font-semibold mb-4">下载安装（推荐）</h3>
+            <p class="text-slate-300 mb-4">前往 GitHub Releases 页面下载适合你系统的安装包：</p>
+            <div class="mb-4">
+              <a href="https://github.com/guoyongchang/worktree-manager/releases/latest" target="_blank" class="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                下载最新版本
+              </a>
+            </div>
+            <div class="flex gap-3 flex-wrap text-sm text-slate-400 mb-4">
+              <span class="flex items-center gap-1">&#x2705; macOS (Intel + ARM)</span>
+              <span class="flex items-center gap-1">&#x2705; Windows</span>
+              <span class="flex items-center gap-1">&#x2705; Linux</span>
+            </div>
+            <div class="bg-green-900/20 border border-green-700/50 rounded-lg p-3">
+              <p class="text-green-300 text-sm">&#x1F504; 内置自动更新功能，安装后新版本会自动推送，无需手动下载。</p>
+            </div>
           </div>
 
-          <h3 class="text-xl font-semibold mb-4">安装步骤</h3>
-          <pre class="mb-4"><code># 1. 克隆项目
+          <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 mb-6">
+            <h3 class="text-xl font-semibold mb-4 flex items-center gap-2">
+              <svg class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+              macOS 安装说明
+            </h3>
+            <ol class="space-y-3 text-slate-300">
+              <li class="flex items-start gap-2">
+                <span class="flex-shrink-0 w-6 h-6 bg-slate-700 rounded-full flex items-center justify-center text-xs font-bold text-slate-300">1</span>
+                <span>下载 <code>.dmg</code> 文件，打开后将应用拖入 Applications 文件夹完成安装。</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <span class="flex-shrink-0 w-6 h-6 bg-slate-700 rounded-full flex items-center justify-center text-xs font-bold text-slate-300">2</span>
+                <span>首次打开如提示"无法验证开发者"，请<strong>右键点击 app</strong>，然后选择<strong>"打开"</strong>。</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <span class="flex-shrink-0 w-6 h-6 bg-slate-700 rounded-full flex items-center justify-center text-xs font-bold text-slate-300">3</span>
+                <span>如仍无法打开，前往<strong>系统设置 &rarr; 隐私与安全性</strong>，在底部找到提示并点击<strong>"仍要打开"</strong>。</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <span class="flex-shrink-0 w-6 h-6 bg-slate-700 rounded-full flex items-center justify-center text-xs font-bold text-slate-300">4</span>
+                <span>以上方法均无效时，打开终端执行：<code>xattr -cr "/Applications/Worktree Manager.app"</code></span>
+              </li>
+            </ol>
+          </div>
+
+          <details class="bg-slate-800/50 border border-slate-700 rounded-xl p-6 mb-6">
+            <summary class="font-semibold text-slate-300 cursor-pointer hover:text-blue-400 transition">&#x1F6E0;&#xFE0F; 从源码构建（面向开发者）</summary>
+            <div class="mt-4">
+              <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 mb-4">
+                <h4 class="text-lg font-semibold mb-4">环境要求</h4>
+                <ul class="space-y-2 text-slate-300">
+                  <li class="flex items-start gap-2">
+                    <span class="text-green-400 mt-1">&#x2713;</span>
+                    <span><strong>Node.js</strong> 20+ (<a href="https://nodejs.org" class="text-blue-400 hover:underline">下载安装</a>)</span>
+                  </li>
+                  <li class="flex items-start gap-2">
+                    <span class="text-green-400 mt-1">&#x2713;</span>
+                    <span><strong>Rust</strong> 1.70+ (<a href="https://rustup.rs" class="text-blue-400 hover:underline">安装指南</a>)</span>
+                  </li>
+                  <li class="flex items-start gap-2">
+                    <span class="text-green-400 mt-1">&#x2713;</span>
+                    <span><strong>Git</strong> 2.0+（命令行可用）</span>
+                  </li>
+                </ul>
+              </div>
+
+              <h4 class="text-lg font-semibold mb-4">构建步骤</h4>
+              <pre class="mb-4"><code># 1. 克隆项目
 git clone https://github.com/guoyongchang/worktree-manager.git
 cd worktree-manager
 
@@ -168,12 +229,14 @@ npm run tauri dev
 # 4. 构建生产版本（可选）
 npm run tauri build</code></pre>
 
-          <div class="bg-blue-900/20 border border-blue-700 rounded-lg p-4">
-            <p class="text-blue-200"><strong>💡 提示：</strong>首次运行可能需要几分钟下载 Rust 依赖，请耐心等待。</p>
-          </div>
+              <div class="bg-blue-900/20 border border-blue-700 rounded-lg p-4">
+                <p class="text-blue-200"><strong>&#x1F4A1; 提示：</strong>首次运行可能需要几分钟下载 Rust 依赖，请耐心等待。</p>
+              </div>
+            </div>
+          </details>
         </section>
 
-        <!-- Getting Started -->
+        <!-- 2. Getting Started -->
         <section id="getting-started">
           <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
             <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">2</span>
@@ -259,7 +322,7 @@ npm run tauri build</code></pre>
           </div>
         </section>
 
-        <!-- Workspace -->
+        <!-- 3. Workspace -->
         <section id="workspace">
           <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
             <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">3</span>
@@ -300,7 +363,7 @@ npm run tauri build</code></pre>
           </div>
         </section>
 
-        <!-- Worktree Operations -->
+        <!-- 4. Worktree Operations -->
         <section id="worktree">
           <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
             <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">4</span>
@@ -309,28 +372,433 @@ npm run tauri build</code></pre>
 
           <div class="grid md:grid-cols-2 gap-4">
             <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
-              <h3 class="text-lg font-semibold mb-3">🔄 切换分支</h3>
+              <h3 class="text-lg font-semibold mb-3">&#x1F504; 切换分支</h3>
               <p class="text-slate-300 text-sm">在列表中点击不同的 Worktree 即可切换，无需 <code>git checkout</code></p>
             </div>
             <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
-              <h3 class="text-lg font-semibold mb-3">📊 状态监控</h3>
+              <h3 class="text-lg font-semibold mb-3">&#x1F4CA; 状态监控</h3>
               <p class="text-slate-300 text-sm">实时显示提交数、未提交更改、是否合并到测试分支</p>
             </div>
             <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
-              <h3 class="text-lg font-semibold mb-3">🗑️ 归档 Worktree</h3>
+              <h3 class="text-lg font-semibold mb-3">&#x1F5D1;&#xFE0F; 归档 Worktree</h3>
               <p class="text-slate-300 text-sm">完成开发后可归档，会先检查未提交/未推送的代码，避免丢失</p>
             </div>
             <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
-              <h3 class="text-lg font-semibold mb-3">♻️ 恢复归档</h3>
+              <h3 class="text-lg font-semibold mb-3">&#x267B;&#xFE0F; 恢复归档</h3>
               <p class="text-slate-300 text-sm">从归档列表中一键恢复之前的 Worktree</p>
             </div>
           </div>
         </section>
 
-        <!-- Configuration -->
-        <section id="configuration">
+        <!-- 5. Multi-Window -->
+        <section id="multi-window">
           <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
             <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">5</span>
+            多窗口与工作区切换
+          </h2>
+
+          <div class="space-y-6">
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">多窗口工作模式</h3>
+              <p class="text-slate-300 mb-4">每个 Workspace 可以在独立的窗口中打开，让你同时操作多个工作区，互不干扰。</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li>在侧边栏的 Workspace 列表中，点击 Workspace 名称旁边的<strong>外部链接图标</strong>（&#x2197;&#xFE0F;），即可在新窗口中打开该工作区</li>
+                <li>每个窗口独立运行，可以同时查看和操作不同的 Workspace</li>
+                <li>主窗口关闭时，子窗口也会随之关闭</li>
+              </ul>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">窗口标题</h3>
+              <p class="text-slate-300 mb-4">窗口标题会动态显示当前的工作区和分支信息，格式为：</p>
+              <div class="bg-slate-950 rounded-lg p-3 font-mono text-sm text-blue-400 mb-4">
+                {WorkspaceName} - {WorktreeName}
+              </div>
+              <p class="text-slate-300 text-sm">这样在多窗口场景下，你可以通过窗口标题快速区分不同的工作区。</p>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">Worktree 锁定机制</h3>
+              <p class="text-slate-300 mb-4">当一个 Worktree 已经在某个窗口中打开时，在其他窗口中该 Worktree 会显示为<strong>"已占用"</strong>状态。</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li>已占用的 Worktree 不能在另一个窗口中同时操作，避免冲突</li>
+                <li>切换到其他 Worktree 时，当前 Worktree 的锁会自动释放</li>
+                <li>关闭窗口时，该窗口持有的所有锁也会自动释放</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <!-- 6. Terminal -->
+        <section id="terminal">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">6</span>
+            终端功能
+          </h2>
+
+          <div class="space-y-6">
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">内置终端</h3>
+              <p class="text-slate-300 mb-4">每个 Worktree 都有独立的内置终端，工作目录自动设置为 Worktree 的根目录。无需手动 <code>cd</code> 到对应路径。</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li>终端面板位于应用底部，可以通过拖拽调整高度</li>
+                <li>切换 Worktree 时，终端会自动切换到对应的会话</li>
+                <li>终端会话在 Worktree 生命周期内保持，不会因为切换而丢失</li>
+              </ul>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">多标签页</h3>
+              <p class="text-slate-300 mb-4">每个 Worktree 可以拥有多个终端标签页：</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li>点击终端面板的 <code>+</code> 按钮创建新的终端标签页</li>
+                <li>点击标签页切换不同的终端会话</li>
+                <li>点击标签页上的 <code>x</code> 按钮关闭终端</li>
+                <li>每个标签页都是独立的终端进程</li>
+              </ul>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">全屏模式</h3>
+              <p class="text-slate-300 mb-4">终端支持全屏模式，适合需要更大终端空间的场景：</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li>点击终端面板右上角的<strong>最大化图标</strong>进入全屏模式</li>
+                <li>按 <span class="kbd">Escape</span> 键退出全屏模式</li>
+                <li>全屏模式下终端会占满整个应用窗口</li>
+              </ul>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">外部终端</h3>
+              <p class="text-slate-300">如果你更习惯使用系统自带的终端应用，可以点击终端面板的<strong>"在外部终端中打开"</strong>按钮，它会自动打开系统默认终端并切换到 Worktree 目录。</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- 7. IDE Integration -->
+        <section id="ide-integration">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">7</span>
+            IDE 集成
+          </h2>
+
+          <div class="space-y-6">
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">支持的 IDE</h3>
+              <p class="text-slate-300 mb-4">Worktree Manager 支持多种主流 IDE 和编辑器：</p>
+              <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <div class="bg-slate-900 rounded-lg p-3 text-center">
+                  <span class="block text-lg font-semibold text-slate-200">VS Code</span>
+                  <span class="text-xs text-slate-500">code</span>
+                </div>
+                <div class="bg-slate-900 rounded-lg p-3 text-center">
+                  <span class="block text-lg font-semibold text-slate-200">Cursor</span>
+                  <span class="text-xs text-slate-500">cursor</span>
+                </div>
+                <div class="bg-slate-900 rounded-lg p-3 text-center">
+                  <span class="block text-lg font-semibold text-slate-200">IntelliJ IDEA</span>
+                  <span class="text-xs text-slate-500">idea</span>
+                </div>
+                <div class="bg-slate-900 rounded-lg p-3 text-center">
+                  <span class="block text-lg font-semibold text-slate-200">Zed</span>
+                  <span class="text-xs text-slate-500">zed</span>
+                </div>
+                <div class="bg-slate-900 rounded-lg p-3 text-center">
+                  <span class="block text-lg font-semibold text-slate-200">Sublime Text</span>
+                  <span class="text-xs text-slate-500">subl</span>
+                </div>
+                <div class="bg-slate-900 rounded-lg p-3 text-center">
+                  <span class="block text-lg font-semibold text-slate-200">Windsurf</span>
+                  <span class="text-xs text-slate-500">windsurf</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">切换默认 IDE</h3>
+              <p class="text-slate-300 mb-4">在 Worktree 详情页中，点击 IDE 按钮旁边的<strong>下拉箭头</strong>，即可看到 IDE 选择列表：</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li>选择一个 IDE 后，它会成为当前项目的默认 IDE</li>
+                <li>下次点击 IDE 按钮时，会直接使用上次选择的 IDE 打开</li>
+                <li>不同项目可以设置不同的默认 IDE</li>
+              </ul>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">快速打开</h3>
+              <p class="text-slate-300 mb-4">在 IDE 下拉菜单中，每个 IDE 选项右侧都有一个<strong>快速打开图标</strong>（&#x2197;&#xFE0F;）：</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li>点击图标可以直接用该 IDE 打开项目，<strong>而不会改变默认 IDE 设置</strong></li>
+                <li>适合偶尔用其他 IDE 打开的场景</li>
+              </ul>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">在文件夹中打开</h3>
+              <p class="text-slate-300">IDE 下拉菜单底部还有<strong>"在文件夹中打开"</strong>选项，点击后会在系统文件管理器（Finder / 文件资源管理器）中打开 Worktree 的项目目录。</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- 8. Smart Folder Scan -->
+        <section id="smart-scan">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">8</span>
+            智能文件夹扫描
+          </h2>
+
+          <div class="space-y-6">
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">功能说明</h3>
+              <p class="text-slate-300 mb-4">智能文件夹扫描可以自动检测项目中适合被链接的大文件夹，帮助你快速配置 <code>linked_folders</code>。</p>
+              <p class="text-slate-300">链接这些文件夹后，新创建的 Worktree 会自动从主仓库创建软链接，无需重复安装依赖或重新构建，节省大量磁盘空间和时间。</p>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">如何使用</h3>
+              <ol class="list-decimal list-inside space-y-2 text-slate-300">
+                <li>进入<strong>工作区设置</strong>页面</li>
+                <li>找到项目的 <strong>Linked Folders</strong> 配置项</li>
+                <li>点击<strong>扫描按钮</strong>（放大镜图标）</li>
+                <li>系统会自动扫描项目目录，列出所有可链接的文件夹</li>
+                <li>勾选你需要链接的文件夹，点击确认</li>
+              </ol>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">自动检测的文件夹类型</h3>
+              <p class="text-slate-300 mb-4">扫描功能会自动识别以下常见的大文件夹：</p>
+              <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                  <thead>
+                    <tr class="border-b border-slate-600">
+                      <th class="py-2 px-4">文件夹</th>
+                      <th class="py-2 px-4">用途</th>
+                    </tr>
+                  </thead>
+                  <tbody class="text-slate-300">
+                    <tr class="border-b border-slate-700">
+                      <td class="py-2 px-4"><code>node_modules</code></td>
+                      <td class="py-2 px-4">Node.js 依赖</td>
+                    </tr>
+                    <tr class="border-b border-slate-700">
+                      <td class="py-2 px-4"><code>.next</code></td>
+                      <td class="py-2 px-4">Next.js 构建产物</td>
+                    </tr>
+                    <tr class="border-b border-slate-700">
+                      <td class="py-2 px-4"><code>dist</code></td>
+                      <td class="py-2 px-4">通用构建输出</td>
+                    </tr>
+                    <tr class="border-b border-slate-700">
+                      <td class="py-2 px-4"><code>build</code></td>
+                      <td class="py-2 px-4">构建输出</td>
+                    </tr>
+                    <tr class="border-b border-slate-700">
+                      <td class="py-2 px-4"><code>vendor</code></td>
+                      <td class="py-2 px-4">PHP / Go 依赖</td>
+                    </tr>
+                    <tr class="border-b border-slate-700">
+                      <td class="py-2 px-4"><code>.output</code></td>
+                      <td class="py-2 px-4">Nuxt 3 构建输出</td>
+                    </tr>
+                    <tr class="border-b border-slate-700">
+                      <td class="py-2 px-4"><code>.nuxt</code></td>
+                      <td class="py-2 px-4">Nuxt.js 构建产物</td>
+                    </tr>
+                    <tr>
+                      <td class="py-2 px-4"><code>target</code></td>
+                      <td class="py-2 px-4">Rust / Java 构建输出</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 9. Remote Sharing -->
+        <section id="remote-sharing">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">9</span>
+            远程分享与协作
+          </h2>
+
+          <div class="space-y-6">
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">功能概述</h3>
+              <p class="text-slate-300 mb-4">远程分享功能允许你将当前工作区通过浏览器分享给同事，对方无需安装任何软件，只需打开链接即可查看你的 Worktree、使用终端，甚至进行协作开发。</p>
+              <div class="bg-blue-900/20 border border-blue-700 rounded-lg p-4 mb-4">
+                <p class="text-blue-200 text-sm"><strong>适用场景：</strong></p>
+                <ul class="list-disc list-inside space-y-1 text-blue-200 text-sm mt-2">
+                  <li>结对编程 -- 远程同事通过浏览器加入你的终端，实时协作</li>
+                  <li>代码演示 -- 让 PM 或测试人员在浏览器中查看你的分支状态</li>
+                  <li>远程协助 -- 帮同事排查问题，直接在他分享的终端里操作</li>
+                  <li>移动办公 -- 在平板或手机浏览器上临时查看工作区状态</li>
+                </ul>
+              </div>
+              <p class="text-slate-300 text-sm">分享功能支持两种模式：<strong>局域网分享</strong>（同一 Wi-Fi / 内网）和<strong>外网分享</strong>（通过 ngrok 穿透公网）。</p>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">开启分享</h3>
+              <p class="text-slate-300 mb-4">在桌面端应用中，按照以下步骤开启分享：</p>
+              <ol class="list-decimal list-inside space-y-3 text-slate-300">
+                <li>在侧边栏底部找到<strong>"分享"按钮</strong>，点击打开分享面板</li>
+                <li>设置<strong>端口号</strong>（默认推荐 49152-65535 范围，也支持 3000-9999 开发端口）</li>
+                <li>设置<strong>访问密码</strong>（必填，用于保护你的工作区）</li>
+                <li>点击<strong>"开启分享"</strong>，系统会启动一个内置 HTTP 服务器</li>
+                <li>分享成功后会显示一个<strong>局域网访问地址</strong>（如 <code>http://192.168.1.100:49152</code>）</li>
+              </ol>
+              <div class="bg-slate-950 rounded-lg p-4 mt-4 font-mono text-sm">
+                <span class="text-slate-500"># 分享成功后显示的地址示例</span><br>
+                <span class="text-green-400">局域网地址: http://192.168.1.100:49152</span><br>
+                <span class="text-slate-500"># 将此地址和密码发给同事即可</span>
+              </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">浏览器模式访问</h3>
+              <p class="text-slate-300 mb-4">协作者打开分享链接后：</p>
+              <ol class="list-decimal list-inside space-y-2 text-slate-300">
+                <li>浏览器会显示一个<strong>密码输入页面</strong>，输入你设置的密码即可进入</li>
+                <li>进入后看到与桌面端相同的界面，包括 Worktree 列表、分支状态等</li>
+                <li>可以使用<strong>内置终端</strong>（通过 WebSocket 实时传输）</li>
+                <li>可以<strong>加入协作</strong>，与桌面端用户共享终端会话</li>
+                <li>所有操作通过 WebSocket 实时同步，延迟极低</li>
+              </ol>
+              <div class="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4 mt-4">
+                <p class="text-yellow-200 text-sm"><strong>&#x26A0;&#xFE0F; 注意：</strong>浏览器端的终端操作会直接影响你本机的文件，请确保只分享给信任的人。</p>
+              </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">ngrok 外网穿透</h3>
+              <p class="text-slate-300 mb-4">如果协作者不在同一局域网，可以使用 ngrok 进行外网穿透，通过公网 URL 访问：</p>
+
+              <h4 class="text-lg font-semibold mb-3 text-slate-200">第一步：安装 ngrok 并获取 Token</h4>
+              <ol class="list-decimal list-inside space-y-2 text-slate-300 mb-4">
+                <li>前往 <a href="https://ngrok.com" class="text-blue-400 hover:underline">ngrok.com</a> 注册账号（免费）</li>
+                <li>在 <a href="https://dashboard.ngrok.com/get-started/your-authtoken" class="text-blue-400 hover:underline">ngrok Dashboard</a> 复制你的 Authtoken</li>
+              </ol>
+
+              <h4 class="text-lg font-semibold mb-3 text-slate-200">第二步：在应用中配置 Token</h4>
+              <ol class="list-decimal list-inside space-y-2 text-slate-300 mb-4">
+                <li>打开<strong>设置页面</strong>（齿轮图标）</li>
+                <li>滚动到底部找到 <strong>"外网分享 (ngrok)"</strong> 区域</li>
+                <li>将 Authtoken 粘贴到输入框中，点击<strong>"保存"</strong></li>
+              </ol>
+
+              <h4 class="text-lg font-semibold mb-3 text-slate-200">第三步：启用外网隧道</h4>
+              <ol class="list-decimal list-inside space-y-2 text-slate-300 mb-4">
+                <li>先按上述步骤开启<strong>局域网分享</strong></li>
+                <li>在分享面板中点击<strong>"开启外网"</strong>按钮</li>
+                <li>等待 ngrok 隧道建立成功（通常几秒内完成）</li>
+                <li>生成的公网地址（如 <code>https://xxxx.ngrok-free.app</code>）即可分享给任何人</li>
+              </ol>
+
+              <div class="bg-slate-950 rounded-lg p-4 font-mono text-sm">
+                <span class="text-slate-500"># ngrok 外网地址示例</span><br>
+                <span class="text-green-400">外网地址: https://a1b2c3d4.ngrok-free.app</span><br>
+                <span class="text-slate-500"># 任何能上网的人都可以通过此地址访问</span>
+              </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">安全注意事项</h3>
+              <div class="space-y-3">
+                <div class="flex items-start gap-3">
+                  <span class="text-green-400 mt-0.5">&#x2713;</span>
+                  <div>
+                    <p class="text-slate-200 font-medium">密码保护</p>
+                    <p class="text-slate-400 text-sm">所有分享都必须设置密码，浏览器端必须先认证才能访问 API</p>
+                  </div>
+                </div>
+                <div class="flex items-start gap-3">
+                  <span class="text-green-400 mt-0.5">&#x2713;</span>
+                  <div>
+                    <p class="text-slate-200 font-medium">防暴力破解</p>
+                    <p class="text-slate-400 text-sm">内置速率限制机制，同一 IP 每 60 秒最多尝试 5 次认证</p>
+                  </div>
+                </div>
+                <div class="flex items-start gap-3">
+                  <span class="text-green-400 mt-0.5">&#x2713;</span>
+                  <div>
+                    <p class="text-slate-200 font-medium">会话隔离</p>
+                    <p class="text-slate-400 text-sm">每个浏览器端获得独立的 session ID，服务端生成，无法伪造</p>
+                  </div>
+                </div>
+                <div class="flex items-start gap-3">
+                  <span class="text-green-400 mt-0.5">&#x2713;</span>
+                  <div>
+                    <p class="text-slate-200 font-medium">CORS 限制</p>
+                    <p class="text-slate-400 text-sm">仅允许来自 localhost、局域网 IP 和当前 ngrok URL 的跨域请求</p>
+                  </div>
+                </div>
+                <div class="flex items-start gap-3">
+                  <span class="text-green-400 mt-0.5">&#x2713;</span>
+                  <div>
+                    <p class="text-slate-200 font-medium">随时可控</p>
+                    <p class="text-slate-400 text-sm">分享者可随时修改密码（自动踢出所有已连接用户）、关闭外网隧道或完全停止分享</p>
+                  </div>
+                </div>
+              </div>
+              <div class="bg-red-900/20 border border-red-700 rounded-lg p-4 mt-4">
+                <p class="text-red-200 text-sm"><strong>&#x26A0;&#xFE0F; 重要提醒：</strong>分享功能会暴露你的工作区文件和终端。请使用强密码，且仅分享给你信任的人。使用 ngrok 外网模式时请格外注意，因为任何知道链接和密码的人都可以访问。不使用时请及时关闭分享。</p>
+              </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">分享问题排查</h3>
+              <div class="space-y-4">
+                <details class="border border-slate-600 rounded-lg p-4 cursor-pointer">
+                  <summary class="font-semibold text-slate-200">局域网分享后同事无法访问？</summary>
+                  <div class="mt-3 text-slate-300 text-sm space-y-2">
+                    <ul class="list-disc list-inside space-y-1">
+                      <li>确认双方在同一局域网 / Wi-Fi 下</li>
+                      <li>检查防火墙是否放行了对应端口（macOS 可能会弹出防火墙提示，点击"允许"）</li>
+                      <li>尝试用 <code>curl http://你的IP:端口/api/get_share_info</code> 测试连通性</li>
+                      <li>如果用的是公司 VPN，有可能网络隔离，建议使用 ngrok 外网模式</li>
+                    </ul>
+                  </div>
+                </details>
+                <details class="border border-slate-600 rounded-lg p-4 cursor-pointer">
+                  <summary class="font-semibold text-slate-200">ngrok 隧道启动失败？</summary>
+                  <div class="mt-3 text-slate-300 text-sm space-y-2">
+                    <ul class="list-disc list-inside space-y-1">
+                      <li>检查 ngrok token 是否正确配置（设置页面底部）</li>
+                      <li>确认网络能访问外网（ngrok 需要连接其服务器）</li>
+                      <li>免费版 ngrok 有同时隧道数限制，确保没有其他隧道在运行</li>
+                      <li>如果超时，重试一次，ngrok 偶尔会连接较慢</li>
+                    </ul>
+                  </div>
+                </details>
+                <details class="border border-slate-600 rounded-lg p-4 cursor-pointer">
+                  <summary class="font-semibold text-slate-200">浏览器端终端无响应？</summary>
+                  <div class="mt-3 text-slate-300 text-sm space-y-2">
+                    <ul class="list-disc list-inside space-y-1">
+                      <li>检查 WebSocket 连接状态（浏览器开发者工具 &rarr; Network &rarr; WS）</li>
+                      <li>如果使用 ngrok，确认 ngrok 隧道仍在运行</li>
+                      <li>尝试刷新页面重新连接</li>
+                    </ul>
+                  </div>
+                </details>
+                <details class="border border-slate-600 rounded-lg p-4 cursor-pointer">
+                  <summary class="font-semibold text-slate-200">端口被占用怎么办？</summary>
+                  <div class="mt-3 text-slate-300 text-sm space-y-2">
+                    <p>更换一个端口号即可。推荐使用 49152-65535 范围内的端口，这些是动态/私有端口，不太可能被其他程序占用。</p>
+                    <pre class="mt-2"><code># 查看端口占用情况（macOS/Linux）
+lsof -i :49152</code></pre>
+                  </div>
+                </details>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 10. Configuration -->
+        <section id="configuration">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">10</span>
             配置详解
           </h2>
 
@@ -342,8 +810,14 @@ npm run tauri build</code></pre>
   "workspaces": [
     { "name": "我的项目", "path": "/path/to/workspace" }
   ],
-  "current_workspace": "/path/to/workspace"
+  "current_workspace": "/path/to/workspace",
+  "ngrok_token": "2abc...xyz",
+  "last_share_port": 49152
 }</code></pre>
+              <div class="mt-4 space-y-2 text-sm">
+                <p class="text-slate-300"><strong>ngrok_token</strong>: 可选，ngrok Authtoken，用于外网穿透分享</p>
+                <p class="text-slate-300"><strong>last_share_port</strong>: 可选，上次使用的分享端口号，下次分享时自动填入</p>
+              </div>
             </div>
 
             <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
@@ -373,45 +847,98 @@ npm run tauri build</code></pre>
           </div>
         </section>
 
-        <!-- Best Practices -->
+        <!-- 11. Keyboard Shortcuts -->
+        <section id="keyboard-shortcuts">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">11</span>
+            快捷键
+          </h2>
+
+          <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+            <div class="overflow-x-auto">
+              <table class="w-full text-left border-collapse">
+                <thead>
+                  <tr class="border-b border-slate-600">
+                    <th class="py-3 px-4">快捷键</th>
+                    <th class="py-3 px-4">功能</th>
+                    <th class="py-3 px-4">适用场景</th>
+                  </tr>
+                </thead>
+                <tbody class="text-slate-300">
+                  <tr class="border-b border-slate-700">
+                    <td class="py-3 px-4"><span class="kbd">Escape</span></td>
+                    <td class="py-3 px-4">退出终端全屏</td>
+                    <td class="py-3 px-4">终端全屏模式下</td>
+                  </tr>
+                  <tr class="border-b border-slate-700">
+                    <td class="py-3 px-4"><span class="kbd">Escape</span></td>
+                    <td class="py-3 px-4">关闭下拉菜单 / 弹窗</td>
+                    <td class="py-3 px-4">任意菜单或弹窗打开时</td>
+                  </tr>
+                  <tr>
+                    <td class="py-3 px-4">右键点击</td>
+                    <td class="py-3 px-4">打开 Worktree 上下文菜单</td>
+                    <td class="py-3 px-4">在 Worktree 列表项上</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 12. Best Practices -->
         <section id="best-practices">
           <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
-            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">6</span>
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">12</span>
             最佳实践
           </h2>
 
           <div class="space-y-4">
             <div class="bg-gradient-to-r from-green-900/20 to-slate-800 border border-green-700 rounded-xl p-6">
-              <h3 class="text-lg font-semibold mb-2 text-green-400">✅ 推荐做法</h3>
+              <h3 class="text-lg font-semibold mb-2 text-green-400">&#x2705; 推荐做法</h3>
               <ul class="space-y-2 text-slate-300">
-                <li>• 为每个需求/功能创建独立的 Worktree</li>
-                <li>• 使用统一的分支命名规范（如 <code>feature/xxx</code>、<code>hotfix/xxx</code>）</li>
-                <li>• 定期归档已合并的 Worktree，保持列表整洁</li>
-                <li>• 将常用的依赖目录加入 <code>linked_folders</code></li>
-                <li>• 使用内置终端，避免路径混淆</li>
+                <li>&#x2022; 为每个需求/功能创建独立的 Worktree</li>
+                <li>&#x2022; 使用统一的分支命名规范（如 <code>feature/xxx</code>、<code>hotfix/xxx</code>）</li>
+                <li>&#x2022; 定期归档已合并的 Worktree，保持列表整洁</li>
+                <li>&#x2022; 将常用的依赖目录加入 <code>linked_folders</code></li>
+                <li>&#x2022; 使用内置终端，避免路径混淆</li>
               </ul>
             </div>
 
             <div class="bg-gradient-to-r from-red-900/20 to-slate-800 border border-red-700 rounded-xl p-6">
-              <h3 class="text-lg font-semibold mb-2 text-red-400">⚠️ 避免做法</h3>
+              <h3 class="text-lg font-semibold mb-2 text-red-400">&#x26A0;&#xFE0F; 避免做法</h3>
               <ul class="space-y-2 text-slate-300">
-                <li>• 不要手动删除 Worktree 目录，请使用归档功能</li>
-                <li>• 不要在多个 Worktree 中同时修改同一个文件（链接的文件除外）</li>
-                <li>• 不要链接会产生冲突的文件（如 <code>.env</code>）</li>
-                <li>• 避免创建过多 Worktree（建议不超过 10 个）</li>
+                <li>&#x2022; 不要手动删除 Worktree 目录，请使用归档功能</li>
+                <li>&#x2022; 不要在多个 Worktree 中同时修改同一个文件（链接的文件除外）</li>
+                <li>&#x2022; 不要链接会产生冲突的文件（如 <code>.env</code>）</li>
+                <li>&#x2022; 避免创建过多 Worktree（建议不超过 10 个）</li>
               </ul>
             </div>
           </div>
         </section>
 
-        <!-- Troubleshooting -->
+        <!-- 13. Troubleshooting -->
         <section id="troubleshooting">
           <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
-            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">7</span>
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">13</span>
             常见问题
           </h2>
 
           <div class="space-y-4">
+            <details class="bg-slate-800 border border-slate-700 rounded-xl p-6 cursor-pointer">
+              <summary class="font-semibold text-lg">Q: macOS 提示"已损坏"或"无法验证开发者"怎么办？</summary>
+              <div class="mt-4 text-slate-300 space-y-2">
+                <p>这是因为应用未经 Apple 公证签名，macOS 的安全机制会阻止打开。请按以下步骤操作：</p>
+                <ol class="list-decimal list-inside space-y-2 mt-3">
+                  <li><strong>右键点击</strong>应用图标，选择"打开"（而不是双击）</li>
+                  <li>如果仍然无法打开，前往<strong>系统设置 &rarr; 隐私与安全性</strong>，在页面底部找到被阻止的提示，点击<strong>"仍要打开"</strong></li>
+                  <li>如果以上方法都不行，打开<strong>终端</strong>，执行以下命令：</li>
+                </ol>
+                <pre><code>xattr -cr "/Applications/Worktree Manager.app"</code></pre>
+                <p>执行后重新打开应用即可。此命令会移除文件的隔离属性。</p>
+              </div>
+            </details>
+
             <details class="bg-slate-800 border border-slate-700 rounded-xl p-6 cursor-pointer">
               <summary class="font-semibold text-lg">Q: 创建 Worktree 失败怎么办？</summary>
               <div class="mt-4 text-slate-300 space-y-2">
@@ -431,6 +958,42 @@ npm run tauri build</code></pre>
                 <p>检查 <code>linked_folders</code> 配置是否正确，确保主仓库中对应的文件夹存在。在终端中运行：</p>
                 <pre><code>ls -la worktrees/your-worktree/</code></pre>
                 <p>查看链接是否正常。如果链接损坏，可以删除后重新创建 Worktree。</p>
+              </div>
+            </details>
+
+            <details class="bg-slate-800 border border-slate-700 rounded-xl p-6 cursor-pointer">
+              <summary class="font-semibold text-lg">Q: 如何在新窗口打开工作区？</summary>
+              <div class="mt-4 text-slate-300 space-y-2">
+                <p>在侧边栏的 Workspace 列表中，将鼠标悬停在 Workspace 名称上，右侧会出现一个<strong>外部链接图标</strong>（&#x2197;&#xFE0F;）。</p>
+                <p>点击该图标，即可在新窗口中打开对应的工作区。新窗口是独立的，不会影响主窗口的操作。</p>
+              </div>
+            </details>
+
+            <details class="bg-slate-800 border border-slate-700 rounded-xl p-6 cursor-pointer">
+              <summary class="font-semibold text-lg">Q: 终端如何全屏？</summary>
+              <div class="mt-4 text-slate-300 space-y-2">
+                <p>点击终端面板右上角的<strong>最大化图标</strong>即可进入全屏模式。</p>
+                <p>按 <span class="kbd">Escape</span> 键退出全屏模式，恢复到正常布局。</p>
+              </div>
+            </details>
+
+            <details class="bg-slate-800 border border-slate-700 rounded-xl p-6 cursor-pointer">
+              <summary class="font-semibold text-lg">Q: 链接的文件夹有哪些推荐？</summary>
+              <div class="mt-4 text-slate-300 space-y-2">
+                <p>以下是常见的推荐链接文件夹列表，按项目类型选择：</p>
+                <ul class="list-disc list-inside space-y-1 mt-3">
+                  <li><code>node_modules</code> -- Node.js / 前端项目依赖</li>
+                  <li><code>.next</code> -- Next.js 构建缓存</li>
+                  <li><code>dist</code> -- 通用构建输出目录</li>
+                  <li><code>build</code> -- React / 其他框架构建输出</li>
+                  <li><code>vendor</code> -- PHP Composer / Go 依赖</li>
+                  <li><code>.output</code> -- Nuxt 3 构建输出</li>
+                  <li><code>.nuxt</code> -- Nuxt.js 构建缓存</li>
+                  <li><code>target</code> -- Rust Cargo / Java Maven 构建输出</li>
+                </ul>
+                <div class="bg-blue-900/20 border border-blue-700 rounded-lg p-3 mt-4">
+                  <p class="text-blue-200 text-sm"><strong>&#x1F4A1; 提示：</strong>也可以使用<strong>智能文件夹扫描</strong>功能自动检测，详见<a href="#smart-scan" class="text-blue-400 hover:underline">第 8 节</a>。</p>
+                </div>
               </div>
             </details>
 
@@ -457,9 +1020,9 @@ git push</code></pre>
               <div class="mt-4 text-slate-300 space-y-2">
                 <p>目前支持：</p>
                 <ul class="list-disc list-inside">
-                  <li>✅ macOS (Intel + Apple Silicon)</li>
-                  <li>✅ Linux (Ubuntu, Debian, Arch 等)</li>
-                  <li>⚠️ Windows (实验性支持，软链接需要管理员权限)</li>
+                  <li>&#x2705; macOS (Intel + Apple Silicon)</li>
+                  <li>&#x2705; Linux (Ubuntu, Debian, Arch 等)</li>
+                  <li>&#x26A0;&#xFE0F; Windows (实验性支持，软链接需要管理员权限)</li>
                 </ul>
               </div>
             </details>
@@ -490,15 +1053,15 @@ git push</code></pre>
     <div class="max-w-5xl mx-auto">
       <p class="text-slate-400">
         <a href="https://github.com/guoyongchang/worktree-manager" class="text-blue-400 hover:text-blue-300">GitHub</a>
-        <span class="mx-2">·</span>
+        <span class="mx-2">&middot;</span>
         <a href="https://github.com/guoyongchang/worktree-manager/issues" class="text-blue-400 hover:text-blue-300">反馈问题</a>
-        <span class="mx-2">·</span>
+        <span class="mx-2">&middot;</span>
         <a href="index.html" class="text-blue-400 hover:text-blue-300">返回首页</a>
-        <span class="mx-2">·</span>
+        <span class="mx-2">&middot;</span>
         <span>MIT License</span>
       </p>
-      <p class="mt-4 text-slate-500">Made with ❤️ using Tauri + React + Rust</p>
-      <p class="mt-2 text-xs text-slate-600">© 2024 Worktree Manager Team</p>
+      <p class="mt-4 text-slate-500">Made with &#x2764;&#xFE0F; using Tauri + React + Rust</p>
+      <p class="mt-2 text-xs text-slate-600">&copy; 2025 Worktree Manager Team</p>
     </div>
   </footer>
 

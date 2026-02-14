@@ -1,4 +1,4 @@
-import { check } from '@tauri-apps/plugin-updater';
+import { isTauri } from '../lib/backend';
 
 /**
  * Check if an update is available.
@@ -6,7 +6,9 @@ import { check } from '@tauri-apps/plugin-updater';
  * UI presentation is handled by the useUpdater hook and UpdaterDialogs components.
  */
 export async function checkUpdateAvailable() {
+  if (!isTauri()) return null;
   try {
+    const { check } = await import('@tauri-apps/plugin-updater');
     return await check();
   } catch (error) {
     console.error('Failed to check for updates:', error);
