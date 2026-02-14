@@ -195,6 +195,7 @@ function App() {
       const wsPath = workspace.currentWorkspace.path;
       // Find first active worktree that is not locked by another window
       const tryAutoSelect = async () => {
+        const t0 = performance.now();
         // 网页端：不自动选择和锁定，等待用户手动选择
         if (!isTauri()) {
           return;
@@ -215,6 +216,7 @@ function App() {
           try {
             await workspace.lockWorktree(wsPath, activeWorktree.name);
             setSelectedWorktree(activeWorktree);
+            console.log(`[app] autoSelect "${activeWorktree.name}": ${(performance.now() - t0).toFixed(1)}ms`);
           } catch {
             // If lock fails, still select main workspace (null)
             setSelectedWorktree(null);
@@ -294,6 +296,8 @@ function App() {
 
   // Workspace handlers
   const handleSwitchWorkspace = useCallback(async (path: string) => {
+    const t0 = performance.now();
+    console.log(`[app] handleSwitchWorkspace → ${path}`);
     // Clear UI state immediately — don't wait for unlock
     setShowWorkspaceMenu(false);
     setSelectedWorktree(null);
@@ -307,6 +311,7 @@ function App() {
       await workspace.switchWorkspace(path);
     } finally {
       setSwitchingWorkspace(false);
+      console.log(`[app] handleSwitchWorkspace done: ${(performance.now() - t0).toFixed(1)}ms`);
     }
   }, [workspace, selectedWorktree]);
 

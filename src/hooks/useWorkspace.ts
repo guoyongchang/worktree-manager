@@ -82,6 +82,7 @@ export function useWorkspace(ready = true): UseWorkspaceReturn {
   }, [ready]);
 
   const loadWorkspaces = useCallback(async () => {
+    const t0 = performance.now();
     try {
       const [wsList, current] = await Promise.all([
         callBackend<WorkspaceRef[]>("list_workspaces"),
@@ -89,6 +90,7 @@ export function useWorkspace(ready = true): UseWorkspaceReturn {
       ]);
       setWorkspaces(wsList);
       setCurrentWorkspace(current);
+      console.log(`[ws] loadWorkspaces: ${(performance.now() - t0).toFixed(1)}ms`);
     } catch (e) {
       setError(String(e));
     }
@@ -96,6 +98,7 @@ export function useWorkspace(ready = true): UseWorkspaceReturn {
 
   const loadData = useCallback(async () => {
     const version = ++loadVersion.current;
+    const t0 = performance.now();
     setLoading(true);
     setError(null);
     try {
@@ -106,11 +109,15 @@ export function useWorkspace(ready = true): UseWorkspaceReturn {
         callBackend<string>("get_config_path_info"),
       ]);
       // Discard stale results if a newer load has started
-      if (version !== loadVersion.current) return;
+      if (version !== loadVersion.current) {
+        console.log(`[ws] loadData: discarded (stale v${version}, current v${loadVersion.current})`);
+        return;
+      }
       setConfig(cfg);
       setWorktrees(wts);
       setMainWorkspace(main);
       setConfigPath(path);
+      console.log(`[ws] loadData: ${(performance.now() - t0).toFixed(1)}ms (${wts.length} worktrees)`);
     } catch (e) {
       if (version !== loadVersion.current) return;
       setError(String(e));
@@ -129,6 +136,8 @@ export function useWorkspace(ready = true): UseWorkspaceReturn {
   }, [ready, loadWorkspaces, loadData]);
 
   const switchWorkspace = useCallback(async (path: string) => {
+    const t0 = performance.now();
+    console.log(`[ws] switchWorkspace start → ${path}`);
     // Bump version to cancel any in-flight loadData
     ++loadVersion.current;
     // Immediately show loading and clear stale data
@@ -138,9 +147,12 @@ export function useWorkspace(ready = true): UseWorkspaceReturn {
     setMainWorkspace(null);
     setError(null);
     try {
+      const t1 = performance.now();
       await callBackend("switch_workspace", { path });
+      console.log(`[ws]   backend switch: ${(performance.now() - t1).toFixed(1)}ms`);
       // loadWorkspaces and loadData are independent after switch — run in parallel
       await Promise.all([loadWorkspaces(), loadData()]);
+      console.log(`[ws] switchWorkspace total: ${(performance.now() - t0).toFixed(1)}ms`);
     } catch (e) {
       setError(String(e));
       setLoading(false);
