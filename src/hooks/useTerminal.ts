@@ -55,6 +55,14 @@ export function useTerminal(
   const workspacePath = workspacePathParam || '';
   const worktreeName = selectedWorktree?.name || '';
 
+  // Refs for current state — allows stable callbacks without state dependencies
+  const activatedTerminalsRef = useRef(activatedTerminals);
+  activatedTerminalsRef.current = activatedTerminals;
+  const activeTerminalTabRef = useRef(activeTerminalTab);
+  activeTerminalTabRef.current = activeTerminalTab;
+  const terminalVisibleRef = useRef(terminalVisible);
+  terminalVisibleRef.current = terminalVisible;
+
   const currentProjects: Array<{ name: string; path: string }> = selectedWorktree?.projects ||
     (mainWorkspace ? mainWorkspace.projects.map(p => ({
       name: p.name,
@@ -110,6 +118,7 @@ export function useTerminal(
   }, [currentWorkspaceRoot]);
 
   // Shared handler for incoming terminal state messages (used by both Tauri and WebSocket)
+  // Uses refs for current state to keep callback stable (no state dependencies)
   const handleTerminalStateMessage = useCallback((msg: {
     workspacePath?: string;
     worktreeName?: string;
@@ -123,26 +132,21 @@ export function useTerminal(
       return;
     }
 
-    // Only process updates for current workspace (Tauri events are global)
-    if (msg.workspacePath && msg.worktreeName &&
-        (msg.workspacePath !== workspacePath || msg.worktreeName !== worktreeName)) {
-      return;
-    }
-
     if (sequence !== undefined) {
       lastReceivedSequence.current = sequence;
     }
 
     isReceivingUpdate.current = true;
 
+    const currentActivated = activatedTerminalsRef.current;
     const newActivatedTerminals = new Set(msg.activatedTerminals);
     const activatedChanged =
-      newActivatedTerminals.size !== activatedTerminals.size ||
-      !Array.from(newActivatedTerminals).every(t => activatedTerminals.has(t));
+      newActivatedTerminals.size !== currentActivated.size ||
+      !Array.from(newActivatedTerminals).every(t => currentActivated.has(t));
 
     if (activatedChanged ||
-        msg.activeTerminalTab !== activeTerminalTab ||
-        msg.terminalVisible !== terminalVisible) {
+        msg.activeTerminalTab !== activeTerminalTabRef.current ||
+        msg.terminalVisible !== terminalVisibleRef.current) {
       setActivatedTerminals(newActivatedTerminals);
       setActiveTerminalTab(msg.activeTerminalTab);
       setTerminalVisible(msg.terminalVisible);
@@ -151,9 +155,11 @@ export function useTerminal(
     setTimeout(() => {
       isReceivingUpdate.current = false;
     }, TERMINAL.BROADCAST_DEBOUNCE_MS);
-  }, [workspacePath, worktreeName, activatedTerminals, activeTerminalTab, terminalVisible]);
+  }, []);
 
   // Terminal state synchronization: both desktop and web subscribe and broadcast
+  // handleTerminalStateMessage is now stable (no state deps), so this effect only re-runs
+  // when workspace/worktree identity changes — no more cascade re-subscriptions
   useEffect(() => {
     if (!selectedWorktree || !workspacePath || !worktreeName) return;
 
@@ -167,7 +173,14 @@ export function useTerminal(
         activeTerminalTab: string | null;
         terminalVisible: boolean;
         sequence?: number;
-      }>('terminal-state-update', (event) => handleTerminalStateMessage(event.payload));
+      }>('terminal-state-update', (event) => {
+        // Filter by workspace/worktree identity here (since callback no longer has these deps)
+        if (event.payload.workspacePath && event.payload.worktreeName &&
+            (event.payload.workspacePath !== workspacePath || event.payload.worktreeName !== worktreeName)) {
+          return;
+        }
+        handleTerminalStateMessage(event.payload);
+      });
 
       unsubscribe = () => { unlisten.then(fn => fn()); };
     } else {
@@ -182,17 +195,24 @@ export function useTerminal(
     return unsubscribe;
   }, [selectedWorktree, workspacePath, worktreeName, _isTauri, handleTerminalStateMessage]);
 
+  // Track whether the user has interacted with terminal state (skip initial broadcasts)
+  const hasUserInteracted = useRef(false);
+
   // Broadcast terminal state changes (both desktop and web) with rate limiting
   useEffect(() => {
     // If receiving external update, don't broadcast (avoid loop)
-    if (isReceivingUpdate.current) {
-      if (import.meta.env.DEV) {
-        console.log('[useTerminal] Skipping broadcast (receiving external update)');
-      }
-      return;
-    }
+    if (isReceivingUpdate.current) return;
 
     if (!selectedWorktree || !workspacePath || !worktreeName) return;
+
+    // Skip broadcasting empty/initial state — nothing useful to sync
+    if (activatedTerminals.size === 0 && activeTerminalTab === null && !terminalVisible) return;
+
+    // Skip the very first state change to avoid broadcasting during initialization
+    if (!hasUserInteracted.current) {
+      hasUserInteracted.current = true;
+      return;
+    }
 
     // Rate limiting: prevent broadcasts more frequent than BROADCAST_RATE_LIMIT_MS
     const now = Date.now();
@@ -200,10 +220,8 @@ export function useTerminal(
 
     const doBroadcast = () => {
       if (import.meta.env.DEV) {
-        console.log('[useTerminal] Broadcasting terminal state:');
-        console.log('  isTauri:', _isTauri);
-        console.log('  activatedTerminals:', Array.from(activatedTerminals));
-        console.log('  activeTerminalTab:', activeTerminalTab);
+        console.log('[useTerminal] Broadcasting terminal state:',
+          'tabs:', Array.from(activatedTerminals), 'active:', activeTerminalTab);
       }
 
       // Increment sequence number for message deduplication
@@ -212,7 +230,6 @@ export function useTerminal(
 
       // Bidirectional sync: both PC and Web broadcast terminal state changes
       if (_isTauri) {
-        // Desktop: call Tauri command to broadcast
         broadcastTerminalStateBackend(
           workspacePath,
           worktreeName,
@@ -223,7 +240,6 @@ export function useTerminal(
           console.error('[useTerminal] Failed to broadcast terminal state:', err);
         });
       } else {
-        // Web: broadcast via WebSocket with sequence number
         const wsManager = getWebSocketManager();
         wsManager.broadcastTerminalState(
           workspacePath,
