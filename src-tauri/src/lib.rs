@@ -2668,7 +2668,9 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_log::Builder::new()
             .level(log::LevelFilter::Info)
-            .target(tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout))
+            .targets([
+                tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+            ])
             .build())
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
