@@ -1130,6 +1130,13 @@ pub fn archive_worktree_impl(window_label: &str, name: String) -> Result<(), Str
         }
     }
 
+    // If archive directory already exists (e.g. from a previous failed attempt), remove it first
+    if archive_path.exists() {
+        log::warn!("Archive directory already exists, removing: {:?}", archive_path);
+        fs::remove_dir_all(&archive_path)
+            .map_err(|e| format!("Failed to remove existing archive directory: {}", e))?;
+    }
+
     std::fs::rename(&worktree_path, &archive_path)
         .map_err(|e| format!("Failed to archive worktree: {}", e))?;
 

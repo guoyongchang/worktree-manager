@@ -919,7 +919,7 @@ function App() {
     <>
       {/* Settings View */}
       <div
-        className="min-h-screen bg-slate-900 text-slate-100 p-6 overflow-y-auto"
+        className="h-screen bg-slate-900 text-slate-100 p-6 overflow-y-auto"
         style={{ display: viewMode === 'settings' && editingConfig ? 'block' : 'none' }}
       >
         {editingConfig && (
@@ -951,7 +951,7 @@ function App() {
 
       {/* Main View */}
       <div
-        className="min-h-screen bg-slate-900 text-slate-100 flex"
+        className="h-screen bg-slate-900 text-slate-100 flex overflow-hidden"
         style={{ display: viewMode === 'main' ? 'flex' : 'none' }}
       >
         {!terminalFullscreen && (

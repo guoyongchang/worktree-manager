@@ -1,0 +1,30 @@
+#!/bin/bash
+set -e
+
+echo "🔍 Pre-push checks..."
+
+# 1. Verify package-lock.json only contains official npm registry
+echo "  Checking npm registry..."
+if grep -qE '"resolved":\s*"https?://' package-lock.json 2>/dev/null; then
+  if grep -E '"resolved":\s*"https?://' package-lock.json | grep -vq 'registry.npmjs.org'; then
+    echo "❌ package-lock.json contains non-official npm registry URLs."
+    echo "   Only https://registry.npmjs.org/ is allowed."
+    echo "   Run: rm package-lock.json && npm install"
+    exit 1
+  fi
+fi
+
+# 2. Rust cargo check (only if dist is available)
+if [ -d src-tauri ] && [ -d dist ]; then
+  echo "  Rust cargo check..."
+  cd src-tauri && cargo check 2>&1
+  if [ $? -ne 0 ]; then
+    echo "❌ Rust cargo check failed."
+    exit 1
+  fi
+  cd ..
+else
+  echo "  ⚠️  Skipping cargo check (dist/ not built)"
+fi
+
+echo "✅ Pre-push checks passed."
