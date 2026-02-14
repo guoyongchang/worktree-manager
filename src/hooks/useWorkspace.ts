@@ -122,12 +122,19 @@ export function useWorkspace(ready = true): UseWorkspaceReturn {
   }, [ready, loadWorkspaces, loadData]);
 
   const switchWorkspace = useCallback(async (path: string) => {
+    // Immediately show loading and clear stale data
+    setLoading(true);
+    setConfig(null);
+    setWorktrees([]);
+    setMainWorkspace(null);
+    setError(null);
     try {
       await callBackend("switch_workspace", { path });
       await loadWorkspaces();
       await loadData();
     } catch (e) {
       setError(String(e));
+      setLoading(false);
     }
   }, [loadWorkspaces, loadData]);
 
