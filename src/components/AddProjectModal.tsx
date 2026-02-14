@@ -17,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { BranchCombobox } from './BranchCombobox';
 import type { ScannedFolder } from '../types';
 
 interface AddProjectModalProps {
@@ -317,10 +318,9 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
                   <label className="block text-sm font-medium text-slate-300 mb-2">
                     基准分支
                   </label>
-                  <Input
-                    type="text"
+                  <BranchCombobox
                     value={baseBranch}
-                    onChange={(e) => setBaseBranch(e.target.value)}
+                    onChange={setBaseBranch}
                     placeholder="main"
                   />
                 </div>
@@ -330,10 +330,9 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
                   <label className="block text-sm font-medium text-slate-300 mb-2">
                     测试分支
                   </label>
-                  <Input
-                    type="text"
+                  <BranchCombobox
                     value={testBranch}
-                    onChange={(e) => setTestBranch(e.target.value)}
+                    onChange={setTestBranch}
                     placeholder="test"
                   />
                 </div>

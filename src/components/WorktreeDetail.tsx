@@ -8,6 +8,12 @@ import {
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import {
   FolderIcon,
   ArchiveIcon,
   WarningIcon,
@@ -18,6 +24,8 @@ import {
   RefreshIcon,
   PlusIcon,
   ExternalLinkIcon,
+  CopyIcon,
+  CheckIcon,
 } from './Icons';
 import { GitOperations } from './GitOperations';
 import { EDITORS } from '../constants';
@@ -48,6 +56,7 @@ interface WorktreeDetailProps {
   error: string | null;
   onClearError: () => void;
   restoring?: boolean;
+  switching?: boolean;
 }
 
 function getProjectStatus(project: ProjectStatus): 'success' | 'warning' | 'info' | 'sync' {
@@ -65,6 +74,43 @@ function getStatusText(project: ProjectStatus): string {
   if (project.ahead_of_base > 0) parts.push(`领先 ${project.ahead_of_base}`);
   return parts.length === 0 ? "干净" : parts.join(" · ");
 }
+
+const PathDisplay: FC<{ path: string }> = ({ path }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(path);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy path:', err);
+    }
+  };
+
+  return (
+    <TooltipProvider delayDuration={300}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={handleCopy}
+            className="text-slate-500 text-sm mt-1 select-text hover:text-slate-400 transition-colors flex items-center gap-1.5 max-w-full group"
+          >
+            <span className="truncate block">{path}</span>
+            {copied ? (
+              <CheckIcon className="w-3 h-3 text-green-400 shrink-0" />
+            ) : (
+              <CopyIcon className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+            )}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" align="start">
+          <p className="max-w-md break-all">{path}</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+};
 
 export const WorktreeDetail: FC<WorktreeDetailProps> = ({
   selectedWorktree,
@@ -86,6 +132,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
   error,
   onClearError,
   restoring = false,
+  switching = false,
 }) => {
   const selectedEditorName = EDITORS.find(e => e.id === selectedEditor)?.name || 'VS Code';
   const [switchingBranch, setSwitchingBranch] = useState<string | null>(null);
@@ -93,6 +140,18 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
   if (!selectedWorktree && !mainWorkspace) {
     return (
       <div className="text-slate-500 text-center py-20">选择一个 Worktree 查看详情</div>
+    );
+  }
+
+  // Show loading overlay when switching
+  if (switching) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="flex flex-col items-center gap-3">
+          <RefreshIcon className="w-8 h-8 text-blue-400 animate-spin" />
+          <div className="text-slate-400 text-sm">切换中...</div>
+        </div>
+      </div>
     );
   }
 
@@ -109,7 +168,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
         <div className="flex items-center justify-between mb-6">
           <div>
             <h2 className="text-xl font-semibold text-slate-100">主工作区 - {mainWorkspace.name}</h2>
-            <p className="text-slate-500 text-sm mt-1 select-text">{mainWorkspace.path}</p>
+            <PathDisplay path={mainWorkspace.path} />
           </div>
           <div className="flex gap-2 items-center">
             {onAddProject && (
@@ -146,7 +205,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                       >
                         {editor.name}
                         {editor.id === selectedEditor && (
-                          <span className="text-xs text-green-400">✓</span>
+                          <CheckIcon className="w-3 h-3 text-green-400" />
                         )}
                       </button>
                       <button
@@ -229,7 +288,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                           <GitBranchIcon className="w-3.5 h-3.5 mr-2" />
                           <span>BASE: {proj.base_branch}</span>
                           {proj.current_branch === proj.base_branch && (
-                            <span className="ml-2 text-xs text-green-400">✓</span>
+                            <CheckIcon className="w-3 h-3 ml-2 text-green-400" />
                           )}
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
@@ -240,7 +299,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                           <GitBranchIcon className="w-3.5 h-3.5 mr-2" />
                           <span>TEST: {proj.test_branch}</span>
                           {proj.current_branch === proj.test_branch && (
-                            <span className="ml-2 text-xs text-green-400">✓</span>
+                            <CheckIcon className="w-3 h-3 ml-2 text-green-400" />
                           )}
                         </DropdownMenuItem>
                       </DropdownMenuContent>
@@ -286,7 +345,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
               {selectedWorktree.is_archived ? <ArchiveIcon className="w-5 h-5 text-slate-500" /> : <FolderIcon className="w-5 h-5 text-blue-400" />}
               <h2 className="text-xl font-semibold text-slate-100">{selectedWorktree.name}</h2>
             </div>
-            <p className="text-slate-500 text-sm mt-1 select-text">{selectedWorktree.path}</p>
+            <PathDisplay path={selectedWorktree.path} />
           </div>
           <div className="flex gap-2 items-center">
             {selectedWorktree.is_archived ? (
@@ -328,7 +387,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                           >
                             {editor.name}
                             {editor.id === selectedEditor && (
-                              <span className="text-xs text-green-400">✓</span>
+                              <CheckIcon className="w-3 h-3 text-green-400" />
                             )}
                           </button>
                           <button

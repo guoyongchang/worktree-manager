@@ -18,8 +18,9 @@ import {
 } from '@/components/ui/select';
 import { RefreshCw, Search } from 'lucide-react';
 import { BackIcon, PlusIcon, TrashIcon } from './Icons';
+import { BranchCombobox } from './BranchCombobox';
 import type { WorkspaceRef, WorkspaceConfig, ProjectConfig, ScannedFolder } from '../types';
-import { getAppVersion, getNgrokToken, setNgrokToken as saveNgrokToken, isTauri } from '../lib/backend';
+import { getAppVersion, getNgrokToken, setNgrokToken as saveNgrokToken, isTauri, getRemoteBranches } from '../lib/backend';
 
 interface SettingsViewProps {
   config: WorkspaceConfig;
@@ -274,22 +275,26 @@ export const SettingsView: FC<SettingsViewProps> = ({
                   </div>
                   <div>
                     <label className="block text-xs text-slate-500 mb-1">基准分支</label>
-                    <Input
-                      type="text"
+                    <BranchCombobox
                       value={proj.base_branch}
-                      onChange={(e) => onUpdateProject(index, 'base_branch', e.target.value)}
-                      placeholder="uat"
-                      className="h-8 text-sm"
+                      onChange={(value) => onUpdateProject(index, 'base_branch', value)}
+                      onLoadBranches={async () => {
+                        const projectPath = `${configPath.replace('/.worktree-manager.json', '')}/projects/${proj.name}`;
+                        return await getRemoteBranches(projectPath);
+                      }}
+                      placeholder="main"
                     />
                   </div>
                   <div>
                     <label className="block text-xs text-slate-500 mb-1">测试分支</label>
-                    <Input
-                      type="text"
+                    <BranchCombobox
                       value={proj.test_branch}
-                      onChange={(e) => onUpdateProject(index, 'test_branch', e.target.value)}
+                      onChange={(value) => onUpdateProject(index, 'test_branch', value)}
+                      onLoadBranches={async () => {
+                        const projectPath = `${configPath.replace('/.worktree-manager.json', '')}/projects/${proj.name}`;
+                        return await getRemoteBranches(projectPath);
+                      }}
                       placeholder="test"
-                      className="h-8 text-sm"
                     />
                   </div>
                   <div>
