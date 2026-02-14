@@ -14,11 +14,11 @@ import {
   mergeToTestBranch,
   mergeToBaseBranch,
   getBranchDiffStats,
-  createPullRequest,
   checkRemoteBranchExists,
   fetchProjectRemote,
   type BranchDiffStats,
 } from '@/lib/backend';
+import { CreatePRModal } from './CreatePRModal';
 
 interface GitOperationsProps {
   projectPath: string;
@@ -42,7 +42,7 @@ export const GitOperations: FC<GitOperationsProps> = ({
   const [pushing, setPushing] = useState(false);
   const [mergingToTest, setMergingToTest] = useState(false);
   const [mergingToBase, setMergingToBase] = useState(false);
-  const [creatingPR, setCreatingPR] = useState(false);
+  const [showPRModal, setShowPRModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [testBranchExists, setTestBranchExists] = useState<boolean | null>(null);
@@ -172,24 +172,8 @@ export const GitOperations: FC<GitOperationsProps> = ({
     }
   };
 
-  const handleCreatePR = async () => {
-    const title = window.prompt(`创建 PR/MR 标题 (${currentBranch} -> ${baseBranch}):`);
-    if (!title) return;
-
-    const body = window.prompt('PR/MR 描述 (可选):') || '';
-
-    setCreatingPR(true);
-    setError(null);
-    setSuccess(null);
-    try {
-      const prUrl = await createPullRequest(projectPath, baseBranch, title, body);
-      setSuccess(`PR/MR 创建成功: ${prUrl}`);
-      onRefresh?.();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setCreatingPR(false);
-    }
+  const handleCreatePR = () => {
+    setShowPRModal(true);
   };
 
   const handleRefresh = async () => {
@@ -268,12 +252,12 @@ export const GitOperations: FC<GitOperationsProps> = ({
             variant="secondary"
             size="sm"
             onClick={handleCreatePR}
-            disabled={creatingPR || loading || baseBranchExists === false || actionsDisabled}
+            disabled={loading || baseBranchExists === false || actionsDisabled}
             className="flex-1 text-xs"
             title={baseBranchExists === false ? `远程分支 ${baseBranch} 不存在` : ''}
           >
             <GitPullRequestIcon className="w-3 h-3 mr-1" />
-            {creatingPR ? '创建中...' : '创建 PR/MR'}
+            创建 PR/MR
           </Button>
         </div>
 
@@ -323,6 +307,15 @@ export const GitOperations: FC<GitOperationsProps> = ({
           </span>
         </div>
       )}
+
+      <CreatePRModal
+        open={showPRModal}
+        onOpenChange={setShowPRModal}
+        projectPath={projectPath}
+        baseBranch={baseBranch}
+        currentBranch={currentBranch}
+        onSuccess={onRefresh}
+      />
     </div>
   );
 };
