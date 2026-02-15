@@ -8,7 +8,9 @@ import {
   CloseIcon,
   MaximizeIcon,
   RestoreIcon,
+  MicIcon,
 } from './Icons';
+import type { VoiceStatus } from '../hooks/useVoiceInput';
 import type { TerminalTab } from '../types';
 
 interface TerminalPanelProps {
@@ -25,6 +27,11 @@ interface TerminalPanelProps {
   onCollapse: () => void;
   isFullscreen?: boolean;
   onToggleFullscreen?: () => void;
+  voiceStatus?: VoiceStatus;
+  voiceError?: string | null;
+  /** 0 = just spoke, 1 = about to auto-stop */
+  silenceProgress?: number;
+  onToggleVoice?: () => void;
 }
 
 export const TerminalPanel: FC<TerminalPanelProps> = ({
@@ -41,6 +48,10 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
   onCollapse,
   isFullscreen = false,
   onToggleFullscreen,
+  voiceStatus = 'idle',
+  voiceError,
+  silenceProgress = 0,
+  onToggleVoice,
 }) => {
   return (
     <div
@@ -109,9 +120,45 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
             })}
           </div>
         </div>
-        {/* Fullscreen & Collapse buttons */}
+        {/* Silence countdown bar — fills up as silence duration increases */}
+        {voiceStatus === 'recording' && silenceProgress > 0 && (
+          <div className="w-20 h-1 bg-slate-700/50 rounded-full mx-1 shrink-0 overflow-hidden">
+            <div
+              className="h-full bg-orange-500 rounded-full transition-[width] duration-100"
+              style={{ width: `${silenceProgress * 100}%` }}
+            />
+          </div>
+        )}
+        {/* Voice, Fullscreen & Collapse buttons */}
         {visible && (
           <div className="flex items-center mx-1">
+            {onToggleVoice && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onToggleVoice(); }}
+                className={`p-1.5 rounded transition-colors relative ${
+                  voiceStatus === 'recording'
+                    ? 'text-red-400 hover:bg-red-900/30'
+                    : voiceStatus === 'error'
+                      ? 'text-red-400 hover:bg-slate-700'
+                      : 'text-slate-500 hover:text-slate-300 hover:bg-slate-700'
+                }`}
+                title={
+                  voiceStatus === 'recording'
+                    ? '停止语音输入'
+                    : voiceError
+                      ? `语音输入错误: ${voiceError}`
+                      : '语音输入'
+                }
+                aria-label="语音输入"
+              >
+                <MicIcon className="w-3.5 h-3.5" />
+                {voiceStatus === 'recording' && (
+                  <span
+                    className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full animate-pulse bg-red-500"
+                  />
+                )}
+              </button>
+            )}
             {onToggleFullscreen && (
               <button
                 onClick={(e) => { e.stopPropagation(); onToggleFullscreen(); }}

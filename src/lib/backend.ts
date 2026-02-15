@@ -350,3 +350,4 @@ export async function checkRemoteBranchExists(
 export async function getRemoteBranches(path: string): Promise<string[]> {
   return callBackend<string[]>('get_remote_branches', { path });
 }
+

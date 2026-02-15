@@ -877,9 +877,20 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
                 {isLockedByOther && (
                   <span className="text-[10px] text-slate-500 bg-slate-700/50 px-1.5 py-0.5 rounded shrink-0">已占用</span>
                 )}
-                {wt.projects.some(p => p.has_uncommitted) && !isLockedByOther && (
-                  <WarningIcon className="w-3.5 h-3.5 text-amber-500" />
-                )}
+                {wt.projects.some(p => p.has_uncommitted) && !isLockedByOther && (() => {
+                  const uncommitted = wt.projects.filter(p => p.has_uncommitted);
+                  const tip = uncommitted.map(p => `${p.name}: ${p.uncommitted_count} 个未提交`).join('\n');
+                  return (
+                    <TooltipProvider delayDuration={300}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="shrink-0"><WarningIcon className="w-3.5 h-3.5 text-amber-500" /></span>
+                        </TooltipTrigger>
+                        <TooltipContent side="right" className="whitespace-pre">{tip}</TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  );
+                })()}
               </div>
               <div className="text-slate-500 text-xs mt-0.5 pl-6">{wt.projects.length} 个项目</div>
             </div>
@@ -930,8 +941,8 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
         />
       )}
 
-      {/* Bottom Bar */}
-      <div className="px-3 py-2.5 border-t border-slate-700/50 flex items-center justify-between">
+      {/* Bottom Bar - h-8 matches terminal tab bar height (32px) */}
+      <div className="px-3 h-8 border-t border-slate-700/50 flex items-center justify-between shrink-0">
         {isMainWin ? (
           isDev ? (
             <button

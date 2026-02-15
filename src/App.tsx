@@ -31,6 +31,7 @@ import {
   ToastProvider,
 } from "./components";
 import { useWorkspace, useTerminal, useUpdater, useShareFeature, useBrowserAuth, useWorktreeLocks, useModals } from "./hooks";
+import { useVoiceInput } from "./hooks/useVoiceInput";
 import { Input } from "@/components/ui/input";
 import { callBackend, getWindowLabel, isTauri, setWindowTitle, getShareInfo } from "./lib/backend";
 import type {
@@ -82,6 +83,15 @@ function App() {
 
   const terminal = useTerminal(selectedWorktree, workspace.mainWorkspace, workspace.currentWorkspace?.path);
   const updater = useUpdater();
+
+  // Voice input: transcribed text is written to the active terminal
+  const voice = useVoiceInput(useCallback((text: string) => {
+    const activeTab = terminal.activeTerminalTab;
+    if (activeTab) {
+      const sessionId = `pty-${activeTab.replace(/\//g, '-')}`;
+      callBackend('pty_write', { sessionId, data: text });
+    }
+  }, [terminal.activeTerminalTab]));
 
   // Custom hooks for extracted state
   const modals = useModals();
@@ -850,6 +860,10 @@ function App() {
                 terminal.handleToggleTerminal();
               }
             }}
+            voiceStatus={voice.voiceStatus}
+            voiceError={voice.voiceError}
+            silenceProgress={voice.silenceProgress}
+            onToggleVoice={voice.toggleVoice}
           />
         </div>
 

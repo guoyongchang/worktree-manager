@@ -32,6 +32,7 @@ import {
   Users,
   Eye,
   Github,
+  Mic,
 } from 'lucide-react';
 
 interface IconProps {
@@ -182,4 +183,8 @@ export const SyncIcon: FC<IconProps> = ({ className = "w-4 h-4" }) => (
 
 export const GithubIcon: FC<IconProps> = ({ className = "w-4 h-4" }) => (
   <Github className={className} />
+);
+
+export const MicIcon: FC<IconProps> = ({ className = "w-4 h-4" }) => (
+  <Mic className={className} />
 );

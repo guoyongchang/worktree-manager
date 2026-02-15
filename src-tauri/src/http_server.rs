@@ -432,7 +432,7 @@ async fn security_headers_middleware(request: Request, next: Next) -> Response {
     headers.insert("x-frame-options", HeaderValue::from_static("DENY"));
     headers.insert("x-xss-protection", HeaderValue::from_static("1; mode=block"));
     headers.insert("referrer-policy", HeaderValue::from_static("strict-origin-when-cross-origin"));
-    headers.insert("permissions-policy", HeaderValue::from_static("camera=(), microphone=(), geolocation=()"));
+    headers.insert("permissions-policy", HeaderValue::from_static("camera=(), geolocation=()"));
     response
 }
 
@@ -1206,7 +1206,7 @@ pub fn create_router() -> Router {
         .layer(axum::middleware::from_fn(auth_middleware))
         .layer(axum::middleware::from_fn(localhost_only_middleware))
         .layer(axum::middleware::from_fn(security_headers_middleware))
-        // Limit request body to 1MB to prevent DoS via oversized payloads
+        // Limit request body to 1MB
         .layer(RequestBodyLimitLayer::new(1024 * 1024))
         .fallback_service(serve_dir)
         .layer(cors)
