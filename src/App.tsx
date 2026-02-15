@@ -836,6 +836,7 @@ function App() {
               onAddProjectToWorktree={() => modals.setModal('showAddProjectToWorktreeModal', true)}
               error={workspace.error}
               onClearError={() => workspace.setError(null)}
+              onRefresh={workspace.loadData}
             />
           </div>
           )}
