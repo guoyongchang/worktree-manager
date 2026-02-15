@@ -130,13 +130,14 @@
           <a href="#worktree" class="block hover:text-blue-400 transition">4. Worktree 操作</a>
           <a href="#multi-window" class="block hover:text-blue-400 transition">5. 多窗口与工作区切换</a>
           <a href="#terminal" class="block hover:text-blue-400 transition">6. 终端功能</a>
-          <a href="#ide-integration" class="block hover:text-blue-400 transition">7. IDE 集成</a>
-          <a href="#smart-scan" class="block hover:text-blue-400 transition">8. 智能文件夹扫描</a>
-          <a href="#remote-sharing" class="block hover:text-blue-400 transition">9. 远程分享与协作</a>
-          <a href="#configuration" class="block hover:text-blue-400 transition">10. 配置详解</a>
-          <a href="#keyboard-shortcuts" class="block hover:text-blue-400 transition">11. 快捷键</a>
-          <a href="#best-practices" class="block hover:text-blue-400 transition">12. 最佳实践</a>
-          <a href="#troubleshooting" class="block hover:text-blue-400 transition">13. 常见问题</a>
+          <a href="#voice-input" class="block hover:text-blue-400 transition">7. 语音输入</a>
+          <a href="#ide-integration" class="block hover:text-blue-400 transition">8. IDE 集成</a>
+          <a href="#smart-scan" class="block hover:text-blue-400 transition">9. 智能文件夹扫描</a>
+          <a href="#remote-sharing" class="block hover:text-blue-400 transition">10. 远程分享与协作</a>
+          <a href="#configuration" class="block hover:text-blue-400 transition">11. 配置详解</a>
+          <a href="#keyboard-shortcuts" class="block hover:text-blue-400 transition">12. 快捷键</a>
+          <a href="#best-practices" class="block hover:text-blue-400 transition">13. 最佳实践</a>
+          <a href="#troubleshooting" class="block hover:text-blue-400 transition">14. 常见问题</a>
         </nav>
       </div>
 
@@ -475,10 +476,115 @@ npm run tauri build</code></pre>
           </div>
         </section>
 
-        <!-- 7. IDE Integration -->
-        <section id="ide-integration">
+        <!-- 7. Voice Input -->
+        <section id="voice-input">
           <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
             <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">7</span>
+            语音输入
+          </h2>
+
+          <div class="space-y-6">
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">功能说明</h3>
+              <p class="text-slate-300 mb-4">语音输入功能允许你对着麦克风说话，语音会自动转写为文字并注入到当前终端中。适合双手不方便打字或需要快速输入命令的场景。</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li>点击终端面板右上角的<strong>麦克风图标</strong>开始录音</li>
+                <li>说话内容会实时转写并发送到终端</li>
+                <li>说完后静默 <strong>2 秒</strong>自动停止，也可手动点击麦克风关闭</li>
+                <li>录音中麦克风图标变红并带有脉冲提示，终端标签栏显示橙色静默进度条</li>
+              </ul>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">平台支持</h3>
+              <p class="text-slate-300 mb-4">语音输入基于 Web Speech API（<code>webkitSpeechRecognition</code>），平台支持情况如下：</p>
+              <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                  <thead>
+                    <tr class="border-b border-slate-600">
+                      <th class="py-2 px-4">平台</th>
+                      <th class="py-2 px-4">支持情况</th>
+                      <th class="py-2 px-4">说明</th>
+                    </tr>
+                  </thead>
+                  <tbody class="text-slate-300">
+                    <tr class="border-b border-slate-700">
+                      <td class="py-2 px-4">&#x2705; macOS 桌面端</td>
+                      <td class="py-2 px-4"><strong class="text-green-400">支持</strong></td>
+                      <td class="py-2 px-4">WKWebView 原生支持，使用 Apple 系统语音识别，完全本地处理</td>
+                    </tr>
+                    <tr class="border-b border-slate-700">
+                      <td class="py-2 px-4">&#x274C; Windows 桌面端</td>
+                      <td class="py-2 px-4"><strong class="text-red-400">不支持</strong></td>
+                      <td class="py-2 px-4">WebView2 (Chromium) 不支持 Web Speech API</td>
+                    </tr>
+                    <tr class="border-b border-slate-700">
+                      <td class="py-2 px-4">&#x274C; Linux 桌面端</td>
+                      <td class="py-2 px-4"><strong class="text-red-400">不支持</strong></td>
+                      <td class="py-2 px-4">WebKitGTK 不支持 Web Speech API</td>
+                    </tr>
+                    <tr>
+                      <td class="py-2 px-4">&#x2705; 浏览器远程模式</td>
+                      <td class="py-2 px-4"><strong class="text-green-400">Chrome / Edge</strong></td>
+                      <td class="py-2 px-4">通过远程分享在 Chrome/Edge 浏览器中访问时可用（任何操作系统）</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="bg-blue-900/20 border border-blue-700 rounded-lg p-4 mt-4">
+                <p class="text-blue-200 text-sm"><strong>&#x1F4A1; 提示：</strong>macOS 首次使用时系统会弹出麦克风权限和语音识别权限请求，请点击"允许"。如果不小心拒绝了，前往<strong>系统设置 &rarr; 隐私与安全性 &rarr; 麦克风 / 语音识别</strong>手动开启。</p>
+              </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">语音命令</h3>
+              <p class="text-slate-300 mb-4">除了普通文字转写外，还支持以下语音命令关键词，说出即可触发对应终端操作：</p>
+              <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                  <thead>
+                    <tr class="border-b border-slate-600">
+                      <th class="py-2 px-4">语音关键词</th>
+                      <th class="py-2 px-4">终端操作</th>
+                    </tr>
+                  </thead>
+                  <tbody class="text-slate-300">
+                    <tr class="border-b border-slate-700">
+                      <td class="py-2 px-4"><code>提交</code> / <code>回车</code> / <code>enter</code> / <code>submit</code></td>
+                      <td class="py-2 px-4">按下回车 (Enter)</td>
+                    </tr>
+                    <tr class="border-b border-slate-700">
+                      <td class="py-2 px-4"><code>删除</code> / <code>backspace</code> / <code>delete</code></td>
+                      <td class="py-2 px-4">删除前一个字符 (Backspace)</td>
+                    </tr>
+                    <tr class="border-b border-slate-700">
+                      <td class="py-2 px-4"><code>清空</code> / <code>clear</code></td>
+                      <td class="py-2 px-4">中断当前输入 (Ctrl+C)</td>
+                    </tr>
+                    <tr>
+                      <td class="py-2 px-4"><code>中断</code> / <code>escape</code></td>
+                      <td class="py-2 px-4">发送 ESC 键</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="text-slate-400 text-sm mt-4">例如：说 <code>git status</code> 然后说 <code>回车</code>，等同于在终端中输入 <code>git status</code> 并按回车执行。</p>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">自动停止机制</h3>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li><strong>静默检测</strong>：开始说话后，如果连续 2 秒没有新的语音输入，自动停止录音</li>
+                <li><strong>初始等待期</strong>：刚开启录音时有 30 秒的等待期，期间不会因为还没开始说话而自动停止</li>
+                <li><strong>进度条提示</strong>：终端标签栏上方会显示橙色进度条，直观展示距离自动停止还有多久</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <!-- 8. IDE Integration -->
+        <section id="ide-integration">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">8</span>
             IDE 集成
           </h2>
 
@@ -540,10 +646,10 @@ npm run tauri build</code></pre>
           </div>
         </section>
 
-        <!-- 8. Smart Folder Scan -->
+        <!-- 9. Smart Folder Scan -->
         <section id="smart-scan">
           <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
-            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">8</span>
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">9</span>
             智能文件夹扫描
           </h2>
 
@@ -616,10 +722,10 @@ npm run tauri build</code></pre>
           </div>
         </section>
 
-        <!-- 9. Remote Sharing -->
+        <!-- 10. Remote Sharing -->
         <section id="remote-sharing">
           <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
-            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">9</span>
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">10</span>
             远程分享与协作
           </h2>
 
@@ -795,10 +901,10 @@ lsof -i :49152</code></pre>
           </div>
         </section>
 
-        <!-- 10. Configuration -->
+        <!-- 11. Configuration -->
         <section id="configuration">
           <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
-            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">10</span>
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">11</span>
             配置详解
           </h2>
 
@@ -847,10 +953,10 @@ lsof -i :49152</code></pre>
           </div>
         </section>
 
-        <!-- 11. Keyboard Shortcuts -->
+        <!-- 12. Keyboard Shortcuts -->
         <section id="keyboard-shortcuts">
           <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
-            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">11</span>
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">12</span>
             快捷键
           </h2>
 
@@ -886,10 +992,10 @@ lsof -i :49152</code></pre>
           </div>
         </section>
 
-        <!-- 12. Best Practices -->
+        <!-- 13. Best Practices -->
         <section id="best-practices">
           <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
-            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">12</span>
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">13</span>
             最佳实践
           </h2>
 
@@ -917,10 +1023,10 @@ lsof -i :49152</code></pre>
           </div>
         </section>
 
-        <!-- 13. Troubleshooting -->
+        <!-- 14. Troubleshooting -->
         <section id="troubleshooting">
           <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
-            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">13</span>
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">14</span>
             常见问题
           </h2>
 
@@ -992,7 +1098,7 @@ lsof -i :49152</code></pre>
                   <li><code>target</code> -- Rust Cargo / Java Maven 构建输出</li>
                 </ul>
                 <div class="bg-blue-900/20 border border-blue-700 rounded-lg p-3 mt-4">
-                  <p class="text-blue-200 text-sm"><strong>&#x1F4A1; 提示：</strong>也可以使用<strong>智能文件夹扫描</strong>功能自动检测，详见<a href="#smart-scan" class="text-blue-400 hover:underline">第 8 节</a>。</p>
+                  <p class="text-blue-200 text-sm"><strong>&#x1F4A1; 提示：</strong>也可以使用<strong>智能文件夹扫描</strong>功能自动检测，详见<a href="#smart-scan" class="text-blue-400 hover:underline">第 9 节</a>。</p>
                 </div>
               </div>
             </details>
