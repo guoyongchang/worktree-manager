@@ -486,53 +486,54 @@ npm run tauri build</code></pre>
           <div class="space-y-6">
             <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
               <h3 class="text-xl font-semibold mb-4">功能说明</h3>
-              <p class="text-slate-300 mb-4">语音输入功能允许你对着麦克风说话，语音会自动转写为文字并注入到当前终端中。适合双手不方便打字或需要快速输入命令的场景。</p>
+              <p class="text-slate-300 mb-4">语音输入功能基于<strong>阿里云 Dashscope Paraformer</strong> 实时语音识别，允许你对着麦克风说话，语音实时转写为文字并注入到当前终端中。适合双手不方便打字或需要快速输入命令的场景。</p>
+              <p class="text-slate-300 mb-4">支持两种操作方式：</p>
               <ul class="list-disc list-inside space-y-2 text-slate-300">
-                <li>点击终端面板右上角的<strong>麦克风图标</strong>开始录音</li>
-                <li>说话内容会实时转写并发送到终端</li>
-                <li>说完后静默 <strong>2 秒</strong>自动停止，也可手动点击麦克风关闭</li>
-                <li>录音中麦克风图标变红并带有脉冲提示，终端标签栏显示橙色静默进度条</li>
+                <li><strong>按住说话</strong>：按住 <span class="kbd">Alt</span>+<span class="kbd">V</span> 说话，松开即停止录音并转写</li>
+                <li><strong>点击切换</strong>：点击终端面板的麦克风图标进入待命状态，之后按住 <span class="kbd">Alt</span>+<span class="kbd">V</span> 说话</li>
               </ul>
             </div>
 
             <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
-              <h3 class="text-xl font-semibold mb-4">平台支持</h3>
-              <p class="text-slate-300 mb-4">语音输入基于 Web Speech API（<code>webkitSpeechRecognition</code>），平台支持情况如下：</p>
-              <div class="overflow-x-auto">
-                <table class="w-full text-left border-collapse">
-                  <thead>
-                    <tr class="border-b border-slate-600">
-                      <th class="py-2 px-4">平台</th>
-                      <th class="py-2 px-4">支持情况</th>
-                      <th class="py-2 px-4">说明</th>
-                    </tr>
-                  </thead>
-                  <tbody class="text-slate-300">
-                    <tr class="border-b border-slate-700">
-                      <td class="py-2 px-4">&#x2705; macOS 桌面端</td>
-                      <td class="py-2 px-4"><strong class="text-green-400">支持</strong></td>
-                      <td class="py-2 px-4">WKWebView 原生支持，使用 Apple 系统语音识别，完全本地处理</td>
-                    </tr>
-                    <tr class="border-b border-slate-700">
-                      <td class="py-2 px-4">&#x274C; Windows 桌面端</td>
-                      <td class="py-2 px-4"><strong class="text-red-400">不支持</strong></td>
-                      <td class="py-2 px-4">WebView2 (Chromium) 不支持 Web Speech API</td>
-                    </tr>
-                    <tr class="border-b border-slate-700">
-                      <td class="py-2 px-4">&#x274C; Linux 桌面端</td>
-                      <td class="py-2 px-4"><strong class="text-red-400">不支持</strong></td>
-                      <td class="py-2 px-4">WebKitGTK 不支持 Web Speech API</td>
-                    </tr>
-                    <tr>
-                      <td class="py-2 px-4">&#x2705; 浏览器远程模式</td>
-                      <td class="py-2 px-4"><strong class="text-green-400">Chrome / Edge</strong></td>
-                      <td class="py-2 px-4">通过远程分享在 Chrome/Edge 浏览器中访问时可用（任何操作系统）</td>
-                    </tr>
-                  </tbody>
-                </table>
+              <h3 class="text-xl font-semibold mb-4">配置 Dashscope</h3>
+              <p class="text-slate-300 mb-4">使用语音输入前，需要先配置 Dashscope API Key：</p>
+              <ol class="list-decimal list-inside space-y-3 text-slate-300">
+                <li>打开<strong>设置页面</strong>（齿轮图标）</li>
+                <li>滚动到<strong>"语音识别 (Dashscope)"</strong>区域</li>
+                <li>前往 <a href="https://dashscope.console.aliyun.com/apiKey" class="text-blue-400 hover:underline">Dashscope 控制台</a> 获取 API Key</li>
+                <li>将 API Key 粘贴到输入框中，点击<strong>"保存"</strong></li>
+                <li>点击<strong>"测试连接"</strong>按钮验证配置是否正确</li>
+              </ol>
+              <div class="bg-green-900/20 border border-green-700/50 rounded-lg p-3 mt-4">
+                <p class="text-green-300 text-sm">Dashscope Paraformer 支持中英混合识别，识别速度快、准确率高，所有桌面平台（macOS / Windows / Linux）均可使用。</p>
               </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">麦克风设置</h3>
+              <p class="text-slate-300 mb-4">在设置页的语音识别区域，可以管理麦克风设备：</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li><strong>选择麦克风</strong>：下拉框列出所有可用的音频输入设备，可选择特定麦克风（如外接麦克风、耳机麦克风等），默认使用系统默认设备</li>
+                <li><strong>麦克风测试</strong>：点击"测试"按钮，会显示实时音量条，对着麦克风说话可确认设备是否正常工作。测试 10 秒后自动停止</li>
+                <li><strong>连接测试</strong>：点击"测试连接"按钮，验证 API Key 和 WebSocket 地址是否配置正确，成功时显示绿色"连接成功"提示</li>
+              </ul>
               <div class="bg-blue-900/20 border border-blue-700 rounded-lg p-4 mt-4">
-                <p class="text-blue-200 text-sm"><strong>&#x1F4A1; 提示：</strong>macOS 首次使用时系统会弹出麦克风权限和语音识别权限请求，请点击"允许"。如果不小心拒绝了，前往<strong>系统设置 &rarr; 隐私与安全性 &rarr; 麦克风 / 语音识别</strong>手动开启。</p>
+                <p class="text-blue-200 text-sm"><strong>&#x1F4A1; 提示：</strong>首次使用时系统会弹出麦克风权限请求，请点击"允许"。如果不小心拒绝了，macOS 用户前往<strong>系统设置 &rarr; 隐私与安全性 &rarr; 麦克风</strong>手动开启。</p>
+              </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">使用流程</h3>
+              <ol class="list-decimal list-inside space-y-3 text-slate-300">
+                <li>点击终端面板右上角的<strong>麦克风图标</strong>，进入<strong>待命状态</strong>（图标变为蓝色，麦克风已打开）</li>
+                <li>按住 <span class="kbd">Alt</span>+<span class="kbd">V</span> 开始说话，此时连接 Dashscope 并实时发送音频</li>
+                <li>松开 <span class="kbd">Alt</span>+<span class="kbd">V</span>，停止录音，识别结果自动输入到终端</li>
+                <li>可以反复按住/松开进行多次语音输入，麦克风始终保持待命</li>
+                <li>再次点击麦克风图标，退出待命状态并释放麦克风</li>
+              </ol>
+              <div class="bg-slate-950 rounded-lg p-4 mt-4 font-mono text-sm">
+                <span class="text-slate-500"># 状态流转</span><br>
+                <span class="text-slate-400">空闲</span> <span class="text-slate-600">&rarr;</span> <span class="text-blue-400">[点击麦克风]</span> <span class="text-slate-600">&rarr;</span> <span class="text-green-400">待命</span> <span class="text-slate-600">&rarr;</span> <span class="text-blue-400">[按住 Alt+V]</span> <span class="text-slate-600">&rarr;</span> <span class="text-red-400">录音中</span> <span class="text-slate-600">&rarr;</span> <span class="text-blue-400">[松开]</span> <span class="text-slate-600">&rarr;</span> <span class="text-green-400">待命</span>
               </div>
             </div>
 
@@ -567,16 +568,7 @@ npm run tauri build</code></pre>
                   </tbody>
                 </table>
               </div>
-              <p class="text-slate-400 text-sm mt-4">例如：说 <code>git status</code> 然后说 <code>回车</code>，等同于在终端中输入 <code>git status</code> 并按回车执行。</p>
-            </div>
-
-            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
-              <h3 class="text-xl font-semibold mb-4">自动停止机制</h3>
-              <ul class="list-disc list-inside space-y-2 text-slate-300">
-                <li><strong>静默检测</strong>：开始说话后，如果连续 2 秒没有新的语音输入，自动停止录音</li>
-                <li><strong>初始等待期</strong>：刚开启录音时有 30 秒的等待期，期间不会因为还没开始说话而自动停止</li>
-                <li><strong>进度条提示</strong>：终端标签栏上方会显示橙色进度条，直观展示距离自动停止还有多久</li>
-              </ul>
+              <p class="text-slate-400 text-sm mt-4">例如：按住 Alt+V 说 <code>git status</code>，松开后再按住说 <code>回车</code>，等同于在终端中输入 <code>git status</code> 并按回车执行。</p>
             </div>
           </div>
         </section>
@@ -980,6 +972,11 @@ lsof -i :49152</code></pre>
                     <td class="py-3 px-4"><span class="kbd">Escape</span></td>
                     <td class="py-3 px-4">关闭下拉菜单 / 弹窗</td>
                     <td class="py-3 px-4">任意菜单或弹窗打开时</td>
+                  </tr>
+                  <tr class="border-b border-slate-700">
+                    <td class="py-3 px-4"><span class="kbd">Alt</span>+<span class="kbd">V</span>（按住）</td>
+                    <td class="py-3 px-4">按住说话，松开停止录音</td>
+                    <td class="py-3 px-4">麦克风待命状态下</td>
                   </tr>
                   <tr>
                     <td class="py-3 px-4">右键点击</td>
