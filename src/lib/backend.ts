@@ -351,3 +351,39 @@ export async function getRemoteBranches(path: string): Promise<string[]> {
   return callBackend<string[]>('get_remote_branches', { path });
 }
 
+// ---------------------------------------------------------------------------
+// Voice Recognition API (Dashscope)
+// ---------------------------------------------------------------------------
+
+export async function getDashscopeApiKey(): Promise<string | null> {
+  return callBackend<string | null>('get_dashscope_api_key');
+}
+
+export async function setDashscopeApiKey(key: string): Promise<void> {
+  return callBackend<void>('set_dashscope_api_key', { key });
+}
+
+export async function getDashscopeBaseUrl(): Promise<string | null> {
+  return callBackend<string | null>('get_dashscope_base_url');
+}
+
+export async function setDashscopeBaseUrl(url: string): Promise<void> {
+  return callBackend<void>('set_dashscope_base_url', { url });
+}
+
+export async function voiceStart(sampleRate?: number): Promise<void> {
+  return callBackend<void>('voice_start', { sampleRate });
+}
+
+export async function voiceSendAudio(data: string): Promise<void> {
+  return callBackend<void>('voice_send_audio', { data });
+}
+
+export async function voiceStop(): Promise<void> {
+  return callBackend<void>('voice_stop');
+}
+
+export async function voiceIsActive(): Promise<boolean> {
+  return callBackend<boolean>('voice_is_active');
+}
+

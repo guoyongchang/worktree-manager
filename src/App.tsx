@@ -863,8 +863,9 @@ function App() {
             }}
             voiceStatus={voice.voiceStatus}
             voiceError={voice.voiceError}
-            silenceProgress={voice.silenceProgress}
-            onToggleVoice={voice.toggleVoice}
+            isKeyHeld={voice.isKeyHeld}
+            analyserNode={voice.analyserNode}
+            onToggleVoice={isTauri() ? voice.toggleVoice : undefined}
           />
         </div>
 

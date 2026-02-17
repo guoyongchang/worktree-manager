@@ -1,246 +1,344 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { voiceStart, voiceSendAudio, voiceStop, getDashscopeApiKey } from '../lib/backend';
 
-export type VoiceStatus = 'idle' | 'recording' | 'error';
+/**
+ * 状态机：
+ *   idle    → 未开启，麦克风未获取
+ *   ready   → 麦克风已打开，等待 Alt+V 触发录音
+ *   recording → 按住 Alt+V，正在向 Dashscope 发送音频
+ *   error   → 出错
+ *
+ * 流程：
+ *   点击麦克风按钮: idle → ready（获取麦克风）  /  ready → idle（释放麦克风）
+ *   按下 Alt+V:     ready → recording（连接 Dashscope，开始发送音频）
+ *   松开 Alt+V:     recording → ready（停止 Dashscope，麦克风保持）
+ */
+export type VoiceStatus = 'idle' | 'ready' | 'recording' | 'error';
 
 export interface UseVoiceInputReturn {
   voiceStatus: VoiceStatus;
   voiceError: string | null;
-  /** 0 = just spoke or in grace period, 1 = about to auto-stop */
-  silenceProgress: number;
+  isKeyHeld: boolean;
+  analyserNode: AnalyserNode | null;
   toggleVoice: () => void;
 }
 
-/**
- * Voice command keywords → terminal control sequences.
- * We normalize before matching: lowercase + strip trailing punctuation.
- */
 const VOICE_COMMANDS: Record<string, string> = {
-  // 删除 → Backspace
   '删除': '\x7F',
   'backspace': '\x7F',
   'delete': '\x7F',
-  // 清空 → Ctrl+C (interrupt current input)
   '清空': '\x03',
   'clear': '\x03',
-  // 中断 → ESC
   '中断': '\x1B',
   'escape': '\x1B',
-  // 提交 → Enter
   '提交': '\r',
   '回车': '\r',
   'enter': '\r',
   'submit': '\r',
 };
 
-/** Normalize transcribed text for command matching */
 function normalizeForMatch(text: string): string {
-  return text
-    .trim()
-    .toLowerCase()
-    .replace(/[。，、！？.!?,\s]+$/g, ''); // strip trailing punctuation/whitespace
+  return text.trim().toLowerCase().replace(/[。，、！？.!?,\s]+$/g, '');
 }
 
-/**
- * Process transcribed text: if it matches a voice command exactly,
- * return the control sequence; otherwise return the original text as-is.
- */
 function processTranscription(text: string): string {
   const normalized = normalizeForMatch(text);
-  const command = VOICE_COMMANDS[normalized];
-  if (command) return command;
-  return text;
+  return VOICE_COMMANDS[normalized] ?? text;
 }
 
-// Type declarations for webkitSpeechRecognition (available in WKWebView / Chrome)
-interface SpeechRecognitionEvent extends Event {
-  results: SpeechRecognitionResultList;
-  resultIndex: number;
+function float32ToBase64Pcm(samples: Float32Array): string {
+  const buffer = new ArrayBuffer(samples.length * 2);
+  const view = new DataView(buffer);
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  }
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
 }
-
-interface SpeechRecognitionErrorEvent extends Event {
-  error: string;
-  message?: string;
-}
-
-type SpeechRecognitionCtor = new () => SpeechRecognitionInstance;
-
-interface SpeechRecognitionInstance extends EventTarget {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  start(): void;
-  stop(): void;
-  abort(): void;
-  onresult: ((ev: SpeechRecognitionEvent) => void) | null;
-  onend: (() => void) | null;
-  onerror: ((ev: SpeechRecognitionErrorEvent) => void) | null;
-}
-
-function getSpeechRecognition(): SpeechRecognitionCtor | null {
-  const w = window as unknown as Record<string, unknown>;
-  return (w.webkitSpeechRecognition ?? w.SpeechRecognition ?? null) as SpeechRecognitionCtor | null;
-}
-
-// ---------------------------------------------------------------------------
-// Silence detection via onresult timing (no getUserMedia needed)
-// ---------------------------------------------------------------------------
-
-/** How long (ms) silence must persist before auto-stopping. */
-const SILENCE_TIMEOUT_MS = 2000;
-
-/** Grace period (ms) after starting — don't auto-stop before user begins speaking. */
-const INITIAL_GRACE_MS = 30000;
-
-/** Interval (ms) for updating silenceProgress state. */
-const TICK_INTERVAL_MS = 100;
 
 export function useVoiceInput(
   onTranscribed: (text: string) => void,
 ): UseVoiceInputReturn {
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>('idle');
   const [voiceError, setVoiceError] = useState<string | null>(null);
-  const [silenceProgress, setSilenceProgress] = useState(0);
+  const [isKeyHeld, setIsKeyHeld] = useState(false);
+  const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
 
-  // SpeechRecognition
-  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
-  const intentRef = useRef(false);
+  // 音频管道（在 ready 和 recording 期间保持）
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const sampleRateRef = useRef(16000);
 
-  // Silence tracking
-  const lastResultRef = useRef<number>(0);
-  const startTimeRef = useRef<number>(0);
-  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  /** Whether the user has spoken at least once (got a result). */
-  const hasSpokenRef = useRef(false);
+  // 控制是否发送音频数据的开关
+  const isStreamingRef = useRef(false);
 
-  const cleanupTick = useCallback(() => {
-    if (tickRef.current) {
-      clearInterval(tickRef.current);
-      tickRef.current = null;
+  // 防重入
+  const busyRef = useRef(false);
+
+  // 用 ref 追踪状态，避免 keyboard handler 闭包过期
+  const voiceStatusRef = useRef(voiceStatus);
+  voiceStatusRef.current = voiceStatus;
+
+  // ---- 释放全部音频资源 ----
+  const cleanupAudio = useCallback(() => {
+    isStreamingRef.current = false;
+    if (processorRef.current) {
+      processorRef.current.disconnect();
+      processorRef.current.onaudioprocess = null;
+      processorRef.current = null;
     }
-    setSilenceProgress(0);
+    if (analyserRef.current) {
+      analyserRef.current.disconnect();
+      analyserRef.current = null;
+    }
+    setAnalyserNode(null);
+    if (sourceRef.current) {
+      sourceRef.current.disconnect();
+      sourceRef.current = null;
+    }
+    if (audioCtxRef.current) {
+      audioCtxRef.current.close().catch(() => {});
+      audioCtxRef.current = null;
+    }
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(t => t.stop());
+      mediaStreamRef.current = null;
+    }
   }, []);
 
-  const stopRecording = useCallback(() => {
-    intentRef.current = false;
-    cleanupTick();
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-      recognitionRef.current = null;
-    }
-    setVoiceStatus('idle');
-  }, [cleanupTick]);
-
-  const startRecording = useCallback(() => {
+  // ---- 进入 ready 状态：获取麦克风，建立音频管道 ----
+  const enterReady = useCallback(async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
     setVoiceError(null);
-    setSilenceProgress(0);
-
-    const SpeechRecognition = getSpeechRecognition();
-    if (!SpeechRecognition) {
-      setVoiceError('当前环境不支持语音识别');
-      setVoiceStatus('error');
-      return;
-    }
-
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    // interimResults = true gives us frequent onresult signals while user is speaking
-    recognition.interimResults = true;
-    recognition.lang = 'zh-CN';
-
-    const now = Date.now();
-    lastResultRef.current = now;
-    startTimeRef.current = now;
-    hasSpokenRef.current = false;
-
-    recognition.onresult = (ev: SpeechRecognitionEvent) => {
-      lastResultRef.current = Date.now();
-      hasSpokenRef.current = true;
-      setSilenceProgress(0);
-
-      for (let i = ev.resultIndex; i < ev.results.length; i++) {
-        const result = ev.results[i];
-        if (result.isFinal) {
-          const text = result[0].transcript;
-          if (text.trim()) {
-            const processed = processTranscription(text);
-            onTranscribed(processed);
-          }
-        }
-      }
-    };
-
-    recognition.onerror = (ev: SpeechRecognitionErrorEvent) => {
-      if (ev.error === 'no-speech' || ev.error === 'aborted') return;
-      console.error('[voice] SpeechRecognition error:', ev.error);
-      const messages: Record<string, string> = {
-        'not-allowed': '麦克风权限被拒绝，请在系统设置中允许',
-        'audio-capture': '未检测到麦克风设备',
-        'network': '语音识别网络错误',
-      };
-      setVoiceError(messages[ev.error] || `语音识别错误: ${ev.error}`);
-      setVoiceStatus('error');
-      intentRef.current = false;
-      cleanupTick();
-      recognitionRef.current = null;
-    };
-
-    recognition.onend = () => {
-      if (intentRef.current) {
-        try {
-          recognition.start();
-        } catch {
-          // Already started or other error — ignore
-        }
-      } else {
-        recognitionRef.current = null;
-        setVoiceStatus('idle');
-      }
-    };
-
-    recognitionRef.current = recognition;
-    intentRef.current = true;
 
     try {
-      recognition.start();
-      setVoiceStatus('recording');
-    } catch (e) {
-      setVoiceError(`语音识别启动失败: ${e}`);
-      setVoiceStatus('error');
-      intentRef.current = false;
-      recognitionRef.current = null;
-      return;
-    }
-
-    // Tick loop — compute silenceProgress and auto-stop
-    tickRef.current = setInterval(() => {
-      if (!intentRef.current) return;
-
-      const elapsed = Date.now() - startTimeRef.current;
-
-      // During grace period, only auto-stop if user has spoken then gone silent
-      if (elapsed < INITIAL_GRACE_MS && !hasSpokenRef.current) {
-        setSilenceProgress(0);
+      // Check API Key before acquiring mic
+      const apiKey = await getDashscopeApiKey();
+      if (!apiKey || !apiKey.trim()) {
+        setVoiceError('请先在设置中配置 Dashscope API Key');
+        setVoiceStatus('error');
+        busyRef.current = false;
         return;
       }
 
-      const silenceMs = Date.now() - lastResultRef.current;
-      const progress = Math.min(silenceMs / SILENCE_TIMEOUT_MS, 1);
-      setSilenceProgress(progress);
+      const preferredDeviceId = localStorage.getItem('preferred-mic-device-id');
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          sampleRate: 16000,
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          ...(preferredDeviceId ? { deviceId: { exact: preferredDeviceId } } : {}),
+        },
+      });
+      mediaStreamRef.current = stream;
 
-      if (progress >= 1) {
-        console.log(`[voice] Auto-stop: ${silenceMs}ms silence`);
-        stopRecording();
+      const audioCtx = new AudioContext({ sampleRate: 16000 });
+      audioCtxRef.current = audioCtx;
+      sampleRateRef.current = audioCtx.sampleRate;
+
+      const source = audioCtx.createMediaStreamSource(stream);
+      sourceRef.current = source;
+
+      // AnalyserNode 用于 UI 波形绘制
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      analyserRef.current = analyser;
+      setAnalyserNode(analyser);
+
+      const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+      processorRef.current = processor;
+
+      // onaudioprocess 始终运行，但只在 isStreamingRef.current === true 时发送数据
+      processor.onaudioprocess = (e) => {
+        if (!isStreamingRef.current) return;
+        const inputData = e.inputBuffer.getChannelData(0);
+        const base64Data = float32ToBase64Pcm(inputData);
+        voiceSendAudio(base64Data).catch(() => {});
+      };
+
+      // source → analyser → processor → destination
+      source.connect(analyser);
+      analyser.connect(processor);
+      processor.connect(audioCtx.destination);
+
+      setVoiceStatus('ready');
+    } catch (e) {
+      cleanupAudio();
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes('Permission') || msg.includes('NotAllowed')) {
+        setVoiceError('麦克风权限被拒绝，请在系统设置中允许');
+      } else if (msg.includes('NotFound') || msg.includes('audio-capture')) {
+        setVoiceError('未检测到麦克风设备');
+      } else {
+        setVoiceError(msg);
       }
-    }, TICK_INTERVAL_MS);
-  }, [onTranscribed, cleanupTick, stopRecording]);
-
-  const toggleVoice = useCallback(() => {
-    if (voiceStatus === 'recording') {
-      stopRecording();
-    } else {
-      startRecording();
+      setVoiceStatus('error');
+    } finally {
+      busyRef.current = false;
     }
-  }, [voiceStatus, startRecording, stopRecording]);
+  }, [cleanupAudio]);
 
-  return { voiceStatus, voiceError, silenceProgress, toggleVoice };
+  // ---- 退出 ready 状态：释放麦克风 ----
+  const exitReady = useCallback(async () => {
+    isStreamingRef.current = false;
+    await voiceStop().catch(() => {});
+    cleanupAudio();
+    setVoiceStatus('idle');
+    setIsKeyHeld(false);
+  }, [cleanupAudio]);
+
+  // ---- 开始录音：连接 Dashscope，打开音频发送开关 ----
+  const startStreaming = useCallback(async () => {
+    if (busyRef.current) return;
+    if (voiceStatusRef.current !== 'ready') return;
+    busyRef.current = true;
+
+    try {
+      await voiceStart(sampleRateRef.current);
+      isStreamingRef.current = true;
+      setVoiceStatus('recording');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setVoiceError(msg);
+      // 连接 Dashscope 失败不影响 ready 状态
+      setVoiceStatus('ready');
+    } finally {
+      busyRef.current = false;
+    }
+  }, []);
+
+  // ---- 停止录音：关闭音频发送，断开 Dashscope，回到 ready ----
+  const stopStreaming = useCallback(async () => {
+    isStreamingRef.current = false;
+    await voiceStop().catch(() => {});
+    // voice-stopped 事件会触发状态更新，但这里也主动设置以保证 UI 响应
+    if (voiceStatusRef.current === 'recording') {
+      setVoiceStatus('ready');
+    }
+  }, []);
+
+  // ---- toggleVoice：麦克风按钮点击，切换 idle ↔ ready ----
+  const toggleVoice = useCallback(() => {
+    const status = voiceStatusRef.current;
+    if (status === 'idle' || status === 'error') {
+      enterReady();
+    } else if (status === 'ready') {
+      exitReady();
+    } else if (status === 'recording') {
+      // 录音中点击按钮 → 直接关闭一切
+      exitReady();
+    }
+  }, [enterReady, exitReady]);
+
+  // ---- 监听 Tauri 后端事件 ----
+  useEffect(() => {
+    let unlisten: Array<() => void> = [];
+
+    (async () => {
+      try {
+        const { listen } = await import('@tauri-apps/api/event');
+
+        const u1 = await listen<{ text: string; is_final: boolean }>('voice-result', (event) => {
+          if (event.payload.is_final && event.payload.text.trim()) {
+            const processed = processTranscription(event.payload.text);
+            onTranscribed(processed);
+          }
+        });
+        unlisten.push(u1);
+
+        const u2 = await listen('voice-stopped', () => {
+          isStreamingRef.current = false;
+          // 回到 ready（如果麦克风还在），否则 idle
+          if (mediaStreamRef.current) {
+            setVoiceStatus('ready');
+          } else {
+            setVoiceStatus('idle');
+          }
+          setIsKeyHeld(false);
+        });
+        unlisten.push(u2);
+
+        const u3 = await listen<{ message: string }>('voice-error', (event) => {
+          isStreamingRef.current = false;
+          setVoiceError(event.payload.message);
+          // 错误时回到 ready（保持麦克风），让用户可以重试
+          if (mediaStreamRef.current) {
+            setVoiceStatus('ready');
+          } else {
+            setVoiceStatus('error');
+          }
+        });
+        unlisten.push(u3);
+      } catch {
+        // Not in Tauri environment
+      }
+    })();
+
+    return () => { unlisten.forEach(fn => fn()); };
+  }, [onTranscribed]);
+
+  // ---- Alt+V 按住说话 ----
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Alt/Option + V（用 e.code 检测物理按键，避免 macOS Option 产生 √ 等字符）
+      if (e.altKey && e.code === 'KeyV' && !e.repeat) {
+        e.preventDefault();
+        setIsKeyHeld(true);
+        if (voiceStatusRef.current === 'ready') {
+          startStreaming();
+        }
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Alt' || e.code === 'KeyV') {
+        setIsKeyHeld(prev => {
+          if (prev && voiceStatusRef.current === 'recording') {
+            stopStreaming();
+          }
+          return false;
+        });
+      }
+    };
+
+    const handleBlur = () => {
+      setIsKeyHeld(prev => {
+        if (prev && voiceStatusRef.current === 'recording') {
+          stopStreaming();
+        }
+        return false;
+      });
+    };
+
+    // capture: true — 在事件到达 xterm textarea 之前截获
+    window.addEventListener('keydown', handleKeyDown, true);
+    window.addEventListener('keyup', handleKeyUp, true);
+    window.addEventListener('blur', handleBlur);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+      window.removeEventListener('keyup', handleKeyUp, true);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, [startStreaming, stopStreaming]);
+
+  // ---- 组件卸载时清理 ----
+  useEffect(() => {
+    return () => {
+      isStreamingRef.current = false;
+      cleanupAudio();
+      voiceStop().catch(() => {});
+    };
+  }, [cleanupAudio]);
+
+  return { voiceStatus, voiceError, isKeyHeld, analyserNode, toggleVoice };
 }
