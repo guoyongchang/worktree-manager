@@ -10,6 +10,7 @@ export interface UseTerminalReturn {
   terminalHeight: number;
   isResizing: boolean;
   activatedTerminals: Set<string>;
+  mountedTerminals: Set<string>;
   activeTerminalTab: string | null;
   terminalTabs: TerminalTab[];
   setTerminalVisible: (visible: boolean) => void;
@@ -20,6 +21,7 @@ export interface UseTerminalReturn {
   handleDuplicateTerminal: (path: string) => void;
   handleToggleTerminal: () => void;
   resetActiveTab: () => void;
+  cleanupTerminalsForPath: (pathPrefix: string) => void;
 }
 
 export function useTerminal(
@@ -32,10 +34,14 @@ export function useTerminal(
   const [isResizing, setIsResizing] = useState(false);
   const [activatedTerminals, setActivatedTerminals] = useState<Set<string>>(new Set());
   const [activeTerminalTab, setActiveTerminalTab] = useState<string | null>(null);
+  // Global set of all ever-activated terminals — controls Terminal component mounting.
+  // Only shrinks when a tab is explicitly closed. Survives worktree switches so PTY sessions stay alive.
+  const [mountedTerminals, setMountedTerminals] = useState<Set<string>>(new Set());
 
-  // Remember active tab & activated terminals per workspace root, so switching back restores them
+  // Remember active tab, activated terminals & visibility per workspace root, so switching back restores them
   const activeTabPerWorkspace = useRef<Map<string, string>>(new Map());
   const activatedPerWorkspace = useRef<Map<string, Set<string>>>(new Map());
+  const visiblePerWorkspace = useRef<Map<string, boolean>>(new Map());
   const prevWorkspaceRoot = useRef<string>('');
 
   // Prevent broadcast loops: track if receiving external updates
@@ -55,6 +61,18 @@ export function useTerminal(
   // Get workspace path for broadcasting (needed for both desktop and web)
   const workspacePath = workspacePathParam || '';
   const worktreeName = selectedWorktree?.name || '';
+
+  // Accumulate new activatedTerminals into mountedTerminals (never auto-remove)
+  useEffect(() => {
+    setMountedTerminals(prev => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const t of activatedTerminals) {
+        if (!next.has(t)) { next.add(t); changed = true; }
+      }
+      return changed ? next : prev;
+    });
+  }, [activatedTerminals]);
 
   // Refs for current state — allows stable callbacks without state dependencies
   const activatedTerminalsRef = useRef(activatedTerminals);
@@ -107,14 +125,17 @@ export function useTerminal(
         activeTabPerWorkspace.current.set(prev, currentTab);
       }
       activatedPerWorkspace.current.set(prev, new Set(activatedTerminalsRef.current));
+      visiblePerWorkspace.current.set(prev, terminalVisibleRef.current);
     }
 
     if (currentWorkspaceRoot && currentWorkspaceRoot !== prev) {
       // Restore state for the new workspace (or reset to empty)
       const savedActivated = activatedPerWorkspace.current.get(currentWorkspaceRoot);
       const savedTab = activeTabPerWorkspace.current.get(currentWorkspaceRoot);
+      const savedVisible = visiblePerWorkspace.current.get(currentWorkspaceRoot);
 
       setActivatedTerminals(savedActivated || new Set());
+      setTerminalVisible(savedVisible ?? false);
       if (savedTab && savedActivated?.has(savedTab)) {
         setActiveTerminalTab(savedTab);
       } else {
@@ -334,6 +355,12 @@ export function useTerminal(
       next.delete(path);
       return next;
     });
+    // Remove from mountedTerminals so the Terminal component unmounts and PTY is closed
+    setMountedTerminals(prev => {
+      const next = new Set(prev);
+      next.delete(path);
+      return next;
+    });
     if (activeTerminalTab === path) {
       const remaining = Array.from(activatedTerminals).filter(p => p !== path);
       setActiveTerminalTab(remaining.length > 0 ? remaining[0] : null);
@@ -364,11 +391,37 @@ export function useTerminal(
     // This is kept for API compatibility
   }, []);
 
+  // Remove all terminals matching a path prefix (e.g. when archiving a worktree).
+  // This unmounts Terminal components → triggers pty_close on the frontend side.
+  const cleanupTerminalsForPath = useCallback((pathPrefix: string) => {
+    const matches = (p: string) => p.startsWith(pathPrefix) || p.split('#')[0].startsWith(pathPrefix);
+    setMountedTerminals(prev => {
+      const next = new Set(prev);
+      for (const p of prev) if (matches(p)) next.delete(p);
+      return next.size === prev.size ? prev : next;
+    });
+    setActivatedTerminals(prev => {
+      const next = new Set(prev);
+      for (const p of prev) if (matches(p)) next.delete(p);
+      return next.size === prev.size ? prev : next;
+    });
+    // Also clean saved per-workspace state
+    for (const [key, set] of activatedPerWorkspace.current) {
+      if (matches(key)) {
+        activatedPerWorkspace.current.delete(key);
+        activeTabPerWorkspace.current.delete(key);
+      } else {
+        for (const p of set) if (matches(p)) set.delete(p);
+      }
+    }
+  }, []);
+
   return {
     terminalVisible,
     terminalHeight,
     isResizing,
     activatedTerminals,
+    mountedTerminals,
     activeTerminalTab,
     terminalTabs,
     setTerminalVisible,
@@ -379,5 +432,6 @@ export function useTerminal(
     handleDuplicateTerminal,
     handleToggleTerminal,
     resetActiveTab,
+    cleanupTerminalsForPath,
   };
 }

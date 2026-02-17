@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Dialog,
   DialogContent,
@@ -92,6 +92,19 @@ function App() {
       callBackend('pty_write', { sessionId, data: text });
     }
   }, [terminal.activeTerminalTab]));
+
+  // Auto-close voice input when switching worktree or terminal tab
+  const prevWorktreeRef = useRef(selectedWorktree);
+  const prevTabRef = useRef(terminal.activeTerminalTab);
+  useEffect(() => {
+    const wtChanged = prevWorktreeRef.current !== selectedWorktree;
+    const tabChanged = prevTabRef.current !== terminal.activeTerminalTab;
+    prevWorktreeRef.current = selectedWorktree;
+    prevTabRef.current = terminal.activeTerminalTab;
+    if (wtChanged || tabChanged) {
+      voice.stopVoice();
+    }
+  }, [selectedWorktree, terminal.activeTerminalTab, voice.stopVoice]);
 
   // Custom hooks for extracted state
   const modals = useModals();
@@ -485,6 +498,9 @@ function App() {
     if (!archiveModal) return;
     setArchiving(true);
     try {
+      // Clean up mounted terminals before archiving (backend closes PTY, frontend must unmount)
+      const wtPath = archiveModal.worktree.path;
+      if (wtPath) terminal.cleanupTerminalsForPath(wtPath);
       await workspace.archiveWorktree(archiveModal.worktree.name);
       if (selectedWorktree?.name === archiveModal.worktree.name) {
         setSelectedWorktree(null);
@@ -495,7 +511,7 @@ function App() {
     } finally {
       setArchiving(false);
     }
-  }, [workspace, archiveModal, selectedWorktree]);
+  }, [workspace, archiveModal, selectedWorktree, terminal]);
 
   const handleDeleteArchivedWorktree = useCallback(async () => {
     if (!deleteConfirmWorktree) return;
@@ -847,6 +863,7 @@ function App() {
             onStartResize={() => terminal.setIsResizing(true)}
             terminalTabs={terminal.terminalTabs}
             activatedTerminals={terminal.activatedTerminals}
+            mountedTerminals={terminal.mountedTerminals}
             activeTerminalTab={terminal.activeTerminalTab}
             onTabClick={terminal.handleTerminalTabClick}
             onTabContextMenu={handleTerminalTabContextMenu}
