@@ -5,3 +5,4 @@ pub(crate) mod pty;
 pub(crate) mod system;
 pub(crate) mod window;
 pub(crate) mod sharing;
+pub(crate) mod voice;

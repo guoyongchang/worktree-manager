@@ -53,6 +53,7 @@ use commands::pty::*;
 use commands::system::*;
 use commands::window::*;
 use commands::sharing::*;
+use commands::voice::*;
 
 // ==================== Tauri 入口 ====================
 
@@ -148,6 +149,15 @@ pub fn run() {
             get_last_share_password,
             start_ngrok_tunnel,
             stop_ngrok_tunnel,
+            // 语音识别 (Dashscope)
+            get_dashscope_api_key,
+            set_dashscope_api_key,
+            get_dashscope_base_url,
+            set_dashscope_base_url,
+            voice_start,
+            voice_send_audio,
+            voice_stop,
+            voice_is_active,
             // DevTools
             open_devtools,
         ])

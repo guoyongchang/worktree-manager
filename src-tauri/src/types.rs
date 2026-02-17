@@ -107,6 +107,10 @@ pub struct GlobalConfig {
     pub last_share_port: Option<u16>,  // 上次使用的分享端口
     #[serde(default)]
     pub last_share_password: Option<String>,  // 上次使用的分享密码
+    #[serde(default)]
+    pub dashscope_api_key: Option<String>,
+    #[serde(default)]
+    pub dashscope_base_url: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -123,6 +127,8 @@ impl Default for GlobalConfig {
             ngrok_token: None,
             last_share_port: None,
             last_share_password: None,
+            dashscope_api_key: None,
+            dashscope_base_url: None,
         }
     }
 }

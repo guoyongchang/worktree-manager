@@ -93,6 +93,12 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible 
 
     term.open(terminalRef.current);
 
+    // 让 Alt/Option+V 穿透 xterm，冒泡到 window 供语音输入使用
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.altKey && e.code === 'KeyV') return false;
+      return true;
+    });
+
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
 

@@ -1,4 +1,4 @@
-import type { FC } from 'react';
+import { useRef, useState, useEffect, type FC } from 'react';
 import { Terminal } from './Terminal';
 import {
   FolderIcon,
@@ -12,6 +12,84 @@ import {
 } from './Icons';
 import type { VoiceStatus } from '../hooks/useVoiceInput';
 import type { TerminalTab } from '../types';
+
+// ---- 音频波形组件 ----
+// 颜色取自 Tailwind red-400 (248,113,113)，与录音按钮/圆点一致
+const BAR_COLOR_R = 248, BAR_COLOR_G = 113, BAR_COLOR_B = 113;
+
+const AudioWaveform: FC<{ analyserNode: AnalyserNode }> = ({ analyserNode }) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const container = containerRef.current;
+    if (!canvas || !container) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const bufferLength = analyserNode.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+
+    const resize = () => {
+      const rect = container.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    resize();
+
+    const observer = new ResizeObserver(resize);
+    observer.observe(container);
+
+    let animId: number;
+    const draw = () => {
+      animId = requestAnimationFrame(draw);
+      analyserNode.getByteFrequencyData(dataArray);
+
+      const rect = container.getBoundingClientRect();
+      const w = rect.width;
+      const h = rect.height;
+      ctx.clearRect(0, 0, w, h);
+
+      const barCount = 48;
+      const barWidth = 3;
+      const gap = 2;
+      const totalWidth = barCount * (barWidth + gap) - gap;
+      const startX = (w - totalWidth) / 2;
+      const centerY = h / 2;
+
+      for (let i = 0; i < barCount; i++) {
+        const dataIndex = Math.floor(i * bufferLength / barCount);
+        const value = dataArray[dataIndex] / 255;
+        const barHeight = Math.max(2, value * centerY * 0.85);
+        const x = startX + i * (barWidth + gap);
+        const alpha = 0.35 + value * 0.65;
+
+        ctx.fillStyle = `rgba(${BAR_COLOR_R},${BAR_COLOR_G},${BAR_COLOR_B},${alpha})`;
+        ctx.beginPath();
+        ctx.roundRect(x, centerY - barHeight, barWidth, barHeight * 2, barWidth / 2);
+        ctx.fill();
+      }
+    };
+
+    draw();
+    return () => {
+      cancelAnimationFrame(animId);
+      observer.disconnect();
+    };
+  }, [analyserNode]);
+
+  return (
+    <div ref={containerRef} className="w-64 h-16">
+      <canvas ref={canvasRef} className="w-full h-full" />
+    </div>
+  );
+};
+
+// ---- TerminalPanel ----
 
 interface TerminalPanelProps {
   visible: boolean;
@@ -29,8 +107,8 @@ interface TerminalPanelProps {
   onToggleFullscreen?: () => void;
   voiceStatus?: VoiceStatus;
   voiceError?: string | null;
-  /** 0 = just spoke, 1 = about to auto-stop */
-  silenceProgress?: number;
+  isKeyHeld?: boolean;
+  analyserNode?: AnalyserNode | null;
   onToggleVoice?: () => void;
 }
 
@@ -50,9 +128,23 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
   onToggleFullscreen,
   voiceStatus = 'idle',
   voiceError,
-  silenceProgress = 0,
+  isKeyHeld = false,
+  analyserNode,
   onToggleVoice,
 }) => {
+  const [showError, setShowError] = useState<string | null>(null);
+  const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Show voice errors as a visible toast
+  useEffect(() => {
+    if (voiceError) {
+      setShowError(voiceError);
+      if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+      errorTimerRef.current = setTimeout(() => setShowError(null), 4000);
+    }
+    return () => { if (errorTimerRef.current) clearTimeout(errorTimerRef.current); };
+  }, [voiceError]);
+
   return (
     <div
       className={`border-t border-slate-700 flex flex-col shrink-0 ${isFullscreen ? 'fixed inset-0 z-50 border-t-0 bg-slate-900' : ''}`}
@@ -120,15 +212,6 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
             })}
           </div>
         </div>
-        {/* Silence countdown bar — fills up as silence duration increases */}
-        {voiceStatus === 'recording' && silenceProgress > 0 && (
-          <div className="w-20 h-1 bg-slate-700/50 rounded-full mx-1 shrink-0 overflow-hidden">
-            <div
-              className="h-full bg-orange-500 rounded-full transition-[width] duration-100"
-              style={{ width: `${silenceProgress * 100}%` }}
-            />
-          </div>
-        )}
         {/* Voice, Fullscreen & Collapse buttons */}
         {visible && (
           <div className="flex items-center mx-1">
@@ -138,24 +221,29 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
                 className={`p-1.5 rounded transition-colors relative ${
                   voiceStatus === 'recording'
                     ? 'text-red-400 hover:bg-red-900/30'
-                    : voiceStatus === 'error'
-                      ? 'text-red-400 hover:bg-slate-700'
-                      : 'text-slate-500 hover:text-slate-300 hover:bg-slate-700'
+                    : voiceStatus === 'ready'
+                      ? 'text-green-400 hover:bg-green-900/30'
+                      : voiceStatus === 'error'
+                        ? 'text-red-400 hover:bg-slate-700'
+                        : 'text-slate-500 hover:text-slate-300 hover:bg-slate-700'
                 }`}
                 title={
                   voiceStatus === 'recording'
-                    ? '停止语音输入'
-                    : voiceError
-                      ? `语音输入错误: ${voiceError}`
-                      : '语音输入'
+                    ? isKeyHeld ? '松开 Alt+V 停止' : '点击关闭语音模式'
+                    : voiceStatus === 'ready'
+                      ? '按住 Alt+V 开始说话 | 点击关闭语音模式'
+                      : voiceError
+                        ? `语音输入错误: ${voiceError}`
+                        : '开启语音模式'
                 }
                 aria-label="语音输入"
               >
                 <MicIcon className="w-3.5 h-3.5" />
                 {voiceStatus === 'recording' && (
-                  <span
-                    className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full animate-pulse bg-red-500"
-                  />
+                  <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full animate-pulse bg-red-500" />
+                )}
+                {voiceStatus === 'ready' && (
+                  <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-green-500" />
                 )}
               </button>
             )}
@@ -215,6 +303,23 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
         ) : (
           <div className="flex items-center justify-center h-full text-slate-500 text-sm">
             点击上方项目标签打开终端
+          </div>
+        )}
+
+        {/* 语音错误提示 */}
+        {showError && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 px-4 py-2 bg-red-900/90 border border-red-700/50 rounded-lg text-sm text-red-200 shadow-lg animate-in fade-in slide-in-from-top-2 duration-200">
+            {showError}
+          </div>
+        )}
+
+        {/* 录音遮罩 + 波形 */}
+        {voiceStatus === 'recording' && (
+          <div className="absolute inset-0 z-10 bg-black/50 flex flex-col items-center justify-center gap-3 fade-in-0">
+            {analyserNode && <AudioWaveform analyserNode={analyserNode} />}
+            <span className="text-sm text-slate-400 select-none">
+              正在录音... 松开 Alt+V 停止
+            </span>
           </div>
         )}
       </div>

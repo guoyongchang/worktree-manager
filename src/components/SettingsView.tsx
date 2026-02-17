@@ -1,4 +1,4 @@
-import { useState, useEffect, type FC } from 'react';
+import { useState, useEffect, useRef, useCallback, type FC } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -16,11 +16,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { RefreshCw, Search } from 'lucide-react';
+import { RefreshCw, Search, Mic } from 'lucide-react';
 import { BackIcon, PlusIcon, TrashIcon } from './Icons';
 import { BranchCombobox } from './BranchCombobox';
 import type { WorkspaceRef, WorkspaceConfig, ProjectConfig, ScannedFolder } from '../types';
-import { getAppVersion, getNgrokToken, setNgrokToken as saveNgrokToken, isTauri, getRemoteBranches } from '../lib/backend';
+import { getAppVersion, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, voiceStart, voiceStop, isTauri, getRemoteBranches } from '../lib/backend';
 
 interface SettingsViewProps {
   config: WorkspaceConfig;
@@ -81,6 +81,125 @@ export const SettingsView: FC<SettingsViewProps> = ({
   const [ngrokSaved, setNgrokSaved] = useState(false);
   const [ngrokError, setNgrokError] = useState<string | null>(null);
 
+  // Dashscope API key state
+  const [dashscopeKey, setDashscopeKey] = useState('');
+  const [dashscopeKeyLoaded, setDashscopeKeyLoaded] = useState(false);
+  const [dashscopeSaving, setDashscopeSaving] = useState(false);
+  const [dashscopeSaved, setDashscopeSaved] = useState(false);
+  const [dashscopeError, setDashscopeError] = useState<string | null>(null);
+
+  // Dashscope base URL state
+  const DEFAULT_DASHSCOPE_URL = 'wss://dashscope.aliyuncs.com/api-ws/v1/inference/';
+  const [dashscopeUrl, setDashscopeUrl] = useState('');
+  const [dashscopeUrlSaving, setDashscopeUrlSaving] = useState(false);
+  const [dashscopeUrlSaved, setDashscopeUrlSaved] = useState(false);
+  const [dashscopeUrlError, setDashscopeUrlError] = useState<string | null>(null);
+
+  // Microphone selection state
+  const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedMicId, setSelectedMicId] = useState(() =>
+    localStorage.getItem('preferred-mic-device-id') || ''
+  );
+
+  // Microphone test state
+  const [micTesting, setMicTesting] = useState(false);
+  const [micVolume, setMicVolume] = useState(0);
+  const micTestStreamRef = useRef<MediaStream | null>(null);
+  const micTestAudioCtxRef = useRef<AudioContext | null>(null);
+  const micTestAnimRef = useRef<number>(0);
+  const micTestTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Dashscope connection test state
+  const [dashscopeTesting, setDashscopeTesting] = useState(false);
+  const [dashscopeTestResult, setDashscopeTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  // Load microphone devices
+  const loadMicDevices = useCallback(async () => {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audioInputs = devices.filter(d => d.kind === 'audioinput');
+      // If labels are empty, we need to request permission first
+      if (audioInputs.length > 0 && !audioInputs[0].label) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          stream.getTracks().forEach(t => t.stop());
+          const devicesWithLabels = await navigator.mediaDevices.enumerateDevices();
+          setMicDevices(devicesWithLabels.filter(d => d.kind === 'audioinput'));
+        } catch {
+          setMicDevices(audioInputs);
+        }
+      } else {
+        setMicDevices(audioInputs);
+      }
+    } catch {
+      setMicDevices([]);
+    }
+  }, []);
+
+  // Stop microphone test
+  const stopMicTest = useCallback(() => {
+    if (micTestAnimRef.current) {
+      cancelAnimationFrame(micTestAnimRef.current);
+      micTestAnimRef.current = 0;
+    }
+    if (micTestTimerRef.current) {
+      clearTimeout(micTestTimerRef.current);
+      micTestTimerRef.current = null;
+    }
+    if (micTestAudioCtxRef.current) {
+      micTestAudioCtxRef.current.close().catch(() => {});
+      micTestAudioCtxRef.current = null;
+    }
+    if (micTestStreamRef.current) {
+      micTestStreamRef.current.getTracks().forEach(t => t.stop());
+      micTestStreamRef.current = null;
+    }
+    setMicTesting(false);
+    setMicVolume(0);
+  }, []);
+
+  // Start microphone test
+  const startMicTest = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          ...(selectedMicId ? { deviceId: { exact: selectedMicId } } : {}),
+        },
+      });
+      micTestStreamRef.current = stream;
+
+      const audioCtx = new AudioContext();
+      micTestAudioCtxRef.current = audioCtx;
+
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0;
+      source.connect(analyser);
+
+      const dataArray = new Uint8Array(analyser.fftSize);
+      const updateVolume = () => {
+        analyser.getByteTimeDomainData(dataArray);
+        // RMS calculation on time-domain data — no FFT smoothing delay
+        let sumSq = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          const v = (dataArray[i] - 128) / 128;
+          sumSq += v * v;
+        }
+        const rms = Math.sqrt(sumSq / dataArray.length);
+        setMicVolume(Math.min(100, Math.round(rms * 400)));
+        micTestAnimRef.current = requestAnimationFrame(updateVolume);
+      };
+      updateVolume();
+      setMicTesting(true);
+
+      // Auto-stop after 10 seconds
+      micTestTimerRef.current = setTimeout(stopMicTest, 10000);
+    } catch {
+      stopMicTest();
+    }
+  }, [selectedMicId, stopMicTest]);
+
   useEffect(() => {
     getAppVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
     if (isTauri()) {
@@ -88,8 +207,30 @@ export const SettingsView: FC<SettingsViewProps> = ({
         setNgrokToken(t || '');
         setNgrokTokenLoaded(true);
       }).catch(() => setNgrokTokenLoaded(true));
+      getDashscopeApiKey().then(k => {
+        setDashscopeKey(k || '');
+        setDashscopeKeyLoaded(true);
+      }).catch(() => setDashscopeKeyLoaded(true));
+      getDashscopeBaseUrl().then(u => {
+        setDashscopeUrl(u || '');
+      }).catch(() => {});
+      loadMicDevices();
     }
-  }, []);
+  }, [loadMicDevices]);
+
+  // Validate stored deviceId against available devices
+  useEffect(() => {
+    if (micDevices.length > 0 && selectedMicId) {
+      const exists = micDevices.some(d => d.deviceId === selectedMicId);
+      if (!exists) {
+        setSelectedMicId('');
+        localStorage.removeItem('preferred-mic-device-id');
+      }
+    }
+  }, [micDevices, selectedMicId]);
+
+  // Cleanup mic test on unmount
+  useEffect(() => stopMicTest, [stopMicTest]);
   return (
     <div className="max-w-3xl mx-auto">
       {/* Header */}
@@ -504,6 +645,221 @@ export const SettingsView: FC<SettingsViewProps> = ({
                 }}
               >
                 获取 token
+              </button>
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Dashscope Voice Recognition Config (Tauri only) */}
+      {isTauri() && dashscopeKeyLoaded && (
+        <div className="mt-8 pt-8 border-t border-slate-700/50">
+          <h2 className="text-lg font-medium mb-4">语音识别 (Dashscope)</h2>
+          <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 space-y-3">
+            {/* Microphone Selection */}
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">麦克风设备</label>
+              <div className="flex gap-2">
+                <Select
+                  value={selectedMicId || '__default__'}
+                  onValueChange={(value) => {
+                    const id = value === '__default__' ? '' : value;
+                    setSelectedMicId(id);
+                    if (id) {
+                      localStorage.setItem('preferred-mic-device-id', id);
+                    } else {
+                      localStorage.removeItem('preferred-mic-device-id');
+                    }
+                  }}
+                >
+                  <SelectTrigger className="flex-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__default__">默认设备</SelectItem>
+                    {micDevices.map((device) => (
+                      <SelectItem key={device.deviceId} value={device.deviceId}>
+                        {device.label || `麦克风 ${device.deviceId.slice(0, 8)}`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    if (micTesting) {
+                      stopMicTest();
+                    } else {
+                      startMicTest();
+                    }
+                  }}
+                >
+                  <Mic className="w-4 h-4" />
+                  {micTesting ? '停止测试' : '测试'}
+                </Button>
+              </div>
+              {/* Volume Bar */}
+              {micTesting && (
+                <div className="mt-2 flex items-center gap-2">
+                  <span className="text-xs text-slate-500 shrink-0">音量</span>
+                  <div className="flex-1 h-2 bg-slate-700 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-green-500 rounded-full"
+                      style={{ width: `${micVolume}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">Dashscope API Key</label>
+              <div className="flex gap-2">
+                <Input
+                  type="password"
+                  value={dashscopeKey}
+                  onChange={(e) => { setDashscopeKey(e.target.value); setDashscopeSaved(false); }}
+                  placeholder="粘贴你的 Dashscope API Key"
+                  className="flex-1"
+                />
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={dashscopeSaving}
+                  onClick={async () => {
+                    setDashscopeSaving(true);
+                    setDashscopeError(null);
+                    try {
+                      await saveDashscopeApiKey(dashscopeKey.trim());
+                      setDashscopeSaved(true);
+                      setTimeout(() => setDashscopeSaved(false), 2000);
+                    } catch (e) {
+                      setDashscopeError(String(e));
+                    } finally {
+                      setDashscopeSaving(false);
+                    }
+                  }}
+                >
+                  {dashscopeSaving ? '保存中...' : dashscopeSaved ? '已保存' : '保存'}
+                </Button>
+              </div>
+              {dashscopeError && (
+                <p className="text-sm text-red-400 mt-1">{dashscopeError}</p>
+              )}
+            </div>
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">WebSocket 地址</label>
+              <div className="flex gap-2">
+                <Input
+                  type="text"
+                  value={dashscopeUrl}
+                  onChange={(e) => { setDashscopeUrl(e.target.value); setDashscopeUrlSaved(false); }}
+                  placeholder={DEFAULT_DASHSCOPE_URL}
+                  className="flex-1"
+                />
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={dashscopeUrlSaving}
+                  onClick={async () => {
+                    setDashscopeUrlSaving(true);
+                    setDashscopeUrlError(null);
+                    try {
+                      await saveDashscopeBaseUrl(dashscopeUrl.trim());
+                      setDashscopeUrlSaved(true);
+                      setTimeout(() => setDashscopeUrlSaved(false), 2000);
+                    } catch (e) {
+                      setDashscopeUrlError(String(e));
+                    } finally {
+                      setDashscopeUrlSaving(false);
+                    }
+                  }}
+                >
+                  {dashscopeUrlSaving ? '保存中...' : dashscopeUrlSaved ? '已保存' : '保存'}
+                </Button>
+                {dashscopeUrl && dashscopeUrl !== DEFAULT_DASHSCOPE_URL && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={async () => {
+                      setDashscopeUrl('');
+                      setDashscopeUrlError(null);
+                      try {
+                        await saveDashscopeBaseUrl('');
+                        setDashscopeUrlSaved(true);
+                        setTimeout(() => setDashscopeUrlSaved(false), 2000);
+                      } catch (e) {
+                        setDashscopeUrlError(String(e));
+                      }
+                    }}
+                    className="text-slate-400 hover:text-slate-200"
+                  >
+                    恢复默认
+                  </Button>
+                )}
+              </div>
+              {dashscopeUrlError && (
+                <p className="text-sm text-red-400 mt-1">{dashscopeUrlError}</p>
+              )}
+              <p className="text-xs text-slate-500 mt-1">
+                留空使用默认地址: {DEFAULT_DASHSCOPE_URL}
+              </p>
+            </div>
+            {/* Dashscope Connection Test */}
+            <div className="flex items-center gap-3">
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={dashscopeTesting || !dashscopeKey.trim()}
+                onClick={async () => {
+                  setDashscopeTesting(true);
+                  setDashscopeTestResult(null);
+                  try {
+                    // Save current key & url before testing
+                    await saveDashscopeApiKey(dashscopeKey.trim());
+                    if (dashscopeUrl.trim()) {
+                      await saveDashscopeBaseUrl(dashscopeUrl.trim());
+                    }
+                    await voiceStart(16000);
+                    await voiceStop();
+                    setDashscopeTestResult({ ok: true, message: '连接成功' });
+                  } catch (e) {
+                    setDashscopeTestResult({ ok: false, message: String(e) });
+                  } finally {
+                    setDashscopeTesting(false);
+                    setTimeout(() => setDashscopeTestResult(null), 4000);
+                  }
+                }}
+              >
+                {dashscopeTesting ? (
+                  <>
+                    <div className="w-3 h-3 border border-blue-500 border-t-transparent rounded-full animate-spin" />
+                    测试中...
+                  </>
+                ) : '测试连接'}
+              </Button>
+              {dashscopeTestResult && (
+                <span className={`text-sm ${dashscopeTestResult.ok ? 'text-green-400' : 'text-red-400'}`}>
+                  {dashscopeTestResult.message}
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-500">
+              配置 API Key 后，可通过按住 Alt+V 或点击终端面板麦克风按钮进行语音输入。
+              <button
+                type="button"
+                className="text-blue-400 hover:text-blue-300 ml-1 underline cursor-pointer transition-colors"
+                onClick={async () => {
+                  const url = 'https://dashscope.console.aliyun.com/apiKey';
+                  if (isTauri()) {
+                    const { openUrl } = await import('@tauri-apps/plugin-opener');
+                    await openUrl(url);
+                  } else {
+                    window.open(url, '_blank');
+                  }
+                }}
+              >
+                获取 API Key
               </button>
             </p>
           </div>
