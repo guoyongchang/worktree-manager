@@ -21,6 +21,7 @@ export interface UseVoiceInputReturn {
   isKeyHeld: boolean;
   analyserNode: AnalyserNode | null;
   toggleVoice: () => void;
+  stopVoice: () => void;
 }
 
 const VOICE_COMMANDS: Record<string, string> = {
@@ -340,5 +341,5 @@ export function useVoiceInput(
     };
   }, [cleanupAudio]);
 
-  return { voiceStatus, voiceError, isKeyHeld, analyserNode, toggleVoice };
+  return { voiceStatus, voiceError, isKeyHeld, analyserNode, toggleVoice, stopVoice: exitReady };
 }

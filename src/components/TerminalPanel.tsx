@@ -97,6 +97,7 @@ interface TerminalPanelProps {
   onStartResize: () => void;
   terminalTabs: TerminalTab[];
   activatedTerminals: Set<string>;
+  mountedTerminals: Set<string>;
   activeTerminalTab: string | null;
   onTabClick: (path: string) => void;
   onTabContextMenu: (e: React.MouseEvent, path: string, name: string) => void;
@@ -118,6 +119,7 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
   onStartResize,
   terminalTabs,
   activatedTerminals,
+  mountedTerminals,
   activeTerminalTab,
   onTabClick,
   onTabContextMenu,
@@ -279,10 +281,10 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
         className="flex-1 min-h-0 overflow-hidden relative"
         style={{ display: visible ? 'flex' : 'none' }}
       >
-        {/* Always render all activated terminals to preserve PTY sessions across view switches */}
-        {activatedTerminals.size > 0 ? (
+        {/* Render from mountedTerminals (global, survives worktree switches) to keep PTY sessions alive */}
+        {mountedTerminals.size > 0 ? (
           <>
-            {Array.from(activatedTerminals).map(path => (
+            {Array.from(mountedTerminals).map(path => (
               <div
                 key={path}
                 className="absolute inset-0"
