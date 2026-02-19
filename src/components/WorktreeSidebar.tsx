@@ -41,6 +41,7 @@ import {
   CopyIcon,
   GithubIcon,
   CheckCircleIcon,
+  LinkIcon,
 } from './Icons';
 import type {
   WorkspaceRef,
@@ -275,6 +276,19 @@ const ShareBar: FC<{
               </Button>
             </TooltipTrigger>
             <TooltipContent side="top">复制链接</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => url && navigator.clipboard.writeText(`${url}?pwd=${encodeURIComponent(editingPassword)}`)}
+                className="h-5 w-5 shrink-0 text-slate-400 hover:text-slate-200"
+              >
+                <LinkIcon className="w-2.5 h-2.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">复制带密码链接</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>

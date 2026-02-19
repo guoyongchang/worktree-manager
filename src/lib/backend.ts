@@ -277,7 +277,8 @@ export async function broadcastTerminalState(
   worktreeName: string,
   activatedTerminals: string[],
   activeTerminalTab: string | null,
-  terminalVisible: boolean
+  terminalVisible: boolean,
+  clientId?: string
 ): Promise<void> {
   return callBackend('broadcast_terminal_state', {
     workspacePath,
@@ -285,6 +286,7 @@ export async function broadcastTerminalState(
     activatedTerminals,
     activeTerminalTab,
     terminalVisible,
+    clientId,
   });
 }
 

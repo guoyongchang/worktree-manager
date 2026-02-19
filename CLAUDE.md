@@ -126,7 +126,22 @@ workspace_root/
 - **会话 ID**: `pty-{path-with-dashes}` 格式，复制标签用 `path#timestamp`
 - **同步**: 多窗口/多客户端通过 broadcast channel + 序列号去重 + 防抖
 - **默认高度**: 280px (MIN: 100, MAX: 600), 窗口默认 1100x700
-- **状态隔离**: 终端标签按 worktree 保存/恢复，切换 worktree 时互不干扰
+- **状态隔离**: 终端标签、活跃 tab、面板可见性均按 worktree 保存/恢复
+
+### 终端状态架构（重要约束）
+
+`activatedTerminals` 和 `mountedTerminals` 必须分离，绝对不能用同一个 Set 同时控制标签栏显示和 Terminal 组件生命周期：
+
+| 状态 | 职责 | 作用域 | 何时移除 |
+|------|------|--------|---------|
+| `activatedTerminals` | 标签栏显示哪些 tab | 按 worktree 保存/恢复 | 切换 worktree 时替换 |
+| `mountedTerminals` | Terminal 组件是否挂载（PTY 生命周期） | 全局累积 | 仅在显式关闭标签或归档 worktree 时 |
+| `terminalVisible` | 终端面板展开/收起 | 按 worktree 保存/恢复 | — |
+
+- 切换 worktree 时：Terminal 组件通过 `display:none` + `visible:false` 隐藏，**不卸载**
+- Terminal 组件卸载时会调用 `pty_close` 销毁后端 PTY 会话，因此必须严格控制卸载时机
+- 归档 worktree 时需调用 `cleanupTerminalsForPath()` 清理 mountedTerminals，否则会留下僵尸组件
+- 语音输入（麦克风）在切换 worktree 或终端标签时自动关闭，避免写入错误会话
 
 ## 关键数据类型
 

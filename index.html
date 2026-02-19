@@ -2,13 +2,29 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="icon" type="image/svg+xml" href="/app-icon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tauri + React + Typescript</title>
+    <title>Worktree Manager</title>
   </head>
 
   <body>
     <div id="root"></div>
+    <script>
+      window.onerror = function(msg, url, line, col, err) {
+        var el = document.getElementById('root');
+        if (el && !el.hasChildNodes()) {
+          el.style.cssText = 'padding:2rem;font-family:monospace;color:#ef4444;white-space:pre-wrap';
+          el.textContent = msg + '\n  at ' + url + ':' + line + ':' + col;
+        }
+      };
+      window.addEventListener('unhandledrejection', function(e) {
+        var el = document.getElementById('root');
+        if (el && !el.hasChildNodes()) {
+          el.style.cssText = 'padding:2rem;font-family:monospace;color:#ef4444;white-space:pre-wrap';
+          el.textContent = 'Unhandled rejection: ' + (e.reason && e.reason.message || e.reason || e);
+        }
+      });
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

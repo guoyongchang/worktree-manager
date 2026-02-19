@@ -14,7 +14,6 @@ export const TERMINAL = {
   POLL_INTERVAL_MS: 100,
   SCROLLBACK_LINES: 5000,
   // Terminal state broadcast settings
-  BROADCAST_DEBOUNCE_MS: 300,
   BROADCAST_RATE_LIMIT_MS: 100,
   // Terminal resize settings
   RESIZE_TRIGGER_OFFSET: 5,

@@ -38,17 +38,13 @@ export const GitOperations: FC<GitOperationsProps> = ({
   const [stats, setStats] = useState<BranchDiffStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [fetchingSyncing, setFetchingSyncing] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [pushing, setPushing] = useState(false);
-  const [mergingToTest, setMergingToTest] = useState(false);
-  const [mergingToBase, setMergingToBase] = useState(false);
+  const [activeAction, setActiveAction] = useState<'sync' | 'push' | 'mergeTest' | 'mergeBase' | null>(null);
   const [showPRModal, setShowPRModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [testBranchExists, setTestBranchExists] = useState<boolean | null>(null);
   const [baseBranchExists, setBaseBranchExists] = useState<boolean | null>(null);
   const [dismissing, setDismissing] = useState<'error' | 'success' | null>(null);
-  const mountedRef = useRef(true);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -80,12 +76,11 @@ export const GitOperations: FC<GitOperationsProps> = ({
     setLoading(true);
     setError(null);
     try {
-      const diffStats = await getBranchDiffStats(projectPath, baseBranch);
-      if (mountedRef.current) setStats(diffStats);
+      setStats(await getBranchDiffStats(projectPath, baseBranch));
     } catch (err) {
-      if (mountedRef.current) setError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
-      if (mountedRef.current) setLoading(false);
+      setLoading(false);
     }
   };
 
@@ -95,17 +90,15 @@ export const GitOperations: FC<GitOperationsProps> = ({
         checkRemoteBranchExists(projectPath, testBranch),
         checkRemoteBranchExists(projectPath, baseBranch),
       ]);
-      if (mountedRef.current) {
-        setTestBranchExists(testExists);
-        setBaseBranchExists(baseExists);
-      }
+      setTestBranchExists(testExists);
+      setBaseBranchExists(baseExists);
     } catch (err) {
       console.error('Failed to check branches:', err);
     }
   };
 
   useEffect(() => {
-    mountedRef.current = true;
+    let cancelled = false;
 
     // Phase 1: Instant local data (milliseconds)
     const rafId = requestAnimationFrame(() => {
@@ -116,93 +109,40 @@ export const GitOperations: FC<GitOperationsProps> = ({
       setFetchingSyncing(true);
       fetchProjectRemote(projectPath)
         .then(() => {
-          if (mountedRef.current) {
-            // Re-check branches with updated remote-tracking refs
-            return Promise.all([checkBranches(), loadStats()]);
-          }
+          if (!cancelled) return Promise.all([checkBranches(), loadStats()]);
         })
         .catch((err) => {
           console.error('Background fetch failed:', err);
         })
         .finally(() => {
-          if (mountedRef.current) setFetchingSyncing(false);
+          if (!cancelled) setFetchingSyncing(false);
         });
     });
 
     return () => {
-      mountedRef.current = false;
+      cancelled = true;
       cancelAnimationFrame(rafId);
       clearTimeout(errorTimerRef.current);
       clearTimeout(successTimerRef.current);
     };
   }, [projectPath, baseBranch, testBranch]);
 
-  const handleSync = async () => {
-    setSyncing(true);
+  const runGitAction = async (
+    action: typeof activeAction,
+    operation: () => Promise<string>,
+  ) => {
+    setActiveAction(action);
     setErrorWithAutoDismiss(null);
     setSuccessWithAutoDismiss(null);
     try {
-      const result = await syncWithBaseBranch(projectPath, baseBranch);
-      setSuccessWithAutoDismiss(result);
+      setSuccessWithAutoDismiss(await operation());
       await loadStats();
       onRefresh?.();
     } catch (err) {
       setErrorWithAutoDismiss(err instanceof Error ? err.message : String(err));
     } finally {
-      setSyncing(false);
+      setActiveAction(null);
     }
-  };
-
-  const handlePush = async () => {
-    setPushing(true);
-    setErrorWithAutoDismiss(null);
-    setSuccessWithAutoDismiss(null);
-    try {
-      const result = await pushToRemote(projectPath);
-      setSuccessWithAutoDismiss(result);
-      await loadStats();
-      onRefresh?.();
-    } catch (err) {
-      setErrorWithAutoDismiss(err instanceof Error ? err.message : String(err));
-    } finally {
-      setPushing(false);
-    }
-  };
-
-  const handleMergeToTest = async () => {
-    setMergingToTest(true);
-    setErrorWithAutoDismiss(null);
-    setSuccessWithAutoDismiss(null);
-    try {
-      const result = await mergeToTestBranch(projectPath, testBranch);
-      setSuccessWithAutoDismiss(result);
-      await loadStats();
-      onRefresh?.();
-    } catch (err) {
-      setErrorWithAutoDismiss(err instanceof Error ? err.message : String(err));
-    } finally {
-      setMergingToTest(false);
-    }
-  };
-
-  const handleMergeToBase = async () => {
-    setMergingToBase(true);
-    setErrorWithAutoDismiss(null);
-    setSuccessWithAutoDismiss(null);
-    try {
-      const result = await mergeToBaseBranch(projectPath, baseBranch);
-      setSuccessWithAutoDismiss(result);
-      await loadStats();
-      onRefresh?.();
-    } catch (err) {
-      setErrorWithAutoDismiss(err instanceof Error ? err.message : String(err));
-    } finally {
-      setMergingToBase(false);
-    }
-  };
-
-  const handleCreatePR = () => {
-    setShowPRModal(true);
   };
 
   const handleRefresh = async () => {
@@ -211,7 +151,7 @@ export const GitOperations: FC<GitOperationsProps> = ({
     onRefresh?.();
   };
 
-  const actionsDisabled = fetchingSyncing;
+  const actionsDisabled = fetchingSyncing || activeAction !== null;
 
   return (
     <div className="space-y-3">
@@ -257,30 +197,30 @@ export const GitOperations: FC<GitOperationsProps> = ({
           <Button
             variant="secondary"
             size="sm"
-            onClick={handleSync}
-            disabled={syncing || loading || baseBranchExists === false || actionsDisabled}
+            onClick={() => runGitAction('sync', () => syncWithBaseBranch(projectPath, baseBranch))}
+            disabled={loading || baseBranchExists === false || actionsDisabled}
             className="flex-1 text-xs"
             title={baseBranchExists === false ? `远程分支 ${baseBranch} 不存在` : ''}
           >
             <SyncIcon className="w-3 h-3 mr-1" />
-            {syncing ? '同步中...' : `同步 ${baseBranch}`}
+            {activeAction === 'sync' ? '同步中...' : `同步 ${baseBranch}`}
           </Button>
 
           <Button
             variant="secondary"
             size="sm"
-            onClick={handlePush}
-            disabled={pushing || loading || actionsDisabled}
+            onClick={() => runGitAction('push', () => pushToRemote(projectPath))}
+            disabled={loading || actionsDisabled}
             className="flex-1 text-xs"
           >
             <UploadIcon className="w-3 h-3 mr-1" />
-            {pushing ? '推送中...' : '推送'}
+            {activeAction === 'push' ? '推送中...' : '推送'}
           </Button>
 
           <Button
             variant="secondary"
             size="sm"
-            onClick={handleCreatePR}
+            onClick={() => setShowPRModal(true)}
             disabled={loading || baseBranchExists === false || actionsDisabled}
             className="flex-1 text-xs"
             title={baseBranchExists === false ? `远程分支 ${baseBranch} 不存在` : ''}
@@ -294,25 +234,25 @@ export const GitOperations: FC<GitOperationsProps> = ({
           <Button
             variant="secondary"
             size="sm"
-            onClick={handleMergeToTest}
-            disabled={mergingToTest || loading || testBranchExists === false || actionsDisabled}
+            onClick={() => runGitAction('mergeTest', () => mergeToTestBranch(projectPath, testBranch))}
+            disabled={loading || testBranchExists === false || actionsDisabled}
             className="flex-1 text-xs"
             title={testBranchExists === false ? `远程分支 ${testBranch} 不存在` : ''}
           >
             <GitMergeIcon className="w-3 h-3 mr-1" />
-            {mergingToTest ? '合并中...' : `合并到 ${testBranch}`}
+            {activeAction === 'mergeTest' ? '合并中...' : `合并到 ${testBranch}`}
           </Button>
 
           <Button
             variant="secondary"
             size="sm"
-            onClick={handleMergeToBase}
-            disabled={mergingToBase || loading || baseBranchExists === false || actionsDisabled}
+            onClick={() => runGitAction('mergeBase', () => mergeToBaseBranch(projectPath, baseBranch))}
+            disabled={loading || baseBranchExists === false || actionsDisabled}
             className="flex-1 text-xs"
             title={baseBranchExists === false ? `远程分支 ${baseBranch} 不存在` : ''}
           >
             <GitMergeIcon className="w-3 h-3 mr-1" />
-            {mergingToBase ? '合并中...' : `合并到 ${baseBranch}`}
+            {activeAction === 'mergeBase' ? '合并中...' : `合并到 ${baseBranch}`}
           </Button>
         </div>
       </div>

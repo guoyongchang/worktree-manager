@@ -121,6 +121,7 @@ pub(crate) fn broadcast_terminal_state(
     activated_terminals: Vec<String>,
     active_terminal_tab: Option<String>,
     terminal_visible: bool,
+    client_id: Option<String>,
 ) {
     let key = (workspace_path.clone(), worktree_name.clone());
 
@@ -130,7 +131,7 @@ pub(crate) fn broadcast_terminal_state(
             activated_terminals: activated_terminals.clone(),
             active_terminal_tab: active_terminal_tab.clone(),
             terminal_visible,
-            sequence: None,
+            client_id: client_id.clone(),
         });
     }
 
@@ -141,6 +142,7 @@ pub(crate) fn broadcast_terminal_state(
         "activatedTerminals": activated_terminals,
         "activeTerminalTab": active_terminal_tab,
         "terminalVisible": terminal_visible,
+        "clientId": client_id,
     })) {
         let _ = TERMINAL_STATE_BROADCAST.send(json_str);
     }
@@ -152,6 +154,7 @@ pub(crate) fn broadcast_terminal_state(
         "activatedTerminals": activated_terminals,
         "activeTerminalTab": active_terminal_tab,
         "terminalVisible": terminal_visible,
+        "clientId": client_id,
     }));
 }
 

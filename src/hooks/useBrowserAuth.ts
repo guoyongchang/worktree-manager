@@ -17,8 +17,28 @@ export function useBrowserAuth(): UseBrowserAuthReturn {
   const [browserLoggingIn, setBrowserLoggingIn] = useState(false);
 
   // Validate stored session on startup (avoids re-auth on refresh)
+  // Also checks URL ?pwd= parameter for auto-authentication via shared link
   useEffect(() => {
     if (isTauri()) return;
+
+    // Check URL ?pwd= parameter for auto-authentication
+    const params = new URLSearchParams(window.location.search);
+    const urlPwd = params.get('pwd');
+    if (urlPwd) {
+      // Remove password from URL to avoid leaking to browser history
+      params.delete('pwd');
+      const cleanUrl = params.toString()
+        ? `${window.location.pathname}?${params}`
+        : window.location.pathname;
+      window.history.replaceState({}, '', cleanUrl);
+
+      authenticate(urlPwd)
+        .then(() => setBrowserAuthenticated(true))
+        .catch(() => { /* wrong password, show normal login page */ });
+      return;
+    }
+
+    // Validate existing session from sessionStorage
     const sid = getSessionId();
     if (!sid) return;
     callBackend('list_workspaces')

@@ -94,17 +94,14 @@ function App() {
   }, [terminal.activeTerminalTab]));
 
   // Auto-close voice input when switching worktree or terminal tab
-  const prevWorktreeRef = useRef(selectedWorktree);
-  const prevTabRef = useRef(terminal.activeTerminalTab);
+  const voiceMountedRef = useRef(false);
   useEffect(() => {
-    const wtChanged = prevWorktreeRef.current !== selectedWorktree;
-    const tabChanged = prevTabRef.current !== terminal.activeTerminalTab;
-    prevWorktreeRef.current = selectedWorktree;
-    prevTabRef.current = terminal.activeTerminalTab;
-    if (wtChanged || tabChanged) {
+    if (voiceMountedRef.current) {
       voice.stopVoice();
+    } else {
+      voiceMountedRef.current = true;
     }
-  }, [selectedWorktree, terminal.activeTerminalTab, voice.stopVoice]);
+  }, [selectedWorktree, terminal.activeTerminalTab]);
 
   // Custom hooks for extracted state
   const modals = useModals();
@@ -251,11 +248,6 @@ function App() {
       setSwitchingWorktree(false);
     }
   }, [workspace, selectedWorktree, locks.refreshLockedWorktrees]);
-
-  // Reset terminal active tab when worktree changes
-  useEffect(() => {
-    terminal.resetActiveTab();
-  }, [selectedWorktree?.path]);
 
   // Update window title based on workspace and worktree
   useEffect(() => {
@@ -476,23 +468,22 @@ function App() {
     setArchiveModal({ ...archiveModal, confirmedIssues: newConfirmed });
   }, [archiveModal]);
 
-  const areAllIssuesConfirmed = useCallback((): boolean => {
+  const allArchiveIssuesConfirmed = (() => {
     if (!archiveModal?.status) return false;
     const { projects } = archiveModal.status;
     const allIssueKeys: string[] = [];
 
-    projects.forEach((proj) => {
+    for (const proj of projects) {
       if (proj.has_uncommitted && proj.uncommitted_count > 0) {
         allIssueKeys.push(`proj-uncommitted-${proj.project_name}`);
       }
       if (proj.unpushed_commits > 0) {
         allIssueKeys.push(`proj-unpushed-${proj.project_name}`);
       }
-    });
+    }
 
-    if (allIssueKeys.length === 0) return true;
-    return allIssueKeys.every(key => archiveModal.confirmedIssues.has(key));
-  }, [archiveModal]);
+    return allIssueKeys.length === 0 || allIssueKeys.every(key => archiveModal.confirmedIssues.has(key));
+  })();
 
   const handleArchiveWorktree = useCallback(async () => {
     if (!archiveModal) return;
@@ -882,7 +873,9 @@ function App() {
             voiceError={voice.voiceError}
             isKeyHeld={voice.isKeyHeld}
             analyserNode={voice.analyserNode}
-            onToggleVoice={isTauri() ? voice.toggleVoice : undefined}
+            onToggleVoice={voice.toggleVoice}
+            onStartRecording={voice.startRecording}
+            onStopRecording={voice.stopRecording}
           />
         </div>
 
@@ -961,7 +954,7 @@ function App() {
             onClose={() => setArchiveModal(null)}
             onConfirmIssue={confirmArchiveIssue}
             onArchive={handleArchiveWorktree}
-            areAllIssuesConfirmed={areAllIssuesConfirmed()}
+            areAllIssuesConfirmed={allArchiveIssuesConfirmed}
             archiving={archiving}
           />
         )}
