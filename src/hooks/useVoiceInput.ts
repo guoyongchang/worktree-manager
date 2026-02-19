@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { voiceStart, voiceSendAudio, voiceStop, getDashscopeApiKey, isTauri } from '../lib/backend';
+import { voiceStart, voiceSendAudio, voiceStop, isTauri } from '../lib/backend';
 
 /**
  * 状态机：
@@ -124,15 +124,6 @@ export function useVoiceInput(
     setVoiceError(null);
 
     try {
-      // Check API Key before acquiring mic
-      const apiKey = await getDashscopeApiKey();
-      if (!apiKey || !apiKey.trim()) {
-        setVoiceError('请先在设置中配置 Dashscope API Key');
-        setVoiceStatus('error');
-        busyRef.current = false;
-        return;
-      }
-
       const preferredDeviceId = localStorage.getItem('preferred-mic-device-id');
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
