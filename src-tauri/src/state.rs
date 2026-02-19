@@ -59,6 +59,12 @@ pub(crate) static APP_HANDLE: Lazy<Mutex<Option<tauri::AppHandle>>> = Lazy::new(
 pub(crate) static AUTH_RATE_LIMITER: Lazy<Mutex<AuthRateLimiter>> =
     Lazy::new(|| Mutex::new(AuthRateLimiter::new()));
 
+// Broadcast channel for voice events (WebSocket push to browser clients)
+pub(crate) static VOICE_BROADCAST: Lazy<tokio::sync::broadcast::Sender<String>> = Lazy::new(|| {
+    let (tx, _) = tokio::sync::broadcast::channel(64);
+    tx
+});
+
 // ==================== 全局配置缓存 ====================
 
 pub(crate) static GLOBAL_CONFIG_CACHE: Lazy<Mutex<Option<GlobalConfig>>> = Lazy::new(|| Mutex::new(None));

@@ -15,7 +15,9 @@ type TerminalStateCallback = (msg: {
   activatedTerminals: string[];
   activeTerminalTab: string | null;
   terminalVisible: boolean;
+  clientId?: string;
 }) => void;
+type VoiceEventCallback = (event: string, payload: Record<string, unknown>) => void;
 
 class WebSocketManager {
   private ws: WebSocket | null = null;
@@ -29,6 +31,7 @@ class WebSocketManager {
   private ptyCallbacks = new Map<string, PtyCallback>();
   private lockCallback: LockCallback | null = null;
   private terminalStateCallbacks: TerminalStateCallback[] = [];
+  private voiceEventCallbacks: VoiceEventCallback[] = [];
 
   // Pending subscriptions to send after reconnect
   private pendingPtySubscriptions = new Set<string>();
@@ -108,6 +111,14 @@ class WebSocketManager {
         }
         break;
       }
+      case 'voice_event': {
+        if (msg.event) {
+          for (const cb of this.voiceEventCallbacks) {
+            cb(msg.event, msg.payload || {});
+          }
+        }
+        break;
+      }
     }
   }
 
@@ -120,7 +131,8 @@ class WebSocketManager {
   private hasActiveSubscriptions(): boolean {
     return this.ptyCallbacks.size > 0
       || !!this.lockCallback
-      || this.terminalStateCallbacks.length > 0;
+      || this.terminalStateCallbacks.length > 0
+      || this.voiceEventCallbacks.length > 0;
   }
 
   private scheduleReconnect() {
@@ -163,7 +175,7 @@ class WebSocketManager {
     activatedTerminals: string[],
     activeTerminalTab: string | null,
     terminalVisible: boolean,
-    sequence?: number
+    clientId?: string
   ) {
     this.sendJson({
       type: 'broadcast_terminal_state',
@@ -172,7 +184,7 @@ class WebSocketManager {
       activatedTerminals,
       activeTerminalTab,
       terminalVisible,
-      sequence,
+      clientId,
     });
   }
 
@@ -187,6 +199,14 @@ class WebSocketManager {
     this.pendingLockSubscription = null;
   }
 
+  subscribeVoiceEvents(callback: VoiceEventCallback): () => void {
+    this.voiceEventCallbacks.push(callback);
+    this.sendJson({ type: 'subscribe_voice_events' });
+    return () => {
+      this.voiceEventCallbacks = this.voiceEventCallbacks.filter(cb => cb !== callback);
+    };
+  }
+
   disconnect() {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -197,6 +217,7 @@ class WebSocketManager {
     this.lockCallback = null;
     this.pendingLockSubscription = null;
     this.terminalStateCallbacks = [];
+    this.voiceEventCallbacks = [];
     if (this.ws) {
       this.ws.close();
       this.ws = null;

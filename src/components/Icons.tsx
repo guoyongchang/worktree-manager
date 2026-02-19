@@ -33,6 +33,7 @@ import {
   Eye,
   Github,
   Mic,
+  Link,
 } from 'lucide-react';
 
 interface IconProps {
@@ -187,4 +188,8 @@ export const GithubIcon: FC<IconProps> = ({ className = "w-4 h-4" }) => (
 
 export const MicIcon: FC<IconProps> = ({ className = "w-4 h-4" }) => (
   <Mic className={className} />
+);
+
+export const LinkIcon: FC<IconProps> = ({ className = "w-4 h-4" }) => (
+  <Link className={className} />
 );

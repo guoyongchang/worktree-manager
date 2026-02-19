@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { voiceStart, voiceSendAudio, voiceStop, getDashscopeApiKey } from '../lib/backend';
+import { voiceStart, voiceSendAudio, voiceStop, getDashscopeApiKey, isTauri } from '../lib/backend';
 
 /**
  * 状态机：
@@ -22,6 +22,8 @@ export interface UseVoiceInputReturn {
   analyserNode: AnalyserNode | null;
   toggleVoice: () => void;
   stopVoice: () => void;
+  startRecording: () => void;
+  stopRecording: () => void;
 }
 
 const VOICE_COMMANDS: Record<string, string> = {
@@ -241,49 +243,73 @@ export function useVoiceInput(
     }
   }, [enterReady, exitReady]);
 
-  // ---- 监听 Tauri 后端事件 ----
+  // ---- 监听后端语音事件（Tauri 事件 / WebSocket） ----
   useEffect(() => {
     let unlisten: Array<() => void> = [];
 
-    (async () => {
-      try {
-        const { listen } = await import('@tauri-apps/api/event');
-
-        const u1 = await listen<{ text: string; is_final: boolean }>('voice-result', (event) => {
-          if (event.payload.is_final && event.payload.text.trim()) {
-            const processed = processTranscription(event.payload.text);
+    const handleVoiceEvent = (event: string, payload: Record<string, unknown>) => {
+      switch (event) {
+        case 'voice-result': {
+          const text = payload.text as string;
+          const isFinal = payload.is_final as boolean;
+          if (isFinal && text?.trim()) {
+            const processed = processTranscription(text);
             onTranscribed(processed);
           }
-        });
-        unlisten.push(u1);
-
-        const u2 = await listen('voice-stopped', () => {
+          break;
+        }
+        case 'voice-stopped':
           isStreamingRef.current = false;
-          // 回到 ready（如果麦克风还在），否则 idle
           if (mediaStreamRef.current) {
             setVoiceStatus('ready');
           } else {
             setVoiceStatus('idle');
           }
           setIsKeyHeld(false);
-        });
-        unlisten.push(u2);
-
-        const u3 = await listen<{ message: string }>('voice-error', (event) => {
+          break;
+        case 'voice-error':
           isStreamingRef.current = false;
-          setVoiceError(event.payload.message);
-          // 错误时回到 ready（保持麦克风），让用户可以重试
+          setVoiceError(payload.message as string);
           if (mediaStreamRef.current) {
             setVoiceStatus('ready');
           } else {
             setVoiceStatus('error');
           }
-        });
-        unlisten.push(u3);
-      } catch {
-        // Not in Tauri environment
+          break;
       }
-    })();
+    };
+
+    if (isTauri()) {
+      // Tauri desktop: listen via event system
+      (async () => {
+        try {
+          const { listen } = await import('@tauri-apps/api/event');
+
+          const u1 = await listen<{ text: string; is_final: boolean }>('voice-result', (event) => {
+            handleVoiceEvent('voice-result', event.payload as unknown as Record<string, unknown>);
+          });
+          unlisten.push(u1);
+
+          const u2 = await listen('voice-stopped', () => {
+            handleVoiceEvent('voice-stopped', {});
+          });
+          unlisten.push(u2);
+
+          const u3 = await listen<{ message: string }>('voice-error', (event) => {
+            handleVoiceEvent('voice-error', event.payload as unknown as Record<string, unknown>);
+          });
+          unlisten.push(u3);
+        } catch {
+          // Not in Tauri environment
+        }
+      })();
+    } else {
+      // Browser mode: subscribe via WebSocket
+      import('../lib/websocket').then(({ getWebSocketManager }) => {
+        const unsub = getWebSocketManager().subscribeVoiceEvents(handleVoiceEvent);
+        unlisten.push(unsub);
+      }).catch(() => {});
+    }
 
     return () => { unlisten.forEach(fn => fn()); };
   }, [onTranscribed]);
@@ -332,6 +358,27 @@ export function useVoiceInput(
     };
   }, [startStreaming, stopStreaming]);
 
+  // ---- 移动端长按录音：一步完成 enterReady + startStreaming ----
+  const startRecording = useCallback(async () => {
+    const status = voiceStatusRef.current;
+    if (status === 'idle' || status === 'error') {
+      await enterReady();
+      // enterReady 成功后 status 变为 ready，继续 startStreaming
+      if (voiceStatusRef.current === 'ready') {
+        await startStreaming();
+      }
+    } else if (status === 'ready') {
+      await startStreaming();
+    }
+  }, [enterReady, startStreaming]);
+
+  // ---- 移动端松开停止 ----
+  const stopRecording = useCallback(async () => {
+    if (voiceStatusRef.current === 'recording') {
+      await stopStreaming();
+    }
+  }, [stopStreaming]);
+
   // ---- 组件卸载时清理 ----
   useEffect(() => {
     return () => {
@@ -341,5 +388,5 @@ export function useVoiceInput(
     };
   }, [cleanupAudio]);
 
-  return { voiceStatus, voiceError, isKeyHeld, analyserNode, toggleVoice, stopVoice: exitReady };
+  return { voiceStatus, voiceError, isKeyHeld, analyserNode, toggleVoice, stopVoice: exitReady, startRecording, stopRecording };
 }

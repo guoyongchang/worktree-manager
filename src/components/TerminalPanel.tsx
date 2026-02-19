@@ -111,6 +111,8 @@ interface TerminalPanelProps {
   isKeyHeld?: boolean;
   analyserNode?: AnalyserNode | null;
   onToggleVoice?: () => void;
+  onStartRecording?: () => void;
+  onStopRecording?: () => void;
 }
 
 export const TerminalPanel: FC<TerminalPanelProps> = ({
@@ -133,7 +135,10 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
   isKeyHeld = false,
   analyserNode,
   onToggleVoice,
+  onStartRecording,
+  onStopRecording,
 }) => {
+  const isMobile = typeof window !== 'undefined' && 'ontouchstart' in window;
   const [showError, setShowError] = useState<string | null>(null);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -220,6 +225,8 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
             {onToggleVoice && (
               <button
                 onClick={(e) => { e.stopPropagation(); onToggleVoice(); }}
+                onTouchStart={isMobile && onStartRecording ? (e) => { e.preventDefault(); onStartRecording(); } : undefined}
+                onTouchEnd={isMobile && onStopRecording ? (e) => { e.preventDefault(); onStopRecording(); } : undefined}
                 className={`p-1.5 rounded transition-colors relative ${
                   voiceStatus === 'recording'
                     ? 'text-red-400 hover:bg-red-900/30'
@@ -231,12 +238,12 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
                 }`}
                 title={
                   voiceStatus === 'recording'
-                    ? isKeyHeld ? '松开 Alt+V 停止' : '点击关闭语音模式'
+                    ? isKeyHeld ? '松开 Alt+V 停止' : isMobile ? '松开停止录音' : '点击关闭语音模式'
                     : voiceStatus === 'ready'
-                      ? '按住 Alt+V 开始说话 | 点击关闭语音模式'
+                      ? isMobile ? '长按录音' : '按住 Alt+V 开始说话 | 点击关闭语音模式'
                       : voiceError
                         ? `语音输入错误: ${voiceError}`
-                        : '开启语音模式'
+                        : isMobile ? '长按录音' : '开启语音模式'
                 }
                 aria-label="语音输入"
               >
@@ -320,7 +327,7 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
           <div className="absolute inset-0 z-10 bg-black/50 flex flex-col items-center justify-center gap-3 fade-in-0">
             {analyserNode && <AudioWaveform analyserNode={analyserNode} />}
             <span className="text-sm text-slate-400 select-none">
-              正在录音... 松开 Alt+V 停止
+              {isMobile ? '正在录音... 松开停止' : '正在录音... 松开 Alt+V 停止'}
             </span>
           </div>
         )}

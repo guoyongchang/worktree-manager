@@ -162,8 +162,7 @@ export function useWorkspace(ready = true): UseWorkspaceReturn {
   const addWorkspace = useCallback(async (name: string, path: string) => {
     try {
       await callBackend("add_workspace", { name, path });
-      await loadWorkspaces();
-      await loadData();
+      await Promise.all([loadWorkspaces(), loadData()]);
     } catch (e) {
       setError(String(e));
     }
@@ -172,8 +171,7 @@ export function useWorkspace(ready = true): UseWorkspaceReturn {
   const createWorkspace = useCallback(async (name: string, path: string) => {
     try {
       await callBackend("create_workspace", { name, path });
-      await loadWorkspaces();
-      await loadData();
+      await Promise.all([loadWorkspaces(), loadData()]);
     } catch (e) {
       setError(String(e));
     }
@@ -182,8 +180,7 @@ export function useWorkspace(ready = true): UseWorkspaceReturn {
   const removeWorkspace = useCallback(async (path: string) => {
     try {
       await callBackend("remove_workspace", { path });
-      await loadWorkspaces();
-      await loadData();
+      await Promise.all([loadWorkspaces(), loadData()]);
     } catch (e) {
       setError(String(e));
     }

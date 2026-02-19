@@ -22,7 +22,14 @@ static VOICE_SESSION: Lazy<Mutex<Option<VoiceSession>>> = Lazy::new(|| Mutex::ne
 
 fn emit_event(event: &str, payload: serde_json::Value) {
     if let Some(handle) = APP_HANDLE.lock().ok().and_then(|h| h.clone()) {
-        let _ = handle.emit(event, payload);
+        let _ = handle.emit(event, payload.clone());
+    }
+    // Also broadcast to WebSocket clients
+    if let Ok(json_str) = serde_json::to_string(&serde_json::json!({
+        "event": event,
+        "payload": payload,
+    })) {
+        let _ = crate::state::VOICE_BROADCAST.send(json_str);
     }
 }
 
@@ -34,42 +41,57 @@ fn get_event_name(json: &serde_json::Value) -> &str {
 
 // ==================== Dashscope API Key Commands ====================
 
-#[tauri::command]
-pub(crate) async fn get_dashscope_api_key() -> Result<Option<String>, String> {
+pub(crate) fn get_dashscope_api_key_inner() -> Result<Option<String>, String> {
     let config = load_global_config();
     Ok(config.dashscope_api_key)
 }
 
-#[tauri::command]
-pub(crate) async fn set_dashscope_api_key(key: String) -> Result<(), String> {
+pub(crate) fn set_dashscope_api_key_inner(key: String) -> Result<(), String> {
     let mut config = load_global_config();
     config.dashscope_api_key = if key.is_empty() { None } else { Some(key) };
     save_global_config_internal(&config)?;
     Ok(())
 }
 
+#[tauri::command]
+pub(crate) async fn get_dashscope_api_key() -> Result<Option<String>, String> {
+    get_dashscope_api_key_inner()
+}
+
+#[tauri::command]
+pub(crate) async fn set_dashscope_api_key(key: String) -> Result<(), String> {
+    set_dashscope_api_key_inner(key)
+}
+
 // ==================== Dashscope Base URL Commands ====================
 
 const DEFAULT_DASHSCOPE_WS_URL: &str = "wss://dashscope.aliyuncs.com/api-ws/v1/inference/";
 
-#[tauri::command]
-pub(crate) async fn get_dashscope_base_url() -> Result<Option<String>, String> {
+pub(crate) fn get_dashscope_base_url_inner() -> Result<Option<String>, String> {
     let config = load_global_config();
     Ok(config.dashscope_base_url)
 }
 
-#[tauri::command]
-pub(crate) async fn set_dashscope_base_url(url: String) -> Result<(), String> {
+pub(crate) fn set_dashscope_base_url_inner(url: String) -> Result<(), String> {
     let mut config = load_global_config();
     config.dashscope_base_url = if url.is_empty() { None } else { Some(url) };
     save_global_config_internal(&config)?;
     Ok(())
 }
 
-// ==================== Voice Session Commands ====================
+#[tauri::command]
+pub(crate) async fn get_dashscope_base_url() -> Result<Option<String>, String> {
+    get_dashscope_base_url_inner()
+}
 
 #[tauri::command]
-pub(crate) async fn voice_start(sample_rate: Option<u32>) -> Result<(), String> {
+pub(crate) async fn set_dashscope_base_url(url: String) -> Result<(), String> {
+    set_dashscope_base_url_inner(url)
+}
+
+// ==================== Voice Session Commands ====================
+
+pub(crate) async fn voice_start_inner(sample_rate: Option<u32>) -> Result<(), String> {
     // Check if already active
     {
         let session = VOICE_SESSION.lock().map_err(|e| e.to_string())?;
@@ -179,6 +201,11 @@ pub(crate) async fn voice_start(sample_rate: Option<u32>) -> Result<(), String> 
     tokio::spawn(voice_session_task(ws_write, ws_read, audio_rx, stop_rx, task_id));
 
     Ok(())
+}
+
+#[tauri::command]
+pub(crate) async fn voice_start(sample_rate: Option<u32>) -> Result<(), String> {
+    voice_start_inner(sample_rate).await
 }
 
 /// Background task handling bidirectional WebSocket communication with Dashscope
@@ -332,8 +359,7 @@ async fn drain_final_results(
     }
 }
 
-#[tauri::command]
-pub(crate) async fn voice_send_audio(data: String) -> Result<(), String> {
+pub(crate) fn voice_send_audio_inner(data: String) -> Result<(), String> {
     let pcm_bytes = BASE64.decode(&data)
         .map_err(|e| format!("Base64 解码失败: {}", e))?;
 
@@ -347,8 +373,7 @@ pub(crate) async fn voice_send_audio(data: String) -> Result<(), String> {
     }
 }
 
-#[tauri::command]
-pub(crate) async fn voice_stop() -> Result<(), String> {
+pub(crate) fn voice_stop_inner() -> Result<(), String> {
     let session = VOICE_SESSION.lock().map_err(|e| e.to_string())?;
     if let Some(ref s) = *session {
         let _ = s.stop_tx.send(true);
@@ -358,8 +383,22 @@ pub(crate) async fn voice_stop() -> Result<(), String> {
     }
 }
 
-#[tauri::command]
-pub(crate) async fn voice_is_active() -> Result<bool, String> {
+pub(crate) fn voice_is_active_inner() -> Result<bool, String> {
     let session = VOICE_SESSION.lock().map_err(|e| e.to_string())?;
     Ok(session.is_some())
+}
+
+#[tauri::command]
+pub(crate) async fn voice_send_audio(data: String) -> Result<(), String> {
+    voice_send_audio_inner(data)
+}
+
+#[tauri::command]
+pub(crate) async fn voice_stop() -> Result<(), String> {
+    voice_stop_inner()
+}
+
+#[tauri::command]
+pub(crate) async fn voice_is_active() -> Result<bool, String> {
+    voice_is_active_inner()
 }

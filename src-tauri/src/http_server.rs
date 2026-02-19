@@ -412,6 +412,11 @@ async fn localhost_only_middleware(
         "/api/set_ngrok_token",
         "/api/start_ngrok_tunnel",
         "/api/stop_ngrok_tunnel",
+        // Dashscope config should only be accessible from localhost
+        "/api/get_dashscope_api_key",
+        "/api/set_dashscope_api_key",
+        "/api/get_dashscope_base_url",
+        "/api/set_dashscope_base_url",
     ];
 
     if restricted_paths.contains(&path.as_str()) {
@@ -716,6 +721,7 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
     let mut pty_forwarders: HashMap<String, tokio::task::JoinHandle<()>> = HashMap::new();
     let mut lock_forwarder: Option<tokio::task::JoinHandle<()>> = None;
     let mut terminal_state_forwarder: Option<tokio::task::JoinHandle<()>> = None;
+    let mut voice_forwarder: Option<tokio::task::JoinHandle<()>> = None;
 
     // Process incoming messages
     while let Some(msg) = ws_receiver.next().await {
@@ -911,7 +917,7 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                         "activatedTerminals": state.activated_terminals,
                         "activeTerminalTab": state.active_terminal_tab,
                         "terminalVisible": state.terminal_visible,
-                        "sequence": state.sequence,
+                        "clientId": state.client_id,
                     });
                     let mut sender = ws_sender.lock().await;
                     let _ = sender.send(Message::text(msg.to_string())).await;
@@ -937,7 +943,7 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                                             "activatedTerminals": val["activatedTerminals"],
                                             "activeTerminalTab": val["activeTerminalTab"],
                                             "terminalVisible": val["terminalVisible"],
-                                            "sequence": val["sequence"],
+                                            "clientId": val["clientId"],
                                         });
                                         let mut sender = sender.lock().await;
                                         if sender.send(Message::text(msg.to_string())).await.is_err() {
@@ -973,27 +979,27 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                 }).unwrap_or_default();
                 let active_terminal_tab = parsed["activeTerminalTab"].as_str().map(|s| s.to_string());
                 let terminal_visible = parsed["terminalVisible"].as_bool().unwrap_or(false);
-                let sequence = parsed["sequence"].as_u64();
+                let client_id = parsed["clientId"].as_str().map(|s| s.to_string());
 
-                // Update cache with sequence number
+                // Update cache with client_id
                 if let Ok(mut states) = crate::TERMINAL_STATES.lock() {
                     let key = (workspace_path.clone(), worktree_name.clone());
                     states.insert(key, crate::TerminalState {
                         activated_terminals: activated_terminals.clone(),
                         active_terminal_tab: active_terminal_tab.clone(),
                         terminal_visible,
-                        sequence,
+                        client_id: client_id.clone(),
                     });
                 }
 
-                // Broadcast to all connected clients with sequence number
+                // Broadcast to all connected clients with clientId
                 let broadcast_msg = json!({
                     "workspacePath": workspace_path,
                     "worktreeName": worktree_name,
                     "activatedTerminals": activated_terminals,
                     "activeTerminalTab": active_terminal_tab,
                     "terminalVisible": terminal_visible,
-                    "sequence": sequence,
+                    "clientId": client_id,
                 }).to_string();
                 let _ = TERMINAL_STATE_BROADCAST.send(broadcast_msg);
 
@@ -1005,9 +1011,43 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                         "activatedTerminals": activated_terminals,
                         "activeTerminalTab": active_terminal_tab,
                         "terminalVisible": terminal_visible,
-                        "sequence": sequence,
+                        "clientId": client_id,
                     }));
                 }
+            }
+
+            "subscribe_voice_events" => {
+                // Abort existing voice forwarder if any
+                if let Some(handle) = voice_forwarder.take() {
+                    handle.abort();
+                }
+
+                let mut rx = crate::state::VOICE_BROADCAST.subscribe();
+                let sender = Arc::clone(&ws_sender);
+                let handle = tokio::spawn(async move {
+                    loop {
+                        match rx.recv().await {
+                            Ok(json_str) => {
+                                if let Ok(val) = serde_json::from_str::<Value>(&json_str) {
+                                    let event = val["event"].as_str().unwrap_or("");
+                                    let payload = &val["payload"];
+                                    let msg = json!({
+                                        "type": "voice_event",
+                                        "event": event,
+                                        "payload": payload,
+                                    });
+                                    let mut sender = sender.lock().await;
+                                    if sender.send(Message::text(msg.to_string())).await.is_err() {
+                                        break;
+                                    }
+                                }
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        }
+                    }
+                });
+                voice_forwarder = Some(handle);
             }
 
             _ => {}
@@ -1024,6 +1064,9 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
     if let Some(handle) = terminal_state_forwarder {
         handle.abort();
     }
+    if let Some(handle) = voice_forwarder {
+        handle.abort();
+    }
 
     // Mark WebSocket disconnected
     if let Ok(mut clients) = CONNECTED_CLIENTS.lock() {
@@ -1032,6 +1075,44 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
         }
     }
     log::info!("WebSocket disconnected for session {}", session_id);
+}
+
+// -- Voice --
+
+async fn h_voice_start(Json(args): Json<Value>) -> Response {
+    let sample_rate = args["sampleRate"].as_u64().map(|v| v as u32);
+    result_ok(crate::commands::voice::voice_start_inner(sample_rate).await)
+}
+
+async fn h_voice_send_audio(Json(args): Json<Value>) -> Response {
+    let data = args["data"].as_str().unwrap_or("").to_string();
+    result_ok(crate::commands::voice::voice_send_audio_inner(data))
+}
+
+async fn h_voice_stop() -> Response {
+    result_ok(crate::commands::voice::voice_stop_inner())
+}
+
+async fn h_voice_is_active() -> Response {
+    result_json(crate::commands::voice::voice_is_active_inner())
+}
+
+async fn h_get_dashscope_api_key() -> Response {
+    result_json(crate::commands::voice::get_dashscope_api_key_inner())
+}
+
+async fn h_set_dashscope_api_key(Json(args): Json<Value>) -> Response {
+    let key = args["key"].as_str().unwrap_or("").to_string();
+    result_ok(crate::commands::voice::set_dashscope_api_key_inner(key))
+}
+
+async fn h_get_dashscope_base_url() -> Response {
+    result_json(crate::commands::voice::get_dashscope_base_url_inner())
+}
+
+async fn h_set_dashscope_base_url(Json(args): Json<Value>) -> Response {
+    let url = args["url"].as_str().unwrap_or("").to_string();
+    result_ok(crate::commands::voice::set_dashscope_base_url_inner(url))
 }
 
 // -- Connected clients --
@@ -1101,37 +1182,42 @@ pub fn create_router() -> Router {
         ]);
 
     // Resolve the dist/ folder relative to the current executable
-    let dist_path = std::env::current_exe()
-        .ok()
-        .and_then(|exe| {
-            let exe_dir = exe.parent()?;
-            // On macOS, check if we're in an app bundle (Contents/MacOS/)
-            if cfg!(target_os = "macos") {
-                if let Some(contents_dir) = exe_dir.parent() {
-                    if contents_dir.file_name().and_then(|n| n.to_str()) == Some("Contents") {
-                        // In app bundle: dist is in Contents/Resources/dist
-                        let resources_dist = contents_dir.join("Resources").join("dist");
-                        if resources_dist.exists() {
-                            log::info!("Using dist path from app bundle: {:?}", resources_dist);
-                            return Some(resources_dist);
+    // In debug builds, always use CARGO_MANIFEST_DIR/../dist (= project root's dist/)
+    // so that `npm run build` output is served directly without stale copies.
+    let dist_path = if cfg!(debug_assertions) {
+        let dev_dist = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../dist");
+        log::info!("Using dev dist path: {:?}", dev_dist);
+        dev_dist
+    } else {
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| {
+                let exe_dir = exe.parent()?;
+                // On macOS, check if we're in an app bundle (Contents/MacOS/)
+                if cfg!(target_os = "macos") {
+                    if let Some(contents_dir) = exe_dir.parent() {
+                        if contents_dir.file_name().and_then(|n| n.to_str()) == Some("Contents") {
+                            let resources_dist = contents_dir.join("Resources").join("dist");
+                            if resources_dist.exists() {
+                                log::info!("Using dist path from app bundle: {:?}", resources_dist);
+                                return Some(resources_dist);
+                            }
                         }
                     }
                 }
-            }
-            // Try dist next to executable
-            let exe_dist = exe_dir.join("dist");
-            if exe_dist.exists() {
-                log::info!("Using dist path next to executable: {:?}", exe_dist);
-                return Some(exe_dist);
-            }
-            None
-        })
-        .unwrap_or_else(|| {
-            // Fallback: relative to cargo manifest / project root (for dev)
-            let fallback = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../dist");
-            log::info!("Using fallback dist path: {:?}", fallback);
-            fallback
-        });
+                let exe_dist = exe_dir.join("dist");
+                if exe_dist.exists() {
+                    log::info!("Using dist path next to executable: {:?}", exe_dist);
+                    return Some(exe_dist);
+                }
+                None
+            })
+            .unwrap_or_else(|| {
+                let fallback = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../dist");
+                log::info!("Using fallback dist path: {:?}", fallback);
+                fallback
+            })
+    };
 
     let serve_dir = ServeDir::new(&dist_path)
         .append_index_html_on_directories(true)
@@ -1199,6 +1285,15 @@ pub fn create_router() -> Router {
         .route("/api/set_ngrok_token", post(h_set_ngrok_token))
         .route("/api/start_ngrok_tunnel", post(h_start_ngrok_tunnel))
         .route("/api/stop_ngrok_tunnel", post(h_stop_ngrok_tunnel))
+        // Voice
+        .route("/api/voice_start", post(h_voice_start))
+        .route("/api/voice_send_audio", post(h_voice_send_audio))
+        .route("/api/voice_stop", post(h_voice_stop))
+        .route("/api/voice_is_active", post(h_voice_is_active))
+        .route("/api/get_dashscope_api_key", post(h_get_dashscope_api_key))
+        .route("/api/set_dashscope_api_key", post(h_set_dashscope_api_key))
+        .route("/api/get_dashscope_base_url", post(h_get_dashscope_base_url))
+        .route("/api/set_dashscope_base_url", post(h_set_dashscope_base_url))
         // Misc
         .route("/api/get_app_version", post(h_get_app_version))
         // WebSocket (auth handled in upgrade handler via query param)

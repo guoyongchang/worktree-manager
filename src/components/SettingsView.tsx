@@ -207,15 +207,16 @@ export const SettingsView: FC<SettingsViewProps> = ({
         setNgrokToken(t || '');
         setNgrokTokenLoaded(true);
       }).catch(() => setNgrokTokenLoaded(true));
-      getDashscopeApiKey().then(k => {
-        setDashscopeKey(k || '');
-        setDashscopeKeyLoaded(true);
-      }).catch(() => setDashscopeKeyLoaded(true));
-      getDashscopeBaseUrl().then(u => {
-        setDashscopeUrl(u || '');
-      }).catch(() => {});
-      loadMicDevices();
     }
+    // Load Dashscope config in both Tauri and browser modes
+    getDashscopeApiKey().then(k => {
+      setDashscopeKey(k || '');
+      setDashscopeKeyLoaded(true);
+    }).catch(() => setDashscopeKeyLoaded(true));
+    getDashscopeBaseUrl().then(u => {
+      setDashscopeUrl(u || '');
+    }).catch(() => {});
+    loadMicDevices();
   }, [loadMicDevices]);
 
   // Validate stored deviceId against available devices
@@ -651,8 +652,8 @@ export const SettingsView: FC<SettingsViewProps> = ({
         </div>
       )}
 
-      {/* Dashscope Voice Recognition Config (Tauri only) */}
-      {isTauri() && dashscopeKeyLoaded && (
+      {/* Dashscope Voice Recognition Config */}
+      {dashscopeKeyLoaded && (
         <div className="mt-8 pt-8 border-t border-slate-700/50">
           <h2 className="text-lg font-medium mb-4">语音识别 (Dashscope)</h2>
           <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 space-y-3">

@@ -43,7 +43,7 @@ pub struct TerminalState {
     pub activated_terminals: Vec<String>,
     pub active_terminal_tab: Option<String>,
     pub terminal_visible: bool,
-    pub sequence: Option<u64>,
+    pub client_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]

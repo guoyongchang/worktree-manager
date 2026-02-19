@@ -20,7 +20,6 @@ export interface UseTerminalReturn {
   handleCloseTerminalTab: (path: string) => void;
   handleDuplicateTerminal: (path: string) => void;
   handleToggleTerminal: () => void;
-  resetActiveTab: () => void;
   cleanupTerminalsForPath: (pathPrefix: string) => void;
 }
 
@@ -44,16 +43,15 @@ export function useTerminal(
   const visiblePerWorkspace = useRef<Map<string, boolean>>(new Map());
   const prevWorkspaceRoot = useRef<string>('');
 
-  // Prevent broadcast loops: track if receiving external updates
-  const isReceivingUpdate = useRef(false);
-  // Debounce timer for broadcast rate limiting
+  // Unique client ID for self-echo filtering — replaces all workaround refs
+  const clientIdRef = useRef(
+    typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('')
+  );
+  // Rate limiting
   const broadcastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Last broadcast timestamp for rate limiting
   const lastBroadcastTime = useRef<number>(0);
-  // Message sequence number for deduplication
-  const messageSequence = useRef<number>(0);
-  // Last received sequence number to detect duplicates
-  const lastReceivedSequence = useRef<number>(-1);
 
   const currentWorkspaceRoot = selectedWorktree?.path || mainWorkspace?.path || '';
   const _isTauri = isTauri();
@@ -114,6 +112,46 @@ export function useTerminal(
 
   const terminalTabs = [...baseTabs, ...duplicatedTabs];
 
+  // Explicit broadcast function — reads from refs (synchronously updated)
+  const scheduleBroadcast = useCallback(() => {
+    if (!workspacePath || !worktreeName) return;
+
+    const doBroadcast = () => {
+      const tabs = Array.from(activatedTerminalsRef.current);
+      const active = activeTerminalTabRef.current;
+      const visible = terminalVisibleRef.current;
+      const clientId = clientIdRef.current;
+
+      if (import.meta.env.DEV) {
+        console.log('[useTerminal] Broadcasting terminal state:',
+          'tabs:', tabs, 'active:', active);
+      }
+
+      if (_isTauri) {
+        broadcastTerminalStateBackend(
+          workspacePath, worktreeName, tabs, active, visible, clientId
+        ).catch(err => {
+          console.error('[useTerminal] Failed to broadcast terminal state:', err);
+        });
+      } else {
+        getWebSocketManager().broadcastTerminalState(
+          workspacePath, worktreeName, tabs, active, visible, clientId
+        );
+      }
+      lastBroadcastTime.current = Date.now();
+    };
+
+    if (broadcastTimerRef.current) clearTimeout(broadcastTimerRef.current);
+
+    const elapsed = Date.now() - lastBroadcastTime.current;
+    if (elapsed >= TERMINAL.BROADCAST_RATE_LIMIT_MS) {
+      doBroadcast();
+    } else {
+      broadcastTimerRef.current = setTimeout(doBroadcast,
+        TERMINAL.BROADCAST_RATE_LIMIT_MS - elapsed);
+    }
+  }, [workspacePath, worktreeName, _isTauri]);
+
   // Save/restore terminal state when workspace root changes
   useEffect(() => {
     const prev = prevWorkspaceRoot.current;
@@ -134,38 +172,38 @@ export function useTerminal(
       const savedTab = activeTabPerWorkspace.current.get(currentWorkspaceRoot);
       const savedVisible = visiblePerWorkspace.current.get(currentWorkspaceRoot);
 
-      setActivatedTerminals(savedActivated || new Set());
-      setTerminalVisible(savedVisible ?? false);
-      if (savedTab && savedActivated?.has(savedTab)) {
-        setActiveTerminalTab(savedTab);
-      } else {
-        setActiveTerminalTab(null);
-      }
+      const restoredActivated = savedActivated || new Set<string>();
+      const restoredTab = (savedTab && savedActivated?.has(savedTab)) ? savedTab : null;
+      const restoredVisible = savedVisible ?? false;
+
+      // Update state (async)
+      setActivatedTerminals(restoredActivated);
+      setTerminalVisible(restoredVisible);
+      setActiveTerminalTab(restoredTab);
+
+      // Update refs synchronously so scheduleBroadcast reads correct values
+      activatedTerminalsRef.current = restoredActivated;
+      activeTerminalTabRef.current = restoredTab;
+      terminalVisibleRef.current = restoredVisible;
+
+      // Broadcast restored state to sync other clients
+      scheduleBroadcast();
     }
 
     prevWorkspaceRoot.current = currentWorkspaceRoot;
-  }, [currentWorkspaceRoot]);
+  }, [currentWorkspaceRoot, scheduleBroadcast]);
 
   // Shared handler for incoming terminal state messages (used by both Tauri and WebSocket)
-  // Uses refs for current state to keep callback stable (no state dependencies)
   const handleTerminalStateMessage = useCallback((msg: {
     workspacePath?: string;
     worktreeName?: string;
     activatedTerminals: string[];
     activeTerminalTab: string | null;
     terminalVisible: boolean;
-    sequence?: number;
+    clientId?: string;
   }) => {
-    const sequence = msg.sequence;
-    if (sequence !== undefined && sequence <= lastReceivedSequence.current) {
-      return;
-    }
-
-    if (sequence !== undefined) {
-      lastReceivedSequence.current = sequence;
-    }
-
-    isReceivingUpdate.current = true;
+    // Self-echo filtering: ignore messages from this client
+    if (msg.clientId && msg.clientId === clientIdRef.current) return;
 
     const currentActivated = activatedTerminalsRef.current;
     const newActivatedTerminals = new Set(msg.activatedTerminals);
@@ -180,15 +218,9 @@ export function useTerminal(
       setActiveTerminalTab(msg.activeTerminalTab);
       setTerminalVisible(msg.terminalVisible);
     }
-
-    setTimeout(() => {
-      isReceivingUpdate.current = false;
-    }, TERMINAL.BROADCAST_DEBOUNCE_MS);
   }, []);
 
-  // Terminal state synchronization: both desktop and web subscribe and broadcast
-  // handleTerminalStateMessage is now stable (no state deps), so this effect only re-runs
-  // when workspace/worktree identity changes — no more cascade re-subscriptions
+  // Terminal state synchronization: both desktop and web subscribe
   useEffect(() => {
     if (!selectedWorktree || !workspacePath || !worktreeName) return;
 
@@ -201,9 +233,8 @@ export function useTerminal(
         activatedTerminals: string[];
         activeTerminalTab: string | null;
         terminalVisible: boolean;
-        sequence?: number;
+        clientId?: string;
       }>('terminal-state-update', (event) => {
-        // Filter by workspace/worktree identity here (since callback no longer has these deps)
         if (event.payload.workspacePath && event.payload.worktreeName &&
             (event.payload.workspacePath !== workspacePath || event.payload.worktreeName !== worktreeName)) {
           return;
@@ -217,94 +248,18 @@ export function useTerminal(
       unsubscribe = wsManager.subscribeTerminalState(
         workspacePath,
         worktreeName,
-        (msg) => handleTerminalStateMessage(msg as any),
+        (msg) => {
+          if (msg.workspacePath && msg.worktreeName &&
+              (msg.workspacePath !== workspacePath || msg.worktreeName !== worktreeName)) {
+            return;
+          }
+          handleTerminalStateMessage(msg);
+        },
       );
     }
 
     return unsubscribe;
   }, [selectedWorktree, workspacePath, worktreeName, _isTauri, handleTerminalStateMessage]);
-
-  // Track whether the user has interacted with terminal state (skip initial broadcasts)
-  const hasUserInteracted = useRef(false);
-
-  // Broadcast terminal state changes (both desktop and web) with rate limiting
-  useEffect(() => {
-    // If receiving external update, don't broadcast (avoid loop)
-    if (isReceivingUpdate.current) return;
-
-    if (!selectedWorktree || !workspacePath || !worktreeName) return;
-
-    // Skip broadcasting empty/initial state — nothing useful to sync
-    if (activatedTerminals.size === 0 && activeTerminalTab === null && !terminalVisible) return;
-
-    // Skip the very first state change to avoid broadcasting during initialization
-    if (!hasUserInteracted.current) {
-      hasUserInteracted.current = true;
-      return;
-    }
-
-    // Rate limiting: prevent broadcasts more frequent than BROADCAST_RATE_LIMIT_MS
-    const now = Date.now();
-    const timeSinceLastBroadcast = now - lastBroadcastTime.current;
-
-    const doBroadcast = () => {
-      if (import.meta.env.DEV) {
-        console.log('[useTerminal] Broadcasting terminal state:',
-          'tabs:', Array.from(activatedTerminals), 'active:', activeTerminalTab);
-      }
-
-      // Increment sequence number for message deduplication
-      messageSequence.current += 1;
-      const sequence = messageSequence.current;
-
-      // Bidirectional sync: both PC and Web broadcast terminal state changes
-      if (_isTauri) {
-        broadcastTerminalStateBackend(
-          workspacePath,
-          worktreeName,
-          Array.from(activatedTerminals),
-          activeTerminalTab,
-          terminalVisible
-        ).catch(err => {
-          console.error('[useTerminal] Failed to broadcast terminal state:', err);
-        });
-      } else {
-        const wsManager = getWebSocketManager();
-        wsManager.broadcastTerminalState(
-          workspacePath,
-          worktreeName,
-          Array.from(activatedTerminals),
-          activeTerminalTab,
-          terminalVisible,
-          sequence
-        );
-      }
-
-      lastBroadcastTime.current = Date.now();
-    };
-
-    // Clear any pending broadcast timer
-    if (broadcastTimerRef.current) {
-      clearTimeout(broadcastTimerRef.current);
-    }
-
-    // If enough time has passed, broadcast immediately
-    if (timeSinceLastBroadcast >= TERMINAL.BROADCAST_RATE_LIMIT_MS) {
-      doBroadcast();
-    } else {
-      // Otherwise, schedule broadcast after rate limit period
-      const delay = TERMINAL.BROADCAST_RATE_LIMIT_MS - timeSinceLastBroadcast;
-      broadcastTimerRef.current = setTimeout(doBroadcast, delay);
-    }
-
-    // Cleanup function
-    return () => {
-      if (broadcastTimerRef.current) {
-        clearTimeout(broadcastTimerRef.current);
-        broadcastTimerRef.current = null;
-      }
-    };
-  }, [_isTauri, selectedWorktree, workspacePath, worktreeName, activatedTerminals, activeTerminalTab, terminalVisible]);
 
   // Handle terminal resize drag
   useEffect(() => {
@@ -333,63 +288,89 @@ export function useTerminal(
   }, [isResizing]);
 
   const handleTerminalTabClick = useCallback((projectPath: string) => {
-    if (!terminalVisible) {
-      setTerminalVisible(true);
-    }
+    // Update state (async)
+    if (!terminalVisibleRef.current) setTerminalVisible(true);
     setActiveTerminalTab(projectPath);
-    if (!activatedTerminals.has(projectPath)) {
+    if (!activatedTerminalsRef.current.has(projectPath)) {
       setActivatedTerminals(prev => new Set(prev).add(projectPath));
     }
 
+    // Update refs synchronously for broadcast
+    terminalVisibleRef.current = true;
+    activeTerminalTabRef.current = projectPath;
+    if (!activatedTerminalsRef.current.has(projectPath)) {
+      activatedTerminalsRef.current = new Set(activatedTerminalsRef.current).add(projectPath);
+    }
+
+    scheduleBroadcast();
+
     // Trigger terminal resize by temporarily adjusting height
-    // This ensures the CLI resets properly when switching terminals
     setTerminalHeight(prev => prev - TERMINAL.RESIZE_TRIGGER_OFFSET);
     setTimeout(() => {
       setTerminalHeight(prev => prev + TERMINAL.RESIZE_TRIGGER_OFFSET);
     }, TERMINAL.RESIZE_DELAY_MS);
-  }, [terminalVisible, activatedTerminals]);
+  }, [scheduleBroadcast]);
 
   const handleCloseTerminalTab = useCallback((path: string) => {
-    setActivatedTerminals(prev => {
-      const next = new Set(prev);
-      next.delete(path);
-      return next;
-    });
+    const newActivated = new Set(activatedTerminalsRef.current);
+    newActivated.delete(path);
+
+    setActivatedTerminals(newActivated);
     // Remove from mountedTerminals so the Terminal component unmounts and PTY is closed
     setMountedTerminals(prev => {
       const next = new Set(prev);
       next.delete(path);
       return next;
     });
-    if (activeTerminalTab === path) {
-      const remaining = Array.from(activatedTerminals).filter(p => p !== path);
-      setActiveTerminalTab(remaining.length > 0 ? remaining[0] : null);
+
+    let newActiveTab = activeTerminalTabRef.current;
+    if (activeTerminalTabRef.current === path) {
+      const remaining = Array.from(newActivated);
+      newActiveTab = remaining.length > 0 ? remaining[0] : null;
+      setActiveTerminalTab(newActiveTab);
     }
-  }, [activeTerminalTab, activatedTerminals]);
+
+    // Update refs synchronously for broadcast
+    activatedTerminalsRef.current = newActivated;
+    activeTerminalTabRef.current = newActiveTab;
+
+    scheduleBroadcast();
+  }, [scheduleBroadcast]);
 
   const handleDuplicateTerminal = useCallback((path: string) => {
     const duplicatePath = `${path}#${Date.now()}`;
-    setActivatedTerminals(prev => new Set(prev).add(duplicatePath));
+    const newActivated = new Set(activatedTerminalsRef.current).add(duplicatePath);
+
+    setActivatedTerminals(newActivated);
     setActiveTerminalTab(duplicatePath);
-  }, []);
+
+    // Update refs synchronously for broadcast
+    activatedTerminalsRef.current = newActivated;
+    activeTerminalTabRef.current = duplicatePath;
+
+    scheduleBroadcast();
+  }, [scheduleBroadcast]);
 
   const handleToggleTerminal = useCallback(() => {
-    const newVisible = !terminalVisible;
+    const newVisible = !terminalVisibleRef.current;
     setTerminalVisible(newVisible);
 
-    // If opening terminal and no active tab, activate the workspace root terminal
-    if (newVisible && !activeTerminalTab && currentWorkspaceRoot) {
-      setActiveTerminalTab(currentWorkspaceRoot);
-      if (!activatedTerminals.has(currentWorkspaceRoot)) {
-        setActivatedTerminals(prev => new Set(prev).add(currentWorkspaceRoot));
-      }
-    }
-  }, [terminalVisible, activeTerminalTab, currentWorkspaceRoot, activatedTerminals]);
+    // Update ref synchronously
+    terminalVisibleRef.current = newVisible;
 
-  const resetActiveTab = useCallback(() => {
-    // No-op: we now handle tab switching in the useEffect above
-    // This is kept for API compatibility
-  }, []);
+    // If opening terminal and no active tab, activate the workspace root terminal
+    if (newVisible && !activeTerminalTabRef.current && currentWorkspaceRoot) {
+      setActiveTerminalTab(currentWorkspaceRoot);
+      if (!activatedTerminalsRef.current.has(currentWorkspaceRoot)) {
+        const newActivated = new Set(activatedTerminalsRef.current).add(currentWorkspaceRoot);
+        setActivatedTerminals(newActivated);
+        activatedTerminalsRef.current = newActivated;
+      }
+      activeTerminalTabRef.current = currentWorkspaceRoot;
+    }
+
+    scheduleBroadcast();
+  }, [currentWorkspaceRoot, scheduleBroadcast]);
 
   // Remove all terminals matching a path prefix (e.g. when archiving a worktree).
   // This unmounts Terminal components → triggers pty_close on the frontend side.
@@ -431,7 +412,6 @@ export function useTerminal(
     handleCloseTerminalTab,
     handleDuplicateTerminal,
     handleToggleTerminal,
-    resetActiveTab,
     cleanupTerminalsForPath,
   };
 }
