@@ -219,6 +219,72 @@
       color: #f1f5f9;
     }
 
+    /* Workflow Comparison */
+    .workflow-compare {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      margin-top: 1rem;
+      margin-bottom: 1rem;
+    }
+    @media (max-width: 640px) {
+      .workflow-compare { grid-template-columns: 1fr; }
+    }
+    .workflow-col {
+      padding: 1rem;
+      border-radius: 0.5rem;
+    }
+    .workflow-old {
+      background: rgba(239, 68, 68, 0.04);
+      border: 1px solid rgba(239, 68, 68, 0.15);
+    }
+    .workflow-new {
+      background: rgba(34, 197, 94, 0.04);
+      border: 1px solid rgba(34, 197, 94, 0.15);
+    }
+    .workflow-col h4 {
+      font-weight: 600;
+      margin-bottom: 0.75rem;
+      font-size: 0.6875rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .workflow-old h4 { color: #f87171; }
+    .workflow-new h4 { color: #4ade80; }
+    .workflow-steps {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.375rem;
+      align-items: center;
+    }
+    .wf-step {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.25rem 0.625rem;
+      border-radius: 0.375rem;
+      font-family: ui-monospace, monospace;
+      font-size: 0.6875rem;
+      white-space: nowrap;
+    }
+    .workflow-old .wf-step {
+      background: rgba(239, 68, 68, 0.1);
+      color: #fca5a5;
+      border: 1px solid rgba(239, 68, 68, 0.12);
+    }
+    .workflow-new .wf-step {
+      background: rgba(34, 197, 94, 0.1);
+      color: #86efac;
+      border: 1px solid rgba(34, 197, 94, 0.12);
+    }
+    .wf-arrow { color: #475569; font-size: 0.6875rem; }
+    .wf-result {
+      margin-top: 0.75rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .workflow-old .wf-result { color: #f87171; }
+    .workflow-new .wf-result { color: #4ade80; }
+
     /* Container */
     .container {
       max-width: 72rem;
@@ -440,76 +506,147 @@
   <section class="py-16">
     <div class="max-w-5xl mx-auto px-4">
       <h2 class="text-3xl font-bold mb-3">这些场景，是不是似曾相识？</h2>
-      <p class="text-slate-400 mb-10 text-lg">每个开发者都经历过的崩溃瞬间</p>
+      <p class="text-slate-400 mb-10 text-lg">每个开发者都经历过的效率黑洞</p>
       <div class="space-y-4">
 
-        <!-- Scenario 1 -->
+        <!-- Scenario 1: 线上着火 -->
         <div class="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
           <div class="p-6">
-            <div class="font-semibold mb-3 text-lg flex items-center gap-2 text-red-400">&#x1F525; "线上炸了，赶紧修！"</div>
+            <div class="font-semibold mb-3 text-lg flex items-center gap-2 text-red-400">&#x1F525; 线上着火，但你手里的活还没提交</div>
             <div class="text-slate-300 text-sm leading-relaxed space-y-2">
-              <p>周三下午三点，你正在 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">feature/new-dashboard</code> 分支上写得正嗨，CSS 调了半天终于对齐了，十几个文件改了一半还没提交。</p>
-              <p>群里突然 @所有人：<strong>"生产环境登录接口 500，紧急修复！"</strong></p>
-              <p>你只能赶紧 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">git stash</code>，切到 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">hotfix</code> 分支。修完 bug，切回来一看 -- stash 里的改动和当前代码冲突了，CSS 也全乱了。更惨的是，<code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">node_modules</code> 因为两个分支的 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">package.json</code> 不同，又要重新装一遍依赖...</p>
+              <p>你正在 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">feature/checkout-v2</code> 上重构结算流程，改了十几个文件，<code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">npm run dev</code> 跑着热更新。Slack 弹出告警：<strong>线上支付回调 500 了。</strong></p>
+              <p>传统做法：<code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">git stash</code> &rarr; 切到 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">hotfix</code> &rarr; <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">npm install</code>（依赖版本不一样得重装）&rarr; 修完推上去 &rarr; 切回来 &rarr; <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">git stash pop</code> &rarr; 祈祷没冲突 &rarr; 重启 dev server 等构建缓存重建。15 分钟起步，线上还在报错。</p>
             </div>
-            <div class="mt-4 p-3 bg-green-900/20 border border-green-700/50 rounded-lg">
-              <p class="text-green-300 text-sm"><strong>用了 Worktree Manager：</strong>直接点"+"新建一个 hotfix worktree，两秒钟搞定。原来的代码一行不动，两个分支各跑各的，修完 bug 归档 hotfix 就好。</p>
+            <div class="workflow-compare">
+              <div class="workflow-col workflow-old">
+                <h4>传统做法</h4>
+                <div class="workflow-steps">
+                  <span class="wf-step">git stash</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">checkout hotfix</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">npm install</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">修 bug</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">push</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">checkout 回来</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">stash pop</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">npm install</span>
+                </div>
+                <div class="wf-result">8 步 &middot; 15+ 分钟 &middot; 可能冲突</div>
+              </div>
+              <div class="workflow-col workflow-new">
+                <h4>Worktree Manager</h4>
+                <div class="workflow-steps">
+                  <span class="wf-step">点击 "+" 新建 hotfix</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">修 bug</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">push</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">归档</span>
+                </div>
+                <div class="wf-result">4 步 &middot; 30 秒切换 &middot; 原分支零影响</div>
+              </div>
+            </div>
+            <div class="p-3 bg-green-900/20 border border-green-700/50 rounded-lg">
+              <p class="text-green-300 text-sm"><strong>node_modules 自动通过 symlink 共享</strong>，秒级就绪。你的 feature 分支 dev server 还在跑，改到一半的代码一行不用动。</p>
             </div>
           </div>
         </div>
 
-        <!-- Scenario 2 -->
+        <!-- Scenario 2: 前后端联调 -->
         <div class="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
           <div class="p-6">
-            <div class="font-semibold mb-3 text-lg flex items-center gap-2 text-amber-400">&#x23F3; "又要等 npm install..."</div>
+            <div class="font-semibold mb-3 text-lg flex items-center gap-2 text-amber-400">&#x1F4A5; 前后端联调，分支对不上就炸</div>
             <div class="text-slate-300 text-sm leading-relaxed space-y-2">
-              <p>你同时在做登录模块重构和首页性能优化。两个需求在不同分支上，每天在它们之间切换三四次。</p>
-              <p>每次 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">git checkout</code> 之后：<code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">npm install</code> 跑两分钟，Webpack 构建缓存全部失效再等三分钟，TypeScript 类型检查重新跑一遍... 一天下来，光等编译就花了一个多小时。泡咖啡的次数都不够填这些空档。</p>
+              <p>你的项目是前后端分仓：<code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">web</code> 和 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">api</code>。做「会员体系」需求时，两个仓库都要切到 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">feature/membership</code> 分支。但同事让你帮忙看 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">feature/search</code> 的问题，你切了前端忘了切后端&mdash;&mdash;页面白屏，接口 404，排查半天才发现是分支没对齐。</p>
             </div>
-            <div class="mt-4 p-3 bg-green-900/20 border border-green-700/50 rounded-lg">
-              <p class="text-green-300 text-sm"><strong>用了 Worktree Manager：</strong>两个 worktree 同时存在，<code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">node_modules</code> 自动从主仓库链接共享，切换 worktree 只是在列表里点一下，零等待。两个 VS Code 窗口并排开着，左边改登录，右边优化首页。</p>
+            <div class="workflow-compare">
+              <div class="workflow-col workflow-old">
+                <h4>传统做法：手动对齐两个仓库</h4>
+                <div class="workflow-steps">
+                  <span class="wf-step">cd web && git checkout</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">cd api && git checkout</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">忘切一个?</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">404 / 白屏</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">排查 30 分钟</span>
+                </div>
+                <div class="wf-result">多仓分支靠记忆对齐 &middot; 迟早出错</div>
+              </div>
+              <div class="workflow-col workflow-new">
+                <h4>Worktree Manager：一个 worktree = 一套环境</h4>
+                <div class="workflow-steps">
+                  <span class="wf-step">创建 membership worktree</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">web + api 自动检出</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">开发</span>
+                </div>
+                <div class="wf-result">切换 worktree = 切换整套工作环境</div>
+              </div>
+            </div>
+            <div class="p-3 bg-green-900/20 border border-green-700/50 rounded-lg">
+              <p class="text-green-300 text-sm"><strong>一个 worktree 绑定多个项目仓库</strong>，创建时所有仓库同时检出到对应分支。不存在「只切了一半」的问题。</p>
             </div>
           </div>
         </div>
 
-        <!-- Scenario 3 -->
+        <!-- Scenario 3: 提测合并 -->
         <div class="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
           <div class="p-6">
-            <div class="font-semibold mb-3 text-lg flex items-center gap-2 text-blue-400">&#x1F440; "帮我看一下这个分支的实现？"</div>
+            <div class="font-semibold mb-3 text-lg flex items-center gap-2 text-purple-400">&#x1F504; 提测合并全靠命令行肌肉记忆</div>
             <div class="text-slate-300 text-sm leading-relaxed space-y-2">
-              <p>Code Review 的时候，同事说："我在 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">feature/payment</code> 分支上有个奇怪的 bug，你能帮我看看吗？"</p>
-              <p>你当前分支还有一堆未提交的改动。为了看他的代码，要么 stash + checkout（回来还得解冲突），要么新 clone 一份仓库。等终于切好了，同事已经去开会了...</p>
+              <p>需求开发完了，要合并到 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">test</code> 分支给 QA 验证。每次都得：<code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">git checkout test</code> &rarr; <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">git pull</code> &rarr; <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">git merge feature/xxx</code> &rarr; 解决冲突 &rarr; <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">git push</code> &rarr; <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">git checkout feature/xxx</code> 切回来。一天提测三四个需求，这套操作重复到麻木，偶尔还会忘记切回来就在 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">test</code> 上继续开发。</p>
             </div>
-            <div class="mt-4 p-3 bg-green-900/20 border border-green-700/50 rounded-lg">
-              <p class="text-green-300 text-sm"><strong>用了 Worktree Manager：</strong>新建一个 worktree 检出同事的分支，秒级完成。或者更酷的方式 -- 让同事开启"远程分享"，你直接在浏览器里打开他的工作区，连终端都能共用，一起实时排查问题。</p>
+            <div class="workflow-compare">
+              <div class="workflow-col workflow-old">
+                <h4>传统做法</h4>
+                <div class="workflow-steps">
+                  <span class="wf-step">checkout test</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">git pull</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">git merge</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">解冲突</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">git push</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">checkout 回来</span>
+                </div>
+                <div class="wf-result">6 步 &middot; 每次提测重复一遍 &middot; 容易忘切回来</div>
+              </div>
+              <div class="workflow-col workflow-new">
+                <h4>Worktree Manager</h4>
+                <div class="workflow-steps">
+                  <span class="wf-step">点击「合并到 test」</span>
+                </div>
+                <div class="wf-result">1 步 &middot; 不离开当前分支 &middot; 状态实时可见</div>
+              </div>
+            </div>
+            <div class="p-3 bg-green-900/20 border border-green-700/50 rounded-lg">
+              <p class="text-green-300 text-sm">每个项目卡片下方直接有<strong>「合并到 test」「同步 base」「推送」</strong>按钮。分支状态（领先/落后几个 commit、是否已合并 test）实时显示，一目了然。</p>
             </div>
           </div>
         </div>
 
-        <!-- Scenario 4 -->
+        <!-- Scenario 4: 远程访问 -->
         <div class="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
           <div class="p-6">
-            <div class="font-semibold mb-3 text-lg flex items-center gap-2 text-purple-400">&#x1F4BE; "磁盘快满了..."</div>
+            <div class="font-semibold mb-3 text-lg flex items-center gap-2 text-cyan-400">&#x1F310; 出差在外，想看一眼公司机器上的代码</div>
             <div class="text-slate-300 text-sm leading-relaxed space-y-2">
-              <p>团队有个大型 monorepo，光 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">node_modules</code> 就 2GB。为了同时跑两个分支的开发服务器，你 clone 了两份。4GB 依赖 + 两份代码 + 两份构建产物，256GB 的 SSD 已经亮红灯了。</p>
-              <p>更痛苦的是，每次有依赖更新，两边都要跑一遍 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">npm install</code>。</p>
+              <p>你的开发机在公司内网，出差时想看一下代码运行状态，或者在终端里执行几条命令。传统方案要么 SSH 隧道（折腾），要么 VPN + 远程桌面（卡顿）。</p>
             </div>
-            <div class="mt-4 p-3 bg-green-900/20 border border-green-700/50 rounded-lg">
-              <p class="text-green-300 text-sm"><strong>用了 Worktree Manager：</strong>所有 worktree 共享同一个 <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">.git</code> 仓库数据，<code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">node_modules</code> 通过软链接从主仓库共享。10 个分支并行开发，磁盘只占一份依赖的空间。</p>
+            <div class="workflow-compare">
+              <div class="workflow-col workflow-old">
+                <h4>传统做法</h4>
+                <div class="workflow-steps">
+                  <span class="wf-step">配置 VPN</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">远程桌面连接</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">卡顿 &amp; 延迟</span>
+                </div>
+                <div class="wf-result">配置复杂 &middot; 画面卡顿 &middot; 依赖公司网络</div>
+              </div>
+              <div class="workflow-col workflow-new">
+                <h4>Worktree Manager</h4>
+                <div class="workflow-steps">
+                  <span class="wf-step">点击「分享」</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">发送链接</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">浏览器打开</span>
+                </div>
+                <div class="wf-result">3 步 &middot; 无需安装 &middot; ngrok 支持公网访问</div>
+              </div>
             </div>
-          </div>
-        </div>
-
-        <!-- Scenario 5 (NEW - remote sharing) -->
-        <div class="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
-          <div class="p-6">
-            <div class="font-semibold mb-3 text-lg flex items-center gap-2 text-cyan-400">&#x1F310; "你能共享一下你的屏幕吗？"</div>
-            <div class="text-slate-300 text-sm leading-relaxed space-y-2">
-              <p>远程办公中，新同事遇到了环境配置问题。你想帮忙排查，但腾讯会议的屏幕共享延迟高、画面糊，看不清终端输出。他说了半天 "报错了"，你问 "什么报错"，截图发过来一看只截了半屏...</p>
-              <p>又或者，你想给异地的产品经理演示一下新功能的开发进度。为了这五分钟的演示，先开会议、共享屏幕、调分辨率，忙活了十分钟。</p>
-            </div>
-            <div class="mt-4 p-3 bg-green-900/20 border border-green-700/50 rounded-lg">
-              <p class="text-green-300 text-sm"><strong>用了 Worktree Manager：</strong>点一下"分享"，把链接和密码发给对方。他在浏览器里打开就能看到你的完整工作区 -- 所有分支状态、代码目录、终端输出，全都实时同步。如果需要，还能直接在共享终端里一起敲命令，比屏幕共享好用一百倍。通过 ngrok 外网穿透，不在同一个网络也没问题。</p>
+            <div class="p-3 bg-green-900/20 border border-green-700/50 rounded-lg">
+              <p class="text-green-300 text-sm">开启分享功能，局域网或通过 <strong>ngrok 生成公网链接</strong>。在任意浏览器中打开，密码验证后即可查看工作区状态、使用内置终端，不需要安装任何客户端。</p>
             </div>
           </div>
         </div>
@@ -521,9 +658,9 @@
   <!-- Solution -->
   <section class="py-16 bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900">
     <div class="max-w-5xl mx-auto px-4 text-center">
-      <h2 class="text-3xl font-bold mb-3">Git Worktree Manager 让这些问题迎刃而解</h2>
+      <h2 class="text-3xl font-bold mb-3">Git Worktree Manager 怎么解决这些问题？</h2>
       <p class="text-slate-400 text-lg max-w-2xl mx-auto mt-3">
-        利用 Git 原生的 <a href="https://git-scm.com/docs/git-worktree" class="text-blue-400 hover:underline">worktree</a> 功能，在同一个仓库中同时检出多个分支。每个分支有独立的工作目录，共享 <code class="bg-slate-950 px-2 py-0.5 rounded text-sm font-mono">.git</code> 数据，还能自动链接 <code class="bg-slate-950 px-2 py-0.5 rounded text-sm font-mono">node_modules</code> 等大文件夹，节省磁盘空间。更有一键远程分享和浏览器内置终端，让团队协作不受空间限制。
+        基于 Git 原生的 <a href="https://git-scm.com/docs/git-worktree" class="text-blue-400 hover:underline">worktree</a> 能力构建，在<strong class="text-slate-300">同一个仓库</strong>中同时检出多个分支到<strong class="text-slate-300">独立目录</strong>，共享 <code class="bg-slate-950 px-2 py-0.5 rounded text-sm font-mono">.git</code> 数据。配合自动 symlink <code class="bg-slate-950 px-2 py-0.5 rounded text-sm font-mono">node_modules</code> 等大文件夹，<strong class="text-slate-300">零成本切换</strong>，<strong class="text-slate-300">零额外磁盘占用</strong>。
       </p>
     </div>
   </section>

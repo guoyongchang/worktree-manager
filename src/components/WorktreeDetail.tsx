@@ -29,6 +29,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { GitOperations } from './GitOperations';
 import { EDITORS } from '../constants';
+import { isTauri } from '@/lib/backend';
 import type {
   WorktreeListItem,
   MainWorkspaceStatus,
@@ -187,6 +188,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
             <h2 className="text-xl font-semibold text-slate-100 truncate">主工作区 - {mainWorkspace.name}</h2>
             <PathDisplay path={mainWorkspace.path} />
           </div>
+          {isTauri() && (
           <div className="flex gap-2 items-center shrink-0 ml-3">
             {onAddProject && (
               <Button onClick={onAddProject} variant="default">
@@ -247,6 +249,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
             </div>
             <Button variant="secondary" onClick={() => onOpenInTerminal(mainWorkspace.path)}>外部终端</Button>
           </div>
+          )}
         </div>
         <div className="grid grid-cols-2 gap-3">
           {mainWorkspace.projects.map(proj => {
@@ -267,6 +270,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                 <div className="flex items-center justify-between">
                   <span className="font-medium text-slate-200">{proj.name}</span>
                   <div className="flex items-center gap-1 text-slate-500 hover:text-slate-200">
+                    {isTauri() && (
                     <button
                       onClick={() => onRevealInFinder(projectPath)}
                       className="p-1 hover:bg-slate-600 rounded text-slate-400 hover:text-slate-200 transition-colors"
@@ -275,6 +279,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                     >
                       <FolderIcon className="w-3.5 h-3.5" />
                     </button>
+                    )}
                     {proj.has_uncommitted && <WarningIcon className="w-4 h-4 text-amber-500" />}
                   </div>
                 </div>
@@ -376,6 +381,8 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
               </>
             ) : (
               <>
+                {isTauri() && (
+                <>
                 <div className="inline-flex rounded-md">
                   <Button
                     className="rounded-r-none border-r border-blue-700/50"
@@ -429,6 +436,8 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                 </div>
                 <Button variant="secondary" onClick={() => onOpenInTerminal(selectedWorktree.path)}>外部终端</Button>
                 <Button variant="warning" onClick={onArchive}>归档</Button>
+                </>
+                )}
               </>
             )}
           </div>
@@ -451,6 +460,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                     <StatusBadges project={proj} />
                     <div className="text-xs text-slate-500 mt-0.5 select-text">base: {proj.base_branch} · test: {proj.test_branch}</div>
                   </div>
+                  {isTauri() && (
                   <div className="flex items-center gap-1 text-slate-500 hover:text-slate-200">
                     <Button
                       variant="ghost"
@@ -473,6 +483,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                       <TerminalIcon className="w-3.5 h-3.5" />
                     </Button>
                   </div>
+                  )}
                 </div>
               </div>
               <div className="mt-3 pt-3 border-t border-slate-700/50">
@@ -486,7 +497,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
               </div>
             </div>
           ))}
-          {!selectedWorktree.is_archived && onAddProjectToWorktree && (
+          {isTauri() && !selectedWorktree.is_archived && onAddProjectToWorktree && (
             <button
               onClick={onAddProjectToWorktree}
               className="w-full p-3 rounded-lg border border-dashed border-slate-700 hover:border-slate-500 hover:bg-slate-800/30 transition-colors flex items-center justify-center gap-2 text-slate-500 hover:text-slate-300"

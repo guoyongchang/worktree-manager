@@ -1,5 +1,6 @@
 import type { FC } from 'react';
 import { ArchiveIcon } from './Icons';
+import { isTauri } from '@/lib/backend';
 
 interface ContextMenuProps {
   x: number;
@@ -24,6 +25,7 @@ export const WorktreeContextMenu: FC<ContextMenuProps> = ({
         style={{ left: x, top: y }}
         onClick={(e) => e.stopPropagation()}
       >
+        {isTauri() && (
         <button
           onClick={onArchive}
           className="w-full px-4 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 flex items-center gap-2"
@@ -31,6 +33,7 @@ export const WorktreeContextMenu: FC<ContextMenuProps> = ({
           <ArchiveIcon className="w-4 h-4" />
           归档
         </button>
+        )}
       </div>
     </div>
   );

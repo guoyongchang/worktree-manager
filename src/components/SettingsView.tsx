@@ -20,7 +20,7 @@ import { RefreshCw, Search, Mic } from 'lucide-react';
 import { BackIcon, PlusIcon, TrashIcon } from './Icons';
 import { BranchCombobox } from './BranchCombobox';
 import type { WorkspaceRef, WorkspaceConfig, ProjectConfig, ScannedFolder } from '../types';
-import { getAppVersion, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, voiceStart, voiceStop, isTauri, getRemoteBranches } from '../lib/backend';
+import { getAppVersion, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, voiceStart, voiceStop, isTauri, getRemoteBranches, openLink } from '../lib/backend';
 
 interface SettingsViewProps {
   config: WorkspaceConfig;
@@ -655,15 +655,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
               <button
                 type="button"
                 className="text-blue-400 hover:text-blue-300 ml-1 underline cursor-pointer transition-colors"
-                onClick={async () => {
-                  const url = 'https://dashboard.ngrok.com/get-started/your-authtoken';
-                  if (isTauri()) {
-                    const { openUrl } = await import('@tauri-apps/plugin-opener');
-                    await openUrl(url);
-                  } else {
-                    window.open(url, '_blank');
-                  }
-                }}
+                onClick={() => openLink('https://dashboard.ngrok.com/get-started/your-authtoken')}
               >
                 获取 token
               </button>
@@ -870,15 +862,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
               <button
                 type="button"
                 className="text-blue-400 hover:text-blue-300 ml-1 underline cursor-pointer transition-colors"
-                onClick={async () => {
-                  const url = 'https://dashscope.console.aliyun.com/apiKey';
-                  if (isTauri()) {
-                    const { openUrl } = await import('@tauri-apps/plugin-opener');
-                    await openUrl(url);
-                  } else {
-                    window.open(url, '_blank');
-                  }
-                }}
+                onClick={() => openLink('https://dashscope.console.aliyun.com/apiKey')}
               >
                 获取 API Key
               </button>
