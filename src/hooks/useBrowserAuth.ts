@@ -33,7 +33,10 @@ export function useBrowserAuth(): UseBrowserAuthReturn {
       window.history.replaceState({}, '', cleanUrl);
 
       authenticate(urlPwd)
-        .then(() => setBrowserAuthenticated(true))
+        .then(() => {
+          // Full page reload to reset all singletons (WebSocket, etc.) with new session ID
+          window.location.replace(cleanUrl);
+        })
         .catch(() => { /* wrong password, show normal login page */ });
       return;
     }
@@ -56,11 +59,11 @@ export function useBrowserAuth(): UseBrowserAuthReturn {
     setBrowserLoginError(null);
     try {
       await authenticate(browserLoginPassword.trim());
-      setBrowserAuthenticated(true);
-      setBrowserLoginPassword('');
+      // Full page reload to reset all singletons (WebSocket, etc.) with new session ID
+      window.location.replace('/');
+      return; // Page is about to reload, skip cleanup
     } catch (e) {
       setBrowserLoginError(String(e));
-    } finally {
       setBrowserLoggingIn(false);
     }
   }, [browserLoginPassword]);

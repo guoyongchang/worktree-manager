@@ -7,6 +7,7 @@ import {
   GitPullRequestIcon,
   UploadIcon,
   WarningIcon,
+  CloseIcon,
 } from './Icons';
 import {
   syncWithBaseBranch,
@@ -56,7 +57,7 @@ export const GitOperations: FC<GitOperationsProps> = ({
       errorTimerRef.current = setTimeout(() => {
         setDismissing('error');
         setTimeout(() => { setError(null); setDismissing(null); }, 200);
-      }, 5000);
+      }, 8000);
     }
   }, []);
 
@@ -68,7 +69,7 @@ export const GitOperations: FC<GitOperationsProps> = ({
       successTimerRef.current = setTimeout(() => {
         setDismissing('success');
         setTimeout(() => { setSuccess(null); setDismissing(null); }, 200);
-      }, 3000);
+      }, 5000);
     }
   }, []);
 
@@ -156,13 +157,21 @@ export const GitOperations: FC<GitOperationsProps> = ({
   return (
     <div className="space-y-3">
       {error && (
-        <div className={`p-2 bg-red-900/30 border border-red-800/50 rounded text-red-300 text-xs transition-opacity duration-200 ${dismissing === 'error' ? 'opacity-0' : 'opacity-100'}`}>
-          {error}
+        <div
+          className={`p-2 bg-red-900/40 border border-red-800/50 rounded text-red-300 text-xs transition-opacity duration-200 cursor-pointer flex items-center justify-between gap-2 ${dismissing === 'error' ? 'opacity-0' : 'opacity-100'}`}
+          onClick={() => { clearTimeout(errorTimerRef.current); setError(null); setDismissing(null); }}
+        >
+          <span>{error}</span>
+          <CloseIcon className="w-3 h-3 shrink-0 text-red-400" />
         </div>
       )}
       {success && (
-        <div className={`p-2 bg-green-900/30 border border-green-800/50 rounded text-green-300 text-xs transition-opacity duration-200 ${dismissing === 'success' ? 'opacity-0' : 'opacity-100'}`}>
-          {success}
+        <div
+          className={`p-2 bg-green-900/40 border border-green-800/50 rounded text-green-300 text-xs transition-opacity duration-200 cursor-pointer flex items-center justify-between gap-2 ${dismissing === 'success' ? 'opacity-0' : 'opacity-100'}`}
+          onClick={() => { clearTimeout(successTimerRef.current); setSuccess(null); setDismissing(null); }}
+        >
+          <span>{success}</span>
+          <CloseIcon className="w-3 h-3 shrink-0 text-green-400" />
         </div>
       )}
 
@@ -193,17 +202,17 @@ export const GitOperations: FC<GitOperationsProps> = ({
       </div>
 
       <div className="flex flex-col gap-2">
-        <div className="flex gap-2" title="同步操作">
+        <div className="grid grid-cols-3 gap-2" title="同步操作">
           <Button
             variant="secondary"
             size="sm"
             onClick={() => runGitAction('sync', () => syncWithBaseBranch(projectPath, baseBranch))}
             disabled={loading || baseBranchExists === false || actionsDisabled}
-            className="flex-1 text-xs"
+            className="text-xs min-w-0"
             title={baseBranchExists === false ? `远程分支 ${baseBranch} 不存在` : ''}
           >
-            <SyncIcon className="w-3 h-3 mr-1" />
-            {activeAction === 'sync' ? '同步中...' : `同步 ${baseBranch}`}
+            <SyncIcon className="w-3 h-3 mr-1 shrink-0" />
+            <span className="truncate">{activeAction === 'sync' ? '同步中...' : `同步 ${baseBranch}`}</span>
           </Button>
 
           <Button
@@ -211,10 +220,10 @@ export const GitOperations: FC<GitOperationsProps> = ({
             size="sm"
             onClick={() => runGitAction('push', () => pushToRemote(projectPath))}
             disabled={loading || actionsDisabled}
-            className="flex-1 text-xs"
+            className="text-xs min-w-0"
           >
-            <UploadIcon className="w-3 h-3 mr-1" />
-            {activeAction === 'push' ? '推送中...' : '推送'}
+            <UploadIcon className="w-3 h-3 mr-1 shrink-0" />
+            <span className="truncate">{activeAction === 'push' ? '推送中...' : '推送'}</span>
           </Button>
 
           <Button
@@ -222,25 +231,25 @@ export const GitOperations: FC<GitOperationsProps> = ({
             size="sm"
             onClick={() => setShowPRModal(true)}
             disabled={loading || baseBranchExists === false || actionsDisabled}
-            className="flex-1 text-xs"
+            className="text-xs min-w-0"
             title={baseBranchExists === false ? `远程分支 ${baseBranch} 不存在` : ''}
           >
-            <GitPullRequestIcon className="w-3 h-3 mr-1" />
-            创建 PR/MR
+            <GitPullRequestIcon className="w-3 h-3 mr-1 shrink-0" />
+            <span className="truncate">创建 PR/MR</span>
           </Button>
         </div>
 
-        <div className="flex gap-2" title="合并操作">
+        <div className="grid grid-cols-2 gap-2" title="合并操作">
           <Button
             variant="secondary"
             size="sm"
             onClick={() => runGitAction('mergeTest', () => mergeToTestBranch(projectPath, testBranch))}
             disabled={loading || testBranchExists === false || actionsDisabled}
-            className="flex-1 text-xs"
+            className="text-xs min-w-0"
             title={testBranchExists === false ? `远程分支 ${testBranch} 不存在` : ''}
           >
-            <GitMergeIcon className="w-3 h-3 mr-1" />
-            {activeAction === 'mergeTest' ? '合并中...' : `合并到 ${testBranch}`}
+            <GitMergeIcon className="w-3 h-3 mr-1 shrink-0" />
+            <span className="truncate">{activeAction === 'mergeTest' ? '合并中...' : `合并到 ${testBranch}`}</span>
           </Button>
 
           <Button
@@ -248,11 +257,11 @@ export const GitOperations: FC<GitOperationsProps> = ({
             size="sm"
             onClick={() => runGitAction('mergeBase', () => mergeToBaseBranch(projectPath, baseBranch))}
             disabled={loading || baseBranchExists === false || actionsDisabled}
-            className="flex-1 text-xs"
+            className="text-xs min-w-0"
             title={baseBranchExists === false ? `远程分支 ${baseBranch} 不存在` : ''}
           >
-            <GitMergeIcon className="w-3 h-3 mr-1" />
-            {activeAction === 'mergeBase' ? '合并中...' : `合并到 ${baseBranch}`}
+            <GitMergeIcon className="w-3 h-3 mr-1 shrink-0" />
+            <span className="truncate">{activeAction === 'mergeBase' ? '合并中...' : `合并到 ${baseBranch}`}</span>
           </Button>
         </div>
       </div>

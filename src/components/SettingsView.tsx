@@ -255,6 +255,26 @@ export const SettingsView: FC<SettingsViewProps> = ({
         </Button>
       </div>
 
+      {/* Section Navigation */}
+      <div className="sticky top-14 z-[9] bg-slate-900/95 backdrop-blur-sm py-2 -mx-4 px-4 mb-4 border-b border-slate-700/30 flex items-center gap-1.5 overflow-x-auto">
+        {[
+          { id: 'settings-workspace', label: 'Workspace' },
+          { id: 'settings-management', label: '管理' },
+          { id: 'settings-projects', label: '项目' },
+          ...(isTauri() ? [{ id: 'settings-ngrok', label: 'ngrok' }] : []),
+          { id: 'settings-voice', label: '语音' },
+          { id: 'settings-about', label: '关于' },
+        ].map(({ id, label }) => (
+          <button
+            key={id}
+            onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' })}
+            className="px-3 py-1 text-xs font-medium text-slate-400 hover:text-slate-200 bg-slate-800/50 hover:bg-slate-700/50 rounded-md transition-colors whitespace-nowrap shrink-0"
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {error && (
         <div className="mb-4 p-4 bg-red-900/30 border border-red-800/50 rounded-lg">
           <div className="text-red-300 text-sm select-text">{error}</div>
@@ -270,7 +290,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
 
       {/* Workspace Settings */}
       <div className="mb-8">
-        <h2 className="text-lg font-medium mb-4">Workspace 配置</h2>
+        <h2 id="settings-workspace" className="text-lg font-medium mb-4 scroll-mt-32">Workspace 配置</h2>
         <div className="space-y-4">
           <div>
             <label className="block text-sm text-slate-400 mb-1">Workspace 名称</label>
@@ -345,7 +365,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
       {/* Workspace Management */}
       {workspaces.length > 0 && onRemoveWorkspace && (
         <div className="mb-8">
-          <h2 className="text-lg font-medium mb-4">Workspace 管理</h2>
+          <h2 id="settings-management" className="text-lg font-medium mb-4 scroll-mt-32">Workspace 管理</h2>
           <div className="space-y-2">
             {workspaces.map(ws => (
               <div
@@ -389,7 +409,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
       {/* Projects */}
       <div className="pt-6 border-t border-slate-700/50">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-medium">项目配置</h2>
+          <h2 id="settings-projects" className="text-lg font-medium scroll-mt-32">项目配置</h2>
           <Button
             variant="secondary"
             size="sm"
@@ -593,7 +613,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
       {/* ngrok Config Section (Tauri only) */}
       {isTauri() && ngrokTokenLoaded && (
         <div className="mt-8 pt-8 border-t border-slate-700/50">
-          <h2 className="text-lg font-medium mb-4">外网分享 (ngrok)</h2>
+          <h2 id="settings-ngrok" className="text-lg font-medium mb-4 scroll-mt-32">外网分享 (ngrok)</h2>
           <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 space-y-3">
             <div>
               <label className="block text-sm text-slate-400 mb-1">ngrok Authtoken</label>
@@ -655,7 +675,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
       {/* Dashscope Voice Recognition Config */}
       {dashscopeKeyLoaded && (
         <div className="mt-8 pt-8 border-t border-slate-700/50">
-          <h2 className="text-lg font-medium mb-4">语音识别 (Dashscope)</h2>
+          <h2 id="settings-voice" className="text-lg font-medium mb-4 scroll-mt-32">语音识别 (Dashscope)</h2>
           <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 space-y-3">
             {/* Microphone Selection */}
             <div>
@@ -869,7 +889,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
 
       {/* About Section */}
       <div className="mt-8 pt-8 border-t border-slate-700/50">
-        <h2 className="text-lg font-medium mb-4">关于</h2>
+        <h2 id="settings-about" className="text-lg font-medium mb-4 scroll-mt-32">关于</h2>
         <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4">
           <div className="flex items-center gap-4 mb-3">
             <div>

@@ -226,6 +226,7 @@ async fn voice_session_task(
     task_id: String,
 ) {
     emit_event("voice-started", serde_json::json!({}));
+    let mut last_final = String::new();
 
     loop {
         tokio::select! {
@@ -246,7 +247,7 @@ async fn voice_session_task(
             msg = ws_read.next() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
-                        handle_dashscope_message(&text);
+                        handle_dashscope_message(&text, &mut last_final);
                         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
                             let event = get_event_name(&json);
                             if event == "task-finished" || event == "task-failed" {
@@ -279,8 +280,8 @@ async fn voice_session_task(
                     });
                     let _ = ws_write.send(Message::Text(finish.to_string().into())).await;
 
-                    // Drain remaining results with a timeout
-                    drain_final_results(&mut ws_read).await;
+                    // Drain remaining results with a timeout (dedup via last_final)
+                    drain_final_results(&mut ws_read, &mut last_final).await;
                     break;
                 }
             }
@@ -297,8 +298,9 @@ async fn voice_session_task(
     emit_event("voice-stopped", serde_json::json!({}));
 }
 
-/// Process a single Dashscope event message
-fn handle_dashscope_message(text: &str) {
+/// Process a single Dashscope event message.
+/// Returns the sentence text if a final (sentence_end) result was emitted, for dedup tracking.
+fn handle_dashscope_message(text: &str, last_final: &mut String) {
     let Ok(json) = serde_json::from_str::<serde_json::Value>(text) else { return };
     let event = get_event_name(&json);
 
@@ -313,6 +315,13 @@ fn handle_dashscope_message(text: &str) {
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
                 if !text.is_empty() {
+                    // Skip duplicate final results (Dashscope re-sends on finish-task)
+                    if is_sentence_end && text == last_final.as_str() {
+                        return;
+                    }
+                    if is_sentence_end {
+                        *last_final = text.to_string();
+                    }
                     emit_event("voice-result", serde_json::json!({
                         "text": text,
                         "is_final": is_sentence_end
@@ -330,13 +339,15 @@ fn handle_dashscope_message(text: &str) {
     }
 }
 
-/// Wait up to 3 seconds for final recognition results after sending finish-task
+/// Wait up to 3 seconds for Dashscope to send task-finished after finish-task.
+/// Emits new results but skips duplicates via `last_final` tracking.
 async fn drain_final_results(
     ws_read: &mut futures_util::stream::SplitStream<
         tokio_tungstenite::WebSocketStream<
             tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>
         >
     >,
+    last_final: &mut String,
 ) {
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(3);
     loop {
@@ -346,7 +357,7 @@ async fn drain_final_results(
         }
         match tokio::time::timeout(remaining, ws_read.next()).await {
             Ok(Some(Ok(Message::Text(text)))) => {
-                handle_dashscope_message(&text);
+                handle_dashscope_message(&text, last_final);
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
                     let event = get_event_name(&json);
                     if event == "task-finished" || event == "task-failed" {

@@ -44,10 +44,14 @@ class WebSocketManager {
   }
 
   private doConnect() {
-    if (!this.sessionId) return;
+    if (!this.sessionId) {
+      console.warn('[ws] doConnect: no sessionId, skipping');
+      return;
+    }
 
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const url = `${protocol}//${location.host}/ws?session_id=${encodeURIComponent(this.sessionId)}`;
+    console.log('[ws] connecting to', url);
 
     try {
       this.ws = new WebSocket(url);
@@ -59,6 +63,7 @@ class WebSocketManager {
     this.ws.onopen = () => {
       this.connected = true;
       this.reconnectDelay = 1000;
+      console.log('[ws] connected, re-subscribing', this.pendingPtySubscriptions.size, 'PTY sessions');
 
       // Re-subscribe any active subscriptions after reconnect
       for (const sessionId of this.pendingPtySubscriptions) {
@@ -79,12 +84,14 @@ class WebSocketManager {
     };
 
     this.ws.onclose = () => {
+      console.log('[ws] disconnected');
       this.connected = false;
       this.ws = null;
       this.scheduleReconnect();
     };
 
-    this.ws.onerror = () => {
+    this.ws.onerror = (e) => {
+      console.error('[ws] error', e);
       // onclose will fire after onerror
     };
   }
@@ -95,7 +102,11 @@ class WebSocketManager {
       case 'pty_output': {
         if (msg.sessionId && msg.data) {
           const cb = this.ptyCallbacks.get(msg.sessionId);
-          if (cb) cb(msg.data);
+          if (cb) {
+            cb(msg.data);
+          } else {
+            console.warn('[ws] pty_output received but no callback for:', msg.sessionId);
+          }
         }
         break;
       }
@@ -148,6 +159,7 @@ class WebSocketManager {
   subscribePty(sessionId: string, onData: PtyCallback) {
     this.ptyCallbacks.set(sessionId, onData);
     this.pendingPtySubscriptions.add(sessionId);
+    console.log('[ws] subscribePty:', sessionId, 'connected:', this.connected);
     this.sendJson({ type: 'pty_subscribe', sessionId });
   }
 

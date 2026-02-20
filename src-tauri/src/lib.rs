@@ -125,6 +125,7 @@ pub fn run() {
             unlock_worktree,
             get_locked_worktrees,
             broadcast_terminal_state,
+            get_terminal_state,
             // 智能扫描
             scan_linked_folders,
             // PTY 终端

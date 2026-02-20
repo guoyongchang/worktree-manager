@@ -24,6 +24,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible 
   const actualCwd = cwd.split('#')[0];
   const sessionIdRef = useRef<string>(`pty-${cwd.replace(/[\/#]/g, '-')}`);
   const readerIntervalRef = useRef<number | null>(null);
+  const wsSubscribedRef = useRef(false);
   const initializedRef = useRef(false);
   const cwdRef = useRef(actualCwd);
 
@@ -140,13 +141,20 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible 
         const cols = term.cols;
         const rows = term.rows;
 
-        // Create PTY session
-        await callBackend('pty_create', {
+        // Check if PTY session already exists (e.g., created by another client)
+        const exists = await callBackend<boolean>('pty_exists', {
           sessionId: sessionIdRef.current,
-          cwd: cwdRef.current,
-          cols,
-          rows,
         });
+
+        if (!exists) {
+          // Create new PTY session
+          await callBackend('pty_create', {
+            sessionId: sessionIdRef.current,
+            cwd: cwdRef.current,
+            cols,
+            rows,
+          });
+        }
 
         initializedRef.current = true;
 
@@ -165,7 +173,10 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible 
   // Start/stop reading based on visibility
   const startReading = useCallback(() => {
     if (!isTauri()) {
-      // Browser mode: subscribe to WebSocket PTY output (no polling)
+      // Browser mode: WS subscribe is idempotent — skip if already subscribed.
+      // The WS pty_subscribe handler sends replay buffer, so no separate HTTP call needed.
+      if (wsSubscribedRef.current) return;
+      wsSubscribedRef.current = true;
       getWebSocketManager().subscribePty(sessionIdRef.current, (data) => {
         if (data && xtermRef.current) {
           xtermRef.current.write(data);
@@ -193,7 +204,8 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible 
   }, []);
 
   const stopReading = useCallback(() => {
-    if (!isTauri()) {
+    if (!isTauri() && wsSubscribedRef.current) {
+      wsSubscribedRef.current = false;
       getWebSocketManager().unsubscribePty(sessionIdRef.current);
     }
     if (readerIntervalRef.current) {
@@ -204,7 +216,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible 
 
   // Handle resize
   const handleResize = useCallback(() => {
-    if (!fitAddonRef.current || !xtermRef.current || !visible) return;
+    if (!fitAddonRef.current || !xtermRef.current || !visible || !initializedRef.current) return;
 
     fitAddonRef.current.fit();
     const cols = xtermRef.current.cols;
@@ -224,7 +236,8 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible 
     if (!initializedRef.current) return;
 
     if (visible) {
-      startReading();
+      // Browser WS subscription is persistent (managed at init/unmount), only Tauri needs visibility toggle
+      if (isTauri()) startReading();
       // Trigger resize when terminal becomes visible to ensure proper display
       // Use a small delay to ensure DOM is fully rendered
       const resizeTimer = setTimeout(() => {
@@ -232,7 +245,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible 
       }, 50);
       return () => clearTimeout(resizeTimer);
     } else {
-      stopReading();
+      if (isTauri()) stopReading();
     }
   }, [visible, startReading, stopReading, handleResize]);
 
@@ -253,11 +266,12 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible 
     };
   }, [visible, handleResize]);
 
-  // Cleanup on unmount
+  // Cleanup on unmount — only stop reading, NEVER close PTY.
+  // PTY sessions persist independently (like tmux) and are shared across clients.
+  // Cleanup happens only on worktree archive or app shutdown.
   useEffect(() => {
     return () => {
       stopReading();
-      callBackend('pty_close', { sessionId: sessionIdRef.current }).catch(() => {});
     };
   }, [stopReading]);
 

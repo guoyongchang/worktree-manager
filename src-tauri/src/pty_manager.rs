@@ -1,10 +1,13 @@
 use portable_pty::{native_pty_system, CommandBuilder, PtySize, MasterPty, Child};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Receiver};
 use tokio::sync::broadcast;
 use log;
+
+/// Max replay buffer size per session (64 KB)
+const REPLAY_BUFFER_CAP: usize = 64 * 1024;
 
 /// Get the default shell for the current platform.
 /// Windows: COMSPEC -> PowerShell -> cmd.exe
@@ -49,6 +52,8 @@ pub struct PtySession {
     reader: PtyReader,
     child: Box<dyn Child + Send + Sync>,
     broadcast_tx: broadcast::Sender<Vec<u8>>,
+    /// Ring buffer of recent PTY output for replaying to new subscribers.
+    replay_buffer: Arc<Mutex<VecDeque<u8>>>,
 }
 
 impl PtySession {
@@ -149,6 +154,10 @@ impl PtyManager {
         let (broadcast_tx, _) = broadcast::channel::<Vec<u8>>(256);
         let broadcast_tx_clone = broadcast_tx.clone();
 
+        // Replay buffer shared with reader thread
+        let replay_buffer: Arc<Mutex<VecDeque<u8>>> = Arc::new(Mutex::new(VecDeque::with_capacity(REPLAY_BUFFER_CAP)));
+        let replay_buf_clone = replay_buffer.clone();
+
         // Spawn a thread to read from PTY
         std::thread::spawn(move || {
             let mut buf = [0u8; 4096];
@@ -159,6 +168,15 @@ impl PtyManager {
                         let data = buf[..n].to_vec();
                         // Send to broadcast (for WS subscribers); ignore errors (no receivers)
                         let _ = broadcast_tx_clone.send(data.clone());
+                        // Append to replay buffer
+                        if let Ok(mut rb) = replay_buf_clone.lock() {
+                            rb.extend(&data);
+                            // Trim from front if over capacity
+                            if rb.len() > REPLAY_BUFFER_CAP {
+                                let excess = rb.len() - REPLAY_BUFFER_CAP;
+                                rb.drain(..excess);
+                            }
+                        }
                         // Send to mpsc (for desktop pty_read polling)
                         if tx.send(data).is_err() {
                             break; // Receiver dropped
@@ -175,6 +193,7 @@ impl PtyManager {
             reader: PtyReader { receiver: rx },
             child,
             broadcast_tx,
+            replay_buffer,
         };
 
         self.sessions.insert(id.to_string(), Arc::new(Mutex::new(session)));
@@ -235,11 +254,16 @@ impl PtyManager {
         self.sessions.contains_key(id)
     }
 
-    /// Get a broadcast receiver for a PTY session's output (used by WebSocket subscribers).
-    pub fn subscribe_session(&self, id: &str) -> Option<broadcast::Receiver<Vec<u8>>> {
+    /// Get a broadcast receiver and replay buffer snapshot for a PTY session (used by WebSocket subscribers).
+    /// Returns (replay_data, broadcast_receiver).
+    pub fn subscribe_session(&self, id: &str) -> Option<(Vec<u8>, broadcast::Receiver<Vec<u8>>)> {
         let session_arc = self.sessions.get(id)?;
         let session = session_arc.lock().ok()?;
-        Some(session.broadcast_tx.subscribe())
+        let replay = session.replay_buffer.lock().ok()
+            .map(|rb| rb.iter().copied().collect::<Vec<u8>>())
+            .unwrap_or_default();
+        let rx = session.broadcast_tx.subscribe();
+        Some((replay, rx))
     }
 
     pub fn close_sessions_by_path_prefix(&mut self, path_prefix: &str) -> Vec<String> {
