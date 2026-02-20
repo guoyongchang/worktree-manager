@@ -214,10 +214,10 @@ const ShareBar: FC<{
   }
 
   return (
-    <div className="px-3 py-2 border-t border-slate-700/50 space-y-1.5">
+    <div className="px-3 py-2.5 border-t border-slate-700/50 space-y-2">
       {/* ngrok row - always show */}
       <div className="flex items-center gap-1.5">
-        <span className="text-[10px] font-medium text-slate-500 shrink-0">NGROK:</span>
+        <span className="text-[11px] font-medium text-slate-500 shrink-0">NGROK:</span>
         {ngrokUrl ? (
           <>
             <span className="flex-1 text-xs text-blue-400 truncate min-w-0 select-all" title={ngrokUrl}>
@@ -230,9 +230,9 @@ const ShareBar: FC<{
                     variant="ghost"
                     size="icon"
                     onClick={() => navigator.clipboard.writeText(ngrokUrl)}
-                    className="h-5 w-5 shrink-0"
+                    className="h-6 w-6 shrink-0"
                   >
-                    <CopyIcon className="w-2.5 h-2.5" />
+                    <CopyIcon className="w-3 h-3" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="top">复制外网链接</TooltipContent>
@@ -255,9 +255,51 @@ const ShareBar: FC<{
           }`} />
         </button>
       </div>
+      {/* Local URL row */}
+      {url && (() => {
+        const localUrl = `http://localhost:${new URL(url).port}`;
+        return (
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] font-bold px-1 py-0.5 rounded shrink-0 bg-emerald-600/30 text-emerald-500">
+              Local
+            </span>
+            <span className="flex-1 text-xs text-emerald-400 truncate min-w-0 select-all" title={localUrl}>
+              {localUrl}
+            </span>
+            <TooltipProvider delayDuration={300}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => navigator.clipboard.writeText(localUrl)}
+                    className="h-6 w-6 shrink-0"
+                  >
+                    <CopyIcon className="w-3 h-3" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">复制链接</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => navigator.clipboard.writeText(`${localUrl}?pwd=${encodeURIComponent(editingPassword)}`)}
+                    className="h-6 w-6 shrink-0 text-slate-400 hover:text-slate-200"
+                  >
+                    <LinkIcon className="w-3 h-3" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">复制带密码链接</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+        );
+      })()}
       {/* LAN URL row */}
-      <div className="flex items-center gap-1">
-        <span className="text-[9px] font-bold px-1 py-0.5 rounded shrink-0 bg-slate-600/30 text-slate-500">
+      <div className="flex items-center gap-1.5">
+        <span className="text-[11px] font-bold px-1 py-0.5 rounded shrink-0 bg-slate-600/30 text-slate-500">
           LAN
         </span>
         <span className="flex-1 text-xs text-emerald-400 truncate min-w-0 select-all" title={url || ''}>
@@ -270,9 +312,9 @@ const ShareBar: FC<{
                 variant="ghost"
                 size="icon"
                 onClick={() => url && navigator.clipboard.writeText(url)}
-                className="h-5 w-5 shrink-0"
+                className="h-6 w-6 shrink-0"
               >
-                <CopyIcon className="w-2.5 h-2.5" />
+                <CopyIcon className="w-3 h-3" />
               </Button>
             </TooltipTrigger>
             <TooltipContent side="top">复制链接</TooltipContent>
@@ -283,9 +325,9 @@ const ShareBar: FC<{
                 variant="ghost"
                 size="icon"
                 onClick={() => url && navigator.clipboard.writeText(`${url}?pwd=${encodeURIComponent(editingPassword)}`)}
-                className="h-5 w-5 shrink-0 text-slate-400 hover:text-slate-200"
+                className="h-6 w-6 shrink-0 text-slate-400 hover:text-slate-200"
               >
-                <LinkIcon className="w-2.5 h-2.5" />
+                <LinkIcon className="w-3 h-3" />
               </Button>
             </TooltipTrigger>
             <TooltipContent side="top">复制带密码链接</TooltipContent>
@@ -296,10 +338,10 @@ const ShareBar: FC<{
                 variant="ghost"
                 size="icon"
                 onClick={handleOpenShareDialog}
-                className="h-5 w-5 shrink-0 text-slate-400 hover:text-slate-200"
+                className="h-6 w-6 shrink-0 text-slate-400 hover:text-slate-200"
                 title="更改端口"
               >
-                <SettingsIcon className="w-2.5 h-2.5" />
+                <SettingsIcon className="w-3 h-3" />
               </Button>
             </TooltipTrigger>
             <TooltipContent side="top">更改端口</TooltipContent>
@@ -310,9 +352,9 @@ const ShareBar: FC<{
                 variant="ghost"
                 size="icon"
                 onClick={onStop}
-                className="h-5 w-5 shrink-0 text-red-400 hover:text-red-300"
+                className="h-6 w-6 shrink-0 text-red-400 hover:text-red-300"
               >
-                <StopIcon className="w-2.5 h-2.5" />
+                <StopIcon className="w-3 h-3" />
               </Button>
             </TooltipTrigger>
             <TooltipContent side="top">停止分享</TooltipContent>
@@ -320,7 +362,8 @@ const ShareBar: FC<{
         </TooltipProvider>
       </div>
       {/* Password row */}
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1.5">
+        <span className="text-[11px] font-medium text-slate-500 shrink-0">密码:</span>
         <div className="flex-1 min-w-0 relative">
           <input
             type={showPassword ? 'text' : 'password'}
@@ -338,13 +381,13 @@ const ShareBar: FC<{
             variant="ghost"
             size="icon"
             onClick={handleConfirmPassword}
-            className="h-5 w-5 shrink-0 text-emerald-400 hover:text-emerald-300"
+            className="h-6 w-6 shrink-0 text-emerald-400 hover:text-emerald-300"
             title="确认密码更新"
           >
             <CheckCircleIcon className="w-3 h-3" />
           </Button>
         ) : passwordConfirmed ? (
-          <span className="h-5 w-5 flex items-center justify-center shrink-0 text-emerald-400">
+          <span className="h-6 w-6 flex items-center justify-center shrink-0 text-emerald-400">
             <CheckCircleIcon className="w-3 h-3" />
           </span>
         ) : (
@@ -352,10 +395,10 @@ const ShareBar: FC<{
             variant="ghost"
             size="icon"
             onClick={() => url && navigator.clipboard.writeText(editingPassword)}
-            className="h-5 w-5 shrink-0"
+            className="h-6 w-6 shrink-0"
             title="复制密码"
           >
-            <CopyIcon className="w-2.5 h-2.5" />
+            <CopyIcon className="w-3 h-3" />
           </Button>
         )}
       </div>
@@ -889,7 +932,14 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
                 <FolderIcon className={`w-4 h-4 ${isLockedByOther ? 'text-slate-500' : 'text-blue-400'}`} />
                 <span className="font-medium text-sm truncate flex-1">{wt.name}</span>
                 {isLockedByOther && (
-                  <span className="text-[10px] text-slate-500 bg-slate-700/50 px-1.5 py-0.5 rounded shrink-0">已占用</span>
+                  <TooltipProvider delayDuration={300}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="text-[10px] text-amber-400/80 bg-amber-900/20 border border-amber-800/30 px-1.5 py-0.5 rounded shrink-0 cursor-help">已占用</span>
+                      </TooltipTrigger>
+                      <TooltipContent side="right">此 Worktree 正在被另一个窗口使用</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 )}
                 {wt.projects.some(p => p.has_uncommitted) && !isLockedByOther && (() => {
                   const uncommitted = wt.projects.filter(p => p.has_uncommitted);

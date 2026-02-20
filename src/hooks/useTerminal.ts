@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { TerminalTab, MainWorkspaceStatus, WorktreeListItem } from '../types';
 import { TERMINAL } from '../constants';
-import { isTauri, broadcastTerminalState as broadcastTerminalStateBackend } from '../lib/backend';
+import { callBackend, isTauri, broadcastTerminalState as broadcastTerminalStateBackend, getTerminalState } from '../lib/backend';
 import { getWebSocketManager } from '../lib/websocket';
 import { listen } from '@tauri-apps/api/event';
 
@@ -167,7 +167,7 @@ export function useTerminal(
     }
 
     if (currentWorkspaceRoot && currentWorkspaceRoot !== prev) {
-      // Restore state for the new workspace (or reset to empty)
+      // Fast restore from local map (or empty) to avoid blank flash
       const savedActivated = activatedPerWorkspace.current.get(currentWorkspaceRoot);
       const savedTab = activeTabPerWorkspace.current.get(currentWorkspaceRoot);
       const savedVisible = visiblePerWorkspace.current.get(currentWorkspaceRoot);
@@ -176,22 +176,49 @@ export function useTerminal(
       const restoredTab = (savedTab && savedActivated?.has(savedTab)) ? savedTab : null;
       const restoredVisible = savedVisible ?? false;
 
-      // Update state (async)
       setActivatedTerminals(restoredActivated);
       setTerminalVisible(restoredVisible);
       setActiveTerminalTab(restoredTab);
 
-      // Update refs synchronously so scheduleBroadcast reads correct values
       activatedTerminalsRef.current = restoredActivated;
       activeTerminalTabRef.current = restoredTab;
       terminalVisibleRef.current = restoredVisible;
 
-      // Broadcast restored state to sync other clients
-      scheduleBroadcast();
+      // Always fetch authoritative state from backend cache.
+      // Do NOT broadcast here — only user actions (open/close/toggle) trigger broadcasts.
+      const wsRoot = currentWorkspaceRoot;
+      getTerminalState(workspacePath, worktreeName).then((cached) => {
+        if (!cached || prevWorkspaceRoot.current !== wsRoot) return;
+
+        const cachedActivated = new Set(cached.activated_terminals);
+        const localActivated = activatedTerminalsRef.current;
+        const changed =
+          cachedActivated.size !== localActivated.size ||
+          !Array.from(cachedActivated).every(t => localActivated.has(t)) ||
+          cached.active_terminal_tab !== activeTerminalTabRef.current ||
+          cached.terminal_visible !== terminalVisibleRef.current;
+
+        if (!changed) return;
+
+        setActivatedTerminals(cachedActivated);
+        setActiveTerminalTab(cached.active_terminal_tab);
+        setTerminalVisible(cached.terminal_visible);
+
+        activatedTerminalsRef.current = cachedActivated;
+        activeTerminalTabRef.current = cached.active_terminal_tab;
+        terminalVisibleRef.current = cached.terminal_visible;
+
+        // Update local map for fast restore on next switch
+        activatedPerWorkspace.current.set(wsRoot, cachedActivated);
+        if (cached.active_terminal_tab) {
+          activeTabPerWorkspace.current.set(wsRoot, cached.active_terminal_tab);
+        }
+        visiblePerWorkspace.current.set(wsRoot, cached.terminal_visible);
+      }).catch(() => {});
     }
 
     prevWorkspaceRoot.current = currentWorkspaceRoot;
-  }, [currentWorkspaceRoot, scheduleBroadcast]);
+  }, [currentWorkspaceRoot, workspacePath, worktreeName]);
 
   // Shared handler for incoming terminal state messages (used by both Tauri and WebSocket)
   const handleTerminalStateMessage = useCallback((msg: {
@@ -316,12 +343,16 @@ export function useTerminal(
     newActivated.delete(path);
 
     setActivatedTerminals(newActivated);
-    // Remove from mountedTerminals so the Terminal component unmounts and PTY is closed
+    // Remove from mountedTerminals so the Terminal component unmounts
     setMountedTerminals(prev => {
       const next = new Set(prev);
       next.delete(path);
       return next;
     });
+
+    // Explicitly close PTY session (Terminal component no longer does this on unmount)
+    const sessionId = `pty-${path.replace(/[\/#]/g, '-')}`;
+    callBackend('pty_close', { sessionId }).catch(() => {});
 
     let newActiveTab = activeTerminalTabRef.current;
     if (activeTerminalTabRef.current === path) {
@@ -373,7 +404,8 @@ export function useTerminal(
   }, [currentWorkspaceRoot, scheduleBroadcast]);
 
   // Remove all terminals matching a path prefix (e.g. when archiving a worktree).
-  // This unmounts Terminal components → triggers pty_close on the frontend side.
+  // PTY sessions are cleaned up by the backend (close_sessions_by_path_prefix).
+  // This only clears frontend state (mounted/activated terminals).
   const cleanupTerminalsForPath = useCallback((pathPrefix: string) => {
     const matches = (p: string) => p.startsWith(pathPrefix) || p.split('#')[0].startsWith(pathPrefix);
     setMountedTerminals(prev => {

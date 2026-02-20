@@ -26,6 +26,7 @@ import {
   CopyIcon,
   CheckIcon,
 } from './Icons';
+import { Badge } from '@/components/ui/badge';
 import { GitOperations } from './GitOperations';
 import { EDITORS } from '../constants';
 import type {
@@ -34,6 +35,20 @@ import type {
   ProjectStatus,
   EditorType,
 } from '../types';
+
+const StatusBadges: FC<{ project: ProjectStatus }> = ({ project }) => {
+  const badges: { label: string; variant: 'warning' | 'success' | 'default' }[] = [];
+  if (project.has_uncommitted) badges.push({ label: `${project.uncommitted_count} 未提交`, variant: 'warning' });
+  if (project.is_merged_to_test) badges.push({ label: `已合并 ${project.test_branch}`, variant: 'success' });
+  if (project.behind_base > 0) badges.push({ label: `落后 ${project.behind_base}`, variant: 'default' });
+  if (project.ahead_of_base > 0) badges.push({ label: `领先 ${project.ahead_of_base}`, variant: 'default' });
+  if (badges.length === 0) return <Badge variant="success">干净</Badge>;
+  return (
+    <div className="flex flex-wrap gap-1 justify-end">
+      {badges.map((b, i) => <Badge key={i} variant={b.variant}>{b.label}</Badge>)}
+    </div>
+  );
+};
 
 interface WorktreeDetailProps {
   selectedWorktree: WorktreeListItem | null;
@@ -72,14 +87,6 @@ const statusBorderColor: Record<ReturnType<typeof getProjectStatus>, string> = {
   sync: 'border-l-blue-400',
 };
 
-function getStatusText(project: ProjectStatus): string {
-  const parts: string[] = [];
-  if (project.has_uncommitted) parts.push(`${project.uncommitted_count} 未提交`);
-  if (project.is_merged_to_test) parts.push(`已合并 ${project.test_branch}`);
-  if (project.behind_base > 0) parts.push(`落后 ${project.behind_base}`);
-  if (project.ahead_of_base > 0) parts.push(`领先 ${project.ahead_of_base}`);
-  return parts.length === 0 ? "干净" : parts.join(" · ");
-}
 
 const PathDisplay: FC<{ path: string }> = ({ path }) => {
   const [copied, setCopied] = useState(false);
@@ -259,7 +266,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
               <div key={proj.name} className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 group hover:border-slate-600 hover:shadow-md hover:shadow-black/10 hover:-translate-y-px transition-all duration-150">
                 <div className="flex items-center justify-between">
                   <span className="font-medium text-slate-200">{proj.name}</span>
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="flex items-center gap-1 text-slate-500 hover:text-slate-200">
                     <button
                       onClick={() => onRevealInFinder(projectPath)}
                       className="p-1 hover:bg-slate-600 rounded text-slate-400 hover:text-slate-200 transition-colors"
@@ -441,19 +448,19 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="text-right">
-                    <div className="text-sm text-slate-300 select-text">{getStatusText(proj)}</div>
+                    <StatusBadges project={proj} />
                     <div className="text-xs text-slate-500 mt-0.5 select-text">base: {proj.base_branch} · test: {proj.test_branch}</div>
                   </div>
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="flex items-center gap-1 text-slate-500 hover:text-slate-200">
                     <Button
                       variant="ghost"
                       size="icon"
                       onClick={() => onOpenInEditor(proj.path)}
                       title={`在 ${selectedEditorName} 中打开`}
                       aria-label={`在 ${selectedEditorName} 中打开 ${proj.name}`}
-                      className="h-8 w-8"
+                      className="h-7 w-7"
                     >
-                      <FolderIcon className="w-4 h-4" />
+                      <FolderIcon className="w-3.5 h-3.5" />
                     </Button>
                     <Button
                       variant="ghost"
@@ -461,9 +468,9 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                       onClick={() => onOpenInTerminal(proj.path)}
                       title="在外部终端打开"
                       aria-label={`在外部终端打开 ${proj.name}`}
-                      className="h-8 w-8"
+                      className="h-7 w-7"
                     >
-                      <TerminalIcon className="w-4 h-4" />
+                      <TerminalIcon className="w-3.5 h-3.5" />
                     </Button>
                   </div>
                 </div>

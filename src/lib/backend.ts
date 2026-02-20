@@ -271,6 +271,19 @@ export async function authenticate(password: string): Promise<void> {
   }
 }
 
+/** Get cached terminal state for a worktree (used for initial sync) */
+export async function getTerminalState(
+  workspacePath: string,
+  worktreeName: string,
+): Promise<{
+  activated_terminals: string[];
+  active_terminal_tab: string | null;
+  terminal_visible: boolean;
+  client_id?: string;
+} | null> {
+  return callBackend('get_terminal_state', { workspacePath, worktreeName });
+}
+
 /** Broadcast terminal state (desktop only) */
 export async function broadcastTerminalState(
   workspacePath: string,

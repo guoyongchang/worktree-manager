@@ -124,6 +124,9 @@ function App() {
   // Terminal fullscreen state
   const [terminalFullscreen, setTerminalFullscreen] = useState(false);
 
+  // Shortcut help dialog
+  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
+
   // Create modal state
   const [newWorktreeName, setNewWorktreeName] = useState("");
   const [selectedProjects, setSelectedProjects] = useState<Map<string, string>>(new Map());
@@ -643,6 +646,11 @@ function App() {
           setSidebarCollapsed(prev => !prev);
         }
       }
+      // Cmd/Ctrl+/: Show shortcut help
+      if ((e.metaKey || e.ctrlKey) && e.key === '/') {
+        e.preventDefault();
+        setShowShortcutHelp(prev => !prev);
+      }
     }
     function handleClick(): void {
       setTerminalTabMenu(null);
@@ -1017,6 +1025,36 @@ function App() {
       />
 
       <UpToDateToast show={updater.showUpToDateToast} />
+
+      {/* Shortcut Help Dialog */}
+      <Dialog open={showShortcutHelp} onOpenChange={setShowShortcutHelp}>
+        <DialogContent className="max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>快捷键</DialogTitle>
+            <DialogDescription>所有可用的键盘快捷键</DialogDescription>
+          </DialogHeader>
+          <div className="py-2 space-y-2">
+            {[
+              { keys: isTauri() ? '⌘ N' : 'Ctrl N', desc: '新建 Worktree' },
+              { keys: isTauri() ? '⌘ ,' : 'Ctrl ,', desc: '打开设置' },
+              { keys: isTauri() ? '⌘ B' : 'Ctrl B', desc: '切换侧边栏' },
+              { keys: isTauri() ? '⌘ [' : 'Ctrl [', desc: '返回（设置 → 主界面）' },
+              { keys: isTauri() ? '⌘ /' : 'Ctrl /', desc: '显示快捷键帮助' },
+              { keys: 'Alt V', desc: '按住录音（语音输入）' },
+              { keys: 'Escape', desc: '关闭弹窗 / 退出全屏' },
+            ].map(({ keys, desc }) => (
+              <div key={keys} className="flex items-center justify-between py-1.5 px-1">
+                <span className="text-sm text-slate-300">{desc}</span>
+                <div className="flex gap-1">
+                  {keys.split(' ').map((k) => (
+                    <kbd key={k} className="px-2 py-0.5 bg-slate-700 border border-slate-600 rounded text-xs font-mono text-slate-300">{k}</kbd>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Ngrok Token Dialog */}
       <Dialog open={share.showNgrokTokenDialog} onOpenChange={share.setShowNgrokTokenDialog}>

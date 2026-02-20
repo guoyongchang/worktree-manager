@@ -643,6 +643,13 @@ async fn h_get_share_info() -> Response {
 
 // -- Misc --
 
+async fn h_get_terminal_state(Json(args): Json<Value>) -> Response {
+    let ws_path = args["workspacePath"].as_str().unwrap_or("").to_string();
+    let wt_name = args["worktreeName"].as_str().unwrap_or("").to_string();
+    let state = crate::commands::window::get_terminal_state_inner(ws_path, wt_name);
+    Json(json!(state)).into_response()
+}
+
 async fn h_open_workspace_window(Json(args): Json<Value>) -> Response {
     // In browser mode, "open new window" just opens a new browser tab
     let ws_path = args["workspacePath"].as_str().unwrap_or("").to_string();
@@ -755,8 +762,8 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                     handle.abort();
                 }
 
-                // Get broadcast receiver from PTY manager
-                let rx = {
+                // Get replay buffer + broadcast receiver from PTY manager
+                let subscription = {
                     let manager = match PTY_MANAGER.lock() {
                         Ok(m) => m,
                         Err(_) => continue,
@@ -764,10 +771,26 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                     manager.subscribe_session(&pty_session_id)
                 };
 
-                if let Some(mut rx) = rx {
+                if let Some((replay, mut rx)) = subscription {
+                    log::info!("PTY subscribe '{}': replay buffer {} bytes", pty_session_id, replay.len());
                     let sender = Arc::clone(&ws_sender);
                     let sid = pty_session_id.clone();
                     let handle = tokio::spawn(async move {
+                        // Send replay buffer first so new subscribers see existing content
+                        if !replay.is_empty() {
+                            let text = String::from_utf8_lossy(&replay).to_string();
+                            let msg = json!({
+                                "type": "pty_output",
+                                "sessionId": sid,
+                                "data": text,
+                            });
+                            let mut s = sender.lock().await;
+                            if s.send(Message::text(msg.to_string())).await.is_err() {
+                                return;
+                            }
+                        }
+
+                        // Forward real-time output
                         loop {
                             match rx.recv().await {
                                 Ok(data) => {
@@ -783,7 +806,6 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                                     }
                                 }
                                 Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                                    // Log lagged receiver warning - client is too slow to process PTY output
                                     log::warn!("PTY output broadcast lagged, skipped {} messages for session {}",
                                         skipped, sid);
                                     continue;
@@ -795,6 +817,8 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                         }
                     });
                     pty_forwarders.insert(pty_session_id, handle);
+                } else {
+                    log::warn!("PTY subscribe '{}': session not found in PTY manager", pty_session_id);
                 }
             }
 
@@ -1264,6 +1288,7 @@ pub fn create_router() -> Router {
         .route("/api/lock_worktree", post(h_lock_worktree))
         .route("/api/unlock_worktree", post(h_unlock_worktree))
         .route("/api/get_locked_worktrees", post(h_get_locked_worktrees))
+        .route("/api/get_terminal_state", post(h_get_terminal_state))
         .route("/api/open_workspace_window", post(h_open_workspace_window))
         // PTY
         .route("/api/pty_create", post(h_pty_create))

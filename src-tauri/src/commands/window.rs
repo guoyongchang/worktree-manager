@@ -112,6 +112,23 @@ pub(crate) fn get_locked_worktrees(workspace_path: String) -> HashMap<String, St
         .collect()
 }
 
+/// 获取缓存的终端状态（用于客户端首次打开 worktree 时同步）
+pub(crate) fn get_terminal_state_inner(
+    workspace_path: String,
+    worktree_name: String,
+) -> Option<TerminalState> {
+    let key = (workspace_path, worktree_name);
+    TERMINAL_STATES.lock().ok().and_then(|states| states.get(&key).cloned())
+}
+
+#[tauri::command]
+pub(crate) fn get_terminal_state(
+    workspace_path: String,
+    worktree_name: String,
+) -> Option<TerminalState> {
+    get_terminal_state_inner(workspace_path, worktree_name)
+}
+
 /// 广播终端状态变化（用于桌面端同步到网页端）
 #[tauri::command]
 pub(crate) fn broadcast_terminal_state(
