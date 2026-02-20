@@ -1,5 +1,5 @@
 import { useState, useEffect, type FC } from 'react';
-import { openUrl } from '@tauri-apps/plugin-opener';
+import { openLink } from '@/lib/backend';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -1063,7 +1063,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => openUrl('https://github.com/guoyongchang/worktree-manager')}
+                  onClick={() => openLink('https://github.com/guoyongchang/worktree-manager')}
                   className="h-7 w-7"
                 >
                   <GithubIcon className="w-3.5 h-3.5" />

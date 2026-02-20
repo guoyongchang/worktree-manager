@@ -14,23 +14,33 @@
 
 ## 为什么需要这个工具？
 
-作为开发者，你一定遇到过这些烦恼：
-
-> **场景一：紧急修 Bug**
+> **场景一：线上着火，但你手里的活还没提交**
 >
-> 你正在 `feature/new-page` 分支上开发新页面，写到一半，产品经理跑过来说线上有个紧急 bug。你不得不 `git stash`，切换到 `hotfix` 分支，修完再切回来，结果发现 `node_modules` 要重新装一遍...
-
-> **场景二：多任务并行**
+> 你正在 `feature/checkout-v2` 上重构结算流程，改了十几个文件，`npm run dev` 跑着热更新。这时候 Slack 弹出告警：线上支付回调 500 了。你得马上修。
 >
-> 你同时负责两个需求，一个在 `feature/a`，一个在 `feature/b`。来回切换分支，每次都要等 `npm install`、等构建缓存重建，一天下来光等编译就花了一小时。
-
-> **场景三：代码对比**
+> 传统做法：`git stash` → 切到 `hotfix` → `npm install`（依赖版本不一样，得重装）→ 修完推上去 → 切回来 → `git stash pop` → 祈祷没冲突 → 重启 dev server 等构建缓存重建。整个流程 15 分钟起步，而线上还在报错。
 >
-> 你想对比两个分支的运行效果，只能来回切换，或者 clone 两份代码。磁盘空间翻倍不说，还得维护两套环境。
+> **用 Worktree Manager**：新建一个 `hotfix-payment` worktree，`node_modules` 自动通过 symlink 共享，秒级就绪。你的 `feature/checkout-v2` dev server 还在跑，改到一半的代码一行不用动。修完线上问题，归档 hotfix worktree，整个过程不超过 30 秒切换成本。
 
-**Git Worktree Manager 就是为了解决这些问题！**
+> **场景二：前后端联调，分支对不上就炸**
+>
+> 你的项目是前后端分仓：`web` 和 `api`。做「会员体系」需求时，两个仓库都要切到 `feature/membership` 分支。但同事让你帮忙看一个 `feature/search` 的问题，你切了前端分支忘了切后端——页面白屏，接口 404，排查半天才发现是分支没对齐。
+>
+> **用 Worktree Manager**：一个 worktree 绑定多个项目仓库。创建 `membership` worktree 时，`web` 和 `api` 同时检出到对应分支。切换 worktree 就是切换整套工作环境，不存在「只切了一半」的问题。
 
-它利用 Git 原生的 [worktree](https://git-scm.com/docs/git-worktree) 功能，让你在**同一个仓库**中同时检出多个分支，每个分支有**独立的工作目录**，共享 `.git` 数据，还能自动链接 `node_modules` 等大文件夹，**节省磁盘空间**。
+> **场景三：提测合并全靠命令行肌肉记忆**
+>
+> 需求开发完了，要合并到 `test` 分支给 QA 验证。你每次都得：`git checkout test` → `git pull` → `git merge feature/xxx` → 解决冲突 → `git push` → `git checkout feature/xxx` 切回来。一天提测三四个需求，这套操作重复到麻木，偶尔还会忘记切回来就在 `test` 分支上继续开发。
+>
+> **用 Worktree Manager**：每个项目卡片下方直接有「合并到 test」「同步 base」「推送」按钮，一键操作，不需要离开当前分支。分支状态（领先/落后几个 commit、是否已合并 test）实时显示，一目了然。
+
+> **场景四：出差在外，想看一眼公司机器上的代码**
+>
+> 你的开发机在公司内网，出差时想看一下代码运行状态，或者在终端里执行几条命令。传统方案要么 SSH 隧道（折腾），要么 VPN + 远程桌面（卡顿）。
+>
+> **用 Worktree Manager**：开启内置分享功能，局域网或通过 ngrok 生成公网链接。在任意浏览器中打开，密码验证后即可查看工作区状态、使用内置终端，不需要安装任何客户端。
+
+**Git Worktree Manager** 基于 Git 原生的 [worktree](https://git-scm.com/docs/git-worktree) 能力构建，让你在**同一个仓库**中同时检出多个分支到**独立目录**，共享 `.git` 数据。配合自动 symlink `node_modules` 等大文件夹，**零成本切换**，**零额外磁盘占用**。
 
 ## 核心功能
 
