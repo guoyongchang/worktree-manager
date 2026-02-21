@@ -469,6 +469,10 @@
   "voice.micNeedsHttps": "Microphone requires HTTPS or localhost, current HTTP connection is not supported",
   "voice.permissionDenied": "Microphone permission denied, please allow in system settings",
   "voice.noMicDetected": "No microphone device detected",
+  "voice.rawText": "Raw",
+  "voice.refinedText": "AI Refined",
+  "voice.refining": "Refining...",
+  "voice.refineFailed": "AI refinement failed, will use raw text",
 
   "backend.authFailed": "Authentication failed",
 

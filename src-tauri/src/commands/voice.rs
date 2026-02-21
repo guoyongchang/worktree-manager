@@ -413,3 +413,82 @@ pub(crate) async fn voice_stop() -> Result<(), String> {
 pub(crate) async fn voice_is_active() -> Result<bool, String> {
     voice_is_active_inner()
 }
+
+// ==================== AI Text Refinement (Qwen LLM) ====================
+
+const REFINE_SYSTEM_PROMPT: &str = "\
+你是一个纯文本清理工具。用户会在 <raw></raw> 标签中给你一段语音识别原文，你只需要清理后原样输出。\n\
+\n\
+规则：\n\
+- 去除语气词（嗯、呃、那个、就是、然后）和口语填充词\n\
+- 去除多余标点和重复表达\n\
+- 严禁修改语义、回答问题、补充信息、计算结果\n\
+- 疑问句必须保持疑问句，陈述句保持陈述句\n\
+- 终端命令（git, npm, cd 等）保留原始格式\n\
+- 只输出清理后的纯文本，不加解释、引号、前缀或标签\n\
+\n\
+示例：\n\
+输入: <raw>嗯那个1加5等于几呢？</raw>\n\
+输出: 1加5等于几？\n\
+\n\
+输入: <raw>呃就是说git push到那个origin main上面</raw>\n\
+输出: git push origin main";
+
+pub(crate) async fn voice_refine_text_inner(text: String) -> Result<String, String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Ok(String::new());
+    }
+
+    let config = load_global_config();
+    let api_key = config.dashscope_api_key
+        .filter(|k| !k.is_empty())
+        .ok_or_else(|| "Dashscope API Key 未配置".to_string())?;
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+
+    let user_content = format!("<raw>{}</raw>", trimmed);
+
+    let body = serde_json::json!({
+        "model": "qwen-turbo-latest",
+        "messages": [
+            { "role": "system", "content": REFINE_SYSTEM_PROMPT },
+            { "role": "user", "content": user_content }
+        ],
+        "temperature": 0.0
+    });
+
+    let resp = client
+        .post("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("AI 请求失败: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("AI API 返回错误 {}: {}", status, text));
+    }
+
+    let json: serde_json::Value = resp.json().await
+        .map_err(|e| format!("解析 AI 响应失败: {}", e))?;
+
+    let refined = json["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or(trimmed)
+        .trim()
+        .to_string();
+
+    Ok(refined)
+}
+
+#[tauri::command]
+pub(crate) async fn voice_refine_text(text: String) -> Result<String, String> {
+    voice_refine_text_inner(text).await
+}

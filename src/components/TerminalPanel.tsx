@@ -11,7 +11,7 @@ import {
   RestoreIcon,
   MicIcon,
 } from './Icons';
-import type { VoiceStatus } from '../hooks/useVoiceInput';
+import type { VoiceStatus, StagingState } from '../hooks/useVoiceInput';
 import type { TerminalTab } from '../types';
 import { isTauri } from '@/lib/backend';
 
@@ -241,6 +241,7 @@ interface TerminalPanelProps {
   onToggleVoice?: () => void;
   onStartRecording?: () => void;
   onStopRecording?: () => void;
+  staging?: StagingState | null;
 }
 
 export const TerminalPanel: FC<TerminalPanelProps> = ({
@@ -265,6 +266,7 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
   onToggleVoice,
   onStartRecording,
   onStopRecording,
+  staging,
 }) => {
   const { t } = useTranslation();
   const [showError, setShowError] = useState<string | null>(null);
@@ -453,13 +455,87 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
           </div>
         )}
 
-        {/* 录音遮罩 + 波形（移动端 Web 不显示，由悬浮按钮提供反馈）*/}
+        {/* 录音暂存区遮罩（桌面端全屏 / 移动端底部卡片）*/}
         {voiceStatus === 'recording' && !IS_MOBILE_WEB && (
-          <div className="absolute inset-0 z-10 bg-black/50 flex flex-col items-center justify-center gap-3 fade-in-0">
+          <div className="absolute inset-0 z-10 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center gap-4 fade-in-0 p-4">
             {analyserNode && <AudioWaveform analyserNode={analyserNode} />}
+
+            {/* 暂存区内容 */}
+            {staging && (staging.rawText || staging.interimText) && (
+              <div className="w-full max-w-md flex flex-col gap-2">
+                {/* 原始语音 */}
+                <div className="rounded-lg bg-slate-800/80 border border-slate-600/50 p-3">
+                  <div className="text-[10px] text-slate-500 mb-1 font-medium uppercase tracking-wider">{t('voice.rawText')}</div>
+                  <div className="text-sm text-slate-200 leading-relaxed break-all">
+                    {staging.rawText}
+                    {staging.interimText && (
+                      <span className="text-slate-500 italic">{staging.interimText}</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* AI 整理 */}
+                {(staging.refinedText || staging.isRefining || staging.refineFailed) && (
+                  <div className={`rounded-lg p-3 ${
+                    staging.refineFailed
+                      ? 'bg-red-900/30 border border-red-700/50'
+                      : 'bg-slate-800/80 border border-blue-500/40'
+                  }`}>
+                    <div className="text-[10px] mb-1 font-medium uppercase tracking-wider flex items-center gap-1">
+                      <span className={staging.refineFailed ? 'text-red-400' : 'text-blue-400'}>
+                        {t('voice.refinedText')}
+                      </span>
+                      {staging.isRefining && (
+                        <span className="text-slate-500 animate-pulse">{t('voice.refining')}</span>
+                      )}
+                    </div>
+                    <div className="text-sm leading-relaxed break-all">
+                      {staging.refineFailed ? (
+                        <span className="text-red-300/80">{t('voice.refineFailed')}</span>
+                      ) : (
+                        <span className="text-blue-200">{staging.refinedText}</span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <span className="text-sm text-slate-400 select-none">
               {t('terminal.recordingHint')}
             </span>
+          </div>
+        )}
+
+        {/* 移动端 Web 暂存区卡片（在悬浮按钮上方）*/}
+        {voiceStatus === 'recording' && IS_MOBILE_WEB && staging && (staging.rawText || staging.interimText) && (
+          <div className="absolute bottom-20 left-2 right-2 z-15 rounded-xl bg-slate-800/95 border border-slate-600/50 p-3 shadow-2xl backdrop-blur-sm">
+            <div className="text-[10px] text-slate-500 mb-1 font-medium uppercase tracking-wider">{t('voice.rawText')}</div>
+            <div className="text-sm text-slate-200 leading-relaxed break-all mb-2">
+              {staging.rawText}
+              {staging.interimText && (
+                <span className="text-slate-500 italic">{staging.interimText}</span>
+              )}
+            </div>
+            {(staging.refinedText || staging.isRefining || staging.refineFailed) && (
+              <>
+                <div className="text-[10px] font-medium uppercase tracking-wider flex items-center gap-1 mb-1">
+                  <span className={staging.refineFailed ? 'text-red-400' : 'text-blue-400'}>
+                    {t('voice.refinedText')}
+                  </span>
+                  {staging.isRefining && (
+                    <span className="text-slate-500 animate-pulse">{t('voice.refining')}</span>
+                  )}
+                </div>
+                <div className="text-sm leading-relaxed break-all">
+                  {staging.refineFailed ? (
+                    <span className="text-red-300/80">{t('voice.refineFailed')}</span>
+                  ) : (
+                    <span className="text-blue-200">{staging.refinedText}</span>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>

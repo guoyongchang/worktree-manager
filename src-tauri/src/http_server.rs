@@ -1121,6 +1121,11 @@ async fn h_voice_is_active() -> Response {
     result_json(crate::commands::voice::voice_is_active_inner())
 }
 
+async fn h_voice_refine_text(Json(args): Json<Value>) -> Response {
+    let text = args["text"].as_str().unwrap_or("").to_string();
+    result_json(crate::commands::voice::voice_refine_text_inner(text).await)
+}
+
 async fn h_get_dashscope_api_key() -> Response {
     result_json(crate::commands::voice::get_dashscope_api_key_inner())
 }
@@ -1315,6 +1320,7 @@ pub fn create_router() -> Router {
         .route("/api/voice_send_audio", post(h_voice_send_audio))
         .route("/api/voice_stop", post(h_voice_stop))
         .route("/api/voice_is_active", post(h_voice_is_active))
+        .route("/api/voice_refine_text", post(h_voice_refine_text))
         .route("/api/get_dashscope_api_key", post(h_get_dashscope_api_key))
         .route("/api/set_dashscope_api_key", post(h_set_dashscope_api_key))
         .route("/api/get_dashscope_base_url", post(h_get_dashscope_base_url))

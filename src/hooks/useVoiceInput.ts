@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import i18next from 'i18next';
-import { voiceStart, voiceSendAudio, voiceStop, isTauri } from '../lib/backend';
+import { voiceStart, voiceSendAudio, voiceStop, voiceRefineText, isTauri } from '../lib/backend';
 
 /**
  * 状态机：
@@ -13,41 +13,32 @@ import { voiceStart, voiceSendAudio, voiceStop, isTauri } from '../lib/backend';
  *   点击麦克风按钮: idle → ready（获取麦克风）  /  ready → idle（释放麦克风）
  *   按下 Alt+V:     ready → recording（连接 Dashscope，开始发送音频）
  *   松开 Alt+V:     recording → ready（停止 Dashscope，麦克风保持）
+ *
+ * 暂存区（Staging）：
+ *   录音期间，转写结果累积到暂存区而非直接写入终端。
+ *   后台调用 Qwen LLM 对累积文本做 AI 优化（去语气词、精简表达）。
+ *   松开 Alt+V 后，将 AI 优化后的文本（或兜底原始文本）发送到终端。
  */
 export type VoiceStatus = 'idle' | 'ready' | 'recording' | 'error';
+
+export interface StagingState {
+  rawText: string;       // 累积的所有 final 句子
+  interimText: string;   // 当前正在说的 interim 文本
+  refinedText: string;   // AI 优化后的文本
+  isRefining: boolean;   // AI 请求中
+  refineFailed: boolean; // AI 失败标记
+}
 
 export interface UseVoiceInputReturn {
   voiceStatus: VoiceStatus;
   voiceError: string | null;
   isKeyHeld: boolean;
   analyserNode: AnalyserNode | null;
+  staging: StagingState | null;
   toggleVoice: () => void;
   stopVoice: () => void;
   startRecording: () => void;
   stopRecording: () => void;
-}
-
-const VOICE_COMMANDS: Record<string, string> = {
-  '删除': '\x7F',
-  'backspace': '\x7F',
-  'delete': '\x7F',
-  '清空': '\x03',
-  'clear': '\x03',
-  '中断': '\x1B',
-  'escape': '\x1B',
-  '提交': '\r',
-  '回车': '\r',
-  'enter': '\r',
-  'submit': '\r',
-};
-
-function normalizeForMatch(text: string): string {
-  return text.trim().toLowerCase().replace(/[。，、！？.!?,\s]+$/g, '');
-}
-
-function processTranscription(text: string): string {
-  const normalized = normalizeForMatch(text);
-  return VOICE_COMMANDS[normalized] ?? text;
 }
 
 function float32ToBase64Pcm(samples: Float32Array): string {
@@ -72,6 +63,7 @@ export function useVoiceInput(
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [isKeyHeld, setIsKeyHeld] = useState(false);
   const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
+  const [staging, setStaging] = useState<StagingState | null>(null);
 
   // 音频管道（在 ready 和 recording 期间保持）
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -90,6 +82,82 @@ export function useVoiceInput(
   // 用 ref 追踪状态，避免 keyboard handler 闭包过期
   const voiceStatusRef = useRef(voiceStatus);
   voiceStatusRef.current = voiceStatus;
+
+  // Staging refs for async callbacks
+  const stagingRef = useRef<StagingState | null>(null);
+  const refineTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refineAbortRef = useRef<AbortController | null>(null);
+  const pendingSendRef = useRef(false);
+  const lastFinalRef = useRef(''); // 前端去重：跳过 Dashscope finish-task 重发的同句 final
+  const onTranscribedRef = useRef(onTranscribed);
+  onTranscribedRef.current = onTranscribed;
+
+  // Keep stagingRef in sync
+  useEffect(() => { stagingRef.current = staging; }, [staging]);
+
+  // ---- AI 文本优化（500ms 防抖）----
+  const triggerRefine = useCallback((rawText: string) => {
+    // Clear previous timer
+    if (refineTimerRef.current) {
+      clearTimeout(refineTimerRef.current);
+    }
+
+    refineTimerRef.current = setTimeout(async () => {
+      // Abort previous request
+      if (refineAbortRef.current) {
+        refineAbortRef.current.abort();
+      }
+      const abort = new AbortController();
+      refineAbortRef.current = abort;
+
+      setStaging(prev => prev ? { ...prev, isRefining: true } : prev);
+
+      try {
+        const refined = await voiceRefineText(rawText);
+        if (abort.signal.aborted) return;
+        setStaging(prev => prev ? {
+          ...prev,
+          refinedText: refined,
+          isRefining: false,
+          refineFailed: false,
+        } : prev);
+      } catch {
+        if (abort.signal.aborted) return;
+        setStaging(prev => prev ? {
+          ...prev,
+          isRefining: false,
+          refineFailed: true,
+        } : prev);
+      }
+    }, 500);
+  }, []);
+
+  // ---- 最终发送 ----
+  const finalizeStagingAndSend = useCallback(() => {
+    const s = stagingRef.current;
+    if (!s || !s.rawText.trim()) {
+      setStaging(null);
+      return;
+    }
+    // Prefer refined text if available and not failed
+    const textToSend = (s.refinedText && !s.refineFailed) ? s.refinedText : s.rawText;
+    onTranscribedRef.current(textToSend);
+    setStaging(null);
+  }, []);
+
+  // ---- 清理 staging 状态 ----
+  const clearStaging = useCallback(() => {
+    if (refineTimerRef.current) {
+      clearTimeout(refineTimerRef.current);
+      refineTimerRef.current = null;
+    }
+    if (refineAbortRef.current) {
+      refineAbortRef.current.abort();
+      refineAbortRef.current = null;
+    }
+    pendingSendRef.current = false;
+    setStaging(null);
+  }, []);
 
   // ---- 释放全部音频资源 ----
   const cleanupAudio = useCallback(() => {
@@ -192,11 +260,12 @@ export function useVoiceInput(
     isStreamingRef.current = false;
     await voiceStop().catch(() => {});
     cleanupAudio();
+    clearStaging();
     setVoiceStatus('idle');
     setIsKeyHeld(false);
-  }, [cleanupAudio]);
+  }, [cleanupAudio, clearStaging]);
 
-  // ---- 开始录音：连接 Dashscope，打开音频发送开关 ----
+  // ---- 开始录音：连接 Dashscope，打开音频发送开关，初始化暂存区 ----
   const startStreaming = useCallback(async () => {
     if (busyRef.current) return;
     if (voiceStatusRef.current !== 'ready') return;
@@ -205,6 +274,16 @@ export function useVoiceInput(
     try {
       await voiceStart(sampleRateRef.current);
       isStreamingRef.current = true;
+      // 初始化暂存区
+      setStaging({
+        rawText: '',
+        interimText: '',
+        refinedText: '',
+        isRefining: false,
+        refineFailed: false,
+      });
+      pendingSendRef.current = false;
+      lastFinalRef.current = '';
       setVoiceStatus('recording');
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -219,8 +298,10 @@ export function useVoiceInput(
   // ---- 停止录音：关闭音频发送，断开 Dashscope，回到 ready ----
   const stopStreaming = useCallback(async () => {
     isStreamingRef.current = false;
+    pendingSendRef.current = true;
     await voiceStop().catch(() => {});
-    // voice-stopped 事件会触发状态更新，但这里也主动设置以保证 UI 响应
+    // voice-stopped 事件会触发 finalizeStagingAndSend
+    // 但如果事件已经触发了（racing），主动检查
     if (voiceStatusRef.current === 'recording') {
       setVoiceStatus('ready');
     }
@@ -245,8 +326,6 @@ export function useVoiceInput(
 
     const handleVoiceEvent = (event: string, payload: Record<string, unknown>) => {
       // Only process voice events if this client has an active voice session (microphone acquired).
-      // Without this guard, when sharing is active, both the desktop and browser clients
-      // would receive the same voice-result and both write to PTY → duplicated input.
       if (!mediaStreamRef.current) return;
 
       switch (event) {
@@ -254,8 +333,23 @@ export function useVoiceInput(
           const text = payload.text as string;
           const isFinal = payload.is_final as boolean;
           if (isFinal && text?.trim()) {
-            const processed = processTranscription(text);
-            onTranscribed(processed);
+            const trimmed = text.trim();
+            // 前端去重：Dashscope finish-task 后可能重发最后一句（标点微变），跳过
+            if (trimmed === lastFinalRef.current) break;
+            lastFinalRef.current = trimmed;
+            // 累积到暂存区 rawText，然后触发 AI 优化
+            setStaging(prev => {
+              if (!prev) return prev;
+              const newRaw = prev.rawText ? prev.rawText + trimmed : trimmed;
+              return { ...prev, rawText: newRaw, interimText: '' };
+            });
+            // 副作用放在 setter 外面
+            const currentRaw = stagingRef.current?.rawText ?? '';
+            const newRawForRefine = currentRaw ? currentRaw + trimmed : trimmed;
+            triggerRefine(newRawForRefine);
+          } else if (!isFinal && text) {
+            // interim → 更新暂存区灰色文本
+            setStaging(prev => prev ? { ...prev, interimText: text } : prev);
           }
           break;
         }
@@ -267,6 +361,12 @@ export function useVoiceInput(
             setVoiceStatus('idle');
           }
           setIsKeyHeld(false);
+          // 如果松开了 Alt+V（pendingSend），发送最终文本
+          if (pendingSendRef.current) {
+            pendingSendRef.current = false;
+            // 小延迟等待最后的 staging 更新
+            setTimeout(() => finalizeStagingAndSend(), 50);
+          }
           break;
         case 'voice-error':
           isStreamingRef.current = false;
@@ -313,7 +413,7 @@ export function useVoiceInput(
     }
 
     return () => { unlisten.forEach(fn => fn()); };
-  }, [onTranscribed]);
+  }, [triggerRefine, finalizeStagingAndSend]);
 
   // ---- Alt+V 按住说话 ----
   useEffect(() => {
@@ -385,9 +485,10 @@ export function useVoiceInput(
     return () => {
       isStreamingRef.current = false;
       cleanupAudio();
+      clearStaging();
       voiceStop().catch(() => {});
     };
-  }, [cleanupAudio]);
+  }, [cleanupAudio, clearStaging]);
 
-  return { voiceStatus, voiceError, isKeyHeld, analyserNode, toggleVoice, stopVoice: exitReady, startRecording, stopRecording };
+  return { voiceStatus, voiceError, isKeyHeld, analyserNode, staging, toggleVoice, stopVoice: exitReady, startRecording, stopRecording };
 }
