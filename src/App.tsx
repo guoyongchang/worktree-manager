@@ -812,7 +812,7 @@ function App() {
           onToggleCollapsed={() => setSidebarCollapsed(prev => !prev)}
           switchingWorkspace={switchingWorkspace}
           shareActive={share.shareActive}
-          shareUrl={share.shareUrl}
+          shareUrls={share.shareUrls}
           shareNgrokUrl={share.shareNgrokUrl}
           sharePassword={share.sharePassword}
           onStartShare={share.handleStartShare}

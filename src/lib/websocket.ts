@@ -36,6 +36,7 @@ class WebSocketManager {
   // Pending subscriptions to send after reconnect
   private pendingPtySubscriptions = new Set<string>();
   private pendingLockSubscription: string | null = null;
+  private pendingVoiceSubscription = false;
 
   connect(sessionId: string) {
     if (this.ws && this.connected) return;
@@ -71,6 +72,9 @@ class WebSocketManager {
       }
       if (this.pendingLockSubscription) {
         this.sendJson({ type: 'subscribe_locks', workspacePath: this.pendingLockSubscription });
+      }
+      if (this.pendingVoiceSubscription) {
+        this.sendJson({ type: 'subscribe_voice_events' });
       }
     };
 
@@ -213,9 +217,13 @@ class WebSocketManager {
 
   subscribeVoiceEvents(callback: VoiceEventCallback): () => void {
     this.voiceEventCallbacks.push(callback);
+    this.pendingVoiceSubscription = true;
     this.sendJson({ type: 'subscribe_voice_events' });
     return () => {
       this.voiceEventCallbacks = this.voiceEventCallbacks.filter(cb => cb !== callback);
+      if (this.voiceEventCallbacks.length === 0) {
+        this.pendingVoiceSubscription = false;
+      }
     };
   }
 
@@ -230,6 +238,7 @@ class WebSocketManager {
     this.pendingLockSubscription = null;
     this.terminalStateCallbacks = [];
     this.voiceEventCallbacks = [];
+    this.pendingVoiceSubscription = false;
     if (this.ws) {
       this.ws.close();
       this.ws = null;

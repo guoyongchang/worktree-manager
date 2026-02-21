@@ -302,6 +302,8 @@
   "settings.stopTest": "停止测试",
   "settings.test": "测试",
   "settings.volume": "音量",
+  "settings.voiceRefineLabel": "AI 文本优化",
+  "settings.voiceRefineDesc": "录音结束后使用 Qwen AI 精简文本、去语气词",
   "settings.dashscopeKeyLabel": "Dashscope API Key",
   "settings.dashscopeKeyPlaceholder": "粘贴你的 Dashscope API Key",
   "settings.wsAddressLabel": "WebSocket 地址",

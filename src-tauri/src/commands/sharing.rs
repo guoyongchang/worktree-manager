@@ -12,6 +12,7 @@ use crate::state::{
     TOKIO_RT,
 };
 use crate::http_server;
+use crate::tls;
 
 // ==================== 分享功能命令 ====================
 
@@ -73,12 +74,29 @@ pub(crate) async fn start_sharing(window: tauri::Window, port: u16, password: St
         return Err(format!("端口 {} 已被占用: {}", port, e));
     }
 
-    // Determine local IP for the share URL
-    let local_ip = local_ip_address::local_ip()
-        .map(|ip| ip.to_string())
-        .unwrap_or_else(|_| "0.0.0.0".to_string());
+    // Collect all LAN IPs for multi-address display
+    // Include all non-loopback IPv4: private, link-local, CGNAT (Tailscale 100.x), etc.
+    let mut lan_ips: Vec<std::net::IpAddr> = local_ip_address::list_afinet_netifas()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(_name, ip)| {
+            match ip {
+                std::net::IpAddr::V4(v4) if !v4.is_loopback() && !v4.is_unspecified() && !v4.is_multicast() => Some(ip),
+                _ => None,
+            }
+        })
+        .collect();
+    lan_ips.sort();
+    lan_ips.dedup();
 
-    let share_url = format!("http://{}:{}", local_ip, port);
+    // Generate self-signed TLS certificate for HTTPS (includes all LAN IPs in SAN)
+    let tls_certs = tls::generate_self_signed(&lan_ips)?;
+
+    let share_urls: Vec<String> = lan_ips.iter()
+        .map(|ip| format!("https://{}:{}", ip, port))
+        .collect();
+
+    let share_url = share_urls.first().cloned().unwrap_or_else(|| format!("https://0.0.0.0:{}", port));
 
     // Create shutdown channel
     let (tx, rx) = tokio::sync::watch::channel(false);
@@ -107,8 +125,8 @@ pub(crate) async fn start_sharing(window: tauri::Window, port: u16, password: St
         sessions.clear();
     }
 
-    // Spawn the HTTP server on the shared tokio runtime
-    TOKIO_RT.spawn(http_server::start_server(port, rx));
+    // Spawn HTTP (port) + HTTPS (port+1) servers on the shared tokio runtime
+    TOKIO_RT.spawn(http_server::start_server(port, rx, Some(tls_certs)));
 
     log::info!("Sharing started on {} for workspace {}", share_url, workspace_path);
 
@@ -254,18 +272,25 @@ pub(crate) async fn stop_sharing() -> Result<(), String> {
 pub(crate) async fn get_share_state() -> Result<ShareStateInfo, String> {
     let state = SHARE_STATE.lock()
         .map_err(|_| "Internal state error".to_string())?;
-    let url = if state.active {
-        let local_ip = local_ip_address::local_ip()
-            .map(|ip| ip.to_string())
-            .unwrap_or_else(|_| "0.0.0.0".to_string());
-        Some(format!("http://{}:{}", local_ip, state.port))
+    let urls = if state.active {
+        let mut ips: Vec<std::net::IpAddr> = local_ip_address::list_afinet_netifas()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|(_name, ip)| match ip {
+                std::net::IpAddr::V4(v4) if !v4.is_loopback() && !v4.is_unspecified() && !v4.is_multicast() => Some(ip),
+                _ => None,
+            })
+            .collect();
+        ips.sort();
+        ips.dedup();
+        ips.iter().map(|ip| format!("https://{}:{}", ip, state.port)).collect()
     } else {
-        None
+        vec![]
     };
 
     Ok(ShareStateInfo {
         active: state.active,
-        url,
+        urls,
         ngrok_url: state.ngrok_url.clone(),
         workspace_path: state.workspace_path.clone(),
     })

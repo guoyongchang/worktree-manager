@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import i18next from 'i18next';
-import { voiceStart, voiceSendAudio, voiceStop, voiceRefineText, isTauri } from '../lib/backend';
+import { voiceStart, voiceSendAudio, voiceStop, voiceRefineText, getVoiceRefineEnabled, isTauri } from '../lib/backend';
 
 /**
  * 状态机：
@@ -91,6 +91,7 @@ export function useVoiceInput(
   const lastFinalRef = useRef(''); // 前端去重：跳过 Dashscope finish-task 重发的同句 final
   const onTranscribedRef = useRef(onTranscribed);
   onTranscribedRef.current = onTranscribed;
+  const refineEnabledRef = useRef(true); // 从后端读取，缓存在 ref 中
 
   // Keep stagingRef in sync
   useEffect(() => { stagingRef.current = staging; }, [staging]);
@@ -191,6 +192,13 @@ export function useVoiceInput(
     if (busyRef.current) return;
     busyRef.current = true;
     setVoiceError(null);
+
+    // 从后端读取 AI 优化开关（缓存到 ref，录音期间不再重复请求）
+    try {
+      refineEnabledRef.current = await getVoiceRefineEnabled();
+    } catch {
+      refineEnabledRef.current = true;
+    }
 
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
@@ -343,10 +351,12 @@ export function useVoiceInput(
               const newRaw = prev.rawText ? prev.rawText + trimmed : trimmed;
               return { ...prev, rawText: newRaw, interimText: '' };
             });
-            // 副作用放在 setter 外面
-            const currentRaw = stagingRef.current?.rawText ?? '';
-            const newRawForRefine = currentRaw ? currentRaw + trimmed : trimmed;
-            triggerRefine(newRawForRefine);
+            // 副作用放在 setter 外面 — 仅在用户开启 AI 优化时触发
+            if (refineEnabledRef.current) {
+              const currentRaw = stagingRef.current?.rawText ?? '';
+              const newRawForRefine = currentRaw ? currentRaw + trimmed : trimmed;
+              triggerRefine(newRawForRefine);
+            }
           } else if (!isFinal && text) {
             // interim → 更新暂存区灰色文本
             setStaging(prev => prev ? { ...prev, interimText: text } : prev);

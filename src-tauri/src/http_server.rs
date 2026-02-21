@@ -4,7 +4,7 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
     routing::{get, post},
-    Router,
+    Extension, Router,
 };
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
@@ -17,6 +17,8 @@ use tower_http::cors::CorsLayer;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::services::{ServeDir, ServeFile};
 use tauri::Emitter;
+
+use crate::tls::TlsCerts;
 
 use crate::{
     // _impl functions (window-context commands)
@@ -447,7 +449,7 @@ async fn auth_middleware(headers: HeaderMap, request: Request, next: Next) -> Re
     let path = request.uri().path().to_string();
 
     // Allow non-API paths (static files), exempt endpoints, and WebSocket
-    if !path.starts_with("/api/") || path == "/api/auth" || path == "/api/get_share_info" || path == "/ws" {
+    if !path.starts_with("/api/") || path == "/api/auth" || path == "/api/get_share_info" || path == "/api/cert.pem" || path == "/ws" {
         return next.run(request).await;
     }
 
@@ -1144,6 +1146,15 @@ async fn h_set_dashscope_base_url(Json(args): Json<Value>) -> Response {
     result_ok(crate::commands::voice::set_dashscope_base_url_inner(url))
 }
 
+async fn h_get_voice_refine_enabled() -> Response {
+    result_json(crate::commands::voice::get_voice_refine_enabled_inner())
+}
+
+async fn h_set_voice_refine_enabled(Json(args): Json<Value>) -> Response {
+    let enabled = args["enabled"].as_bool().unwrap_or(true);
+    result_ok(crate::commands::voice::set_voice_refine_enabled_inner(enabled))
+}
+
 // -- Connected clients --
 
 async fn h_get_connected_clients() -> Response {
@@ -1159,6 +1170,17 @@ async fn h_get_connected_clients() -> Response {
 async fn h_kick_client(Json(args): Json<Value>) -> Response {
     let session_id = args["sessionId"].as_str().unwrap_or("").to_string();
     result_ok(crate::kick_client_internal(&session_id))
+}
+
+// -- Certificate download --
+
+async fn h_cert_pem(Extension(cert_pem): Extension<Arc<String>>) -> Response {
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/x-pem-file"),
+         (header::CONTENT_DISPOSITION, "attachment; filename=\"worktree-manager.pem\"")],
+        cert_pem.as_str().to_string(),
+    ).into_response()
 }
 
 // ---------------------------------------------------------------------------
@@ -1199,7 +1221,7 @@ fn is_allowed_origin(origin: &str) -> bool {
     false
 }
 
-pub fn create_router() -> Router {
+pub fn create_router(cert_pem: Option<String>) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(tower_http::cors::AllowOrigin::predicate(|origin: &HeaderValue, _| {
             origin.to_str().map_or(false, is_allowed_origin)
@@ -1252,7 +1274,7 @@ pub fn create_router() -> Router {
         .append_index_html_on_directories(true)
         .fallback(ServeFile::new(dist_path.join("index.html")));
 
-    Router::new()
+    let mut router = Router::new()
         // Workspace management
         .route("/api/list_workspaces", post(h_list_workspaces))
         .route("/api/add_workspace", post(h_add_workspace))
@@ -1325,10 +1347,20 @@ pub fn create_router() -> Router {
         .route("/api/set_dashscope_api_key", post(h_set_dashscope_api_key))
         .route("/api/get_dashscope_base_url", post(h_get_dashscope_base_url))
         .route("/api/set_dashscope_base_url", post(h_set_dashscope_base_url))
+        .route("/api/get_voice_refine_enabled", post(h_get_voice_refine_enabled))
+        .route("/api/set_voice_refine_enabled", post(h_set_voice_refine_enabled))
         // Misc
         .route("/api/get_app_version", post(h_get_app_version))
         // WebSocket (auth handled in upgrade handler via query param)
-        .route("/ws", get(h_ws_upgrade))
+        .route("/ws", get(h_ws_upgrade));
+
+    // Add cert download route when TLS is enabled
+    if let Some(pem) = cert_pem {
+        router = router.route("/api/cert.pem", get(h_cert_pem))
+            .layer(Extension(Arc::new(pem)));
+    }
+
+    router
         .layer(axum::middleware::from_fn(auth_middleware))
         .layer(axum::middleware::from_fn(localhost_only_middleware))
         .layer(axum::middleware::from_fn(security_headers_middleware))
@@ -1338,29 +1370,157 @@ pub fn create_router() -> Router {
         .layer(cors)
 }
 
-/// Start the HTTP server with graceful shutdown support.
-pub async fn start_server(port: u16, mut shutdown_rx: tokio::sync::watch::Receiver<bool>) {
-    let app = create_router();
+// ---------------------------------------------------------------------------
+// Server startup
+// ---------------------------------------------------------------------------
+
+/// Start the server with graceful shutdown support.
+///
+/// When `tls_certs` is Some (sharing mode):
+///   Single port — localhost connections get plain HTTP, LAN connections get HTTPS.
+/// When `tls_certs` is None:
+///   Plain HTTP for everyone (e.g. dev mode).
+pub async fn start_server(
+    port: u16,
+    mut shutdown_rx: tokio::sync::watch::Receiver<bool>,
+    tls_certs: Option<TlsCerts>,
+) {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    log::info!("HTTP API server listening on http://{}", addr);
 
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(l) => l,
         Err(e) => {
-            log::error!("Failed to bind HTTP server on {}: {}", addr, e);
+            log::error!("Failed to bind server on {}: {}", addr, e);
             return;
         }
     };
-    if let Err(e) = axum::serve(
-        listener,
-        app.into_make_service_with_connect_info::<SocketAddr>(),
-    )
-    .with_graceful_shutdown(async move {
-        let _ = shutdown_rx.changed().await;
-        log::info!("HTTP server shutting down gracefully");
-    })
-    .await
-    {
-        log::error!("HTTP server error: {}", e);
+
+    match tls_certs {
+        Some(certs) => {
+            // Dual-protocol: HTTP for localhost, HTTPS for LAN — same port
+            log::info!("Server on {} (localhost: HTTP, LAN: HTTPS)", addr);
+
+            let app = create_router(Some(certs.cert_pem.clone()));
+
+            let cert_chain: Vec<rustls_pki_types::CertificateDer<'static>> = {
+                let mut reader = std::io::BufReader::new(certs.cert_pem.as_bytes());
+                rustls_pemfile::certs(&mut reader)
+                    .filter_map(|r| r.ok())
+                    .collect()
+            };
+            let key_der = {
+                let mut reader = std::io::BufReader::new(certs.key_pem.as_bytes());
+                rustls_pemfile::private_key(&mut reader)
+                    .expect("Failed to parse private key PEM")
+                    .expect("No private key found in PEM")
+            };
+
+            let mut tls_config = rustls::ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(cert_chain, key_der)
+                .expect("Failed to build TLS ServerConfig");
+            // ALPN: HTTP/1.1 only (h2 doesn't support traditional WebSocket upgrade)
+            tls_config.alpn_protocols = vec![b"http/1.1".to_vec()];
+            let tls_acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(tls_config));
+
+            loop {
+                tokio::select! {
+                    _ = shutdown_rx.changed() => {
+                        log::info!("Server shutting down gracefully");
+                        break;
+                    }
+                    result = listener.accept() => {
+                        let (tcp_stream, remote_addr) = match result {
+                            Ok(v) => v,
+                            Err(e) => {
+                                log::warn!("TCP accept error: {}", e);
+                                continue;
+                            }
+                        };
+
+                        let app = app.clone();
+
+                        if remote_addr.ip().is_loopback() {
+                            // Localhost → plain HTTP/1.1 (with WebSocket upgrade support)
+                            tokio::spawn(async move {
+                                let io = hyper_util::rt::TokioIo::new(tcp_stream);
+                                let service = hyper::service::service_fn(move |mut req: hyper::Request<hyper::body::Incoming>| {
+                                    req.extensions_mut().insert(ConnectInfo(remote_addr));
+                                    let mut app = app.clone();
+                                    async move {
+                                        use tower::Service;
+                                        app.call(req).await
+                                    }
+                                });
+                                if let Err(e) = hyper::server::conn::http1::Builder::new()
+                                    .keep_alive(true)
+                                    .serve_connection(io, service)
+                                    .with_upgrades()
+                                    .await
+                                {
+                                    let msg = e.to_string();
+                                    if !msg.contains("connection closed") && !msg.contains("reset") {
+                                        log::warn!("HTTP connection error from {}: {}", remote_addr, e);
+                                    }
+                                }
+                            });
+                        } else {
+                            // LAN → TLS handshake → HTTPS (h2 or h1.1 via ALPN)
+                            let acceptor = tls_acceptor.clone();
+                            tokio::spawn(async move {
+                                let tls_stream = match acceptor.accept(tcp_stream).await {
+                                    Ok(s) => s,
+                                    Err(e) => {
+                                        // Expected when LAN client tries plain HTTP
+                                        log::debug!("TLS handshake failed from {}: {}", remote_addr, e);
+                                        return;
+                                    }
+                                };
+                                let io = hyper_util::rt::TokioIo::new(tls_stream);
+                                let service = hyper::service::service_fn(move |mut req: hyper::Request<hyper::body::Incoming>| {
+                                    req.extensions_mut().insert(ConnectInfo(remote_addr));
+                                    let mut app = app.clone();
+                                    async move {
+                                        use tower::Service;
+                                        app.call(req).await
+                                    }
+                                });
+                                // HTTPS with HTTP/1.1 keep-alive + WebSocket upgrade support
+                                // (h2 doesn't support traditional WebSocket upgrade)
+                                if let Err(e) = hyper::server::conn::http1::Builder::new()
+                                    .keep_alive(true)
+                                    .serve_connection(io, service)
+                                    .with_upgrades()
+                                    .await
+                                {
+                                    let msg = e.to_string();
+                                    if !msg.contains("connection closed") && !msg.contains("reset") {
+                                        log::warn!("HTTPS connection error from {}: {}", remote_addr, e);
+                                    }
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        None => {
+            // Pure HTTP mode
+            log::info!("HTTP server listening on http://{}", addr);
+            let app = create_router(None);
+
+            if let Err(e) = axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.changed().await;
+                log::info!("HTTP server shutting down");
+            })
+            .await
+            {
+                log::error!("HTTP server error: {}", e);
+            }
+        }
     }
 }

@@ -38,7 +38,6 @@ import {
   SidebarCollapseIcon,
   SidebarExpandIcon,
   ShareIcon,
-  StopIcon,
   CopyIcon,
   GithubIcon,
   CheckCircleIcon,
@@ -57,7 +56,7 @@ import { callBackend, getAppVersion, getLastSharePort, getWindowLabel, isMainWin
 
 const ShareBar: FC<{
   active: boolean;
-  url: string | null;
+  urls: string[];
   ngrokUrl: string | null;
   password: string;
   ngrokLoading: boolean;
@@ -67,7 +66,7 @@ const ShareBar: FC<{
   onStop?: () => void;
   onUpdatePassword?: (password: string) => void;
   onKickClient?: (sessionId: string) => void;
-}> = ({ active, url, ngrokUrl, password, ngrokLoading, connectedClients = [], onToggleNgrok, onStart, onStop, onUpdatePassword, onKickClient }) => {
+}> = ({ active, urls, ngrokUrl, password, ngrokLoading, connectedClients = [], onToggleNgrok, onStart, onStop, onUpdatePassword, onKickClient }) => {
   const { t } = useTranslation();
   const [showPassword, setShowPassword] = useState(false);
   const [editingPassword, setEditingPassword] = useState('');
@@ -106,10 +105,10 @@ const ShareBar: FC<{
   const handleOpenShareDialog = async () => {
     // Get last port or extract from current URL or generate random
     let port = 0;
-    if (url) {
-      // Extract port from current URL
+    if (urls.length > 0) {
+      // Extract port from first URL
       try {
-        const urlObj = new URL(url);
+        const urlObj = new URL(urls[0]);
         port = parseInt(urlObj.port) || 0;
       } catch {
         // ignore
@@ -258,8 +257,8 @@ const ShareBar: FC<{
         </button>
       </div>
       {/* Local URL row */}
-      {url && (() => {
-        const localUrl = `http://localhost:${new URL(url).port}`;
+      {urls.length > 0 && (() => {
+        const localUrl = `http://localhost:${new URL(urls[0]).port}`;
         return (
           <div className="flex items-center gap-1.5">
             <span className="text-[11px] font-bold px-1 py-0.5 rounded shrink-0 bg-emerald-600/30 text-emerald-500">
@@ -299,70 +298,57 @@ const ShareBar: FC<{
           </div>
         );
       })()}
-      {/* LAN URL row */}
-      <div className="flex items-center gap-1.5">
-        <span className="text-[11px] font-bold px-1 py-0.5 rounded shrink-0 bg-slate-600/30 text-slate-500">
-          {t('share.lan')}
-        </span>
-        <span className="flex-1 text-xs text-emerald-400 truncate min-w-0 select-all" title={url || ''}>
-          {url || '...'}
-        </span>
-        <TooltipProvider delayDuration={300}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => url && navigator.clipboard.writeText(url)}
-                className="h-6 w-6 shrink-0"
-              >
-                <CopyIcon className="w-3 h-3" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="top">{t('share.copyLink')}</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => url && navigator.clipboard.writeText(`${url}?pwd=${encodeURIComponent(editingPassword)}`)}
-                className="h-6 w-6 shrink-0 text-slate-400 hover:text-slate-200"
-              >
-                <LinkIcon className="w-3 h-3" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="top">{t('share.copyLinkWithPassword')}</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={handleOpenShareDialog}
-                className="h-6 w-6 shrink-0 text-slate-400 hover:text-slate-200"
-                title={t('share.changePort')}
-              >
-                <SettingsIcon className="w-3 h-3" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="top">{t('share.changePort')}</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={onStop}
-                className="h-6 w-6 shrink-0 text-red-400 hover:text-red-300"
-              >
-                <StopIcon className="w-3 h-3" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="top">{t('share.stopSharing')}</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      </div>
+      {/* LAN URL rows */}
+      {urls.map((lanUrl, i) => (
+        <div key={lanUrl} className="flex items-center gap-1.5">
+          {i === 0 ? (
+            <span className="text-[11px] font-bold px-1 py-0.5 rounded shrink-0 bg-slate-600/30 text-slate-500">
+              {t('share.lan')}
+            </span>
+          ) : (
+            <span className="text-[11px] px-1 py-0.5 shrink-0 w-[30px]" />
+          )}
+          <span className="flex-1 text-xs text-emerald-400 truncate min-w-0 select-all" title={lanUrl}>
+            {lanUrl}
+          </span>
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => navigator.clipboard.writeText(lanUrl)}
+                  className="h-6 w-6 shrink-0"
+                >
+                  <CopyIcon className="w-3 h-3" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">{t('share.copyLink')}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => navigator.clipboard.writeText(`${lanUrl}?pwd=${encodeURIComponent(editingPassword)}`)}
+                  className="h-6 w-6 shrink-0 text-slate-400 hover:text-slate-200"
+                >
+                  <LinkIcon className="w-3 h-3" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">{t('share.copyLinkWithPassword')}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
+      ))}
+      {urls.length === 0 && (
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] font-bold px-1 py-0.5 rounded shrink-0 bg-slate-600/30 text-slate-500">
+            {t('share.lan')}
+          </span>
+          <span className="flex-1 text-xs text-slate-500">...</span>
+        </div>
+      )}
       {/* Password row */}
       <div className="flex items-center gap-1.5">
         <span className="text-[11px] font-medium text-slate-500 shrink-0">{t('share.password')}</span>
@@ -396,7 +382,7 @@ const ShareBar: FC<{
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => url && navigator.clipboard.writeText(editingPassword)}
+            onClick={() => navigator.clipboard.writeText(editingPassword)}
             className="h-6 w-6 shrink-0"
             title={t('share.copyPassword')}
           >
@@ -432,6 +418,33 @@ const ShareBar: FC<{
           </div>
         </div>
       )}
+
+      {/* Share actions row */}
+      <div className="flex items-center justify-between pt-1">
+        <TooltipProvider delayDuration={300}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleOpenShareDialog}
+                className="h-6 w-6 text-slate-400 hover:text-slate-200"
+                title={t('share.changePort')}
+              >
+                <SettingsIcon className="w-3 h-3" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top">{t('share.changePort')}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        <button
+          type="button"
+          onClick={onStop}
+          className="text-[11px] text-red-400 hover:text-red-300 transition-colors px-1"
+        >
+          {t('share.stopSharing')}
+        </button>
+      </div>
 
       {/* Kick Confirmation Dialog */}
       <Dialog open={kickingSessionId !== null} onOpenChange={(open) => !open && setKickingSessionId(null)}>
@@ -535,7 +548,7 @@ interface WorktreeSidebarProps {
   onToggleCollapsed?: () => void;
   switchingWorkspace?: boolean;
   shareActive?: boolean;
-  shareUrl?: string | null;
+  shareUrls?: string[];
   shareNgrokUrl?: string | null;
   sharePassword?: string;
   onStartShare?: (port: number) => void;
@@ -572,7 +585,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
   onToggleCollapsed,
   switchingWorkspace = false,
   shareActive = false,
-  shareUrl,
+  shareUrls = [],
   shareNgrokUrl,
   sharePassword = '',
   onStartShare,
@@ -1001,7 +1014,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
       {_isTauri && (
         <ShareBar
           active={shareActive}
-          url={shareUrl || null}
+          urls={shareUrls}
           ngrokUrl={shareNgrokUrl || null}
           password={sharePassword}
           ngrokLoading={ngrokLoading}
