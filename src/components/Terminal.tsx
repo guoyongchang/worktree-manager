@@ -184,7 +184,13 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible 
       });
     } else {
       // Tauri desktop mode: poll via invoke
+      // Use chained setTimeout instead of setInterval to prevent request accumulation.
+      // With setInterval, if pty_read takes >100ms the calls pile up and block the event loop.
       if (readerIntervalRef.current) return; // Already reading
+
+      const scheduleNext = () => {
+        readerIntervalRef.current = window.setTimeout(readLoop, TERMINAL.POLL_INTERVAL_MS);
+      };
 
       const readLoop = async () => {
         try {
@@ -197,9 +203,13 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible 
         } catch {
           // PTY read failed silently
         }
+        // Schedule next read only after current one completes
+        if (readerIntervalRef.current !== null) {
+          scheduleNext();
+        }
       };
 
-      readerIntervalRef.current = window.setInterval(readLoop, TERMINAL.POLL_INTERVAL_MS);
+      scheduleNext();
     }
   }, []);
 
@@ -208,8 +218,8 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible 
       wsSubscribedRef.current = false;
       getWebSocketManager().unsubscribePty(sessionIdRef.current);
     }
-    if (readerIntervalRef.current) {
-      clearInterval(readerIntervalRef.current);
+    if (readerIntervalRef.current !== null) {
+      clearTimeout(readerIntervalRef.current);
       readerIntervalRef.current = null;
     }
   }, []);

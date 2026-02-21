@@ -256,6 +256,83 @@ async fn h_fetch_project_remote(Json(args): Json<Value>) -> Response {
     result_json(result)
 }
 
+async fn h_sync_with_base_branch(Json(args): Json<Value>) -> Response {
+    let path = args["path"].as_str().unwrap_or("").to_string();
+    let base_branch = args["baseBranch"].as_str().unwrap_or("").to_string();
+    let normalized = normalize_path(&path);
+    let result = tokio::task::spawn_blocking(move || {
+        git_ops::sync_with_base_branch(std::path::Path::new(&normalized), &base_branch)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))
+    .and_then(|r| r);
+    result_json(result)
+}
+
+async fn h_push_to_remote(Json(args): Json<Value>) -> Response {
+    let path = args["path"].as_str().unwrap_or("").to_string();
+    let normalized = normalize_path(&path);
+    let result = tokio::task::spawn_blocking(move || {
+        git_ops::push_to_remote(std::path::Path::new(&normalized))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))
+    .and_then(|r| r);
+    result_json(result)
+}
+
+async fn h_merge_to_test_branch(Json(args): Json<Value>) -> Response {
+    let path = args["path"].as_str().unwrap_or("").to_string();
+    let test_branch = args["testBranch"].as_str().unwrap_or("").to_string();
+    let normalized = normalize_path(&path);
+    let result = tokio::task::spawn_blocking(move || {
+        git_ops::merge_to_test_branch(std::path::Path::new(&normalized), &test_branch)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))
+    .and_then(|r| r);
+    result_json(result)
+}
+
+async fn h_merge_to_base_branch(Json(args): Json<Value>) -> Response {
+    let path = args["path"].as_str().unwrap_or("").to_string();
+    let base_branch = args["baseBranch"].as_str().unwrap_or("").to_string();
+    let normalized = normalize_path(&path);
+    let result = tokio::task::spawn_blocking(move || {
+        git_ops::merge_to_base_branch(std::path::Path::new(&normalized), &base_branch)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))
+    .and_then(|r| r);
+    result_json(result)
+}
+
+async fn h_create_pull_request(Json(args): Json<Value>) -> Response {
+    let path = args["path"].as_str().unwrap_or("").to_string();
+    let base_branch = args["baseBranch"].as_str().unwrap_or("").to_string();
+    let title = args["title"].as_str().unwrap_or("").to_string();
+    let body = args["body"].as_str().unwrap_or("").to_string();
+    let normalized = normalize_path(&path);
+    let result = tokio::task::spawn_blocking(move || {
+        git_ops::create_pull_request(std::path::Path::new(&normalized), &base_branch, &title, &body)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))
+    .and_then(|r| r);
+    result_json(result)
+}
+
+async fn h_get_remote_branches(Json(args): Json<Value>) -> Response {
+    let path = args["path"].as_str().unwrap_or("").to_string();
+    let normalized = normalize_path(&path);
+    let result = tokio::task::spawn_blocking(move || {
+        git_ops::get_remote_branches(std::path::Path::new(&normalized))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))
+    .and_then(|r| r);
+    result_json(result)
+}
 
 // -- Scan --
 
@@ -1302,6 +1379,12 @@ pub fn create_router(cert_pem: Option<String>) -> Router {
         .route("/api/get_branch_diff_stats", post(h_get_branch_diff_stats))
         .route("/api/check_remote_branch_exists", post(h_check_remote_branch_exists))
         .route("/api/fetch_project_remote", post(h_fetch_project_remote))
+        .route("/api/sync_with_base_branch", post(h_sync_with_base_branch))
+        .route("/api/push_to_remote", post(h_push_to_remote))
+        .route("/api/merge_to_test_branch", post(h_merge_to_test_branch))
+        .route("/api/merge_to_base_branch", post(h_merge_to_base_branch))
+        .route("/api/create_pull_request", post(h_create_pull_request))
+        .route("/api/get_remote_branches", post(h_get_remote_branches))
         // Scan
         .route("/api/scan_linked_folders", post(h_scan_linked_folders))
         // System utilities
