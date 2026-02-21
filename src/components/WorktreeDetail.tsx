@@ -251,7 +251,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
           </div>
           )}
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {mainWorkspace.projects.map(proj => {
             const projectPath = `${mainWorkspace.path}/projects/${proj.name}`;
             const isSwitching = switchingBranch === proj.name;

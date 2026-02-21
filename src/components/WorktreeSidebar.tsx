@@ -741,7 +741,13 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
 
   // ==================== Expanded Sidebar ====================
   return (
-    <div className="w-72 bg-slate-800/50 border-r border-slate-700/50 flex flex-col shrink-0">
+    <>
+    {/* Mobile backdrop overlay */}
+    <div
+      className="fixed inset-0 bg-black/50 z-40 sm:hidden"
+      onClick={onToggleCollapsed}
+    />
+    <div className="w-72 bg-slate-800/50 border-r border-slate-700/50 flex flex-col shrink-0 max-sm:fixed max-sm:inset-y-0 max-sm:left-0 max-sm:z-50 max-sm:w-[85vw] max-sm:max-w-[320px] max-sm:bg-slate-800">
       {/* Workspace Selector + Settings */}
       <div className="p-3 border-b border-slate-700/50">
         <div className="flex items-center gap-1.5">
@@ -1095,5 +1101,6 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
         </DialogContent>
       </Dialog>
     </div>
+    </>
   );
 };

@@ -202,7 +202,7 @@ export const GitOperations: FC<GitOperationsProps> = ({
       </div>
 
       <div className="flex flex-col gap-2">
-        <div className="grid grid-cols-3 gap-2" title="同步操作">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2" title="同步操作">
           <Button
             variant="secondary"
             size="sm"
