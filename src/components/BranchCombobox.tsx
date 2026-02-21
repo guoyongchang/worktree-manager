@@ -1,4 +1,5 @@
 import { useState, useEffect, type FC } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -20,9 +21,11 @@ export const BranchCombobox: FC<BranchComboboxProps> = ({
   value,
   onChange,
   onLoadBranches,
-  placeholder = '选择或输入分支',
+  placeholder,
   disabled = false,
 }) => {
+  const { t } = useTranslation();
+  const resolvedPlaceholder = placeholder ?? t('branchCombobox.placeholder');
   const [open, setOpen] = useState(false);
   const [branches, setBranches] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -85,7 +88,7 @@ export const BranchCombobox: FC<BranchComboboxProps> = ({
           value={inputValue}
           onChange={(e) => handleInputChange(e.target.value)}
           onBlur={handleInputBlur}
-          placeholder={placeholder}
+          placeholder={resolvedPlaceholder}
           disabled={disabled}
           className="flex-1"
         />
@@ -109,7 +112,7 @@ export const BranchCombobox: FC<BranchComboboxProps> = ({
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="搜索分支..."
+                      placeholder={t('branchCombobox.search')}
                       className="flex-1 h-8 text-sm"
                       autoFocus
                     />
@@ -127,11 +130,11 @@ export const BranchCombobox: FC<BranchComboboxProps> = ({
                 <div className="overflow-y-auto">
                   {loading ? (
                     <div className="p-4 text-center text-sm text-slate-400">
-                      加载中...
+                      {t('common.loading')}
                     </div>
                   ) : filteredBranches.length === 0 ? (
                     <div className="p-4 text-center text-sm text-slate-400">
-                      {searchQuery ? '未找到匹配的分支' : '未找到远程分支'}
+                      {searchQuery ? t('branchCombobox.noMatch') : t('branchCombobox.noBranches')}
                     </div>
                   ) : (
                     <div className="py-1">

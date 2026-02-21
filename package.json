@@ -27,9 +27,11 @@
     "@xterm/xterm": "^6.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "i18next": "^25.8.13",
     "lucide-react": "^0.563.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "react-i18next": "^16.5.4",
     "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {

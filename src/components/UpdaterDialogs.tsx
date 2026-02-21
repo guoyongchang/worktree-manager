@@ -1,4 +1,5 @@
 import { type FC } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Dialog,
   DialogContent,
@@ -148,6 +149,7 @@ export const UpdateNotificationDialog: FC<UpdateNotificationDialogProps> = ({
   onUpdate,
   onLater,
 }) => {
+  const { t } = useTranslation();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-[500px] p-0">
@@ -157,7 +159,7 @@ export const UpdateNotificationDialog: FC<UpdateNotificationDialogProps> = ({
               <Rocket className="w-5 h-5 text-blue-400" />
             </div>
             <DialogTitle className="text-xl">
-              新版本可用
+              {t('updater.newVersionAvailable')}
             </DialogTitle>
           </div>
         </DialogHeader>
@@ -166,12 +168,12 @@ export const UpdateNotificationDialog: FC<UpdateNotificationDialogProps> = ({
           <DialogDescription asChild>
             <div>
               <p className="text-lg font-medium text-slate-100 mb-3">
-                Worktree Manager v{updateInfo.version} 已发布
+                {t('updater.versionReleased', { version: updateInfo.version })}
               </p>
 
               {updateInfo.notes.length > 0 && (
                 <div className="mb-4 max-h-[300px] overflow-y-auto pr-1">
-                  <p className="text-sm font-medium text-slate-300 mb-2">更新内容:</p>
+                  <p className="text-sm font-medium text-slate-300 mb-2">{t('updater.releaseNotes')}</p>
                   <div className="pl-1">
                     <SimpleMarkdown content={updateInfo.notes.join('\n')} />
                   </div>
@@ -179,9 +181,9 @@ export const UpdateNotificationDialog: FC<UpdateNotificationDialogProps> = ({
               )}
 
               <div className="flex gap-4 text-xs text-slate-500">
-                <span>当前版本: v{updateInfo.currentVersion}</span>
+                <span>{t('updater.currentVersion', { version: updateInfo.currentVersion })}</span>
                 <span>-</span>
-                <span>发布时间: {updateInfo.date}</span>
+                <span>{t('updater.releaseDate', { date: updateInfo.date })}</span>
               </div>
             </div>
           </DialogDescription>
@@ -193,13 +195,13 @@ export const UpdateNotificationDialog: FC<UpdateNotificationDialogProps> = ({
             className="flex-1"
             onClick={onLater}
           >
-            稍后提醒
+            {t('updater.remindLater')}
           </Button>
           <Button
             className="flex-1 group"
             onClick={onUpdate}
           >
-            立即更新
+            {t('updater.updateNow')}
             <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
           </Button>
         </DialogFooter>
@@ -223,6 +225,7 @@ export const DownloadProgressDialog: FC<DownloadProgressDialogProps> = ({
   progress,
   onCancel,
 }) => {
+  const { t } = useTranslation();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-[450px] p-0" onPointerDownOutside={(e) => e.preventDefault()}>
@@ -232,7 +235,7 @@ export const DownloadProgressDialog: FC<DownloadProgressDialogProps> = ({
               <Download className="w-5 h-5 text-blue-400 animate-pulse" />
             </div>
             <DialogTitle className="text-xl">
-              正在下载更新
+              {t('updater.downloading')}
             </DialogTitle>
           </div>
         </DialogHeader>
@@ -241,7 +244,7 @@ export const DownloadProgressDialog: FC<DownloadProgressDialogProps> = ({
           <DialogDescription asChild>
             <div>
               <p className="text-slate-300 mb-4">
-                正在下载 v{progress.version}...
+                {t('updater.downloadingVersion', { version: progress.version })}
               </p>
 
               {/* Progress Bar */}
@@ -277,7 +280,7 @@ export const DownloadProgressDialog: FC<DownloadProgressDialogProps> = ({
             className="w-full"
             onClick={onCancel}
           >
-            取消下载
+            {t('updater.cancelDownload')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -302,6 +305,7 @@ export const UpdateSuccessDialog: FC<UpdateSuccessDialogProps> = ({
   onRestart,
   onLater,
 }) => {
+  const { t } = useTranslation();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-[450px] p-0">
@@ -311,7 +315,7 @@ export const UpdateSuccessDialog: FC<UpdateSuccessDialogProps> = ({
               <CheckCircle className="w-5 h-5 text-green-400" />
             </div>
             <DialogTitle className="text-xl">
-              更新成功
+              {t('updater.updateSuccess')}
             </DialogTitle>
           </div>
         </DialogHeader>
@@ -320,10 +324,10 @@ export const UpdateSuccessDialog: FC<UpdateSuccessDialogProps> = ({
           <DialogDescription asChild>
             <div className="text-center">
               <p className="text-lg text-slate-100 mb-2">
-                已成功更新到 v{version}
+                {t('updater.updatedToVersion', { version })}
               </p>
               <p className="text-sm text-slate-400">
-                重启应用以应用更新
+                {t('updater.restartToApply')}
               </p>
             </div>
           </DialogDescription>
@@ -335,13 +339,13 @@ export const UpdateSuccessDialog: FC<UpdateSuccessDialogProps> = ({
             className="flex-1"
             onClick={onLater}
           >
-            稍后重启
+            {t('updater.restartLater')}
           </Button>
           <Button
             className="flex-1 bg-green-600 hover:bg-green-500 group"
             onClick={onRestart}
           >
-            立即重启
+            {t('updater.restartNow')}
             <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
           </Button>
         </DialogFooter>
@@ -367,6 +371,7 @@ export const UpdateErrorDialog: FC<UpdateErrorDialogProps> = ({
   onRetry,
   onClose,
 }) => {
+  const { t } = useTranslation();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-[500px] p-0">
@@ -376,7 +381,7 @@ export const UpdateErrorDialog: FC<UpdateErrorDialogProps> = ({
               <AlertTriangle className="w-5 h-5 text-orange-400" />
             </div>
             <DialogTitle className="text-xl">
-              更新失败
+              {t('updater.updateFailed')}
             </DialogTitle>
           </div>
         </DialogHeader>
@@ -384,7 +389,7 @@ export const UpdateErrorDialog: FC<UpdateErrorDialogProps> = ({
         <div className="px-5 py-4">
           <DialogDescription asChild>
             <div>
-              <p className="text-slate-300 mb-3">更新过程中出现错误</p>
+              <p className="text-slate-300 mb-3">{t('updater.errorOccurred')}</p>
 
               <div className="p-3 bg-slate-950 border border-slate-700 rounded-lg mb-4">
                 <p className="text-sm text-orange-300 font-mono break-words">
@@ -393,19 +398,19 @@ export const UpdateErrorDialog: FC<UpdateErrorDialogProps> = ({
               </div>
 
               <div className="space-y-1.5">
-                <p className="text-sm font-medium text-slate-300">您可以:</p>
+                <p className="text-sm font-medium text-slate-300">{t('updater.youCan')}</p>
                 <ul className="space-y-1 text-sm text-slate-400">
                   <li className="flex items-start gap-2">
                     <span className="text-blue-400 mt-0.5">-</span>
-                    <span>检查网络连接后重试</span>
+                    <span>{t('updater.checkNetwork')}</span>
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="text-blue-400 mt-0.5">-</span>
-                    <span>稍后自动检查更新</span>
+                    <span>{t('updater.autoCheckLater')}</span>
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="text-blue-400 mt-0.5">-</span>
-                    <span>手动下载更新包</span>
+                    <span>{t('updater.manualDownload')}</span>
                   </li>
                 </ul>
               </div>
@@ -419,14 +424,14 @@ export const UpdateErrorDialog: FC<UpdateErrorDialogProps> = ({
             className="flex-1"
             onClick={onClose}
           >
-            关闭
+            {t('common.close')}
           </Button>
           <Button
             className="flex-1"
             onClick={onRetry}
           >
             <RotateCw className="w-4 h-4" />
-            重试更新
+            {t('updater.retryUpdate')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -441,6 +446,7 @@ interface UpToDateToastProps {
 }
 
 export const UpToDateToast: FC<UpToDateToastProps> = ({ show }) => {
+  const { t } = useTranslation();
   if (!show) return null;
 
   return (
@@ -450,9 +456,9 @@ export const UpToDateToast: FC<UpToDateToastProps> = ({ show }) => {
           <CheckCircle className="w-4 h-4 text-green-400" />
         </div>
         <div>
-          <p className="text-sm font-medium text-slate-100">已是最新版本</p>
+          <p className="text-sm font-medium text-slate-100">{t('updater.upToDate')}</p>
           <p className="text-xs text-slate-400 mt-0.5">
-            您正在使用最新版本的 Worktree Manager
+            {t('updater.usingLatest')}
           </p>
         </div>
       </div>

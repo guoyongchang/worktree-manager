@@ -1,4 +1,5 @@
 import type { FC } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArchiveIcon } from './Icons';
 import { isTauri } from '@/lib/backend';
 
@@ -15,6 +16,7 @@ export const WorktreeContextMenu: FC<ContextMenuProps> = ({
   onClose,
   onArchive,
 }) => {
+  const { t } = useTranslation();
   return (
     <div
       className="fixed inset-0 z-50"
@@ -31,7 +33,7 @@ export const WorktreeContextMenu: FC<ContextMenuProps> = ({
           className="w-full px-4 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 flex items-center gap-2"
         >
           <ArchiveIcon className="w-4 h-4" />
-          归档
+          {t('contextMenu.archive')}
         </button>
         )}
       </div>
@@ -52,6 +54,7 @@ export const TerminalTabContextMenu: FC<TerminalTabContextMenuProps> = ({
   onClose,
   onDuplicate,
 }) => {
+  const { t } = useTranslation();
   return (
     <div
       className="fixed inset-0 z-50"
@@ -69,7 +72,7 @@ export const TerminalTabContextMenu: FC<TerminalTabContextMenuProps> = ({
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
           </svg>
-          复制终端
+          {t('contextMenu.duplicateTerminal')}
         </button>
       </div>
     </div>

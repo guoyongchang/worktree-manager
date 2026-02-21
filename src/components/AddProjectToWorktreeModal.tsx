@@ -1,4 +1,5 @@
 import { useState, type FC } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Dialog,
   DialogContent,
@@ -34,6 +35,7 @@ export const AddProjectToWorktreeModal: FC<AddProjectToWorktreeModalProps> = ({
   onSubmit,
   adding,
 }) => {
+  const { t } = useTranslation();
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [baseBranch, setBaseBranch] = useState<string>('');
 
@@ -72,23 +74,23 @@ export const AddProjectToWorktreeModal: FC<AddProjectToWorktreeModalProps> = ({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-[480px]">
         <DialogHeader>
-          <DialogTitle>添加项目到 Worktree</DialogTitle>
+          <DialogTitle>{t('addProjectToWorktree.title')}</DialogTitle>
         </DialogHeader>
         <div className="py-4">
           <p className="text-sm text-slate-400 mb-4">
-            将主工作区中的项目添加到 <span className="text-slate-200 font-medium">{worktree.name}</span>
+            {t('addProjectToWorktree.desc', { name: worktree.name })}
           </p>
 
           {availableProjects.length === 0 ? (
             <div className="text-center py-8 text-slate-500">
               <PlusIcon className="w-8 h-8 mx-auto mb-2 opacity-50" />
-              <p>没有可添加的项目</p>
-              <p className="text-xs mt-1">所有项目已经在此 Worktree 中</p>
+              <p>{t('addProjectToWorktree.noProjects')}</p>
+              <p className="text-xs mt-1">{t('addProjectToWorktree.allProjectsAdded')}</p>
             </div>
           ) : (
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-2">选择项目</label>
+                <label className="block text-sm font-medium text-slate-300 mb-2">{t('addProjectToWorktree.selectProject')}</label>
                 <div className="space-y-2">
                   {availableProjects.map(proj => (
                     <div
@@ -115,7 +117,7 @@ export const AddProjectToWorktreeModal: FC<AddProjectToWorktreeModalProps> = ({
                         </div>
                       </div>
                       <div className="text-slate-500 text-xs mt-1.5 pl-7">
-                        默认: {proj.base_branch} · 测试: {proj.test_branch}
+                        {t('addProjectToWorktree.defaultBranch')}: {proj.base_branch} · {t('addProjectToWorktree.testBranch')}: {proj.test_branch}
                       </div>
                     </div>
                   ))}
@@ -124,14 +126,14 @@ export const AddProjectToWorktreeModal: FC<AddProjectToWorktreeModalProps> = ({
 
               {selectedProjectConfig && (
                 <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2">Base 分支</label>
+                  <label className="block text-sm font-medium text-slate-300 mb-2">{t('addProjectToWorktree.baseBranch')}</label>
                   <Select value={baseBranch} onValueChange={setBaseBranch}>
                     <SelectTrigger className="w-full">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value={selectedProjectConfig.base_branch}>
-                        {selectedProjectConfig.base_branch} (默认)
+                        {selectedProjectConfig.base_branch} ({t('common.default')})
                       </SelectItem>
                       {selectedProjectConfig.base_branch !== "uat" && <SelectItem value="uat">uat</SelectItem>}
                       {selectedProjectConfig.base_branch !== "master" && <SelectItem value="master">master</SelectItem>}
@@ -146,12 +148,12 @@ export const AddProjectToWorktreeModal: FC<AddProjectToWorktreeModalProps> = ({
           )}
         </div>
         <DialogFooter>
-          <Button variant="secondary" onClick={() => handleOpenChange(false)} disabled={adding}>取消</Button>
+          <Button variant="secondary" onClick={() => handleOpenChange(false)} disabled={adding}>{t('common.cancel')}</Button>
           <Button
             onClick={handleSubmit}
             disabled={!selectedProject || !baseBranch || adding || availableProjects.length === 0}
           >
-            {adding ? "添加中..." : "添加项目"}
+            {adding ? t('addProjectToWorktree.adding') : t('addProjectToWorktree.addProject')}
           </Button>
         </DialogFooter>
       </DialogContent>

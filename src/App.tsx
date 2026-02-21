@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Dialog,
   DialogContent,
@@ -62,6 +63,7 @@ if (typeof window !== 'undefined' && isTauri()) {
 }
 
 function App() {
+  const { t } = useTranslation();
   // Browser auth (declared early so useWorkspace can depend on it)
   const browserAuth = useBrowserAuth();
 
@@ -264,7 +266,7 @@ function App() {
     if (!wsName) {
       title = 'Worktree Manager';
     } else {
-      const wtName = selectedWorktree ? selectedWorktree.name : '主工作区';
+      const wtName = selectedWorktree ? selectedWorktree.name : t('app.mainWorkspace');
       title = `${wsName} - ${wtName}`;
     }
     setWindowTitle(title);
@@ -675,12 +677,12 @@ function App() {
         <div className="w-80 space-y-4">
           <div className="text-center space-y-2">
             <h1 className="text-xl font-semibold">Worktree Manager</h1>
-            <p className="text-sm text-slate-400">请输入访问密码</p>
+            <p className="text-sm text-slate-400">{t('app.loginPasswordLabel')}</p>
           </div>
           <form onSubmit={(e) => { e.preventDefault(); browserAuth.handleBrowserLogin(); }} className="space-y-3">
             <Input
               type="password"
-              placeholder="密码"
+              placeholder={t('app.loginPasswordInput')}
               value={browserAuth.browserLoginPassword}
               onChange={(e) => browserAuth.setBrowserLoginPassword(e.target.value)}
               autoFocus
@@ -694,7 +696,7 @@ function App() {
               className="w-full"
               disabled={browserAuth.browserLoggingIn || !browserAuth.browserLoginPassword.trim()}
             >
-              {browserAuth.browserLoggingIn ? '验证中...' : '进入'}
+              {browserAuth.browserLoggingIn ? t('app.loginVerifying') : t('app.loginEnter')}
             </Button>
           </form>
         </div>
@@ -742,7 +744,7 @@ function App() {
         <div className="fixed inset-0 z-50 bg-slate-900 flex items-center justify-center">
           <div className="flex items-center gap-3">
             <RefreshIcon className="w-5 h-5 animate-spin text-slate-400" />
-            <span className="text-slate-400">加载中...</span>
+            <span className="text-slate-400">{t('common.loading')}</span>
           </div>
         </div>
       )}
@@ -976,17 +978,17 @@ function App() {
         <Dialog open={!!deleteConfirmWorktree} onOpenChange={(open) => !open && setDeleteConfirmWorktree(null)}>
           <DialogContent className="max-w-[400px]">
             <DialogHeader>
-              <DialogTitle>删除归档 Worktree</DialogTitle>
+              <DialogTitle>{t('app.deleteArchivedTitle')}</DialogTitle>
               <DialogDescription>
-                确定要永久删除归档 "{deleteConfirmWorktree?.name}" 吗？此操作将同时删除关联的本地分支和所有文件，且无法恢复。
+                {t('app.deleteArchivedDesc', { name: deleteConfirmWorktree?.name })}
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
               <Button variant="secondary" onClick={() => setDeleteConfirmWorktree(null)}>
-                取消
+                {t('common.cancel')}
               </Button>
               <Button variant="destructive" onClick={handleDeleteArchivedWorktree} disabled={deletingArchived}>
-                {deletingArchived ? "删除中..." : "确认删除"}
+                {deletingArchived ? t('app.deleting') : t('app.confirmDelete')}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -1035,18 +1037,18 @@ function App() {
       <Dialog open={showShortcutHelp} onOpenChange={setShowShortcutHelp}>
         <DialogContent className="max-w-[400px]">
           <DialogHeader>
-            <DialogTitle>快捷键</DialogTitle>
-            <DialogDescription>所有可用的键盘快捷键</DialogDescription>
+            <DialogTitle>{t('app.shortcutsTitle')}</DialogTitle>
+            <DialogDescription>{t('app.shortcutsDesc')}</DialogDescription>
           </DialogHeader>
           <div className="py-2 space-y-2">
             {[
-              { keys: isTauri() ? '⌘ N' : 'Ctrl N', desc: '新建 Worktree' },
-              { keys: isTauri() ? '⌘ ,' : 'Ctrl ,', desc: '打开设置' },
-              { keys: isTauri() ? '⌘ B' : 'Ctrl B', desc: '切换侧边栏' },
-              { keys: isTauri() ? '⌘ [' : 'Ctrl [', desc: '返回（设置 → 主界面）' },
-              { keys: isTauri() ? '⌘ /' : 'Ctrl /', desc: '显示快捷键帮助' },
-              { keys: 'Alt V', desc: '按住录音（语音输入）' },
-              { keys: 'Escape', desc: '关闭弹窗 / 退出全屏' },
+              { keys: isTauri() ? '⌘ N' : 'Ctrl N', desc: t('app.shortcutNewWorktree') },
+              { keys: isTauri() ? '⌘ ,' : 'Ctrl ,', desc: t('app.shortcutOpenSettings') },
+              { keys: isTauri() ? '⌘ B' : 'Ctrl B', desc: t('app.shortcutToggleSidebar') },
+              { keys: isTauri() ? '⌘ [' : 'Ctrl [', desc: t('app.shortcutBack') },
+              { keys: isTauri() ? '⌘ /' : 'Ctrl /', desc: t('app.shortcutHelp') },
+              { keys: 'Alt V', desc: t('app.shortcutVoice') },
+              { keys: 'Escape', desc: t('app.shortcutEscape') },
             ].map(({ keys, desc }) => (
               <div key={keys} className="flex items-center justify-between py-1.5 px-1">
                 <span className="text-sm text-slate-300">{desc}</span>
@@ -1065,9 +1067,10 @@ function App() {
       <Dialog open={share.showNgrokTokenDialog} onOpenChange={share.setShowNgrokTokenDialog}>
         <DialogContent className="max-w-[500px]">
           <DialogHeader>
-            <DialogTitle>配置 Ngrok Token</DialogTitle>
+            <DialogTitle>{t('app.ngrokTokenTitle')}</DialogTitle>
             <DialogDescription>
-              请输入您的 ngrok authtoken。您可以在 <a href="https://dashboard.ngrok.com/get-started/your-authtoken" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">ngrok 控制台</a> 获取。
+              {t('app.ngrokTokenDescPlain')}{' '}
+              <a href="https://dashboard.ngrok.com/get-started/your-authtoken" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">{t('settings.ngrokGetToken')}</a>
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
@@ -1082,10 +1085,10 @@ function App() {
           </div>
           <DialogFooter>
             <Button variant="secondary" onClick={() => share.setShowNgrokTokenDialog(false)}>
-              取消
+              {t('common.cancel')}
             </Button>
             <Button onClick={share.handleSaveNgrokToken} disabled={share.savingNgrokToken || !share.ngrokTokenInput.trim()}>
-              {share.savingNgrokToken ? '保存中...' : '保存并启动'}
+              {share.savingNgrokToken ? t('app.savingToken') : t('app.saveAndStart')}
             </Button>
           </DialogFooter>
         </DialogContent>

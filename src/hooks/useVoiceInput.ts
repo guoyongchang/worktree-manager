@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
+import i18next from 'i18next';
 import { voiceStart, voiceSendAudio, voiceStop, isTauri } from '../lib/backend';
 
 /**
@@ -125,7 +126,7 @@ export function useVoiceInput(
 
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
-        throw new Error('麦克风需要 HTTPS 或 localhost 环境，当前 HTTP 连接不支持');
+        throw new Error(i18next.t('voice.micNeedsHttps'));
       }
 
       const preferredDeviceId = localStorage.getItem('preferred-mic-device-id');
@@ -174,9 +175,9 @@ export function useVoiceInput(
       cleanupAudio();
       const msg = e instanceof Error ? e.message : String(e);
       if (msg.includes('Permission') || msg.includes('NotAllowed')) {
-        setVoiceError('麦克风权限被拒绝，请在系统设置中允许');
+        setVoiceError(i18next.t('voice.permissionDenied'));
       } else if (msg.includes('NotFound') || msg.includes('audio-capture')) {
-        setVoiceError('未检测到麦克风设备');
+        setVoiceError(i18next.t('voice.noMicDetected'));
       } else {
         setVoiceError(msg);
       }

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, type FC } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -69,6 +70,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
   currentWorkspace = null,
   onRemoveWorkspace,
 }) => {
+  const { t, i18n } = useTranslation();
   const [newLinkedItem, setNewLinkedItem] = useState('');
   const [newProjectLinkedFolder, setNewProjectLinkedFolder] = useState<Record<number, string>>({});
   const [appVersion, setAppVersion] = useState('');
@@ -203,8 +205,8 @@ export const SettingsView: FC<SettingsViewProps> = ({
   useEffect(() => {
     getAppVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
     if (isTauri()) {
-      getNgrokToken().then(t => {
-        setNgrokToken(t || '');
+      getNgrokToken().then(token => {
+        setNgrokToken(token || '');
         setNgrokTokenLoaded(true);
       }).catch(() => setNgrokTokenLoaded(true));
     }
@@ -241,29 +243,29 @@ export const SettingsView: FC<SettingsViewProps> = ({
             variant="ghost"
             size="icon"
             onClick={onBack}
-            aria-label="返回主界面"
+            aria-label={t('settings.backLabel')}
           >
             <BackIcon className="w-5 h-5" />
           </Button>
-          <h1 className="text-xl font-semibold">Workspace 设置</h1>
+          <h1 className="text-xl font-semibold">{t('settings.workspaceSettings')}</h1>
         </div>
         <Button
           onClick={onSave}
           disabled={saving}
         >
-          {saving ? "保存中..." : "保存配置"}
+          {saving ? t('common.saving') : t('settings.saveConfig')}
         </Button>
       </div>
 
       {/* Section Navigation */}
       <div className="sticky top-14 z-[9] bg-slate-900/95 backdrop-blur-sm py-2 -mx-4 px-4 mb-4 border-b border-slate-700/30 flex items-center gap-1.5 overflow-x-auto">
         {[
-          { id: 'settings-workspace', label: 'Workspace' },
-          { id: 'settings-management', label: '管理' },
-          { id: 'settings-projects', label: '项目' },
+          { id: 'settings-workspace', label: t('settings.workspaceConfig') },
+          { id: 'settings-management', label: t('settings.management') },
+          { id: 'settings-projects', label: t('settings.projectsNav') },
           ...(isTauri() ? [{ id: 'settings-ngrok', label: 'ngrok' }] : []),
-          { id: 'settings-voice', label: '语音' },
-          { id: 'settings-about', label: '关于' },
+          { id: 'settings-voice', label: t('settings.voiceNav') },
+          { id: 'settings-about', label: t('settings.about') },
         ].map(({ id, label }) => (
           <button
             key={id}
@@ -278,22 +280,22 @@ export const SettingsView: FC<SettingsViewProps> = ({
       {error && (
         <div className="mb-4 p-4 bg-red-900/30 border border-red-800/50 rounded-lg">
           <div className="text-red-300 text-sm select-text">{error}</div>
-          <Button variant="link" size="sm" onClick={onClearError} className="text-red-400 hover:text-red-200 mt-1 p-0 h-auto">关闭</Button>
+          <Button variant="link" size="sm" onClick={onClearError} className="text-red-400 hover:text-red-200 mt-1 p-0 h-auto">{t('common.close')}</Button>
         </div>
       )}
 
       {/* Config Path Info */}
       <div className="mb-6 p-3 bg-slate-800/50 rounded-lg border border-slate-700/50">
-        <div className="text-xs text-slate-500">配置文件路径</div>
+        <div className="text-xs text-slate-500">{t('settings.configFilePath')}</div>
         <div className="text-sm text-slate-300 mt-1 font-mono select-text">{configPath}</div>
       </div>
 
       {/* Workspace Settings */}
       <div className="mb-8">
-        <h2 id="settings-workspace" className="text-lg font-medium mb-4 scroll-mt-32">Workspace 配置</h2>
+        <h2 id="settings-workspace" className="text-lg font-medium mb-4 scroll-mt-32">{t('settings.workspaceConfig')}</h2>
         <div className="space-y-4">
           <div>
-            <label className="block text-sm text-slate-400 mb-1">Workspace 名称</label>
+            <label className="block text-sm text-slate-400 mb-1">{t('settings.workspaceName')}</label>
             <Input
               type="text"
               value={config.name}
@@ -301,7 +303,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
             />
           </div>
           <div>
-            <label className="block text-sm text-slate-400 mb-1">Worktrees 目录（相对路径）</label>
+            <label className="block text-sm text-slate-400 mb-1">{t('settings.worktreesDirLabel')}</label>
             <Input
               type="text"
               value={config.worktrees_dir}
@@ -311,7 +313,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
 
           {/* Linked Workspace Items */}
           <div>
-            <label className="block text-sm text-slate-400 mb-2">链接到 Worktree 的文件/文件夹</label>
+            <label className="block text-sm text-slate-400 mb-2">{t('settings.linkedWorktreeItems')}</label>
             <div className="space-y-2">
               {config.linked_workspace_items.map((item, index) => (
                 <div key={index} className="flex items-center gap-2 bg-slate-800 border border-slate-700 rounded px-3 py-2">
@@ -321,7 +323,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                     onClick={() => onRemoveLinkedItem(index)}
                     className="text-slate-500 hover:text-red-400 text-xs transition-colors"
                   >
-                    删除
+                    {t('common.delete')}
                   </button>
                 </div>
               ))}
@@ -331,7 +333,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                 type="text"
                 value={newLinkedItem}
                 onChange={(e) => setNewLinkedItem(e.target.value)}
-                placeholder="例如: .claude 或 CLAUDE.md"
+                placeholder={t('settings.linkedPlaceholder')}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && newLinkedItem.trim()) {
                     e.preventDefault();
@@ -352,11 +354,11 @@ export const SettingsView: FC<SettingsViewProps> = ({
                 }}
                 disabled={!newLinkedItem.trim()}
               >
-                添加
+                {t('common.add')}
               </Button>
             </div>
             <p className="text-xs text-slate-500 mt-2">
-              这些文件/文件夹将在创建新 worktree 时自动链接到主工作区
+              {t('settings.linkedWorktreeItemsHint')}
             </p>
           </div>
         </div>
@@ -365,7 +367,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
       {/* Workspace Management */}
       {workspaces.length > 0 && onRemoveWorkspace && (
         <div className="mb-8">
-          <h2 id="settings-management" className="text-lg font-medium mb-4 scroll-mt-32">Workspace 管理</h2>
+          <h2 id="settings-management" className="text-lg font-medium mb-4 scroll-mt-32">{t('settings.workspaceManagement')}</h2>
           <div className="space-y-2">
             {workspaces.map(ws => (
               <div
@@ -380,7 +382,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-slate-200">{ws.name}</span>
                     {currentWorkspace?.path === ws.path && (
-                      <span className="text-[10px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded">当前</span>
+                      <span className="text-[10px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded">{t('settings.current')}</span>
                     )}
                   </div>
                   <div className="text-xs text-slate-500 truncate mt-0.5 select-text">{ws.path}</div>
@@ -391,8 +393,8 @@ export const SettingsView: FC<SettingsViewProps> = ({
                     size="icon"
                     onClick={() => setRemoveConfirmWorkspace(ws)}
                     className="h-8 w-8 text-slate-500 hover:text-red-400 hover:bg-red-900/20 shrink-0 ml-2"
-                    title="移除工作区"
-                    aria-label={`移除工作区 ${ws.name}`}
+                    title={t('settings.removeWorkspace')}
+                    aria-label={t('settings.removeWorkspaceLabel', { name: ws.name })}
                   >
                     <TrashIcon className="w-4 h-4" />
                   </Button>
@@ -401,7 +403,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
             ))}
           </div>
           <p className="text-xs text-slate-500 mt-2">
-            移除工作区仅从列表中删除，不会删除实际文件。当前使用中的工作区无法移除。
+            {t('settings.workspaceManagementHint')}
           </p>
         </div>
       )}
@@ -409,14 +411,14 @@ export const SettingsView: FC<SettingsViewProps> = ({
       {/* Projects */}
       <div className="pt-6 border-t border-slate-700/50">
         <div className="flex items-center justify-between mb-4">
-          <h2 id="settings-projects" className="text-lg font-medium scroll-mt-32">项目配置</h2>
+          <h2 id="settings-projects" className="text-lg font-medium scroll-mt-32">{t('settings.projectConfig')}</h2>
           <Button
             variant="secondary"
             size="sm"
             onClick={onAddProject}
           >
             <PlusIcon className="w-4 h-4" />
-            添加项目
+            {t('settings.addProject')}
           </Button>
         </div>
 
@@ -429,7 +431,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                 </div>
                 <div className="flex-1 grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs text-slate-500 mb-1">项目名称</label>
+                    <label className="block text-xs text-slate-500 mb-1">{t('settings.projectName')}</label>
                     <Input
                       type="text"
                       value={proj.name}
@@ -439,7 +441,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-slate-500 mb-1">基准分支</label>
+                    <label className="block text-xs text-slate-500 mb-1">{t('settings.baseBranchLabel')}</label>
                     <BranchCombobox
                       value={proj.base_branch}
                       onChange={(value) => onUpdateProject(index, 'base_branch', value)}
@@ -451,7 +453,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-slate-500 mb-1">测试分支</label>
+                    <label className="block text-xs text-slate-500 mb-1">{t('settings.testBranchLabel')}</label>
                     <BranchCombobox
                       value={proj.test_branch}
                       onChange={(value) => onUpdateProject(index, 'test_branch', value)}
@@ -463,7 +465,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-slate-500 mb-1">合并策略</label>
+                    <label className="block text-xs text-slate-500 mb-1">{t('settings.mergeStrategyLabel')}</label>
                     <Select
                       value={proj.merge_strategy}
                       onValueChange={(value) => onUpdateProject(index, 'merge_strategy', value)}
@@ -484,8 +486,8 @@ export const SettingsView: FC<SettingsViewProps> = ({
                   size="icon"
                   onClick={() => onRemoveProject(index)}
                   className="h-8 w-8 text-red-400 hover:text-red-300 hover:bg-red-900/30 shrink-0"
-                  title="删除项目"
-                  aria-label={`删除项目 ${proj.name || '未命名'}`}
+                  title={t('settings.deleteProject')}
+                  aria-label={t('settings.deleteProjectLabel', { name: proj.name || '' })}
                 >
                   <TrashIcon className="w-4 h-4" />
                 </Button>
@@ -493,7 +495,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
               {/* Linked Folders */}
               <div className="border-t border-slate-700/50 pt-3">
                 <div className="flex items-center justify-between mb-2">
-                  <label className="block text-xs text-slate-500">链接文件夹</label>
+                  <label className="block text-xs text-slate-500">{t('settings.linkedFoldersLabel')}</label>
                   {onScanProject && (
                     <Button
                       type="button"
@@ -506,12 +508,12 @@ export const SettingsView: FC<SettingsViewProps> = ({
                       {scanningProject === proj.name ? (
                         <>
                           <div className="w-3 h-3 border border-blue-500 border-t-transparent rounded-full animate-spin" />
-                          扫描中...
+                          {t('settings.scanning')}
                         </>
                       ) : (
                         <>
                           <Search className="w-3 h-3" />
-                          扫描
+                          {t('settings.scan')}
                         </>
                       )}
                     </Button>
@@ -526,7 +528,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                   if (filteredResults.length === 0) return null;
                   return (
                     <div className="mb-2 p-2 bg-blue-900/20 border border-blue-800/30 rounded-lg">
-                      <div className="text-[10px] font-medium text-blue-400 mb-1.5">扫描结果 (点击添加)</div>
+                      <div className="text-[10px] font-medium text-blue-400 mb-1.5">{t('settings.scanResult')}</div>
                       <div className="space-y-1">
                         {filteredResults.map(result => (
                           <button
@@ -563,7 +565,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                           }}
                           className="text-slate-500 hover:text-red-400 text-xs ml-2 transition-colors"
                         >
-                          删除
+                          {t('common.delete')}
                         </button>
                       </div>
                     ))}
@@ -574,7 +576,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                     type="text"
                     value={newProjectLinkedFolder[index] || ''}
                     onChange={(e) => setNewProjectLinkedFolder(prev => ({ ...prev, [index]: e.target.value }))}
-                    placeholder="例如: node_modules"
+                    placeholder={t('settings.linkedFolderPlaceholder')}
                     className="h-7 text-xs"
                     onKeyDown={(e) => {
                       const val = (newProjectLinkedFolder[index] || '').trim();
@@ -601,7 +603,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                     }}
                     disabled={!(newProjectLinkedFolder[index] || '').trim()}
                   >
-                    添加
+                    {t('common.add')}
                   </Button>
                 </div>
               </div>
@@ -613,16 +615,16 @@ export const SettingsView: FC<SettingsViewProps> = ({
       {/* ngrok Config Section (Tauri only) */}
       {isTauri() && ngrokTokenLoaded && (
         <div className="mt-8 pt-8 border-t border-slate-700/50">
-          <h2 id="settings-ngrok" className="text-lg font-medium mb-4 scroll-mt-32">外网分享 (ngrok)</h2>
+          <h2 id="settings-ngrok" className="text-lg font-medium mb-4 scroll-mt-32">{t('settings.ngrokTitle')}</h2>
           <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 space-y-3">
             <div>
-              <label className="block text-sm text-slate-400 mb-1">ngrok Authtoken</label>
+              <label className="block text-sm text-slate-400 mb-1">{t('settings.ngrokAuthtokenLabel')}</label>
               <div className="flex gap-2">
                 <Input
                   type="password"
                   value={ngrokToken}
                   onChange={(e) => { setNgrokToken(e.target.value); setNgrokSaved(false); }}
-                  placeholder="粘贴你的 ngrok authtoken"
+                  placeholder={t('settings.ngrokAuthtokenPlaceholder')}
                   className="flex-1"
                 />
                 <Button
@@ -643,7 +645,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                     }
                   }}
                 >
-                  {ngrokSaving ? '保存中...' : ngrokSaved ? '已保存' : '保存'}
+                  {ngrokSaving ? t('common.saving') : ngrokSaved ? t('settings.savedSuccess') : t('common.save')}
                 </Button>
               </div>
               {ngrokError && (
@@ -651,13 +653,13 @@ export const SettingsView: FC<SettingsViewProps> = ({
               )}
             </div>
             <p className="text-xs text-slate-500">
-              配置 ngrok token 后，分享时可选择"外网"模式，通过公网 URL 访问。
+              {t('settings.ngrokHint')}
               <button
                 type="button"
                 className="text-blue-400 hover:text-blue-300 ml-1 underline cursor-pointer transition-colors"
                 onClick={() => openLink('https://dashboard.ngrok.com/get-started/your-authtoken')}
               >
-                获取 token
+                {t('settings.ngrokGetToken')}
               </button>
             </p>
           </div>
@@ -667,11 +669,11 @@ export const SettingsView: FC<SettingsViewProps> = ({
       {/* Dashscope Voice Recognition Config */}
       {dashscopeKeyLoaded && (
         <div className="mt-8 pt-8 border-t border-slate-700/50">
-          <h2 id="settings-voice" className="text-lg font-medium mb-4 scroll-mt-32">语音识别 (Dashscope)</h2>
+          <h2 id="settings-voice" className="text-lg font-medium mb-4 scroll-mt-32">{t('settings.voiceTitle')}</h2>
           <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 space-y-3">
             {/* Microphone Selection */}
             <div>
-              <label className="block text-sm text-slate-400 mb-1">麦克风设备</label>
+              <label className="block text-sm text-slate-400 mb-1">{t('settings.micDevice')}</label>
               <div className="flex gap-2">
                 <Select
                   value={selectedMicId || '__default__'}
@@ -689,10 +691,10 @@ export const SettingsView: FC<SettingsViewProps> = ({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__default__">默认设备</SelectItem>
+                    <SelectItem value="__default__">{t('settings.defaultDevice')}</SelectItem>
                     {micDevices.map((device) => (
                       <SelectItem key={device.deviceId} value={device.deviceId}>
-                        {device.label || `麦克风 ${device.deviceId.slice(0, 8)}`}
+                        {device.label || t('settings.micLabel', { id: device.deviceId.slice(0, 8) })}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -709,13 +711,13 @@ export const SettingsView: FC<SettingsViewProps> = ({
                   }}
                 >
                   <Mic className="w-4 h-4" />
-                  {micTesting ? '停止测试' : '测试'}
+                  {micTesting ? t('settings.stopTest') : t('settings.test')}
                 </Button>
               </div>
               {/* Volume Bar */}
               {micTesting && (
                 <div className="mt-2 flex items-center gap-2">
-                  <span className="text-xs text-slate-500 shrink-0">音量</span>
+                  <span className="text-xs text-slate-500 shrink-0">{t('settings.volume')}</span>
                   <div className="flex-1 h-2 bg-slate-700 rounded-full overflow-hidden">
                     <div
                       className="h-full bg-green-500 rounded-full"
@@ -726,13 +728,13 @@ export const SettingsView: FC<SettingsViewProps> = ({
               )}
             </div>
             <div>
-              <label className="block text-sm text-slate-400 mb-1">Dashscope API Key</label>
+              <label className="block text-sm text-slate-400 mb-1">{t('settings.dashscopeKeyLabel')}</label>
               <div className="flex gap-2">
                 <Input
                   type="password"
                   value={dashscopeKey}
                   onChange={(e) => { setDashscopeKey(e.target.value); setDashscopeSaved(false); }}
-                  placeholder="粘贴你的 Dashscope API Key"
+                  placeholder={t('settings.dashscopeKeyPlaceholder')}
                   className="flex-1"
                 />
                 <Button
@@ -753,7 +755,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                     }
                   }}
                 >
-                  {dashscopeSaving ? '保存中...' : dashscopeSaved ? '已保存' : '保存'}
+                  {dashscopeSaving ? t('common.saving') : dashscopeSaved ? t('settings.savedSuccess') : t('common.save')}
                 </Button>
               </div>
               {dashscopeError && (
@@ -761,7 +763,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
               )}
             </div>
             <div>
-              <label className="block text-sm text-slate-400 mb-1">WebSocket 地址</label>
+              <label className="block text-sm text-slate-400 mb-1">{t('settings.wsAddressLabel')}</label>
               <div className="flex gap-2">
                 <Input
                   type="text"
@@ -788,7 +790,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                     }
                   }}
                 >
-                  {dashscopeUrlSaving ? '保存中...' : dashscopeUrlSaved ? '已保存' : '保存'}
+                  {dashscopeUrlSaving ? t('common.saving') : dashscopeUrlSaved ? t('settings.savedSuccess') : t('common.save')}
                 </Button>
                 {dashscopeUrl && dashscopeUrl !== DEFAULT_DASHSCOPE_URL && (
                   <Button
@@ -807,7 +809,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                     }}
                     className="text-slate-400 hover:text-slate-200"
                   >
-                    恢复默认
+                    {t('settings.restoreDefault')}
                   </Button>
                 )}
               </div>
@@ -815,7 +817,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                 <p className="text-sm text-red-400 mt-1">{dashscopeUrlError}</p>
               )}
               <p className="text-xs text-slate-500 mt-1">
-                留空使用默认地址: {DEFAULT_DASHSCOPE_URL}
+                {t('settings.wsAddressHint', { url: DEFAULT_DASHSCOPE_URL })}
               </p>
             </div>
             {/* Dashscope Connection Test */}
@@ -835,7 +837,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                     }
                     await voiceStart(16000);
                     await voiceStop();
-                    setDashscopeTestResult({ ok: true, message: '连接成功' });
+                    setDashscopeTestResult({ ok: true, message: t('settings.connectionSuccess') });
                   } catch (e) {
                     setDashscopeTestResult({ ok: false, message: String(e) });
                   } finally {
@@ -847,9 +849,9 @@ export const SettingsView: FC<SettingsViewProps> = ({
                 {dashscopeTesting ? (
                   <>
                     <div className="w-3 h-3 border border-blue-500 border-t-transparent rounded-full animate-spin" />
-                    测试中...
+                    {t('settings.testing')}
                   </>
-                ) : '测试连接'}
+                ) : t('settings.testConnection')}
               </Button>
               {dashscopeTestResult && (
                 <span className={`text-sm ${dashscopeTestResult.ok ? 'text-green-400' : 'text-red-400'}`}>
@@ -858,13 +860,13 @@ export const SettingsView: FC<SettingsViewProps> = ({
               )}
             </div>
             <p className="text-xs text-slate-500">
-              配置 API Key 后，可通过按住 Alt+V 或点击终端面板麦克风按钮进行语音输入。
+              {t('settings.voiceHint')}
               <button
                 type="button"
                 className="text-blue-400 hover:text-blue-300 ml-1 underline cursor-pointer transition-colors"
                 onClick={() => openLink('https://dashscope.console.aliyun.com/apiKey')}
               >
-                获取 API Key
+                {t('settings.getApiKey')}
               </button>
             </p>
           </div>
@@ -873,15 +875,33 @@ export const SettingsView: FC<SettingsViewProps> = ({
 
       {/* About Section */}
       <div className="mt-8 pt-8 border-t border-slate-700/50">
-        <h2 id="settings-about" className="text-lg font-medium mb-4 scroll-mt-32">关于</h2>
+        <h2 id="settings-about" className="text-lg font-medium mb-4 scroll-mt-32">{t('settings.aboutTitle')}</h2>
         <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4">
           <div className="flex items-center gap-4 mb-3">
             <div>
               <h3 className="text-base font-semibold text-slate-100">Worktree Manager</h3>
-              <p className="text-xs text-slate-400 mt-0.5 select-text">版本: v{appVersion}</p>
+              <p className="text-xs text-slate-400 mt-0.5 select-text">{t('settings.versionLabel', { version: appVersion })}</p>
             </div>
           </div>
-          <p className="text-sm text-slate-400 mb-4">Git Worktree 可视化管理工具</p>
+          <p className="text-sm text-slate-400 mb-4">{t('settings.appDescription')}</p>
+          <div className="mb-4">
+            <label className="block text-sm text-slate-400 mb-1">{t('settings.language')}</label>
+            <Select
+              value={i18n.language}
+              onValueChange={(lng) => {
+                i18n.changeLanguage(lng);
+                localStorage.setItem('i18n-lang', lng);
+              }}
+            >
+              <SelectTrigger className="w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="zh-CN">中文</SelectItem>
+                <SelectItem value="en-US">English</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
           {onCheckUpdate && (
             <Button
               variant="secondary"
@@ -890,7 +910,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
               disabled={checkingUpdate}
             >
               <RefreshCw className={`w-4 h-4 ${checkingUpdate ? 'animate-spin' : ''}`} />
-              {checkingUpdate ? '正在检查更新...' : '检查更新'}
+              {checkingUpdate ? t('settings.checkingUpdate') : t('settings.checkUpdate')}
             </Button>
           )}
         </div>
@@ -900,14 +920,14 @@ export const SettingsView: FC<SettingsViewProps> = ({
       <Dialog open={!!removeConfirmWorkspace} onOpenChange={(open) => !open && setRemoveConfirmWorkspace(null)}>
         <DialogContent className="max-w-[400px]">
           <DialogHeader>
-            <DialogTitle>移除工作区</DialogTitle>
+            <DialogTitle>{t('settings.removeWorkspaceTitle')}</DialogTitle>
             <DialogDescription>
-              确定要移除工作区 "{removeConfirmWorkspace?.name}" 吗？此操作仅从列表中移除，不会删除实际文件。
+              {t('settings.removeWorkspaceDesc', { name: removeConfirmWorkspace?.name })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="secondary" onClick={() => setRemoveConfirmWorkspace(null)}>
-              取消
+              {t('common.cancel')}
             </Button>
             <Button variant="warning" onClick={() => {
               if (removeConfirmWorkspace && onRemoveWorkspace) {
@@ -915,7 +935,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                 setRemoveConfirmWorkspace(null);
               }
             }}>
-              确认移除
+              {t('settings.confirmRemove')}
             </Button>
           </DialogFooter>
         </DialogContent>

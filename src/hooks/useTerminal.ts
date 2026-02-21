@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import i18next from 'i18next';
 import type { TerminalTab, MainWorkspaceStatus, WorktreeListItem } from '../types';
 import { TERMINAL } from '../constants';
 import { callBackend, isTauri, broadcastTerminalState as broadcastTerminalStateBackend, getTerminalState } from '../lib/backend';
@@ -87,7 +88,7 @@ export function useTerminal(
     })) : []);
 
   const baseTabs: TerminalTab[] = currentWorkspaceRoot ? [
-    { name: '工作区', path: currentWorkspaceRoot, isRoot: true, isDuplicate: false },
+    { name: i18next.t('terminal.workspace'), path: currentWorkspaceRoot, isRoot: true, isDuplicate: false },
     ...currentProjects.map(p => ({
       name: p.name,
       path: p.path,
