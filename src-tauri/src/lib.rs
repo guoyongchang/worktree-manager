@@ -159,6 +159,7 @@ pub fn run() {
             voice_send_audio,
             voice_stop,
             voice_is_active,
+            voice_refine_text,
             // DevTools
             open_devtools,
         ])

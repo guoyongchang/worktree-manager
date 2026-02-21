@@ -45,4 +45,5 @@ rustls = { version = "0.23", features = ["aws-lc-rs"] }
 uuid = { version = "1", features = ["v4"] }
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 base64 = "0.22"
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 

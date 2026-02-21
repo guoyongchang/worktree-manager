@@ -459,6 +459,10 @@
   "voice.micNeedsHttps": "麦克风需要 HTTPS 或 localhost 环境，当前 HTTP 连接不支持",
   "voice.permissionDenied": "麦克风权限被拒绝，请在系统设置中允许",
   "voice.noMicDetected": "未检测到麦克风设备",
+  "voice.rawText": "原始语音",
+  "voice.refinedText": "AI 整理",
+  "voice.refining": "整理中...",
+  "voice.refineFailed": "AI 整理失败，将使用原始文本",
 
   "backend.authFailed": "认证失败",
 

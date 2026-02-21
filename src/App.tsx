@@ -891,6 +891,7 @@ function App() {
             onToggleVoice={voice.toggleVoice}
             onStartRecording={voice.startRecording}
             onStopRecording={voice.stopRecording}
+            staging={voice.staging}
           />
         </div>
 

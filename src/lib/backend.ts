@@ -411,3 +411,7 @@ export async function voiceIsActive(): Promise<boolean> {
   return callBackend<boolean>('voice_is_active');
 }
 
+export async function voiceRefineText(text: string): Promise<string> {
+  return callBackend<string>('voice_refine_text', { text });
+}
+
