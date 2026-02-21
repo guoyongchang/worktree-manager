@@ -1,4 +1,5 @@
 import { useState, type FC } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -38,12 +39,13 @@ import type {
 } from '../types';
 
 const StatusBadges: FC<{ project: ProjectStatus }> = ({ project }) => {
+  const { t } = useTranslation();
   const badges: { label: string; variant: 'warning' | 'success' | 'default' }[] = [];
-  if (project.has_uncommitted) badges.push({ label: `${project.uncommitted_count} 未提交`, variant: 'warning' });
-  if (project.is_merged_to_test) badges.push({ label: `已合并 ${project.test_branch}`, variant: 'success' });
-  if (project.behind_base > 0) badges.push({ label: `落后 ${project.behind_base}`, variant: 'default' });
-  if (project.ahead_of_base > 0) badges.push({ label: `领先 ${project.ahead_of_base}`, variant: 'default' });
-  if (badges.length === 0) return <Badge variant="success">干净</Badge>;
+  if (project.has_uncommitted) badges.push({ label: t('detail.uncommitted', { count: project.uncommitted_count }), variant: 'warning' });
+  if (project.is_merged_to_test) badges.push({ label: t('detail.mergedTo', { branch: project.test_branch }), variant: 'success' });
+  if (project.behind_base > 0) badges.push({ label: t('detail.behind', { count: project.behind_base }), variant: 'default' });
+  if (project.ahead_of_base > 0) badges.push({ label: t('detail.ahead', { count: project.ahead_of_base }), variant: 'default' });
+  if (badges.length === 0) return <Badge variant="success">{t('detail.clean')}</Badge>;
   return (
     <div className="flex flex-wrap gap-1 justify-end">
       {badges.map((b, i) => <Badge key={i} variant={b.variant}>{b.label}</Badge>)}
@@ -148,6 +150,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
   restoring = false,
   switching = false,
 }) => {
+  const { t } = useTranslation();
   const selectedEditorName = EDITORS.find(e => e.id === selectedEditor)?.name || 'VS Code';
   const [switchingBranch, setSwitchingBranch] = useState<string | null>(null);
 
@@ -155,8 +158,8 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
     return (
       <div className="flex flex-col items-center justify-center h-full text-center py-20">
         <FolderIcon className="w-12 h-12 text-slate-700 mb-4" />
-        <p className="text-slate-500 text-sm">选择一个 Worktree 查看详情</p>
-        <p className="text-slate-600 text-xs mt-1">从左侧边栏选择工作区或 Worktree</p>
+        <p className="text-slate-500 text-sm">{t('detail.selectWorktree')}</p>
+        <p className="text-slate-600 text-xs mt-1">{t('detail.selectWorktreeHint')}</p>
       </div>
     );
   }
@@ -167,7 +170,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
       <div className="flex items-center justify-center h-full">
         <div className="flex flex-col items-center gap-3">
           <RefreshIcon className="w-8 h-8 text-blue-400 animate-spin" />
-          <div className="text-slate-400 text-sm">切换中...</div>
+          <div className="text-slate-400 text-sm">{t('detail.switching')}</div>
         </div>
       </div>
     );
@@ -180,12 +183,12 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
         {error && (
           <div className="mb-4 p-4 bg-red-900/30 border border-red-800/50 rounded-lg">
             <div className="text-red-300 text-sm select-text">{error}</div>
-            <Button variant="link" size="sm" onClick={onClearError} className="text-red-400 hover:text-red-200 mt-1 p-0 h-auto">关闭</Button>
+            <Button variant="link" size="sm" onClick={onClearError} className="text-red-400 hover:text-red-200 mt-1 p-0 h-auto">{t('common.close')}</Button>
           </div>
         )}
         <div className="flex items-center justify-between mb-6">
           <div className="min-w-0 flex-1">
-            <h2 className="text-xl font-semibold text-slate-100 truncate">主工作区 - {mainWorkspace.name}</h2>
+            <h2 className="text-xl font-semibold text-slate-100 truncate">{t('detail.mainWorkspace', { name: mainWorkspace.name })}</h2>
             <PathDisplay path={mainWorkspace.path} />
           </div>
           {isTauri() && (
@@ -193,7 +196,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
             {onAddProject && (
               <Button onClick={onAddProject} variant="default">
                 <PlusIcon className="w-4 h-4 mr-1.5" />
-                添加项目
+                {t('detail.addProject')}
               </Button>
             )}
             <div className="inline-flex rounded-md">
@@ -229,7 +232,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                       </button>
                       <button
                         className="px-2 flex items-center text-slate-500 hover:text-blue-400 hover:bg-slate-600/40 rounded-r-sm transition-colors shrink-0 border-l border-slate-700/50"
-                        title={`用 ${editor.name} 打开`}
+                        title={t('detail.openWithEditor', { editor: editor.name })}
                         onClick={() => {
                           onOpenInEditor(mainWorkspace.path, editor.id);
                           onShowEditorMenu(false);
@@ -242,12 +245,12 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => onRevealInFinder(mainWorkspace.path)}>
                     <FolderIcon className="w-4 h-4 mr-1.5 text-slate-400" />
-                    在文件夹中打开
+                    {t('detail.openInFolder')}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
-            <Button variant="secondary" onClick={() => onOpenInTerminal(mainWorkspace.path)}>外部终端</Button>
+            <Button variant="secondary" onClick={() => onOpenInTerminal(mainWorkspace.path)}>{t('detail.externalTerminal')}</Button>
           </div>
           )}
         </div>
@@ -274,8 +277,8 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                     <button
                       onClick={() => onRevealInFinder(projectPath)}
                       className="p-1 hover:bg-slate-600 rounded text-slate-400 hover:text-slate-200 transition-colors"
-                      title="在 Finder 中打开"
-                      aria-label={`在 Finder 中打开 ${proj.name}`}
+                      title={t('detail.openInFinderLabel')}
+                      aria-label={t('detail.openInFinderProject', { name: proj.name })}
                     >
                       <FolderIcon className="w-3.5 h-3.5" />
                     </button>
@@ -298,7 +301,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                           className="h-6 px-2 text-xs"
                           disabled={isSwitching}
                         >
-                          切换分支
+                          {t('detail.switchBranch')}
                           <ChevronDownIcon className="w-3 h-3 ml-1" />
                         </Button>
                       </DropdownMenuTrigger>
@@ -308,7 +311,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                           disabled={proj.current_branch === proj.base_branch}
                         >
                           <GitBranchIcon className="w-3.5 h-3.5 mr-2" />
-                          <span>BASE: {proj.base_branch}</span>
+                          <span>{t('detail.baseBranchPrefix', { branch: proj.base_branch })}</span>
                           {proj.current_branch === proj.base_branch && (
                             <CheckIcon className="w-3 h-3 ml-2 text-green-400" />
                           )}
@@ -319,7 +322,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                           disabled={proj.current_branch === proj.test_branch}
                         >
                           <GitBranchIcon className="w-3.5 h-3.5 mr-2" />
-                          <span>TEST: {proj.test_branch}</span>
+                          <span>{t('detail.testBranchPrefix', { branch: proj.test_branch })}</span>
                           {proj.current_branch === proj.test_branch && (
                             <CheckIcon className="w-3 h-3 ml-2 text-green-400" />
                           )}
@@ -330,7 +333,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                 </div>
                 {proj.linked_folders && proj.linked_folders.length > 0 && (
                   <div className="mt-2 pt-2 border-t border-slate-700/50">
-                    <div className="text-xs text-slate-500 mb-1">链接文件夹</div>
+                    <div className="text-xs text-slate-500 mb-1">{t('detail.linkedFolders')}</div>
                     <div className="flex flex-wrap gap-1">
                       {proj.linked_folders.map((folder, idx) => (
                         <span
@@ -358,7 +361,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
         {error && (
           <div className="mb-4 p-4 bg-red-900/30 border border-red-800/50 rounded-lg">
             <div className="text-red-300 text-sm select-text">{error}</div>
-            <Button variant="link" size="sm" onClick={onClearError} className="text-red-400 hover:text-red-200 mt-1 p-0 h-auto">关闭</Button>
+            <Button variant="link" size="sm" onClick={onClearError} className="text-red-400 hover:text-red-200 mt-1 p-0 h-auto">{t('common.close')}</Button>
           </div>
         )}
         <div className="flex items-center justify-between mb-6">
@@ -373,10 +376,10 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
             {selectedWorktree.is_archived ? (
               <>
                 <Button variant="default" className="bg-emerald-600 hover:bg-emerald-500" onClick={onRestore} disabled={restoring}>
-                  {restoring ? "恢复中..." : "恢复"}
+                  {restoring ? t('detail.restoring') : t('detail.restore')}
                 </Button>
                 {onDelete && (
-                  <Button variant="destructive" onClick={onDelete}>删除</Button>
+                  <Button variant="destructive" onClick={onDelete}>{t('detail.delete')}</Button>
                 )}
               </>
             ) : (
@@ -416,7 +419,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                           </button>
                           <button
                             className="px-2 flex items-center text-slate-500 hover:text-blue-400 hover:bg-slate-600/40 rounded-r-sm transition-colors shrink-0 border-l border-slate-700/50"
-                            title={`用 ${editor.name} 打开`}
+                            title={t('detail.openWithEditor', { editor: editor.name })}
                             onClick={() => {
                               onOpenInEditor(selectedWorktree.path, editor.id);
                               onShowEditorMenu(false);
@@ -429,13 +432,13 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                       <DropdownMenuSeparator />
                       <DropdownMenuItem onClick={() => onRevealInFinder(selectedWorktree.path)}>
                         <FolderIcon className="w-4 h-4 mr-1.5 text-slate-400" />
-                        在文件夹中打开
+                        {t('detail.openInFolder')}
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
-                <Button variant="secondary" onClick={() => onOpenInTerminal(selectedWorktree.path)}>外部终端</Button>
-                <Button variant="warning" onClick={onArchive}>归档</Button>
+                <Button variant="secondary" onClick={() => onOpenInTerminal(selectedWorktree.path)}>{t('detail.externalTerminal')}</Button>
+                <Button variant="warning" onClick={onArchive}>{t('detail.archive')}</Button>
                 </>
                 )}
               </>
@@ -458,7 +461,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                 <div className="flex items-center gap-3">
                   <div className="text-right">
                     <StatusBadges project={proj} />
-                    <div className="text-xs text-slate-500 mt-0.5 select-text">base: {proj.base_branch} · test: {proj.test_branch}</div>
+                    <div className="text-xs text-slate-500 mt-0.5 select-text">{t('detail.branchInfo', { base: proj.base_branch, test: proj.test_branch })}</div>
                   </div>
                   {isTauri() && (
                   <div className="flex items-center gap-1 text-slate-500 hover:text-slate-200">
@@ -466,8 +469,8 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                       variant="ghost"
                       size="icon"
                       onClick={() => onOpenInEditor(proj.path)}
-                      title={`在 ${selectedEditorName} 中打开`}
-                      aria-label={`在 ${selectedEditorName} 中打开 ${proj.name}`}
+                      title={t('detail.openInEditorLabel', { editor: selectedEditorName })}
+                      aria-label={t('detail.openInEditorProject', { editor: selectedEditorName, name: proj.name })}
                       className="h-7 w-7"
                     >
                       <FolderIcon className="w-3.5 h-3.5" />
@@ -476,8 +479,8 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                       variant="ghost"
                       size="icon"
                       onClick={() => onOpenInTerminal(proj.path)}
-                      title="在外部终端打开"
-                      aria-label={`在外部终端打开 ${proj.name}`}
+                      title={t('detail.openExternalTerminal')}
+                      aria-label={t('detail.openExternalTerminalProject', { name: proj.name })}
                       className="h-7 w-7"
                     >
                       <TerminalIcon className="w-3.5 h-3.5" />
@@ -503,7 +506,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
               className="w-full p-3 rounded-lg border border-dashed border-slate-700 hover:border-slate-500 hover:bg-slate-800/30 transition-colors flex items-center justify-center gap-2 text-slate-500 hover:text-slate-300"
             >
               <PlusIcon className="w-4 h-4" />
-              <span className="text-sm">添加项目</span>
+              <span className="text-sm">{t('detail.addProject')}</span>
             </button>
           )}
         </div>

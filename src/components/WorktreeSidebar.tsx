@@ -1,4 +1,5 @@
 import { useState, useEffect, type FC } from 'react';
+import { useTranslation } from 'react-i18next';
 import { openLink } from '@/lib/backend';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -67,6 +68,7 @@ const ShareBar: FC<{
   onUpdatePassword?: (password: string) => void;
   onKickClient?: (sessionId: string) => void;
 }> = ({ active, url, ngrokUrl, password, ngrokLoading, connectedClients = [], onToggleNgrok, onStart, onStop, onUpdatePassword, onKickClient }) => {
+  const { t } = useTranslation();
   const [showPassword, setShowPassword] = useState(false);
   const [editingPassword, setEditingPassword] = useState('');
   const [passwordDirty, setPasswordDirty] = useState(false);
@@ -125,7 +127,7 @@ const ShareBar: FC<{
   const handleStartShare = async () => {
     // Validate port
     if (sharePort < 1024 || sharePort > 65535) {
-      setPortError('端口必须在 1024-65535 之间');
+      setPortError(t('share.portError'));
       return;
     }
     setShowShareDialog(false);
@@ -154,7 +156,7 @@ const ShareBar: FC<{
             className="w-full justify-center gap-2 h-8 text-slate-400 hover:text-slate-200"
           >
             <ShareIcon className="w-3.5 h-3.5" />
-            <span className="text-xs">分享</span>
+            <span className="text-xs">{t('share.title')}</span>
           </Button>
         </div>
 
@@ -162,14 +164,14 @@ const ShareBar: FC<{
         <Dialog open={showShareDialog} onOpenChange={setShowShareDialog}>
           <DialogContent className="max-w-[400px]">
             <DialogHeader>
-              <DialogTitle>分享设置</DialogTitle>
+              <DialogTitle>{t('share.shareSettings')}</DialogTitle>
               <DialogDescription>
-                配置分享端口，局域网内的其他设备可以通过此端口访问
+                {t('share.shareSettingsDesc')}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
               <div>
-                <label className="block text-sm text-slate-400 mb-2">端口</label>
+                <label className="block text-sm text-slate-400 mb-2">{t('share.port')}</label>
                 <div className="flex gap-2">
                   <Input
                     type="number"
@@ -186,7 +188,7 @@ const ShareBar: FC<{
                     variant="secondary"
                     size="icon"
                     onClick={() => setSharePort(generateRandomPort())}
-                    title="随机生成端口"
+                    title={t('share.randomPort')}
                   >
                     🎲
                   </Button>
@@ -195,16 +197,16 @@ const ShareBar: FC<{
                   <p className="text-sm text-red-400 mt-1">{portError}</p>
                 )}
                 <p className="text-xs text-slate-500 mt-1">
-                  推荐使用 49152-65535 范围内的端口
+                  {t('share.portHint')}
                 </p>
               </div>
             </div>
             <DialogFooter>
               <Button variant="secondary" onClick={() => setShowShareDialog(false)}>
-                取消
+                {t('common.cancel')}
               </Button>
               <Button onClick={handleStartShare}>
-                开始分享
+                {t('share.startSharing')}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -217,7 +219,7 @@ const ShareBar: FC<{
     <div className="px-3 py-2.5 border-t border-slate-700/50 space-y-2">
       {/* ngrok row - always show */}
       <div className="flex items-center gap-1.5">
-        <span className="text-[11px] font-medium text-slate-500 shrink-0">NGROK:</span>
+        <span className="text-[11px] font-medium text-slate-500 shrink-0">{t('share.ngrokLabel')}</span>
         {ngrokUrl ? (
           <>
             <span className="flex-1 text-xs text-blue-400 truncate min-w-0 select-all" title={ngrokUrl}>
@@ -235,12 +237,12 @@ const ShareBar: FC<{
                     <CopyIcon className="w-3 h-3" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="top">复制外网链接</TooltipContent>
+                <TooltipContent side="top">{t('share.copyExternalLink')}</TooltipContent>
               </Tooltip>
             </TooltipProvider>
           </>
         ) : (
-          <span className="flex-1 text-xs text-slate-500">未启动</span>
+          <span className="flex-1 text-xs text-slate-500">{t('share.ngrokNotStarted')}</span>
         )}
         <button
           type="button"
@@ -261,7 +263,7 @@ const ShareBar: FC<{
         return (
           <div className="flex items-center gap-1.5">
             <span className="text-[11px] font-bold px-1 py-0.5 rounded shrink-0 bg-emerald-600/30 text-emerald-500">
-              Local
+              {t('share.local')}
             </span>
             <span className="flex-1 text-xs text-emerald-400 truncate min-w-0 select-all" title={localUrl}>
               {localUrl}
@@ -278,7 +280,7 @@ const ShareBar: FC<{
                     <CopyIcon className="w-3 h-3" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="top">复制链接</TooltipContent>
+                <TooltipContent side="top">{t('share.copyLink')}</TooltipContent>
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -291,7 +293,7 @@ const ShareBar: FC<{
                     <LinkIcon className="w-3 h-3" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="top">复制带密码链接</TooltipContent>
+                <TooltipContent side="top">{t('share.copyLinkWithPassword')}</TooltipContent>
               </Tooltip>
             </TooltipProvider>
           </div>
@@ -300,7 +302,7 @@ const ShareBar: FC<{
       {/* LAN URL row */}
       <div className="flex items-center gap-1.5">
         <span className="text-[11px] font-bold px-1 py-0.5 rounded shrink-0 bg-slate-600/30 text-slate-500">
-          LAN
+          {t('share.lan')}
         </span>
         <span className="flex-1 text-xs text-emerald-400 truncate min-w-0 select-all" title={url || ''}>
           {url || '...'}
@@ -317,7 +319,7 @@ const ShareBar: FC<{
                 <CopyIcon className="w-3 h-3" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="top">复制链接</TooltipContent>
+            <TooltipContent side="top">{t('share.copyLink')}</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -330,7 +332,7 @@ const ShareBar: FC<{
                 <LinkIcon className="w-3 h-3" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="top">复制带密码链接</TooltipContent>
+            <TooltipContent side="top">{t('share.copyLinkWithPassword')}</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -339,12 +341,12 @@ const ShareBar: FC<{
                 size="icon"
                 onClick={handleOpenShareDialog}
                 className="h-6 w-6 shrink-0 text-slate-400 hover:text-slate-200"
-                title="更改端口"
+                title={t('share.changePort')}
               >
                 <SettingsIcon className="w-3 h-3" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="top">更改端口</TooltipContent>
+            <TooltipContent side="top">{t('share.changePort')}</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -357,13 +359,13 @@ const ShareBar: FC<{
                 <StopIcon className="w-3 h-3" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="top">停止分享</TooltipContent>
+            <TooltipContent side="top">{t('share.stopSharing')}</TooltipContent>
           </Tooltip>
         </TooltipProvider>
       </div>
       {/* Password row */}
       <div className="flex items-center gap-1.5">
-        <span className="text-[11px] font-medium text-slate-500 shrink-0">密码:</span>
+        <span className="text-[11px] font-medium text-slate-500 shrink-0">{t('share.password')}</span>
         <div className="flex-1 min-w-0 relative">
           <input
             type={showPassword ? 'text' : 'password'}
@@ -382,7 +384,7 @@ const ShareBar: FC<{
             size="icon"
             onClick={handleConfirmPassword}
             className="h-6 w-6 shrink-0 text-emerald-400 hover:text-emerald-300"
-            title="确认密码更新"
+            title={t('share.confirmPasswordUpdate')}
           >
             <CheckCircleIcon className="w-3 h-3" />
           </Button>
@@ -396,7 +398,7 @@ const ShareBar: FC<{
             size="icon"
             onClick={() => url && navigator.clipboard.writeText(editingPassword)}
             className="h-6 w-6 shrink-0"
-            title="复制密码"
+            title={t('share.copyPassword')}
           >
             <CopyIcon className="w-3 h-3" />
           </Button>
@@ -406,11 +408,11 @@ const ShareBar: FC<{
       {connectedClients.length > 0 && (
         <div className="space-y-0.5">
           <span className="text-[10px] font-medium text-slate-500">
-            客户端 ({connectedClients.length})
+            {t('share.clients', { count: connectedClients.length })}
           </span>
           <div className="max-h-[60px] overflow-y-auto space-y-0">
             {connectedClients.map(c => (
-              <div key={c.session_id} className="flex items-center gap-1.5 py-px px-1 rounded hover:bg-slate-700/20 group" title={`${c.ip}\n${c.user_agent}\n认证: ${c.authenticated_at}`}>
+              <div key={c.session_id} className="flex items-center gap-1.5 py-px px-1 rounded hover:bg-slate-700/20 group" title={`${c.ip}\n${c.user_agent}\n${c.authenticated_at}`}>
                 <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${c.ws_connected ? 'bg-emerald-400' : 'bg-slate-500'}`} />
                 <span className="text-[11px] text-slate-400 truncate flex-1 font-mono">{c.ip}</span>
                 {c.ws_connected && (
@@ -421,7 +423,7 @@ const ShareBar: FC<{
                   size="icon"
                   onClick={() => setKickingSessionId(c.session_id)}
                   className="h-4 w-4 shrink-0 opacity-0 group-hover:opacity-100 hover:bg-red-500/20 hover:text-red-400"
-                  title="踢出客户端"
+                  title={t('share.kickClient')}
                 >
                   <span className="text-[10px]">✕</span>
                 </Button>
@@ -435,17 +437,17 @@ const ShareBar: FC<{
       <Dialog open={kickingSessionId !== null} onOpenChange={(open) => !open && setKickingSessionId(null)}>
         <DialogContent className="max-w-[360px]">
           <DialogHeader>
-            <DialogTitle>确认踢出客户端</DialogTitle>
+            <DialogTitle>{t('share.confirmKickTitle')}</DialogTitle>
             <DialogDescription>
-              确定要踢出此客户端吗？该客户端将被断开连接并需要重新认证。
+              {t('share.confirmKickDesc')}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setKickingSessionId(null)}>
-              取消
+              {t('common.cancel')}
             </Button>
             <Button variant="destructive" onClick={() => kickingSessionId && handleKickClient(kickingSessionId)}>
-              踢出
+              {t('share.kick')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -455,14 +457,14 @@ const ShareBar: FC<{
       <Dialog open={showShareDialog} onOpenChange={setShowShareDialog}>
         <DialogContent className="max-w-[400px]">
           <DialogHeader>
-            <DialogTitle>{active ? '更改端口' : '分享设置'}</DialogTitle>
+            <DialogTitle>{active ? t('share.changePort') : t('share.shareSettings')}</DialogTitle>
             <DialogDescription>
-              {active ? '更改端口将重启分享服务' : '配置分享端口，局域网内的其他设备可以通过此端口访问'}
+              {active ? t('share.changePortDesc') : t('share.shareSettingsDesc')}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div>
-              <label className="block text-sm text-slate-400 mb-2">端口</label>
+              <label className="block text-sm text-slate-400 mb-2">{t('share.port')}</label>
               <div className="flex gap-2">
                 <Input
                   type="number"
@@ -479,7 +481,7 @@ const ShareBar: FC<{
                   variant="secondary"
                   size="icon"
                   onClick={() => setSharePort(generateRandomPort())}
-                  title="随机生成端口"
+                  title={t('share.randomPort')}
                 >
                   🎲
                 </Button>
@@ -488,16 +490,16 @@ const ShareBar: FC<{
                 <p className="text-sm text-red-400 mt-1">{portError}</p>
               )}
               <p className="text-xs text-slate-500 mt-1">
-                推荐使用 49152-65535 范围内的端口
+                {t('share.portHint')}
               </p>
             </div>
           </div>
           <DialogFooter>
             <Button variant="secondary" onClick={() => setShowShareDialog(false)}>
-              取消
+              {t('common.cancel')}
             </Button>
             <Button onClick={handleStartShare}>
-              {active ? '确认更改' : '开始分享'}
+              {active ? t('share.confirmChange') : t('share.startSharing')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -581,6 +583,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
   connectedClients = [],
   onKickClient,
 }) => {
+  const { t } = useTranslation();
   const _isTauri = isTauri();
 
   // 网页端只显示被锁定的 worktree（正在被桌面端使用的）
@@ -655,7 +658,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
                 <SidebarExpandIcon className="w-4 h-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="right">展开侧边栏</TooltipContent>
+            <TooltipContent side="right">{t('share.expandSidebar')}</TooltipContent>
           </Tooltip>
 
           {/* Workspace icon */}
@@ -686,7 +689,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
                   <FolderIcon className="w-4 h-4 text-slate-400" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="right">主工作区</TooltipContent>
+              <TooltipContent side="right">{t('sidebar.main')}</TooltipContent>
             </Tooltip>
           )}
 
@@ -714,7 +717,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="right">
-                    {wt.name}{isLockedByOther ? ' (已占用)' : ''}
+                    {wt.name}{isLockedByOther ? ` (${t('sidebar.occupied')})` : ''}
                   </TooltipContent>
                 </Tooltip>
               );
@@ -730,7 +733,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
                     <SettingsIcon className="w-3.5 h-3.5" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="right">设置</TooltipContent>
+                <TooltipContent side="right">{t('sidebar.settings')}</TooltipContent>
               </Tooltip>
             )}
           </div>
@@ -760,7 +763,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
                 >
                   <div className="flex items-center gap-2 min-w-0 flex-1">
                     <WorkspaceIcon className="w-4 h-4 text-blue-400 shrink-0" />
-                    <span className="font-medium text-sm truncate">{currentWorkspace?.name || '选择 Workspace'}</span>
+                    <span className="font-medium text-sm truncate">{currentWorkspace?.name || t('sidebar.selectWorkspace')}</span>
                   </div>
                   <ChevronDownIcon className="w-4 h-4 text-slate-400 shrink-0" />
                 </Button>
@@ -785,7 +788,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
                       <div className="flex items-center gap-1.5 min-w-0">
                         <span className="truncate font-medium">{ws.name}</span>
                         {isCurrent && (
-                          <span className="text-[10px] text-blue-400 bg-blue-500/10 px-1 py-px rounded shrink-0">当前</span>
+                          <span className="text-[10px] text-blue-400 bg-blue-500/10 px-1 py-px rounded shrink-0">{t('sidebar.current')}</span>
                         )}
                       </div>
                     </button>
@@ -794,8 +797,8 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
                       <button
                         onClick={(e) => { e.stopPropagation(); onOpenInNewWindow(ws.path); onShowWorkspaceMenu(false); }}
                         className="px-2 flex items-center text-slate-500 hover:text-blue-400 hover:bg-slate-600/40 rounded-r-sm transition-colors shrink-0 border-l border-slate-700/50"
-                        title="在新窗口打开"
-                        aria-label={`在新窗口打开 ${ws.name}`}
+                        title={t('sidebar.openInNewWindow')}
+                        aria-label={`${t('sidebar.openInNewWindow')} ${ws.name}`}
                       >
                         <ExternalLinkIcon className="w-3.5 h-3.5" />
                       </button>
@@ -809,7 +812,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
                 onClick={() => { onAddWorkspace(); onShowWorkspaceMenu(false); }}
               >
                 <PlusIcon className="w-4 h-4" />
-                <span>添加 Workspace</span>
+                <span>{t('sidebar.addWorkspace')}</span>
               </button>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -832,7 +835,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
                     <SettingsIcon className="w-4 h-4" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom">设置</TooltipContent>
+                <TooltipContent side="bottom">{t('sidebar.settings')}</TooltipContent>
               </Tooltip>
             </TooltipProvider>
           )}
@@ -848,8 +851,8 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
               variant="ghost"
               size="icon"
               onClick={onRefresh}
-              title="刷新"
-              aria-label="刷新 Worktree 列表"
+              title={t('sidebar.refresh')}
+              aria-label={t('sidebar.refreshWorktrees')}
               className="h-8 w-8"
             >
               <RefreshIcon className="w-4 h-4" />
@@ -859,8 +862,8 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
                 variant="ghost"
                 size="icon"
                 onClick={onToggleCollapsed}
-                title="收起侧边栏"
-                aria-label="收起侧边栏"
+                title={t('share.collapseSidebar')}
+                aria-label={t('share.collapseSidebar')}
                 className="h-8 w-8"
               >
                 <SidebarCollapseIcon className="w-4 h-4" />
@@ -881,15 +884,15 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <FolderIcon className="w-4 h-4 text-slate-400" />
-              <span className="font-medium text-sm">主工作区</span>
+              <span className="font-medium text-sm">{t('sidebar.main')}</span>
             </div>
             {_isTauri && (
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={(e) => { e.stopPropagation(); onOpenCreateModal(); }}
-                title="新建 Worktree"
-                aria-label="新建 Worktree"
+                title={t('sidebar.newWorktree')}
+                aria-label={t('sidebar.newWorktree')}
                 className="h-7 w-7"
               >
                 <PlusIcon className="w-4 h-4" />
@@ -904,7 +907,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
       <div className="flex-1 overflow-y-auto">
         <div className="px-4 py-2">
           <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
-            活动 ({activeWorktrees.length})
+            {t('sidebar.active')} ({activeWorktrees.length})
           </span>
         </div>
         {activeWorktrees.length === 0 ? (
@@ -912,8 +915,8 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
             <div className="flex justify-center mb-3">
               <FolderIcon className="w-10 h-10 text-slate-600" />
             </div>
-            <p className="text-slate-500 text-sm">暂无 Worktree</p>
-            <p className="text-slate-600 text-xs mt-1">点击上方 + 按钮创建</p>
+            <p className="text-slate-500 text-sm">{t('sidebar.noWorktrees')}</p>
+            <p className="text-slate-600 text-xs mt-1">{t('sidebar.noWorktreesHint')}</p>
           </div>
         ) : (
           activeWorktrees.map(wt => {
@@ -941,15 +944,15 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
                   <TooltipProvider delayDuration={300}>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <span className="text-[10px] text-amber-400/80 bg-amber-900/20 border border-amber-800/30 px-1.5 py-0.5 rounded shrink-0 cursor-help">已占用</span>
+                        <span className="text-[10px] text-amber-400/80 bg-amber-900/20 border border-amber-800/30 px-1.5 py-0.5 rounded shrink-0 cursor-help">{t('sidebar.occupied')}</span>
                       </TooltipTrigger>
-                      <TooltipContent side="right">此 Worktree 正在被另一个窗口使用</TooltipContent>
+                      <TooltipContent side="right">{t('sidebar.occupiedTooltip')}</TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
                 )}
                 {wt.projects.some(p => p.has_uncommitted) && !isLockedByOther && (() => {
                   const uncommitted = wt.projects.filter(p => p.has_uncommitted);
-                  const tip = uncommitted.map(p => `${p.name}: ${p.uncommitted_count} 个未提交`).join('\n');
+                  const tip = uncommitted.map(p => t('sidebar.uncommittedTip', { name: p.name, count: p.uncommitted_count })).join('\n');
                   return (
                     <TooltipProvider delayDuration={300}>
                       <Tooltip>
@@ -962,7 +965,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
                   );
                 })()}
               </div>
-              <div className="text-slate-500 text-xs mt-0.5 pl-6">{wt.projects.length} 个项目</div>
+              <div className="text-slate-500 text-xs mt-0.5 pl-6">{t('sidebar.projects', { count: wt.projects.length })}</div>
             </div>
             );
           })
@@ -973,7 +976,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
           onClick={onToggleArchived}
         >
           <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider group-hover:text-slate-400 transition-colors">
-            归档 ({archivedWorktrees.length})
+            {t('sidebar.archive')} ({archivedWorktrees.length})
           </span>
           <ChevronIcon expanded={showArchived} className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-400 transition-colors" />
         </div>
@@ -1018,7 +1021,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
             <button
               onClick={() => { callBackend('open_devtools').catch(() => {}); }}
               className="text-xs text-amber-500/70 hover:text-amber-400 transition-colors cursor-pointer font-mono"
-              title="打开 DevTools"
+              title={t('sidebar.openDevTools')}
             >
               DEV
             </button>
@@ -1037,7 +1040,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="top">
-                  {hasUpdate ? '有新版本可用，点击更新' : '检查更新'}
+                  {hasUpdate ? t('sidebar.hasUpdateAvailable') : t('settings.checkUpdate')}
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
@@ -1059,7 +1062,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
                     <LogIcon className="w-3.5 h-3.5" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="top">日志文件夹</TooltipContent>
+                <TooltipContent side="top">{t('sidebar.logFolder')}</TooltipContent>
               </Tooltip>
             </TooltipProvider>
           )}
@@ -1085,17 +1088,17 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
       <Dialog open={!!switchConfirmPath} onOpenChange={(open) => !open && setSwitchConfirmPath(null)}>
         <DialogContent className="max-w-[400px]">
           <DialogHeader>
-            <DialogTitle>切换工作区</DialogTitle>
+            <DialogTitle>{t('sidebar.switchWorkspace')}</DialogTitle>
             <DialogDescription>
-              确定要切换到工作区 "{switchTargetName}" 吗？当前工作区的 Worktree 选择状态将被重置。
+              {t('sidebar.switchWorkspaceConfirm', { name: switchTargetName })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="secondary" onClick={() => setSwitchConfirmPath(null)}>
-              取消
+              {t('common.cancel')}
             </Button>
             <Button onClick={confirmSwitch} disabled={switchingWorkspace}>
-              {switchingWorkspace ? "切换中..." : "确认切换"}
+              {switchingWorkspace ? t('sidebar.switching') : t('sidebar.confirmSwitch')}
             </Button>
           </DialogFooter>
         </DialogContent>

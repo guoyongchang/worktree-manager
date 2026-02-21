@@ -1,4 +1,5 @@
 import { type FC, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Dialog,
   DialogContent,
@@ -46,6 +47,7 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
   workspacePath,
   onUpdateLinkedFolders,
 }) => {
+  const { t } = useTranslation();
   // Form state
   const [name, setName] = useState('');
   const [nameManuallyEdited, setNameManuallyEdited] = useState(false);
@@ -218,7 +220,7 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
   const getPlaceholder = () => {
     switch (urlFormat) {
       case 'gh':
-        return 'owner/repo 或 gh:owner/repo';
+        return t('addProject.ghPlaceholder');
       case 'ssh':
         return 'git@github.com:owner/repo.git';
       case 'https':
@@ -235,12 +237,12 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
       <DialogContent className="max-w-[560px] p-0 max-h-[90vh] flex flex-col">
         <DialogHeader className="p-5 border-b border-slate-700">
           <DialogTitle>
-            {phase === 'form' ? '添加项目' : '选择链接文件夹'}
+            {phase === 'form' ? t('addProject.title') : t('addProject.selectLinkedFolders')}
           </DialogTitle>
           <DialogDescription>
             {phase === 'form'
-              ? '克隆一个 Git 仓库到主工作区'
-              : '扫描发现以下可链接的文件夹，选择后将在 worktree 间共享'}
+              ? t('addProject.cloneDesc')
+              : t('addProject.selectLinkedFoldersDesc')}
           </DialogDescription>
         </DialogHeader>
 
@@ -251,7 +253,7 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
               {/* Project Name */}
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-2">
-                  项目名称
+                  {t('addProject.projectName')}
                 </label>
                 <Input
                   type="text"
@@ -264,7 +266,7 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
               {/* URL Format Selector */}
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-2">
-                  克隆方式
+                  {t('addProject.cloneMethod')}
                 </label>
                 <div className="flex gap-2">
                   <Button
@@ -297,7 +299,7 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
               {/* Repository URL */}
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-2">
-                  仓库地址
+                  {t('addProject.repoUrl')}
                 </label>
                 <Input
                   type="text"
@@ -308,9 +310,9 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
                   onKeyDown={(e) => { if (e.key === 'Enter' && name.trim() && repoUrl.trim() && !loading) handleSubmit(); }}
                 />
                 <p className="text-xs text-slate-500 mt-1">
-                  {urlFormat === 'gh' && 'GitHub 简写格式'}
-                  {urlFormat === 'ssh' && 'SSH 格式'}
-                  {urlFormat === 'https' && 'HTTPS 格式'}
+                  {urlFormat === 'gh' && t('addProject.ghShortFormat')}
+                  {urlFormat === 'ssh' && t('addProject.sshFormat')}
+                  {urlFormat === 'https' && t('addProject.httpsFormat')}
                 </p>
               </div>
 
@@ -318,7 +320,7 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-slate-300 mb-2">
-                    基准分支
+                    {t('addProject.baseBranch')}
                   </label>
                   <BranchCombobox
                     value={baseBranch}
@@ -330,7 +332,7 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
                 {/* Test Branch */}
                 <div>
                   <label className="block text-sm font-medium text-slate-300 mb-2">
-                    测试分支
+                    {t('addProject.testBranch')}
                   </label>
                   <BranchCombobox
                     value={testBranch}
@@ -343,7 +345,7 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
               {/* Merge Strategy */}
               <div>
                 <label className="block text-sm font-medium text-slate-300 mb-2">
-                  合并策略
+                  {t('addProject.mergeStrategy')}
                 </label>
                 <Select value={mergeStrategy} onValueChange={setMergeStrategy}>
                   <SelectTrigger className="w-full">
@@ -360,13 +362,13 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
 
             <DialogFooter className="p-5 border-t border-slate-700">
               <Button variant="secondary" onClick={() => handleClose(false)} disabled={loading}>
-                取消
+                {t('common.cancel')}
               </Button>
               <Button
                 onClick={handleSubmit}
                 disabled={!name.trim() || !repoUrl.trim() || loading}
               >
-                {loading ? '克隆中...' : '克隆项目'}
+                {loading ? t('addProject.cloning') : t('addProject.cloneProject')}
               </Button>
             </DialogFooter>
           </>
@@ -376,7 +378,7 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
         {phase === 'scanning' && (
           <div className="p-8 flex flex-col items-center justify-center gap-3">
             <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-            <p className="text-sm text-slate-400">正在扫描项目文件夹...</p>
+            <p className="text-sm text-slate-400">{t('addProject.scanning')}</p>
           </div>
         )}
 
@@ -386,13 +388,13 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
             <div className="p-5 space-y-4 overflow-y-auto">
               {scanError && (
                 <div className="p-3 bg-red-900/30 border border-red-800/50 rounded-lg">
-                  <p className="text-sm text-red-300">扫描出错: {scanError}</p>
+                  <p className="text-sm text-red-300">{t('addProject.scanError', { error: scanError })}</p>
                 </div>
               )}
 
               {scanResults.length === 0 && !scanError && (
                 <div className="p-4 bg-slate-800/50 rounded-lg text-center">
-                  <p className="text-sm text-slate-400">未发现可链接的文件夹</p>
+                  <p className="text-sm text-slate-400">{t('addProject.noLinkedFoldersFound')}</p>
                 </div>
               )}
 
@@ -418,7 +420,7 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
                           </span>
                           {result.is_recommended && (
                             <span className="shrink-0 text-[10px] px-1.5 py-0.5 bg-blue-500/20 text-blue-400 rounded">
-                              推荐
+                              {t('addProject.recommended')}
                             </span>
                           )}
                         </div>
@@ -434,7 +436,7 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
               {/* Custom selected folders */}
               {customSelectedFolders.length > 0 && (
                 <div className="space-y-1.5">
-                  <div className="text-xs font-medium text-slate-400">自定义文件夹</div>
+                  <div className="text-xs font-medium text-slate-400">{t('addProject.customFolders')}</div>
                   {customSelectedFolders.map(folder => (
                     <div key={folder} className="flex items-center gap-2 bg-slate-800 border border-slate-700 rounded px-3 py-2">
                       <span className="flex-1 text-sm text-slate-300 font-mono">{folder}</span>
@@ -443,7 +445,7 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
                         onClick={() => toggleFolder(folder)}
                         className="text-slate-500 hover:text-red-400 text-xs"
                       >
-                        删除
+                        {t('common.delete')}
                       </button>
                     </div>
                   ))}
@@ -453,14 +455,14 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
               {/* Add Custom Folder */}
               <div>
                 <label className="block text-xs font-medium text-slate-400 mb-2">
-                  添加自定义文件夹
+                  {t('addProject.addCustomFolder')}
                 </label>
                 <div className="flex gap-2">
                   <Input
                     type="text"
                     value={customFolder}
                     onChange={(e) => setCustomFolder(e.target.value)}
-                    placeholder="例如: dist 或 .yarn/cache"
+                    placeholder={t('addProject.customFolderPlaceholder')}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
@@ -475,7 +477,7 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
                     onClick={addCustomFolder}
                     disabled={!customFolder.trim()}
                   >
-                    添加
+                    {t('common.add')}
                   </Button>
                 </div>
               </div>
@@ -483,13 +485,13 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
 
             <DialogFooter className="p-5 border-t border-slate-700">
               <Button variant="secondary" onClick={handleSkip} disabled={savingFolders}>
-                跳过
+                {t('addProject.skip')}
               </Button>
               <Button
                 onClick={handleSaveFolders}
                 disabled={selectedFolders.size === 0 || savingFolders}
               >
-                {savingFolders ? '保存中...' : `保存链接文件夹 (${selectedFolders.size})`}
+                {savingFolders ? t('addProject.savingFolders') : t('addProject.saveLinkedFolders', { count: selectedFolders.size })}
               </Button>
             </DialogFooter>
           </>

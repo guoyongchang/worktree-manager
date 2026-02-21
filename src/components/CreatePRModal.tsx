@@ -1,4 +1,5 @@
 import { useState, type FC } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Dialog,
   DialogContent,
@@ -29,6 +30,7 @@ export const CreatePRModal: FC<CreatePRModalProps> = ({
   currentBranch,
   onSuccess,
 }) => {
+  const { t } = useTranslation();
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -39,7 +41,7 @@ export const CreatePRModal: FC<CreatePRModalProps> = ({
     setSubmitting(true);
     try {
       const prUrl = await createPullRequest(projectPath, baseBranch, title.trim(), body.trim());
-      toast('success', `PR/MR 创建成功: ${prUrl}`);
+      toast('success', t('createPR.success', { url: prUrl }));
       onOpenChange(false);
       setTitle('');
       setBody('');
@@ -55,7 +57,7 @@ export const CreatePRModal: FC<CreatePRModalProps> = ({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-[480px] p-0">
         <DialogHeader className="p-5 pb-0">
-          <DialogTitle>创建 PR/MR</DialogTitle>
+          <DialogTitle>{t('createPR.title')}</DialogTitle>
           <DialogDescription>
             {currentBranch} → {baseBranch}
           </DialogDescription>
@@ -63,11 +65,11 @@ export const CreatePRModal: FC<CreatePRModalProps> = ({
 
         <div className="px-5 py-4 space-y-4">
           <div className="space-y-2">
-            <label className="text-sm text-slate-300">标题</label>
+            <label className="text-sm text-slate-300">{t('createPR.titleLabel')}</label>
             <Input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="PR/MR 标题"
+              placeholder={t('createPR.titlePlaceholder')}
               autoFocus
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey && title.trim()) {
@@ -77,11 +79,11 @@ export const CreatePRModal: FC<CreatePRModalProps> = ({
             />
           </div>
           <div className="space-y-2">
-            <label className="text-sm text-slate-300">描述 (可选)</label>
+            <label className="text-sm text-slate-300">{t('createPR.bodyLabel')}</label>
             <textarea
               value={body}
               onChange={(e) => setBody(e.target.value)}
-              placeholder="PR/MR 描述"
+              placeholder={t('createPR.bodyPlaceholder')}
               rows={4}
               className="flex w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 resize-none"
             />
@@ -90,10 +92,10 @@ export const CreatePRModal: FC<CreatePRModalProps> = ({
 
         <DialogFooter className="p-5 pt-0 flex-row gap-3 sm:flex-row">
           <Button variant="secondary" className="flex-1" onClick={() => onOpenChange(false)}>
-            取消
+            {t('common.cancel')}
           </Button>
           <Button className="flex-1" onClick={handleSubmit} disabled={submitting || !title.trim()}>
-            {submitting ? '创建中...' : '创建'}
+            {submitting ? t('common.creating') : t('common.create')}
           </Button>
         </DialogFooter>
       </DialogContent>

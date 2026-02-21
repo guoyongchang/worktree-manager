@@ -114,7 +114,7 @@ export async function openDirectoryDialog(title: string): Promise<string | null>
     return null;
   }
   // Browser fallback: prompt for path
-  const path = window.prompt(title + '\n\n请输入目录路径：');
+  const path = window.prompt(title);
   return path || null;
 }
 
@@ -270,7 +270,7 @@ export async function authenticate(password: string): Promise<void> {
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(text || '认证失败');
+    throw new Error(text || 'Authentication failed');
   }
   // Server returns a generated session ID — clear old and store new
   const data = await res.json();

@@ -1,4 +1,5 @@
 import type { FC } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { StatusDot, GitBranchIcon, RefreshIcon, CheckIcon, CheckCircleIcon } from './Icons';
 import type { ArchiveModalState } from '../types';
@@ -20,11 +21,12 @@ export const ArchiveConfirmationModal: FC<ArchiveConfirmationModalProps> = ({
   areAllIssuesConfirmed,
   archiving = false,
 }) => {
+  const { t } = useTranslation();
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
       <div className="bg-slate-800 border border-slate-700 rounded-xl w-[520px] max-h-[80vh] overflow-hidden shadow-2xl">
         <div className="p-5 border-b border-slate-700">
-          <h3 className="text-lg font-semibold text-slate-100">归档 Worktree</h3>
+          <h3 className="text-lg font-semibold text-slate-100">{t('archive.title')}</h3>
           <p className="text-sm text-slate-400 mt-1 select-text">
             {archiveModal.worktree.name} → {archiveModal.worktree.name}.archive
           </p>
@@ -34,12 +36,12 @@ export const ArchiveConfirmationModal: FC<ArchiveConfirmationModalProps> = ({
           {archiveModal.loading ? (
             <div className="flex items-center justify-center py-8">
               <RefreshIcon className="w-5 h-5 animate-spin text-slate-400" />
-              <span className="ml-2 text-slate-400">检查分支状态...</span>
+              <span className="ml-2 text-slate-400">{t('archive.checkingStatus')}</span>
             </div>
           ) : archiveModal.status ? (
             <div className="space-y-4">
               <div>
-                <h4 className="text-sm font-medium text-slate-300 mb-2">项目状态</h4>
+                <h4 className="text-sm font-medium text-slate-300 mb-2">{t('archive.projectStatus')}</h4>
                 <div className="space-y-2">
                   {archiveModal.status.projects.map((proj) => {
                     const hasUncommitted = proj.has_uncommitted && proj.uncommitted_count > 0;
@@ -68,12 +70,12 @@ export const ArchiveConfirmationModal: FC<ArchiveConfirmationModalProps> = ({
                             {hasUncommitted && (
                               <div className="flex items-center justify-between">
                                 <span className={`text-xs ${uncommittedConfirmed ? 'text-amber-400/60 line-through' : 'text-amber-400'}`}>
-                                  有 {proj.uncommitted_count} 个未提交更改
+                                  {t('archive.uncommittedChanges', { count: proj.uncommitted_count })}
                                 </span>
                                 {uncommittedConfirmed ? (
                                   <span className="text-xs text-emerald-400 flex items-center gap-1">
                                     <CheckIcon className="w-3 h-3" />
-                                    已确认
+                                    {t('archive.confirmed')}
                                   </span>
                                 ) : (
                                   <Button
@@ -82,7 +84,7 @@ export const ArchiveConfirmationModal: FC<ArchiveConfirmationModalProps> = ({
                                     onClick={() => onConfirmIssue(uncommittedKey)}
                                     className="h-6 px-2 text-xs bg-amber-600/30 hover:bg-amber-600/50 text-amber-300 border-amber-600/50"
                                   >
-                                    确认无问题
+                                    {t('archive.confirmNoIssue')}
                                   </Button>
                                 )}
                               </div>
@@ -90,12 +92,12 @@ export const ArchiveConfirmationModal: FC<ArchiveConfirmationModalProps> = ({
                             {hasUnpushed && (
                               <div className="flex items-center justify-between">
                                 <span className={`text-xs ${unpushedConfirmed ? 'text-amber-400/60 line-through' : 'text-amber-400'}`}>
-                                  有 {proj.unpushed_commits} 个未推送提交
+                                  {t('archive.unpushedCommits', { count: proj.unpushed_commits })}
                                 </span>
                                 {unpushedConfirmed ? (
                                   <span className="text-xs text-emerald-400 flex items-center gap-1">
                                     <CheckIcon className="w-3 h-3" />
-                                    已确认
+                                    {t('archive.confirmed')}
                                   </span>
                                 ) : (
                                   <Button
@@ -104,7 +106,7 @@ export const ArchiveConfirmationModal: FC<ArchiveConfirmationModalProps> = ({
                                     onClick={() => onConfirmIssue(unpushedKey)}
                                     className="h-6 px-2 text-xs bg-amber-600/30 hover:bg-amber-600/50 text-amber-300 border-amber-600/50"
                                   >
-                                    确认无问题
+                                    {t('archive.confirmNoIssue')}
                                   </Button>
                                 )}
                               </div>
@@ -113,7 +115,7 @@ export const ArchiveConfirmationModal: FC<ArchiveConfirmationModalProps> = ({
                         ) : (
                           <div className="mt-1 text-xs text-emerald-400 flex items-center gap-1">
                             <CheckIcon className="w-3 h-3" />
-                            <span>无问题</span>
+                            <span>{t('archive.noIssues')}</span>
                           </div>
                         )}
                       </div>
@@ -126,7 +128,7 @@ export const ArchiveConfirmationModal: FC<ArchiveConfirmationModalProps> = ({
                 <div className="bg-emerald-900/20 border border-emerald-800/50 rounded-lg p-4">
                   <div className="flex items-center gap-2 text-emerald-400 font-medium">
                     <CheckCircleIcon className="w-4 h-4" />
-                    所有问题已确认，可以归档
+                    {t('archive.allConfirmedReady')}
                   </div>
                 </div>
               )}
@@ -136,14 +138,14 @@ export const ArchiveConfirmationModal: FC<ArchiveConfirmationModalProps> = ({
 
         <div className="p-5 border-t border-slate-700 flex justify-end gap-3">
           <Button variant="secondary" onClick={onClose}>
-            取消
+            {t('common.cancel')}
           </Button>
           <Button
             variant="warning"
             onClick={onArchive}
             disabled={archiveModal.loading || !areAllIssuesConfirmed || archiving}
           >
-            {archiving ? "归档中..." : "确认归档"}
+            {archiving ? t('archive.archiving') : t('archive.confirmArchive')}
           </Button>
         </div>
       </div>

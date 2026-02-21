@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, type FC } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import {
   RefreshIcon,
@@ -36,6 +37,7 @@ export const GitOperations: FC<GitOperationsProps> = ({
   currentBranch,
   onRefresh,
 }) => {
+  const { t } = useTranslation();
   const [stats, setStats] = useState<BranchDiffStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [fetchingSyncing, setFetchingSyncing] = useState(false);
@@ -180,13 +182,13 @@ export const GitOperations: FC<GitOperationsProps> = ({
           {loading ? (
             <span className="flex items-center gap-1">
               <RefreshIcon className="w-3 h-3 animate-spin" />
-              加载中...
+              {t('common.loading')}
             </span>
           ) : stats ? (
             <div className="flex gap-3">
-              <span>领先 {stats.ahead} 提交</span>
-              <span>落后 {stats.behind} 提交</span>
-              <span>{stats.changed_files} 个变更文件</span>
+              <span>{t('git.aheadCommits', { count: stats.ahead })}</span>
+              <span>{t('git.behindCommits', { count: stats.behind })}</span>
+              <span>{t('git.changedFiles', { count: stats.changed_files })}</span>
             </div>
           ) : null}
         </div>
@@ -202,17 +204,17 @@ export const GitOperations: FC<GitOperationsProps> = ({
       </div>
 
       <div className="flex flex-col gap-2">
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2" title="同步操作">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           <Button
             variant="secondary"
             size="sm"
             onClick={() => runGitAction('sync', () => syncWithBaseBranch(projectPath, baseBranch))}
             disabled={loading || baseBranchExists === false || actionsDisabled}
             className="text-xs min-w-0"
-            title={baseBranchExists === false ? `远程分支 ${baseBranch} 不存在` : ''}
+            title={baseBranchExists === false ? t('git.remoteBranchNotExists', { branch: baseBranch }) : ''}
           >
             <SyncIcon className="w-3 h-3 mr-1 shrink-0" />
-            <span className="truncate">{activeAction === 'sync' ? '同步中...' : `同步 ${baseBranch}`}</span>
+            <span className="truncate">{activeAction === 'sync' ? t('git.syncing') : t('git.syncBranch', { branch: baseBranch })}</span>
           </Button>
 
           <Button
@@ -223,7 +225,7 @@ export const GitOperations: FC<GitOperationsProps> = ({
             className="text-xs min-w-0"
           >
             <UploadIcon className="w-3 h-3 mr-1 shrink-0" />
-            <span className="truncate">{activeAction === 'push' ? '推送中...' : '推送'}</span>
+            <span className="truncate">{activeAction === 'push' ? t('git.pushing') : t('git.pushLabel')}</span>
           </Button>
 
           <Button
@@ -232,24 +234,24 @@ export const GitOperations: FC<GitOperationsProps> = ({
             onClick={() => setShowPRModal(true)}
             disabled={loading || baseBranchExists === false || actionsDisabled}
             className="text-xs min-w-0"
-            title={baseBranchExists === false ? `远程分支 ${baseBranch} 不存在` : ''}
+            title={baseBranchExists === false ? t('git.remoteBranchNotExists', { branch: baseBranch }) : ''}
           >
             <GitPullRequestIcon className="w-3 h-3 mr-1 shrink-0" />
-            <span className="truncate">创建 PR/MR</span>
+            <span className="truncate">{t('git.createPR')}</span>
           </Button>
         </div>
 
-        <div className="grid grid-cols-2 gap-2" title="合并操作">
+        <div className="grid grid-cols-2 gap-2">
           <Button
             variant="secondary"
             size="sm"
             onClick={() => runGitAction('mergeTest', () => mergeToTestBranch(projectPath, testBranch))}
             disabled={loading || testBranchExists === false || actionsDisabled}
             className="text-xs min-w-0"
-            title={testBranchExists === false ? `远程分支 ${testBranch} 不存在` : ''}
+            title={testBranchExists === false ? t('git.remoteBranchNotExists', { branch: testBranch }) : ''}
           >
             <GitMergeIcon className="w-3 h-3 mr-1 shrink-0" />
-            <span className="truncate">{activeAction === 'mergeTest' ? '合并中...' : `合并到 ${testBranch}`}</span>
+            <span className="truncate">{activeAction === 'mergeTest' ? t('git.merging') : t('git.mergeToBranch', { branch: testBranch })}</span>
           </Button>
 
           <Button
@@ -258,10 +260,10 @@ export const GitOperations: FC<GitOperationsProps> = ({
             onClick={() => runGitAction('mergeBase', () => mergeToBaseBranch(projectPath, baseBranch))}
             disabled={loading || baseBranchExists === false || actionsDisabled}
             className="text-xs min-w-0"
-            title={baseBranchExists === false ? `远程分支 ${baseBranch} 不存在` : ''}
+            title={baseBranchExists === false ? t('git.remoteBranchNotExists', { branch: baseBranch }) : ''}
           >
             <GitMergeIcon className="w-3 h-3 mr-1 shrink-0" />
-            <span className="truncate">{activeAction === 'mergeBase' ? '合并中...' : `合并到 ${baseBranch}`}</span>
+            <span className="truncate">{activeAction === 'mergeBase' ? t('git.merging') : t('git.mergeToBranch', { branch: baseBranch })}</span>
           </Button>
         </div>
       </div>
@@ -271,7 +273,7 @@ export const GitOperations: FC<GitOperationsProps> = ({
           <div className="flex-1 h-1 bg-slate-700 rounded-full overflow-hidden">
             <div className="h-full rounded-full animate-progress-indeterminate animate-gradient" />
           </div>
-          <span className="whitespace-nowrap">同步远程仓库中...</span>
+          <span className="whitespace-nowrap">{t('git.syncRemote')}</span>
         </div>
       )}
 
@@ -279,9 +281,9 @@ export const GitOperations: FC<GitOperationsProps> = ({
         <div className="text-xs text-amber-400/80 flex items-center gap-1">
           <WarningIcon className="w-3.5 h-3.5 text-amber-500" />
           <span>
-            {testBranchExists === false && `远程分支 ${testBranch} 不存在`}
-            {testBranchExists === false && baseBranchExists === false && '，'}
-            {baseBranchExists === false && `远程分支 ${baseBranch} 不存在`}
+            {testBranchExists === false && t('git.remoteBranchNotExists', { branch: testBranch })}
+            {testBranchExists === false && baseBranchExists === false && ', '}
+            {baseBranchExists === false && t('git.remoteBranchNotExists', { branch: baseBranch })}
           </span>
         </div>
       )}

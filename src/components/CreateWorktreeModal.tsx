@@ -1,4 +1,5 @@
 import { useMemo, type FC } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Dialog,
   DialogContent,
@@ -47,16 +48,17 @@ export const CreateWorktreeModal: FC<CreateWorktreeModalProps> = ({
   onSubmit,
   creating,
 }) => {
+  const { t } = useTranslation();
   const nameValidation = useMemo(() => {
     const trimmed = worktreeName.trim();
     if (!trimmed) {
       return { valid: false, error: '' };
     }
     if (WORKTREE_NAME_INVALID_CHARS.test(trimmed)) {
-      return { valid: false, error: '不能包含空格、~ ^ : * ? [ \\ 等特殊字符' };
+      return { valid: false, error: t('createWorktree.invalidChars') };
     }
     if (WORKTREE_NAME_INVALID_PATTERNS.test(trimmed)) {
-      return { valid: false, error: '不能包含连续的点(..)、以点开头/结尾、或包含 @{ 等模式' };
+      return { valid: false, error: t('createWorktree.invalidPatterns') };
     }
     return { valid: true, error: '' };
   }, [worktreeName]);
@@ -69,11 +71,11 @@ export const CreateWorktreeModal: FC<CreateWorktreeModalProps> = ({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-[560px] max-h-[80vh] overflow-hidden p-0">
         <DialogHeader className="p-5 border-b border-slate-700">
-          <DialogTitle>新建 Worktree</DialogTitle>
+          <DialogTitle>{t('createWorktree.title')}</DialogTitle>
         </DialogHeader>
         <div className="p-5 overflow-y-auto max-h-[60vh]">
           <div className="mb-5">
-            <label className="block text-sm font-medium text-slate-300 mb-2">Worktree 名称</label>
+            <label className="block text-sm font-medium text-slate-300 mb-2">{t('createWorktree.nameLabel')}</label>
             <Input
               type="text"
               value={worktreeName}
@@ -88,7 +90,7 @@ export const CreateWorktreeModal: FC<CreateWorktreeModalProps> = ({
             )}
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">选择项目</label>
+            <label className="block text-sm font-medium text-slate-300 mb-2">{t('createWorktree.selectProjects')}</label>
             <div className="space-y-2">
               {config.projects.map(proj => (
                 <div
@@ -129,19 +131,19 @@ export const CreateWorktreeModal: FC<CreateWorktreeModalProps> = ({
                       </div>
                     )}
                   </div>
-                  <div className="text-slate-500 text-xs mt-1.5 pl-7">默认: {proj.base_branch} · 测试: {proj.test_branch}</div>
+                  <div className="text-slate-500 text-xs mt-1.5 pl-7">{t('addProjectToWorktree.defaultBranch')}: {proj.base_branch} · {t('addProjectToWorktree.testBranch')}: {proj.test_branch}</div>
                 </div>
               ))}
             </div>
           </div>
         </div>
         <DialogFooter className="p-5 border-t border-slate-700">
-          <Button variant="secondary" onClick={() => onOpenChange(false)} disabled={creating}>取消</Button>
+          <Button variant="secondary" onClick={() => onOpenChange(false)} disabled={creating}>{t('common.cancel')}</Button>
           <Button
             onClick={onSubmit}
             disabled={!canSubmit}
           >
-            {creating ? "创建中..." : `创建 (${selectedProjects.size})`}
+            {creating ? t('common.creating') : t('createWorktree.createCount', { count: selectedProjects.size })}
           </Button>
         </DialogFooter>
       </DialogContent>

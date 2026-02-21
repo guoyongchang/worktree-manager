@@ -1,4 +1,5 @@
 import { type FC, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { openDirectoryDialog } from '../lib/backend';
 import {
   Dialog,
@@ -33,8 +34,9 @@ export const AddWorkspaceModal: FC<AddWorkspaceModalProps> = ({
   onSubmit,
   loading = false,
 }) => {
+  const { t } = useTranslation();
   const handleSelectFolder = useCallback(async () => {
-    const selected = await openDirectoryDialog('选择 Workspace 目录');
+    const selected = await openDirectoryDialog(t('addWorkspace.selectDir'));
     if (selected) {
       onPathChange(selected);
       // Auto-fill name from folder name if empty
@@ -51,14 +53,14 @@ export const AddWorkspaceModal: FC<AddWorkspaceModalProps> = ({
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-[480px] p-0">
         <DialogHeader className="p-5 border-b border-slate-700">
-          <DialogTitle>导入现有 Workspace</DialogTitle>
+          <DialogTitle>{t('addWorkspace.importTitle')}</DialogTitle>
           <DialogDescription>
-            选择一个已有的项目目录作为 Workspace
+            {t('addWorkspace.importDesc')}
           </DialogDescription>
         </DialogHeader>
         <div className="p-5 space-y-4">
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">目录路径</label>
+            <label className="block text-sm font-medium text-slate-300 mb-2">{t('addWorkspace.dirPath')}</label>
             <div className="flex gap-2">
               <Input
                 type="text"
@@ -73,10 +75,10 @@ export const AddWorkspaceModal: FC<AddWorkspaceModalProps> = ({
                 <FolderIcon className="w-4 h-4" />
               </Button>
             </div>
-            <p className="text-xs text-slate-500 mt-1">路径下应包含 projects 目录</p>
+            <p className="text-xs text-slate-500 mt-1">{t('addWorkspace.dirPathHint')}</p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">名称</label>
+            <label className="block text-sm font-medium text-slate-300 mb-2">{t('common.name')}</label>
             <Input
               type="text"
               value={name}
@@ -87,12 +89,12 @@ export const AddWorkspaceModal: FC<AddWorkspaceModalProps> = ({
           </div>
         </div>
         <DialogFooter className="p-5 border-t border-slate-700">
-          <Button variant="secondary" onClick={() => onOpenChange(false)}>取消</Button>
+          <Button variant="secondary" onClick={() => onOpenChange(false)}>{t('common.cancel')}</Button>
           <Button
             onClick={onSubmit}
             disabled={!name.trim() || !path.trim() || loading}
           >
-            {loading ? "导入中..." : "导入"}
+            {loading ? t('common.importing') : t('common.import')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -121,8 +123,9 @@ export const CreateWorkspaceModal: FC<CreateWorkspaceModalProps> = ({
   onSubmit,
   loading = false,
 }) => {
+  const { t } = useTranslation();
   const handleSelectFolder = useCallback(async () => {
-    const selected = await openDirectoryDialog('选择父目录');
+    const selected = await openDirectoryDialog(t('addWorkspace.selectParentDir'));
     if (selected) {
       onPathChange(selected);
     }
@@ -134,14 +137,14 @@ export const CreateWorkspaceModal: FC<CreateWorkspaceModalProps> = ({
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-[480px] p-0">
         <DialogHeader className="p-5 border-b border-slate-700">
-          <DialogTitle>新建 Workspace</DialogTitle>
+          <DialogTitle>{t('addWorkspace.createTitle')}</DialogTitle>
           <DialogDescription>
-            创建一个新的 Workspace，将自动生成 projects 和 worktrees 目录
+            {t('addWorkspace.createDesc')}
           </DialogDescription>
         </DialogHeader>
         <div className="p-5 space-y-4">
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">Workspace 名称</label>
+            <label className="block text-sm font-medium text-slate-300 mb-2">{t('addWorkspace.workspaceName')}</label>
             <Input
               type="text"
               value={name}
@@ -152,7 +155,7 @@ export const CreateWorkspaceModal: FC<CreateWorkspaceModalProps> = ({
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">父目录</label>
+            <label className="block text-sm font-medium text-slate-300 mb-2">{t('addWorkspace.parentDir')}</label>
             <div className="flex gap-2">
               <Input
                 type="text"
@@ -169,18 +172,18 @@ export const CreateWorkspaceModal: FC<CreateWorkspaceModalProps> = ({
           </div>
           {fullPath && (
             <div className="p-3 rounded bg-slate-800/50 border border-slate-700/50">
-              <p className="text-xs text-slate-400 mb-1">将创建目录：</p>
+              <p className="text-xs text-slate-400 mb-1">{t('addWorkspace.willCreate')}</p>
               <p className="text-sm font-mono text-slate-300 select-text">{fullPath}</p>
             </div>
           )}
         </div>
         <DialogFooter className="p-5 border-t border-slate-700">
-          <Button variant="secondary" onClick={() => onOpenChange(false)}>取消</Button>
+          <Button variant="secondary" onClick={() => onOpenChange(false)}>{t('common.cancel')}</Button>
           <Button
             onClick={onSubmit}
             disabled={!name.trim() || !path.trim() || loading}
           >
-            {loading ? "创建中..." : "创建"}
+            {loading ? t('common.creating') : t('common.create')}
           </Button>
         </DialogFooter>
       </DialogContent>

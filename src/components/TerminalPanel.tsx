@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect, useCallback, type FC } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Terminal } from './Terminal';
 import {
   FolderIcon,
@@ -103,6 +104,7 @@ const FloatingMicButton: FC<{
   onStartRecording?: () => void;
   onStopRecording?: () => void;
 }> = ({ voiceStatus, onStartRecording, onStopRecording }) => {
+  const { t } = useTranslation();
   const [pos, setPos] = useState<{ x: number | null; y: number }>({ x: null, y: 80 });
   const posRef = useRef(pos);
   posRef.current = pos;
@@ -180,7 +182,7 @@ const FloatingMicButton: FC<{
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
-      aria-label={isRecording ? '松开停止录音' : '按住录音'}
+      aria-label={isRecording ? t('terminal.releaseToStopRecord') : t('terminal.holdToRecord')}
     >
       <MicIcon className={`w-5 h-5 ${isRecording ? 'text-red-400' : 'text-white'}`} />
     </button>
@@ -191,17 +193,19 @@ function getVoiceButtonTitle(
   voiceStatus: VoiceStatus,
   isKeyHeld: boolean,
   voiceError?: string | null,
+  t?: (key: string, opts?: Record<string, unknown>) => string,
 ): string {
+  const _t = t || ((k: string) => k);
   if (voiceStatus === 'recording') {
-    return isKeyHeld ? '松开 Alt+V 停止' : '点击关闭语音模式';
+    return isKeyHeld ? _t('terminal.releaseToStop') : _t('terminal.clickToCloseVoice');
   }
   if (voiceStatus === 'ready') {
-    return IS_MOBILE ? '点击关闭语音模式' : '按住 Alt+V 开始说话 | 点击关闭语音模式';
+    return IS_MOBILE ? _t('terminal.clickToCloseVoice') : _t('terminal.holdAltVToSpeak');
   }
   if (voiceError) {
-    return `语音输入错误: ${voiceError}`;
+    return _t('terminal.voiceError', { error: voiceError });
   }
-  return '开启语音模式';
+  return _t('terminal.enableVoice');
 }
 
 function getVoiceButtonClass(voiceStatus: VoiceStatus): string {
@@ -262,6 +266,7 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
   onStartRecording,
   onStopRecording,
 }) => {
+  const { t } = useTranslation();
   const [showError, setShowError] = useState<string | null>(null);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -298,7 +303,7 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
           className="flex items-center gap-2 px-3 py-1.5 text-sm text-slate-400 cursor-pointer hover:bg-slate-700/50 transition-colors"
           onClick={onToggle}
           role="button"
-          aria-label={visible ? "折叠终端面板" : "展开终端面板"}
+          aria-label={visible ? t('terminal.collapsePanel') : t('terminal.expandPanel')}
           tabIndex={0}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); } }}
         >
@@ -327,15 +332,15 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
                   {tab.isRoot && <FolderIcon className="w-3 h-3" />}
                   <span>{tab.name}</span>
                   {tab.isDuplicate && (
-                    <span className="text-[9px] text-slate-500 font-mono">副本</span>
+                    <span className="text-[9px] text-slate-500 font-mono">{t('terminal.duplicate')}</span>
                   )}
                   {isActivated && (
                     <span
                       className="w-5 h-5 ml-1 flex items-center justify-center rounded-full hover:bg-slate-600 text-slate-500 hover:text-slate-300 transition-colors"
                       onClick={(e) => { e.stopPropagation(); onCloseTab(tab.path); }}
-                      title="关闭"
+                      title={t('terminal.close')}
                       role="button"
-                      aria-label={`关闭终端 ${tab.name}`}
+                      aria-label={t('terminal.closeTerminalTab', { name: tab.name })}
                       tabIndex={0}
                       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onCloseTab(tab.path); } }}
                     >
@@ -354,8 +359,8 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
               <button
                 onClick={(e) => { e.stopPropagation(); onToggleVoice(); }}
                 className={`p-1.5 rounded transition-colors relative ${getVoiceButtonClass(voiceStatus)}`}
-                title={getVoiceButtonTitle(voiceStatus, isKeyHeld, voiceError)}
-                aria-label="语音输入"
+                title={getVoiceButtonTitle(voiceStatus, isKeyHeld, voiceError, t)}
+                aria-label={t('terminal.voiceOff')}
               >
                 <MicIcon className="w-3.5 h-3.5" />
                 {voiceStatus === 'recording' && (
@@ -370,8 +375,8 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
               <button
                 onClick={(e) => { e.stopPropagation(); onToggleFullscreen(); }}
                 className="p-1.5 hover:bg-slate-700 rounded text-slate-500 hover:text-slate-300 transition-colors"
-                title={isFullscreen ? "退出全屏" : "终端全屏"}
-                aria-label={isFullscreen ? "退出终端全屏" : "终端全屏"}
+                title={isFullscreen ? t('terminal.exitFullscreen') : t('terminal.fullscreen')}
+                aria-label={isFullscreen ? t('terminal.exitFullscreen') : t('terminal.fullscreen')}
               >
                 {isFullscreen ? (
                   <RestoreIcon className="w-3.5 h-3.5" />
@@ -384,8 +389,8 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
               <button
                 onClick={(e) => { e.stopPropagation(); onCollapse(); }}
                 className="p-1.5 hover:bg-slate-700 rounded text-slate-500 hover:text-slate-300 transition-colors"
-                title="折叠终端"
-                aria-label="折叠终端面板"
+                title={t('terminal.collapseTerminal')}
+                aria-label={t('terminal.collapsePanel')}
               >
                 <ChevronDownIcon className="w-3.5 h-3.5" />
               </button>
@@ -415,13 +420,13 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
             ))}
             {!activeTerminalTab && (
               <div className="flex items-center justify-center h-full text-slate-500 text-sm">
-                点击上方项目标签打开终端
+                {t('terminal.clickTabToOpen')}
               </div>
             )}
           </>
         ) : (
           <div className="flex items-center justify-center h-full text-slate-500 text-sm">
-            点击上方项目标签打开终端
+            {t('terminal.clickTabToOpen')}
           </div>
         )}
 
@@ -444,7 +449,7 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
         {/* ALT+V 提示（非移动端，语音就绪时）*/}
         {voiceStatus === 'ready' && !IS_MOBILE && (
           <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 px-3 py-1.5 bg-slate-800/90 border border-slate-600/50 rounded-lg text-xs text-slate-300 shadow-lg pointer-events-none animate-in fade-in duration-200">
-            按住 <kbd className="px-1 py-0.5 bg-slate-700 rounded text-slate-200 font-mono text-[10px]">Alt</kbd>+<kbd className="px-1 py-0.5 bg-slate-700 rounded text-slate-200 font-mono text-[10px]">V</kbd> 语音转文字
+            {t('terminal.altVHint')}
           </div>
         )}
 
@@ -453,7 +458,7 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
           <div className="absolute inset-0 z-10 bg-black/50 flex flex-col items-center justify-center gap-3 fade-in-0">
             {analyserNode && <AudioWaveform analyserNode={analyserNode} />}
             <span className="text-sm text-slate-400 select-none">
-              正在录音... 松开 Alt+V 停止
+              {t('terminal.recordingHint')}
             </span>
           </div>
         )}
