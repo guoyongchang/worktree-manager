@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect, type FC } from 'react';
+import { useRef, useState, useEffect, useCallback, type FC } from 'react';
 import { Terminal } from './Terminal';
 import {
   FolderIcon,
@@ -12,6 +12,10 @@ import {
 } from './Icons';
 import type { VoiceStatus } from '../hooks/useVoiceInput';
 import type { TerminalTab } from '../types';
+import { isTauri } from '@/lib/backend';
+
+const IS_MOBILE = typeof window !== 'undefined' && 'ontouchstart' in window;
+const IS_MOBILE_WEB = IS_MOBILE && !isTauri();
 
 // ---- 音频波形组件 ----
 // 颜色取自 Tailwind red-400 (248,113,113)，与录音按钮/圆点一致
@@ -89,6 +93,126 @@ const AudioWaveform: FC<{ analyserNode: AnalyserNode }> = ({ analyserNode }) => 
   );
 };
 
+// ---- 悬浮可拖动录音按钮（移动端 Web）----
+
+const FLOATING_BTN_SIZE = 48;   // w-12 = 3rem = 48px
+const FLOATING_BTN_MARGIN = 16; // 距离右边缘的默认间距
+
+const FloatingMicButton: FC<{
+  voiceStatus: VoiceStatus;
+  onStartRecording?: () => void;
+  onStopRecording?: () => void;
+}> = ({ voiceStatus, onStartRecording, onStopRecording }) => {
+  const [pos, setPos] = useState<{ x: number | null; y: number }>({ x: null, y: 80 });
+  const posRef = useRef(pos);
+  posRef.current = pos;
+
+  const dragRef = useRef({
+    startX: 0,
+    startY: 0,
+    startPosX: 0,
+    startPosY: 0,
+    isDragging: false,
+  });
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  const constrain = useCallback((x: number, y: number) => {
+    const parent = btnRef.current?.parentElement;
+    if (!parent) return { x, y };
+    const pr = parent.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(x, pr.width - FLOATING_BTN_SIZE)),
+      y: Math.max(0, Math.min(y, pr.height - FLOATING_BTN_SIZE)),
+    };
+  }, []);
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    const d = dragRef.current;
+    const cur = posRef.current;
+    let currentX = cur.x;
+    if (currentX === null && btnRef.current?.parentElement) {
+      const pr = btnRef.current.parentElement.getBoundingClientRect();
+      currentX = pr.width - FLOATING_BTN_SIZE - FLOATING_BTN_MARGIN;
+      setPos(p => ({ ...p, x: currentX }));
+    }
+    d.startX = touch.clientX;
+    d.startY = touch.clientY;
+    d.startPosX = currentX ?? 0;
+    d.startPosY = cur.y;
+    d.isDragging = false;
+    onStartRecording?.();
+  }, [onStartRecording]);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    const d = dragRef.current;
+    const dx = touch.clientX - d.startX;
+    const dy = touch.clientY - d.startY;
+    if (!d.isDragging && Math.abs(dx) + Math.abs(dy) > 5) {
+      d.isDragging = true;
+    }
+    if (d.isDragging) {
+      setPos(constrain(d.startPosX + dx, d.startPosY + dy));
+    }
+  }, [constrain]);
+
+  const handleTouchEnd = useCallback(() => {
+    dragRef.current.isDragging = false;
+    onStopRecording?.();
+  }, [onStopRecording]);
+
+  const isRecording = voiceStatus === 'recording';
+
+  const style: React.CSSProperties = pos.x === null
+    ? { position: 'absolute', right: FLOATING_BTN_MARGIN, top: pos.y }
+    : { position: 'absolute', left: pos.x, top: pos.y };
+
+  return (
+    <button
+      ref={btnRef}
+      className={`z-20 w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-sm touch-none ${
+        isRecording
+          ? 'bg-red-900/70 border-2 border-red-500 shadow-[0_0_12px_rgba(239,68,68,0.5)] animate-pulse'
+          : 'bg-slate-800/70 border-2 border-green-500/60'
+      }`}
+      style={style}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      aria-label={isRecording ? '松开停止录音' : '按住录音'}
+    >
+      <MicIcon className={`w-5 h-5 ${isRecording ? 'text-red-400' : 'text-white'}`} />
+    </button>
+  );
+};
+
+function getVoiceButtonTitle(
+  voiceStatus: VoiceStatus,
+  isKeyHeld: boolean,
+  voiceError?: string | null,
+): string {
+  if (voiceStatus === 'recording') {
+    return isKeyHeld ? '松开 Alt+V 停止' : '点击关闭语音模式';
+  }
+  if (voiceStatus === 'ready') {
+    return IS_MOBILE ? '点击关闭语音模式' : '按住 Alt+V 开始说话 | 点击关闭语音模式';
+  }
+  if (voiceError) {
+    return `语音输入错误: ${voiceError}`;
+  }
+  return '开启语音模式';
+}
+
+function getVoiceButtonClass(voiceStatus: VoiceStatus): string {
+  switch (voiceStatus) {
+    case 'recording': return 'text-red-400 hover:bg-red-900/30';
+    case 'ready':     return 'text-green-400 hover:bg-green-900/30';
+    case 'error':     return 'text-red-400 hover:bg-slate-700';
+    default:          return 'text-slate-500 hover:text-slate-300 hover:bg-slate-700';
+  }
+}
+
 // ---- TerminalPanel ----
 
 interface TerminalPanelProps {
@@ -138,7 +262,6 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
   onStartRecording,
   onStopRecording,
 }) => {
-  const isMobile = typeof window !== 'undefined' && 'ontouchstart' in window;
   const [showError, setShowError] = useState<string | null>(null);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -230,26 +353,8 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
             {onToggleVoice && (
               <button
                 onClick={(e) => { e.stopPropagation(); onToggleVoice(); }}
-                onTouchStart={isMobile && onStartRecording ? (e) => { e.preventDefault(); onStartRecording(); } : undefined}
-                onTouchEnd={isMobile && onStopRecording ? (e) => { e.preventDefault(); onStopRecording(); } : undefined}
-                className={`p-1.5 rounded transition-colors relative ${
-                  voiceStatus === 'recording'
-                    ? 'text-red-400 hover:bg-red-900/30'
-                    : voiceStatus === 'ready'
-                      ? 'text-green-400 hover:bg-green-900/30'
-                      : voiceStatus === 'error'
-                        ? 'text-red-400 hover:bg-slate-700'
-                        : 'text-slate-500 hover:text-slate-300 hover:bg-slate-700'
-                }`}
-                title={
-                  voiceStatus === 'recording'
-                    ? isKeyHeld ? '松开 Alt+V 停止' : isMobile ? '松开停止录音' : '点击关闭语音模式'
-                    : voiceStatus === 'ready'
-                      ? isMobile ? '长按录音' : '按住 Alt+V 开始说话 | 点击关闭语音模式'
-                      : voiceError
-                        ? `语音输入错误: ${voiceError}`
-                        : isMobile ? '长按录音' : '开启语音模式'
-                }
+                className={`p-1.5 rounded transition-colors relative ${getVoiceButtonClass(voiceStatus)}`}
+                title={getVoiceButtonTitle(voiceStatus, isKeyHeld, voiceError)}
                 aria-label="语音输入"
               >
                 <MicIcon className="w-3.5 h-3.5" />
@@ -327,12 +432,28 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
           </div>
         )}
 
-        {/* 录音遮罩 + 波形 */}
-        {voiceStatus === 'recording' && (
+        {/* 悬浮录音按钮（移动端 Web）*/}
+        {IS_MOBILE_WEB && (voiceStatus === 'ready' || voiceStatus === 'recording') && (
+          <FloatingMicButton
+            voiceStatus={voiceStatus}
+            onStartRecording={onStartRecording}
+            onStopRecording={onStopRecording}
+          />
+        )}
+
+        {/* ALT+V 提示（非移动端，语音就绪时）*/}
+        {voiceStatus === 'ready' && !IS_MOBILE && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 px-3 py-1.5 bg-slate-800/90 border border-slate-600/50 rounded-lg text-xs text-slate-300 shadow-lg pointer-events-none animate-in fade-in duration-200">
+            按住 <kbd className="px-1 py-0.5 bg-slate-700 rounded text-slate-200 font-mono text-[10px]">Alt</kbd>+<kbd className="px-1 py-0.5 bg-slate-700 rounded text-slate-200 font-mono text-[10px]">V</kbd> 语音转文字
+          </div>
+        )}
+
+        {/* 录音遮罩 + 波形（移动端 Web 不显示，由悬浮按钮提供反馈）*/}
+        {voiceStatus === 'recording' && !IS_MOBILE_WEB && (
           <div className="absolute inset-0 z-10 bg-black/50 flex flex-col items-center justify-center gap-3 fade-in-0">
             {analyserNode && <AudioWaveform analyserNode={analyserNode} />}
             <span className="text-sm text-slate-400 select-none">
-              {isMobile ? '正在录音... 松开停止' : '正在录音... 松开 Alt+V 停止'}
+              正在录音... 松开 Alt+V 停止
             </span>
           </div>
         )}

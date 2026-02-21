@@ -110,7 +110,8 @@ function App() {
 
   // Non-modal UI states that remain in App
   const [addingProjectToWorktree, setAddingProjectToWorktree] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const isMobileWeb = !isTauri() && window.innerWidth < 640;
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(isMobileWeb);
 
   // Loading states for async operations
   const [switchingWorkspace, setSwitchingWorkspace] = useState(false);
@@ -221,6 +222,10 @@ function App() {
       if (!isTauri()) {
         setHasUserSelected(true);
         setSelectedWorktree(worktree);
+        // 移动端选中后自动收起侧边栏
+        if (window.innerWidth < 640) {
+          setSidebarCollapsed(true);
+        }
         return;
       }
 
