@@ -170,7 +170,7 @@ export async function isMainWindow(): Promise<boolean> {
 
 export interface ShareState {
   active: boolean;
-  url?: string;
+  urls: string[];
   ngrok_url?: string;
   workspace_path?: string;
 }
@@ -413,5 +413,13 @@ export async function voiceIsActive(): Promise<boolean> {
 
 export async function voiceRefineText(text: string): Promise<string> {
   return callBackend<string>('voice_refine_text', { text });
+}
+
+export async function getVoiceRefineEnabled(): Promise<boolean> {
+  return callBackend<boolean>('get_voice_refine_enabled');
+}
+
+export async function setVoiceRefineEnabled(enabled: boolean): Promise<void> {
+  return callBackend<void>('set_voice_refine_enabled', { enabled });
 }
 

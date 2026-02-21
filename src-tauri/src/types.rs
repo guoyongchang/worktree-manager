@@ -49,7 +49,7 @@ pub struct TerminalState {
 #[derive(Debug, Serialize, Clone)]
 pub struct ShareStateInfo {
     pub active: bool,
-    pub url: Option<String>,
+    pub urls: Vec<String>,
     pub ngrok_url: Option<String>,
     pub workspace_path: Option<String>,
 }
@@ -111,7 +111,11 @@ pub struct GlobalConfig {
     pub dashscope_api_key: Option<String>,
     #[serde(default)]
     pub dashscope_base_url: Option<String>,
+    #[serde(default = "default_true")]
+    pub voice_refine_enabled: bool,
 }
+
+fn default_true() -> bool { true }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WorkspaceRef {
@@ -129,6 +133,7 @@ impl Default for GlobalConfig {
             last_share_password: None,
             dashscope_api_key: None,
             dashscope_base_url: None,
+            voice_refine_enabled: true,
         }
     }
 }

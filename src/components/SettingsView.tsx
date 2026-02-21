@@ -21,7 +21,7 @@ import { RefreshCw, Search, Mic } from 'lucide-react';
 import { BackIcon, PlusIcon, TrashIcon } from './Icons';
 import { BranchCombobox } from './BranchCombobox';
 import type { WorkspaceRef, WorkspaceConfig, ProjectConfig, ScannedFolder } from '../types';
-import { getAppVersion, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, voiceStart, voiceStop, isTauri, getRemoteBranches, openLink } from '../lib/backend';
+import { getAppVersion, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, voiceStart, voiceStop, isTauri, getRemoteBranches, openLink } from '../lib/backend';
 
 interface SettingsViewProps {
   config: WorkspaceConfig;
@@ -96,6 +96,10 @@ export const SettingsView: FC<SettingsViewProps> = ({
   const [dashscopeUrlSaving, setDashscopeUrlSaving] = useState(false);
   const [dashscopeUrlSaved, setDashscopeUrlSaved] = useState(false);
   const [dashscopeUrlError, setDashscopeUrlError] = useState<string | null>(null);
+
+  // Voice refine toggle (loaded from backend config)
+  const [voiceRefineEnabled, setVoiceRefineEnabled] = useState(true);
+  const [voiceRefineLoaded, setVoiceRefineLoaded] = useState(false);
 
   // Microphone selection state
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
@@ -218,6 +222,10 @@ export const SettingsView: FC<SettingsViewProps> = ({
     getDashscopeBaseUrl().then(u => {
       setDashscopeUrl(u || '');
     }).catch(() => {});
+    getVoiceRefineEnabled().then(v => {
+      setVoiceRefineEnabled(v);
+      setVoiceRefineLoaded(true);
+    }).catch(() => setVoiceRefineLoaded(true));
     loadMicDevices();
   }, [loadMicDevices]);
 
@@ -726,6 +734,29 @@ export const SettingsView: FC<SettingsViewProps> = ({
                   </div>
                 </div>
               )}
+            </div>
+            {/* AI Text Refinement Toggle */}
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="text-sm text-slate-400">{t('settings.voiceRefineLabel')}</label>
+                <p className="text-xs text-slate-500">{t('settings.voiceRefineDesc')}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const newVal = !voiceRefineEnabled;
+                  setVoiceRefineEnabled(newVal);
+                  saveVoiceRefineEnabled(newVal).catch(() => {});
+                }}
+                disabled={!voiceRefineLoaded}
+                className={`relative inline-flex h-5 w-8 items-center rounded-full transition-colors ${
+                  voiceRefineEnabled ? 'bg-blue-500' : 'bg-slate-600'
+                }`}
+              >
+                <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${
+                  voiceRefineEnabled ? 'translate-x-3.5' : 'translate-x-0.5'
+                }`} />
+              </button>
             </div>
             <div>
               <label className="block text-sm text-slate-400 mb-1">{t('settings.dashscopeKeyLabel')}</label>

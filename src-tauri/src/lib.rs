@@ -6,6 +6,7 @@ mod commands;
 mod git_ops;
 mod pty_manager;
 pub mod http_server;
+pub(crate) mod tls;
 
 // Re-exports used by http_server and other modules
 pub use types::*;
@@ -155,6 +156,8 @@ pub fn run() {
             set_dashscope_api_key,
             get_dashscope_base_url,
             set_dashscope_base_url,
+            get_voice_refine_enabled,
+            set_voice_refine_enabled,
             voice_start,
             voice_send_audio,
             voice_stop,

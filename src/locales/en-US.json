@@ -310,6 +310,8 @@
   "settings.stopTest": "Stop test",
   "settings.test": "Test",
   "settings.volume": "Volume",
+  "settings.voiceRefineLabel": "AI Text Refinement",
+  "settings.voiceRefineDesc": "Use Qwen AI to polish text after recording",
   "settings.dashscopeKeyLabel": "Dashscope API Key",
   "settings.dashscopeKeyPlaceholder": "Paste your Dashscope API Key",
   "settings.wsAddressLabel": "WebSocket URL",

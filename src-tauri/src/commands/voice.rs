@@ -89,6 +89,30 @@ pub(crate) async fn set_dashscope_base_url(url: String) -> Result<(), String> {
     set_dashscope_base_url_inner(url)
 }
 
+// ==================== Voice Refine Toggle ====================
+
+pub(crate) fn get_voice_refine_enabled_inner() -> Result<bool, String> {
+    let config = load_global_config();
+    Ok(config.voice_refine_enabled)
+}
+
+pub(crate) fn set_voice_refine_enabled_inner(enabled: bool) -> Result<(), String> {
+    let mut config = load_global_config();
+    config.voice_refine_enabled = enabled;
+    save_global_config_internal(&config)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) async fn get_voice_refine_enabled() -> Result<bool, String> {
+    get_voice_refine_enabled_inner()
+}
+
+#[tauri::command]
+pub(crate) async fn set_voice_refine_enabled(enabled: bool) -> Result<(), String> {
+    set_voice_refine_enabled_inner(enabled)
+}
+
 // ==================== Voice Session Commands ====================
 
 pub(crate) async fn voice_start_inner(sample_rate: Option<u32>) -> Result<(), String> {

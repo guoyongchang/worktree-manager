@@ -271,6 +271,8 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
   const { t } = useTranslation();
   const [showError, setShowError] = useState<string | null>(null);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [showAltVHint, setShowAltVHint] = useState(false);
+  const hintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Show voice errors as a visible toast
   useEffect(() => {
@@ -281,6 +283,18 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
     }
     return () => { if (errorTimerRef.current) clearTimeout(errorTimerRef.current); };
   }, [voiceError]);
+
+  // Show Alt+V hint briefly when entering ready state
+  useEffect(() => {
+    if (hintTimerRef.current) clearTimeout(hintTimerRef.current);
+    if (voiceStatus === 'ready') {
+      setShowAltVHint(true);
+      hintTimerRef.current = setTimeout(() => setShowAltVHint(false), 3000);
+    } else {
+      setShowAltVHint(false);
+    }
+    return () => { if (hintTimerRef.current) clearTimeout(hintTimerRef.current); };
+  }, [voiceStatus]);
 
   return (
     <div
@@ -448,8 +462,8 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
           />
         )}
 
-        {/* ALT+V 提示（非移动端，语音就绪时）*/}
-        {voiceStatus === 'ready' && !IS_MOBILE && (
+        {/* ALT+V 提示（非移动端，语音就绪时短暂显示 3 秒）*/}
+        {showAltVHint && !IS_MOBILE && (
           <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 px-3 py-1.5 bg-slate-800/90 border border-slate-600/50 rounded-lg text-xs text-slate-300 shadow-lg pointer-events-none animate-in fade-in duration-200">
             {t('terminal.altVHint')}
           </div>

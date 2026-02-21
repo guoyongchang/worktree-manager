@@ -17,7 +17,7 @@ import type { ConnectedClient } from '../lib/backend';
 
 export interface UseShareFeatureReturn {
   shareActive: boolean;
-  shareUrl: string | null;
+  shareUrls: string[];
   shareNgrokUrl: string | null;
   sharePassword: string;
   ngrokLoading: boolean;
@@ -40,7 +40,7 @@ export function useShareFeature(
   setError: (error: string | null) => void,
 ): UseShareFeatureReturn {
   const [shareActive, setShareActive] = useState(false);
-  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [shareUrls, setShareUrls] = useState<string[]>([]);
   const [shareNgrokUrl, setShareNgrokUrl] = useState<string | null>(null);
   const [sharePassword, setSharePassword] = useState('');
   const [ngrokLoading, setNgrokLoading] = useState(false);
@@ -57,9 +57,11 @@ export function useShareFeature(
   const handleStartShare = useCallback(async (port: number) => {
     try {
       const pwd = sharePassword || generatePassword();
-      const url = await startSharing(port, pwd);
+      await startSharing(port, pwd);
+      // Fetch full share state to get all LAN URLs
+      const state = await getShareState();
       setShareActive(true);
-      setShareUrl(url);
+      setShareUrls(state.urls);
       setSharePassword(pwd);
     } catch (e) {
       setError(String(e));
@@ -70,7 +72,7 @@ export function useShareFeature(
     try {
       await stopSharing();
       setShareActive(false);
-      setShareUrl(null);
+      setShareUrls([]);
       setShareNgrokUrl(null);
       setConnectedClients([]);
     } catch (e) {
@@ -143,9 +145,9 @@ export function useShareFeature(
   useEffect(() => {
     if (isTauri()) {
       getShareState().then(state => {
-        if (state.active && state.url) {
+        if (state.active && state.urls.length > 0) {
           setShareActive(true);
-          setShareUrl(state.url);
+          setShareUrls(state.urls);
           if (state.ngrok_url) {
             setShareNgrokUrl(state.ngrok_url);
           }
@@ -177,7 +179,7 @@ export function useShareFeature(
 
   return {
     shareActive,
-    shareUrl,
+    shareUrls,
     shareNgrokUrl,
     sharePassword,
     ngrokLoading,
