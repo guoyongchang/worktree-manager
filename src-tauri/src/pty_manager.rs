@@ -1,10 +1,10 @@
-use portable_pty::{native_pty_system, CommandBuilder, PtySize, MasterPty, Child};
+use log;
+use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
-use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Receiver};
+use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
-use log;
 
 /// Max replay buffer size per session (64 KB)
 const REPLAY_BUFFER_CAP: usize = 64 * 1024;
@@ -80,7 +80,13 @@ impl PtyManager {
         }
     }
 
-    pub fn create_session(&mut self, id: &str, cwd: &str, cols: u16, rows: u16) -> Result<(), String> {
+    pub fn create_session(
+        &mut self,
+        id: &str,
+        cwd: &str,
+        cols: u16,
+        rows: u16,
+    ) -> Result<(), String> {
         // Properly close existing session if any
         if self.has_session(id) {
             self.close_session(id)?;
@@ -107,7 +113,10 @@ impl PtyManager {
         // Set environment variables for better terminal support
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
-        cmd.env("LANG", std::env::var("LANG").unwrap_or_else(|_| "en_US.UTF-8".to_string()));
+        cmd.env(
+            "LANG",
+            std::env::var("LANG").unwrap_or_else(|_| "en_US.UTF-8".to_string()),
+        );
 
         // Preserve important env vars
         if let Ok(path) = std::env::var("PATH") {
@@ -134,17 +143,22 @@ impl PtyManager {
             }
         }
 
-        let child = pair.slave
+        let child = pair
+            .slave
             .spawn_command(cmd)
             .map_err(|e| format!("Failed to spawn shell: {}", e))?;
 
         // Drop slave to avoid blocking
         drop(pair.slave);
 
-        let writer = pair.master.take_writer()
+        let writer = pair
+            .master
+            .take_writer()
             .map_err(|e| format!("Failed to get writer: {}", e))?;
 
-        let mut reader = pair.master.try_clone_reader()
+        let mut reader = pair
+            .master
+            .try_clone_reader()
             .map_err(|e| format!("Failed to get reader: {}", e))?;
 
         // Create channel for async reading (desktop polling via invoke)
@@ -155,7 +169,8 @@ impl PtyManager {
         let broadcast_tx_clone = broadcast_tx.clone();
 
         // Replay buffer shared with reader thread
-        let replay_buffer: Arc<Mutex<VecDeque<u8>>> = Arc::new(Mutex::new(VecDeque::with_capacity(REPLAY_BUFFER_CAP)));
+        let replay_buffer: Arc<Mutex<VecDeque<u8>>> =
+            Arc::new(Mutex::new(VecDeque::with_capacity(REPLAY_BUFFER_CAP)));
         let replay_buf_clone = replay_buffer.clone();
 
         // Spawn a thread to read from PTY
@@ -196,24 +211,33 @@ impl PtyManager {
             replay_buffer,
         };
 
-        self.sessions.insert(id.to_string(), Arc::new(Mutex::new(session)));
+        self.sessions
+            .insert(id.to_string(), Arc::new(Mutex::new(session)));
         Ok(())
     }
 
     pub fn write_to_session(&self, id: &str, data: &str) -> Result<(), String> {
-        let session = self.sessions.get(id)
+        let session = self
+            .sessions
+            .get(id)
             .ok_or_else(|| "Session not found".to_string())?;
 
         let mut session = session.lock().map_err(|e| format!("Lock error: {}", e))?;
-        session.writer.write_all(data.as_bytes())
+        session
+            .writer
+            .write_all(data.as_bytes())
             .map_err(|e| format!("Write error: {}", e))?;
-        session.writer.flush()
+        session
+            .writer
+            .flush()
             .map_err(|e| format!("Flush error: {}", e))?;
         Ok(())
     }
 
     pub fn read_from_session(&self, id: &str) -> Result<String, String> {
-        let session = self.sessions.get(id)
+        let session = self
+            .sessions
+            .get(id)
             .ok_or_else(|| "Session not found".to_string())?;
 
         let session = session.lock().map_err(|e| format!("Lock error: {}", e))?;
@@ -228,16 +252,21 @@ impl PtyManager {
     }
 
     pub fn resize_session(&self, id: &str, cols: u16, rows: u16) -> Result<(), String> {
-        let session = self.sessions.get(id)
+        let session = self
+            .sessions
+            .get(id)
             .ok_or_else(|| "Session not found".to_string())?;
 
         let session = session.lock().map_err(|e| format!("Lock error: {}", e))?;
-        session.master.resize(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        }).map_err(|e| format!("Resize error: {}", e))?;
+        session
+            .master
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| format!("Resize error: {}", e))?;
         Ok(())
     }
 
@@ -259,7 +288,10 @@ impl PtyManager {
     pub fn subscribe_session(&self, id: &str) -> Option<(Vec<u8>, broadcast::Receiver<Vec<u8>>)> {
         let session_arc = self.sessions.get(id)?;
         let session = session_arc.lock().ok()?;
-        let replay = session.replay_buffer.lock().ok()
+        let replay = session
+            .replay_buffer
+            .lock()
+            .ok()
             .map(|rb| rb.iter().copied().collect::<Vec<u8>>())
             .unwrap_or_default();
         let rx = session.broadcast_tx.subscribe();
@@ -268,7 +300,8 @@ impl PtyManager {
 
     pub fn close_sessions_by_path_prefix(&mut self, path_prefix: &str) -> Vec<String> {
         let normalized_prefix = path_prefix.replace(['/', '#'], "-");
-        let sessions_to_close: Vec<String> = self.sessions
+        let sessions_to_close: Vec<String> = self
+            .sessions
             .keys()
             .filter(|id| id.contains(&normalized_prefix))
             .cloned()

@@ -1,27 +1,25 @@
+use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
-use std::fs;
 
-use crate::types::{
-    WorktreeListItem, ProjectStatus, ProjectConfig,
-    MainWorkspaceStatus, MainProjectStatus,
-    CreateWorktreeRequest, WorktreeArchiveStatus,
-    AddProjectToWorktreeRequest, ScannedFolder,
-};
 use crate::config::get_window_workspace_config;
+use crate::git_ops::{get_branch_status, get_worktree_info};
 use crate::state::PTY_MANAGER;
-use crate::utils::{
-    normalize_path, run_git_command_with_timeout,
-    scan_dir_for_linkable_folders,
+use crate::types::{
+    AddProjectToWorktreeRequest, CreateWorktreeRequest, MainProjectStatus, MainWorkspaceStatus,
+    ProjectConfig, ProjectStatus, ScannedFolder, WorktreeArchiveStatus, WorktreeListItem,
 };
-use crate::git_ops::{get_worktree_info, get_branch_status};
+use crate::utils::{normalize_path, run_git_command_with_timeout, scan_dir_for_linkable_folders};
 
 // ==================== Tauri 命令：Worktree 操作 ====================
 
-pub fn list_worktrees_impl(window_label: &str, include_archived: bool) -> Result<Vec<WorktreeListItem>, String> {
+pub fn list_worktrees_impl(
+    window_label: &str,
+    include_archived: bool,
+) -> Result<Vec<WorktreeListItem>, String> {
     let start = std::time::Instant::now();
-    let (workspace_path, config) = get_window_workspace_config(window_label)
-        .ok_or("No workspace selected")?;
+    let (workspace_path, config) =
+        get_window_workspace_config(window_label).ok_or("No workspace selected")?;
 
     let worktrees_path = PathBuf::from(&workspace_path).join(&config.worktrees_dir);
 
@@ -35,15 +33,21 @@ pub fn list_worktrees_impl(window_label: &str, include_archived: bool) -> Result
 }
 
 #[tauri::command]
-pub(crate) fn list_worktrees(window: tauri::Window, include_archived: bool) -> Result<Vec<WorktreeListItem>, String> {
+pub(crate) fn list_worktrees(
+    window: tauri::Window,
+    include_archived: bool,
+) -> Result<Vec<WorktreeListItem>, String> {
     list_worktrees_impl(window.label(), include_archived)
 }
 
-fn scan_worktrees_dir(dir: &PathBuf, config: &crate::types::WorkspaceConfig, include_archived: bool) -> Result<Vec<WorktreeListItem>, String> {
+fn scan_worktrees_dir(
+    dir: &PathBuf,
+    config: &crate::types::WorkspaceConfig,
+    include_archived: bool,
+) -> Result<Vec<WorktreeListItem>, String> {
     let mut result = vec![];
 
-    let entries = std::fs::read_dir(dir)
-        .map_err(|e| format!("Failed to read directory: {}", e))?;
+    let entries = std::fs::read_dir(dir).map_err(|e| format!("Failed to read directory: {}", e))?;
 
     for entry in entries {
         let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
@@ -53,7 +57,8 @@ fn scan_worktrees_dir(dir: &PathBuf, config: &crate::types::WorkspaceConfig, inc
             continue;
         }
 
-        let name = path.file_name()
+        let name = path
+            .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("")
             .to_string();
@@ -82,12 +87,15 @@ fn scan_worktrees_dir(dir: &PathBuf, config: &crate::types::WorkspaceConfig, inc
                     continue;
                 }
 
-                let proj_name = proj_path.file_name()
+                let proj_name = proj_path
+                    .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("")
                     .to_string();
 
-                let proj_config = config.projects.iter()
+                let proj_config = config
+                    .projects
+                    .iter()
                     .find(|p| p.name == proj_name)
                     .cloned()
                     .unwrap_or(ProjectConfig {
@@ -128,8 +136,8 @@ fn scan_worktrees_dir(dir: &PathBuf, config: &crate::types::WorkspaceConfig, inc
 
 pub fn get_main_workspace_status_impl(window_label: &str) -> Result<MainWorkspaceStatus, String> {
     let start = std::time::Instant::now();
-    let (workspace_path, config) = get_window_workspace_config(window_label)
-        .ok_or("No workspace selected")?;
+    let (workspace_path, config) =
+        get_window_workspace_config(window_label).ok_or("No workspace selected")?;
 
     let root_path = PathBuf::from(&workspace_path);
     let projects_path = root_path.join("projects");
@@ -164,13 +172,18 @@ pub fn get_main_workspace_status_impl(window_label: &str) -> Result<MainWorkspac
 }
 
 #[tauri::command]
-pub(crate) fn get_main_workspace_status(window: tauri::Window) -> Result<MainWorkspaceStatus, String> {
+pub(crate) fn get_main_workspace_status(
+    window: tauri::Window,
+) -> Result<MainWorkspaceStatus, String> {
     get_main_workspace_status_impl(window.label())
 }
 
-pub fn create_worktree_impl(window_label: &str, request: CreateWorktreeRequest) -> Result<String, String> {
-    let (workspace_path, config) = get_window_workspace_config(window_label)
-        .ok_or("No workspace selected")?;
+pub fn create_worktree_impl(
+    window_label: &str,
+    request: CreateWorktreeRequest,
+) -> Result<String, String> {
+    let (workspace_path, config) =
+        get_window_workspace_config(window_label).ok_or("No workspace selected")?;
 
     let root = PathBuf::from(&workspace_path);
     let worktree_path = root.join(&config.worktrees_dir).join(&request.name);
@@ -193,7 +206,9 @@ pub fn create_worktree_impl(window_label: &str, request: CreateWorktreeRequest) 
 
     // Create worktrees for each project
     for proj_req in &request.projects {
-        let proj_config = config.projects.iter()
+        let proj_config = config
+            .projects
+            .iter()
             .find(|p| p.name == proj_req.name)
             .cloned()
             .unwrap_or(ProjectConfig {
@@ -208,14 +223,17 @@ pub fn create_worktree_impl(window_label: &str, request: CreateWorktreeRequest) 
         let wt_proj_path = worktree_path.join("projects").join(&proj_req.name);
 
         // Fetch origin first (with timeout)
-        run_git_command_with_timeout(
-            &["fetch", "origin"],
-            main_proj_path.to_str().unwrap(),
-        )?;
+        run_git_command_with_timeout(&["fetch", "origin"], main_proj_path.to_str().unwrap())?;
 
         // Check if branch already exists
         let branch_check = Command::new("git")
-            .args(["-C", main_proj_path.to_str().unwrap(), "branch", "--list", &request.name])
+            .args([
+                "-C",
+                main_proj_path.to_str().unwrap(),
+                "branch",
+                "--list",
+                &request.name,
+            ])
             .output();
 
         let branch_exists = branch_check
@@ -225,24 +243,38 @@ pub fn create_worktree_impl(window_label: &str, request: CreateWorktreeRequest) 
 
         // Create worktree: use existing branch or create new one
         let output = if branch_exists {
-            log::info!("Branch '{}' already exists, using it for project {}", request.name, proj_req.name);
+            log::info!(
+                "Branch '{}' already exists, using it for project {}",
+                request.name,
+                proj_req.name
+            );
             Command::new("git")
                 .args([
-                    "-C", main_proj_path.to_str().unwrap(),
-                    "worktree", "add",
+                    "-C",
+                    main_proj_path.to_str().unwrap(),
+                    "worktree",
+                    "add",
                     wt_proj_path.to_str().unwrap(),
                     &request.name,
                 ])
                 .output()
                 .map_err(|e| format!("Failed to create worktree: {}", e))?
         } else {
-            log::info!("Creating new branch '{}' for project {} from origin/{}", request.name, proj_req.name, proj_req.base_branch);
+            log::info!(
+                "Creating new branch '{}' for project {} from origin/{}",
+                request.name,
+                proj_req.name,
+                proj_req.base_branch
+            );
             Command::new("git")
                 .args([
-                    "-C", main_proj_path.to_str().unwrap(),
-                    "worktree", "add",
+                    "-C",
+                    main_proj_path.to_str().unwrap(),
+                    "worktree",
+                    "add",
                     wt_proj_path.to_str().unwrap(),
-                    "-b", &request.name,
+                    "-b",
+                    &request.name,
                     &format!("origin/{}", proj_req.base_branch),
                 ])
                 .output()
@@ -251,7 +283,10 @@ pub fn create_worktree_impl(window_label: &str, request: CreateWorktreeRequest) 
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("Failed to create worktree for {}: {}", proj_req.name, stderr));
+            return Err(format!(
+                "Failed to create worktree for {}: {}",
+                proj_req.name, stderr
+            ));
         }
 
         // Link configured folders
@@ -265,7 +300,14 @@ pub fn create_worktree_impl(window_label: &str, request: CreateWorktreeRequest) 
 
                 // Remove from git index if it's tracked
                 Command::new("git")
-                    .args(["-C", wt_proj_path.to_str().unwrap(), "rm", "--cached", "-r", folder_name])
+                    .args([
+                        "-C",
+                        wt_proj_path.to_str().unwrap(),
+                        "rm",
+                        "--cached",
+                        "-r",
+                        folder_name,
+                    ])
                     .output()
                     .ok();
             }
@@ -277,13 +319,16 @@ pub fn create_worktree_impl(window_label: &str, request: CreateWorktreeRequest) 
 }
 
 #[tauri::command]
-pub(crate) fn create_worktree(window: tauri::Window, request: CreateWorktreeRequest) -> Result<String, String> {
+pub(crate) fn create_worktree(
+    window: tauri::Window,
+    request: CreateWorktreeRequest,
+) -> Result<String, String> {
     create_worktree_impl(window.label(), request)
 }
 
 pub fn archive_worktree_impl(window_label: &str, name: String) -> Result<(), String> {
-    let (workspace_path, config) = get_window_workspace_config(window_label)
-        .ok_or("No workspace selected")?;
+    let (workspace_path, config) =
+        get_window_workspace_config(window_label).ok_or("No workspace selected")?;
 
     let root = PathBuf::from(&workspace_path);
     let worktree_path = root.join(&config.worktrees_dir).join(&name);
@@ -303,7 +348,11 @@ pub fn archive_worktree_impl(window_label: &str, name: String) -> Result<(), Str
         if let Ok(mut manager) = PTY_MANAGER.lock() {
             let closed = manager.close_sessions_by_path_prefix(&worktree_path_str);
             if !closed.is_empty() {
-                log::info!("Closed {} PTY sessions for archived worktree: {:?}", closed.len(), closed);
+                log::info!(
+                    "Closed {} PTY sessions for archived worktree: {:?}",
+                    closed.len(),
+                    closed
+                );
             }
         }
     }
@@ -314,16 +363,18 @@ pub fn archive_worktree_impl(window_label: &str, name: String) -> Result<(), Str
         if let Ok(entries) = std::fs::read_dir(&projects_path) {
             for entry in entries.flatten() {
                 let proj_path = entry.path();
-                let proj_name = proj_path.file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("");
+                let proj_name = proj_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
                 let main_proj_path = root.join("projects").join(proj_name);
 
                 Command::new("git")
                     .args([
-                        "-C", main_proj_path.to_str().unwrap(),
-                        "worktree", "remove", proj_path.to_str().unwrap(), "--force"
+                        "-C",
+                        main_proj_path.to_str().unwrap(),
+                        "worktree",
+                        "remove",
+                        proj_path.to_str().unwrap(),
+                        "--force",
                     ])
                     .output()
                     .ok();
@@ -333,7 +384,10 @@ pub fn archive_worktree_impl(window_label: &str, name: String) -> Result<(), Str
 
     // If archive directory already exists (e.g. from a previous failed attempt), remove it first
     if archive_path.exists() {
-        log::warn!("Archive directory already exists, removing: {:?}", archive_path);
+        log::warn!(
+            "Archive directory already exists, removing: {:?}",
+            archive_path
+        );
         fs::remove_dir_all(&archive_path)
             .map_err(|e| format!("Failed to remove existing archive directory: {}", e))?;
     }
@@ -349,9 +403,12 @@ pub(crate) fn archive_worktree(window: tauri::Window, name: String) -> Result<()
     archive_worktree_impl(window.label(), name)
 }
 
-pub fn check_worktree_status_impl(window_label: &str, name: String) -> Result<WorktreeArchiveStatus, String> {
-    let (workspace_path, config) = get_window_workspace_config(window_label)
-        .ok_or("No workspace selected")?;
+pub fn check_worktree_status_impl(
+    window_label: &str,
+    name: String,
+) -> Result<WorktreeArchiveStatus, String> {
+    let (workspace_path, config) =
+        get_window_workspace_config(window_label).ok_or("No workspace selected")?;
 
     let root = PathBuf::from(&workspace_path);
     let worktree_path = root.join(&config.worktrees_dir).join(&name);
@@ -380,7 +437,8 @@ pub fn check_worktree_status_impl(window_label: &str, name: String) -> Result<Wo
                 continue;
             }
 
-            let proj_name = proj_path.file_name()
+            let proj_name = proj_path
+                .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("")
                 .to_string();
@@ -403,18 +461,16 @@ pub fn check_worktree_status_impl(window_label: &str, name: String) -> Result<Wo
                     ));
                     status.can_archive = false;
                 } else {
-                    status.warnings.push(format!(
-                        "{}: 分支未推送到远端",
-                        proj_name
-                    ));
+                    status
+                        .warnings
+                        .push(format!("{}: 分支未推送到远端", proj_name));
                 }
             }
 
             if !branch_status.has_merge_request && branch_status.is_pushed {
-                status.warnings.push(format!(
-                    "{}: 请确认是否已创建 Merge Request",
-                    proj_name
-                ));
+                status
+                    .warnings
+                    .push(format!("{}: 请确认是否已创建 Merge Request", proj_name));
             }
 
             status.projects.push(branch_status);
@@ -425,13 +481,16 @@ pub fn check_worktree_status_impl(window_label: &str, name: String) -> Result<Wo
 }
 
 #[tauri::command]
-pub(crate) fn check_worktree_status(window: tauri::Window, name: String) -> Result<WorktreeArchiveStatus, String> {
+pub(crate) fn check_worktree_status(
+    window: tauri::Window,
+    name: String,
+) -> Result<WorktreeArchiveStatus, String> {
     check_worktree_status_impl(window.label(), name)
 }
 
 pub fn restore_worktree_impl(window_label: &str, name: String) -> Result<(), String> {
-    let (workspace_path, config) = get_window_workspace_config(window_label)
-        .ok_or("No workspace selected")?;
+    let (workspace_path, config) =
+        get_window_workspace_config(window_label).ok_or("No workspace selected")?;
 
     let root = PathBuf::from(&workspace_path);
     let archive_path = root.join(&config.worktrees_dir).join(&name);
@@ -447,7 +506,10 @@ pub fn restore_worktree_impl(window_label: &str, name: String) -> Result<(), Str
 
     // If target directory already exists, remove it first
     if worktree_path.exists() {
-        log::warn!("Target directory already exists, removing: {:?}", worktree_path);
+        log::warn!(
+            "Target directory already exists, removing: {:?}",
+            worktree_path
+        );
         fs::remove_dir_all(&worktree_path)
             .map_err(|e| format!("Failed to remove existing directory: {}", e))?;
     }
@@ -466,14 +528,18 @@ pub fn restore_worktree_impl(window_label: &str, name: String) -> Result<(), Str
                     continue;
                 }
 
-                let proj_name = proj_path.file_name()
+                let proj_name = proj_path
+                    .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("")
                     .to_string();
 
                 let main_proj_path = root.join("projects").join(&proj_name);
                 if !main_proj_path.exists() {
-                    log::warn!("Main project path does not exist for {}, skipping", proj_name);
+                    log::warn!(
+                        "Main project path does not exist for {}, skipping",
+                        proj_name
+                    );
                     continue;
                 }
 
@@ -484,7 +550,13 @@ pub fn restore_worktree_impl(window_label: &str, name: String) -> Result<(), Str
                 // Check if branch exists
                 let branch_name = restored_name;
                 let branch_check = Command::new("git")
-                    .args(["-C", main_proj_path.to_str().unwrap(), "branch", "--list", branch_name])
+                    .args([
+                        "-C",
+                        main_proj_path.to_str().unwrap(),
+                        "branch",
+                        "--list",
+                        branch_name,
+                    ])
                     .output();
 
                 let branch_exists = branch_check
@@ -505,29 +577,45 @@ pub fn restore_worktree_impl(window_label: &str, name: String) -> Result<(), Str
 
                 // Re-add worktree
                 let output = if branch_exists {
-                    log::info!("Re-adding worktree for {} with existing branch {}", proj_name, branch_name);
+                    log::info!(
+                        "Re-adding worktree for {} with existing branch {}",
+                        proj_name,
+                        branch_name
+                    );
                     Command::new("git")
                         .args([
-                            "-C", main_proj_path.to_str().unwrap(),
-                            "worktree", "add",
+                            "-C",
+                            main_proj_path.to_str().unwrap(),
+                            "worktree",
+                            "add",
                             wt_proj_path.to_str().unwrap(),
                             branch_name,
                         ])
                         .output()
                 } else {
                     // Find appropriate base branch from project config
-                    let base_branch = config.projects.iter()
+                    let base_branch = config
+                        .projects
+                        .iter()
                         .find(|p| p.name == proj_name)
                         .map(|p| p.base_branch.clone())
                         .unwrap_or_else(|| "uat".to_string());
 
-                    log::info!("Re-adding worktree for {} with new branch {} from origin/{}", proj_name, branch_name, base_branch);
+                    log::info!(
+                        "Re-adding worktree for {} with new branch {} from origin/{}",
+                        proj_name,
+                        branch_name,
+                        base_branch
+                    );
                     Command::new("git")
                         .args([
-                            "-C", main_proj_path.to_str().unwrap(),
-                            "worktree", "add",
+                            "-C",
+                            main_proj_path.to_str().unwrap(),
+                            "worktree",
+                            "add",
                             wt_proj_path.to_str().unwrap(),
-                            "-b", branch_name,
+                            "-b",
+                            branch_name,
                             &format!("origin/{}", base_branch),
                         ])
                         .output()
@@ -542,7 +630,11 @@ pub fn restore_worktree_impl(window_label: &str, name: String) -> Result<(), Str
                         log::error!("Failed to re-add worktree for {}: {}", proj_name, stderr);
                     }
                     Err(e) => {
-                        log::error!("Failed to execute git worktree add for {}: {}", proj_name, e);
+                        log::error!(
+                            "Failed to execute git worktree add for {}: {}",
+                            proj_name,
+                            e
+                        );
                     }
                 }
 
@@ -583,8 +675,8 @@ pub(crate) fn restore_worktree(window: tauri::Window, name: String) -> Result<()
 }
 
 pub fn delete_archived_worktree_impl(window_label: &str, name: String) -> Result<(), String> {
-    let (workspace_path, config) = get_window_workspace_config(window_label)
-        .ok_or("No workspace selected")?;
+    let (workspace_path, config) =
+        get_window_workspace_config(window_label).ok_or("No workspace selected")?;
 
     let root = PathBuf::from(&workspace_path);
     let archive_path = root.join(&config.worktrees_dir).join(&name);
@@ -599,7 +691,11 @@ pub fn delete_archived_worktree_impl(window_label: &str, name: String) -> Result
     }
 
     let branch_name = name.strip_suffix(".archive").unwrap_or(&name);
-    log::info!("Deleting archived worktree '{}' (branch: {})", name, branch_name);
+    log::info!(
+        "Deleting archived worktree '{}' (branch: {})",
+        name,
+        branch_name
+    );
 
     // Close any related PTY sessions
     {
@@ -624,15 +720,24 @@ pub fn delete_archived_worktree_impl(window_label: &str, name: String) -> Result
 
                 // Try to delete the branch (it may not exist in all projects)
                 let output = Command::new("git")
-                    .args(["-C", proj_path.to_str().unwrap(), "branch", "-D", branch_name])
+                    .args([
+                        "-C",
+                        proj_path.to_str().unwrap(),
+                        "branch",
+                        "-D",
+                        branch_name,
+                    ])
                     .output();
 
                 match output {
                     Ok(o) if o.status.success() => {
-                        let proj_name = proj_path.file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("");
-                        log::info!("Deleted branch '{}' from project '{}'", branch_name, proj_name);
+                        let proj_name =
+                            proj_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                        log::info!(
+                            "Deleted branch '{}' from project '{}'",
+                            branch_name,
+                            proj_name
+                        );
                     }
                     _ => {} // Branch might not exist in this project, that's fine
                 }
@@ -655,25 +760,39 @@ pub(crate) fn delete_archived_worktree(window: tauri::Window, name: String) -> R
 
 // ==================== 向已有 Worktree 添加项目 ====================
 
-pub fn add_project_to_worktree_impl(window_label: &str, request: AddProjectToWorktreeRequest) -> Result<(), String> {
-    let (workspace_path, config) = get_window_workspace_config(window_label)
-        .ok_or("No workspace selected")?;
+pub fn add_project_to_worktree_impl(
+    window_label: &str,
+    request: AddProjectToWorktreeRequest,
+) -> Result<(), String> {
+    let (workspace_path, config) =
+        get_window_workspace_config(window_label).ok_or("No workspace selected")?;
 
     let root = PathBuf::from(&workspace_path);
-    let worktree_path = root.join(&config.worktrees_dir).join(&request.worktree_name);
+    let worktree_path = root
+        .join(&config.worktrees_dir)
+        .join(&request.worktree_name);
 
     if !worktree_path.exists() {
-        return Err(format!("Worktree '{}' does not exist", request.worktree_name));
+        return Err(format!(
+            "Worktree '{}' does not exist",
+            request.worktree_name
+        ));
     }
 
     let main_proj_path = root.join("projects").join(&request.project_name);
     if !main_proj_path.exists() {
-        return Err(format!("Project '{}' does not exist in main workspace", request.project_name));
+        return Err(format!(
+            "Project '{}' does not exist in main workspace",
+            request.project_name
+        ));
     }
 
     let wt_proj_path = worktree_path.join("projects").join(&request.project_name);
     if wt_proj_path.exists() {
-        return Err(format!("Project '{}' already exists in worktree '{}'", request.project_name, request.worktree_name));
+        return Err(format!(
+            "Project '{}' already exists in worktree '{}'",
+            request.project_name, request.worktree_name
+        ));
     }
 
     // Ensure the projects directory exists in the worktree
@@ -683,7 +802,9 @@ pub fn add_project_to_worktree_impl(window_label: &str, request: AddProjectToWor
             .map_err(|e| format!("Failed to create projects directory: {}", e))?;
     }
 
-    let proj_config = config.projects.iter()
+    let proj_config = config
+        .projects
+        .iter()
         .find(|p| p.name == request.project_name)
         .cloned()
         .unwrap_or(ProjectConfig {
@@ -694,17 +815,24 @@ pub fn add_project_to_worktree_impl(window_label: &str, request: AddProjectToWor
             linked_folders: vec![],
         });
 
-    log::info!("Adding project '{}' to worktree '{}'", request.project_name, request.worktree_name);
+    log::info!(
+        "Adding project '{}' to worktree '{}'",
+        request.project_name,
+        request.worktree_name
+    );
 
     // Fetch origin first
-    run_git_command_with_timeout(
-        &["fetch", "origin"],
-        main_proj_path.to_str().unwrap(),
-    )?;
+    run_git_command_with_timeout(&["fetch", "origin"], main_proj_path.to_str().unwrap())?;
 
     // Check if branch already exists
     let branch_check = Command::new("git")
-        .args(["-C", main_proj_path.to_str().unwrap(), "branch", "--list", &request.worktree_name])
+        .args([
+            "-C",
+            main_proj_path.to_str().unwrap(),
+            "branch",
+            "--list",
+            &request.worktree_name,
+        ])
         .output();
 
     let branch_exists = branch_check
@@ -714,24 +842,38 @@ pub fn add_project_to_worktree_impl(window_label: &str, request: AddProjectToWor
 
     // Create worktree: use existing branch or create new one
     let output = if branch_exists {
-        log::info!("Branch '{}' already exists, using it for project {}", request.worktree_name, request.project_name);
+        log::info!(
+            "Branch '{}' already exists, using it for project {}",
+            request.worktree_name,
+            request.project_name
+        );
         Command::new("git")
             .args([
-                "-C", main_proj_path.to_str().unwrap(),
-                "worktree", "add",
+                "-C",
+                main_proj_path.to_str().unwrap(),
+                "worktree",
+                "add",
                 wt_proj_path.to_str().unwrap(),
                 &request.worktree_name,
             ])
             .output()
             .map_err(|e| format!("Failed to create worktree: {}", e))?
     } else {
-        log::info!("Creating new branch '{}' for project {} from origin/{}", request.worktree_name, request.project_name, request.base_branch);
+        log::info!(
+            "Creating new branch '{}' for project {} from origin/{}",
+            request.worktree_name,
+            request.project_name,
+            request.base_branch
+        );
         Command::new("git")
             .args([
-                "-C", main_proj_path.to_str().unwrap(),
-                "worktree", "add",
+                "-C",
+                main_proj_path.to_str().unwrap(),
+                "worktree",
+                "add",
                 wt_proj_path.to_str().unwrap(),
-                "-b", &request.worktree_name,
+                "-b",
+                &request.worktree_name,
                 &format!("origin/{}", request.base_branch),
             ])
             .output()
@@ -740,7 +882,10 @@ pub fn add_project_to_worktree_impl(window_label: &str, request: AddProjectToWor
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Failed to add project {} to worktree: {}", request.project_name, stderr));
+        return Err(format!(
+            "Failed to add project {} to worktree: {}",
+            request.project_name, stderr
+        ));
     }
 
     // Link configured folders
@@ -754,25 +899,41 @@ pub fn add_project_to_worktree_impl(window_label: &str, request: AddProjectToWor
 
             // Remove from git index if it's tracked
             Command::new("git")
-                .args(["-C", wt_proj_path.to_str().unwrap(), "rm", "--cached", "-r", folder_name])
+                .args([
+                    "-C",
+                    wt_proj_path.to_str().unwrap(),
+                    "rm",
+                    "--cached",
+                    "-r",
+                    folder_name,
+                ])
                 .output()
                 .ok();
         }
     }
 
-    log::info!("Successfully added project '{}' to worktree '{}'", request.project_name, request.worktree_name);
+    log::info!(
+        "Successfully added project '{}' to worktree '{}'",
+        request.project_name,
+        request.worktree_name
+    );
     Ok(())
 }
 
 #[tauri::command]
-pub(crate) fn add_project_to_worktree(window: tauri::Window, request: AddProjectToWorktreeRequest) -> Result<(), String> {
+pub(crate) fn add_project_to_worktree(
+    window: tauri::Window,
+    request: AddProjectToWorktreeRequest,
+) -> Result<(), String> {
     add_project_to_worktree_impl(window.label(), request)
 }
 
 // ==================== 智能扫描 ====================
 
 #[tauri::command]
-pub(crate) async fn scan_linked_folders(project_path: String) -> Result<Vec<ScannedFolder>, String> {
+pub(crate) async fn scan_linked_folders(
+    project_path: String,
+) -> Result<Vec<ScannedFolder>, String> {
     scan_linked_folders_sync(&project_path)
 }
 

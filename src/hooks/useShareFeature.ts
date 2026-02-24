@@ -10,6 +10,10 @@ import {
   setNgrokToken,
   startNgrokTunnel,
   stopNgrokTunnel,
+  getWmsConfig,
+  setWmsConfig,
+  startWmsTunnel,
+  stopWmsTunnel,
   getConnectedClients,
   kickClient,
 } from '../lib/backend';
@@ -19,19 +23,28 @@ export interface UseShareFeatureReturn {
   shareActive: boolean;
   shareUrls: string[];
   shareNgrokUrl: string | null;
+  shareWmsUrl: string | null;
   sharePassword: string;
   ngrokLoading: boolean;
+  wmsLoading: boolean;
   showNgrokTokenDialog: boolean;
   setShowNgrokTokenDialog: (show: boolean) => void;
   ngrokTokenInput: string;
   setNgrokTokenInput: (value: string) => void;
   savingNgrokToken: boolean;
+  showWmsConfigDialog: boolean;
+  setShowWmsConfigDialog: (show: boolean) => void;
+  wmsConfigInput: { token: string; subdomain: string };
+  setWmsConfigInput: (value: { token: string; subdomain: string }) => void;
+  savingWmsConfig: boolean;
   connectedClients: ConnectedClient[];
   handleStartShare: (port: number) => Promise<void>;
   handleStopShare: () => Promise<void>;
   handleToggleNgrok: () => Promise<void>;
+  handleToggleWms: () => Promise<void>;
   handleUpdateSharePassword: (newPassword: string) => Promise<void>;
   handleSaveNgrokToken: () => Promise<void>;
+  handleSaveWmsConfig: () => Promise<void>;
   handleKickClient: (sessionId: string) => Promise<void>;
   generatePassword: () => string;
 }
@@ -47,6 +60,11 @@ export function useShareFeature(
   const [showNgrokTokenDialog, setShowNgrokTokenDialog] = useState(false);
   const [ngrokTokenInput, setNgrokTokenInput] = useState('');
   const [savingNgrokToken, setSavingNgrokToken] = useState(false);
+  const [shareWmsUrl, setShareWmsUrl] = useState<string | null>(null);
+  const [wmsLoading, setWmsLoading] = useState(false);
+  const [showWmsConfigDialog, setShowWmsConfigDialog] = useState(false);
+  const [wmsConfigInput, setWmsConfigInput] = useState({ token: '', subdomain: '' });
+  const [savingWmsConfig, setSavingWmsConfig] = useState(false);
   const [connectedClients, setConnectedClients] = useState<ConnectedClient[]>([]);
 
   const generatePassword = useCallback(() => {
@@ -70,15 +88,24 @@ export function useShareFeature(
 
   const handleStopShare = useCallback(async () => {
     try {
+      // 如果有 ngrok 或 WMS 正在运行，先停止它们
+      if (shareNgrokUrl) {
+        await stopNgrokTunnel();
+      }
+      if (shareWmsUrl) {
+        await stopWmsTunnel();
+      }
+
       await stopSharing();
       setShareActive(false);
       setShareUrls([]);
       setShareNgrokUrl(null);
+      setShareWmsUrl(null);
       setConnectedClients([]);
     } catch (e) {
       setError(String(e));
     }
-  }, [setError]);
+  }, [setError, shareNgrokUrl, shareWmsUrl]);
 
   const handleToggleNgrok = useCallback(async () => {
     if (ngrokLoading) return;
@@ -141,6 +168,51 @@ export function useShareFeature(
     }
   }, [setError, ngrokTokenInput]);
 
+  const handleToggleWms = useCallback(async () => {
+    if (wmsLoading) return;
+    setWmsLoading(true);
+    try {
+      if (shareWmsUrl) {
+        await stopWmsTunnel();
+        setShareWmsUrl(null);
+      } else {
+        const cfg = await getWmsConfig();
+        if (!cfg.token || !cfg.subdomain) {
+          setWmsLoading(false);
+          setWmsConfigInput({
+            token: cfg.token || '',
+            subdomain: cfg.subdomain || '',
+          });
+          setShowWmsConfigDialog(true);
+          return;
+        }
+        const wmsUrl = await startWmsTunnel();
+        setShareWmsUrl(wmsUrl);
+      }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setWmsLoading(false);
+    }
+  }, [setError, shareWmsUrl, wmsLoading]);
+
+  const handleSaveWmsConfig = useCallback(async () => {
+    if (!wmsConfigInput.token.trim() || !wmsConfigInput.subdomain.trim()) return;
+    setSavingWmsConfig(true);
+    try {
+      await setWmsConfig('https://tunnel.kirov-opensource.com', wmsConfigInput.token.trim(), wmsConfigInput.subdomain.trim());
+      setShowWmsConfigDialog(false);
+      setWmsLoading(true);
+      const wmsUrl = await startWmsTunnel();
+      setShareWmsUrl(wmsUrl);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSavingWmsConfig(false);
+      setWmsLoading(false);
+    }
+  }, [setError, wmsConfigInput]);
+
   // Restore share state and load last password on mount (Tauri only)
   useEffect(() => {
     if (isTauri()) {
@@ -150,6 +222,9 @@ export function useShareFeature(
           setShareUrls(state.urls);
           if (state.ngrok_url) {
             setShareNgrokUrl(state.ngrok_url);
+          }
+          if (state.wms_url) {
+            setShareWmsUrl(state.wms_url);
           }
         }
       }).catch(() => {});
@@ -181,19 +256,28 @@ export function useShareFeature(
     shareActive,
     shareUrls,
     shareNgrokUrl,
+    shareWmsUrl,
     sharePassword,
     ngrokLoading,
+    wmsLoading,
     showNgrokTokenDialog,
     setShowNgrokTokenDialog,
     ngrokTokenInput,
     setNgrokTokenInput,
     savingNgrokToken,
+    showWmsConfigDialog,
+    setShowWmsConfigDialog,
+    wmsConfigInput,
+    setWmsConfigInput,
+    savingWmsConfig,
     connectedClients,
     handleStartShare,
     handleStopShare,
     handleToggleNgrok,
+    handleToggleWms,
     handleUpdateSharePassword,
     handleSaveNgrokToken,
+    handleSaveWmsConfig,
     handleKickClient,
     generatePassword,
   };

@@ -1,11 +1,8 @@
-use std::path::PathBuf;
 use std::fs;
+use std::path::PathBuf;
 
+use crate::state::{GLOBAL_CONFIG_CACHE, WINDOW_WORKSPACES, WORKSPACE_CONFIG_CACHE};
 use crate::types::{GlobalConfig, WorkspaceConfig};
-use crate::state::{
-    GLOBAL_CONFIG_CACHE, WORKSPACE_CONFIG_CACHE,
-    WINDOW_WORKSPACES,
-};
 
 // ==================== 配置路径 ====================
 
@@ -13,17 +10,27 @@ pub(crate) fn get_global_config_path() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
         if let Ok(appdata) = std::env::var("APPDATA") {
-            return PathBuf::from(appdata).join("worktree-manager").join("global.json");
+            return PathBuf::from(appdata)
+                .join("worktree-manager")
+                .join("global.json");
         }
         if let Ok(userprofile) = std::env::var("USERPROFILE") {
-            return PathBuf::from(userprofile).join(".config").join("worktree-manager").join("global.json");
+            return PathBuf::from(userprofile)
+                .join(".config")
+                .join("worktree-manager")
+                .join("global.json");
         }
-        PathBuf::from(".").join("worktree-manager").join("global.json")
+        PathBuf::from(".")
+            .join("worktree-manager")
+            .join("global.json")
     }
     #[cfg(not(target_os = "windows"))]
     {
         let home = std::env::var("HOME").unwrap_or_default();
-        PathBuf::from(home).join(".config").join("worktree-manager").join("global.json")
+        PathBuf::from(home)
+            .join(".config")
+            .join("worktree-manager")
+            .join("global.json")
     }
 }
 
@@ -44,15 +51,13 @@ pub fn load_global_config() -> GlobalConfig {
     let config_path = get_global_config_path();
     let config = if config_path.exists() {
         match fs::read_to_string(&config_path) {
-            Ok(content) => {
-                match serde_json::from_str::<GlobalConfig>(&content) {
-                    Ok(cfg) => cfg,
-                    Err(e) => {
-                        log::warn!("Failed to parse global config at {:?}: {}", config_path, e);
-                        GlobalConfig::default()
-                    }
+            Ok(content) => match serde_json::from_str::<GlobalConfig>(&content) {
+                Ok(cfg) => cfg,
+                Err(e) => {
+                    log::warn!("Failed to parse global config at {:?}: {}", config_path, e);
+                    GlobalConfig::default()
                 }
-            }
+            },
             Err(e) => {
                 log::warn!("Failed to read global config at {:?}: {}", config_path, e);
                 GlobalConfig::default()
@@ -83,8 +88,7 @@ pub fn save_global_config_internal(config: &GlobalConfig) -> Result<(), String> 
     let content = serde_json::to_string_pretty(config)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
 
-    fs::write(&config_path, content)
-        .map_err(|e| format!("Failed to write config file: {}", e))?;
+    fs::write(&config_path, content).map_err(|e| format!("Failed to write config file: {}", e))?;
 
     {
         let mut cache = GLOBAL_CONFIG_CACHE.lock().unwrap();
@@ -109,11 +113,23 @@ pub fn load_workspace_config(workspace_path: &str) -> WorkspaceConfig {
     let config_path = get_workspace_config_path(workspace_path);
     let config = if config_path.exists() {
         fs::read_to_string(&config_path)
-            .map_err(|e| log::warn!("Failed to read workspace config at {:?}: {}", config_path, e))
+            .map_err(|e| {
+                log::warn!(
+                    "Failed to read workspace config at {:?}: {}",
+                    config_path,
+                    e
+                )
+            })
             .ok()
             .and_then(|content| {
                 serde_json::from_str::<WorkspaceConfig>(&content)
-                    .map_err(|e| log::warn!("Failed to parse workspace config at {:?}: {}", config_path, e))
+                    .map_err(|e| {
+                        log::warn!(
+                            "Failed to parse workspace config at {:?}: {}",
+                            config_path,
+                            e
+                        )
+                    })
                     .ok()
             })
             .unwrap_or_default()
@@ -131,14 +147,16 @@ pub fn load_workspace_config(workspace_path: &str) -> WorkspaceConfig {
     config
 }
 
-pub fn save_workspace_config_internal(workspace_path: &str, config: &WorkspaceConfig) -> Result<(), String> {
+pub fn save_workspace_config_internal(
+    workspace_path: &str,
+    config: &WorkspaceConfig,
+) -> Result<(), String> {
     let config_path = get_workspace_config_path(workspace_path);
 
     let content = serde_json::to_string_pretty(config)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
 
-    fs::write(&config_path, content)
-        .map_err(|e| format!("Failed to write config file: {}", e))?;
+    fs::write(&config_path, content).map_err(|e| format!("Failed to write config file: {}", e))?;
 
     {
         let mut cache = WORKSPACE_CONFIG_CACHE.lock().unwrap();

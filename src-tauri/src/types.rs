@@ -12,6 +12,10 @@ pub struct ShareState {
     pub shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
     pub ngrok_url: Option<String>,
     pub ngrok_task: Option<tokio::task::JoinHandle<()>>,
+    pub wms_url: Option<String>,
+    pub wms_task: Option<tokio::task::JoinHandle<()>>,
+    /// Signal to gracefully shut down the WMS tunnel (sends WebSocket Close frame).
+    pub wms_shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
 }
 
 impl Default for ShareState {
@@ -24,6 +28,9 @@ impl Default for ShareState {
             shutdown_tx: None,
             ngrok_url: None,
             ngrok_task: None,
+            wms_url: None,
+            wms_task: None,
+            wms_shutdown_tx: None,
         }
     }
 }
@@ -51,6 +58,7 @@ pub struct ShareStateInfo {
     pub active: bool,
     pub urls: Vec<String>,
     pub ngrok_url: Option<String>,
+    pub wms_url: Option<String>,
     pub workspace_path: Option<String>,
 }
 
@@ -61,7 +69,9 @@ pub struct AuthRateLimiter {
 
 impl AuthRateLimiter {
     pub fn new() -> Self {
-        Self { attempts: HashMap::new() }
+        Self {
+            attempts: HashMap::new(),
+        }
     }
 
     /// Returns true if the request is allowed, false if rate-limited.
@@ -98,15 +108,21 @@ impl AuthRateLimiter {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct GlobalConfig {
     pub workspaces: Vec<WorkspaceRef>,
-    pub current_workspace: Option<String>,  // 当前选中的 workspace 路径
+    pub current_workspace: Option<String>, // 当前选中的 workspace 路径
     // TODO(security): ngrok_token is stored in plaintext in the config file.
     // Consider using the OS keychain (e.g., keytar/keyring crate) for sensitive credentials.
     #[serde(default)]
     pub ngrok_token: Option<String>,
     #[serde(default)]
-    pub last_share_port: Option<u16>,  // 上次使用的分享端口
+    pub last_share_port: Option<u16>, // 上次使用的分享端口
     #[serde(default)]
-    pub last_share_password: Option<String>,  // 上次使用的分享密码
+    pub last_share_password: Option<String>, // 上次使用的分享密码
+    #[serde(default)]
+    pub wms_server_url: Option<String>,
+    #[serde(default)]
+    pub wms_token: Option<String>,
+    #[serde(default)]
+    pub wms_subdomain: Option<String>,
     #[serde(default)]
     pub dashscope_api_key: Option<String>,
     #[serde(default)]
@@ -115,7 +131,9 @@ pub struct GlobalConfig {
     pub voice_refine_enabled: bool,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WorkspaceRef {
@@ -131,6 +149,9 @@ impl Default for GlobalConfig {
             ngrok_token: None,
             last_share_port: None,
             last_share_password: None,
+            wms_server_url: None,
+            wms_token: None,
+            wms_subdomain: None,
             dashscope_api_key: None,
             dashscope_base_url: None,
             voice_refine_enabled: true,
@@ -142,10 +163,10 @@ impl Default for GlobalConfig {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WorkspaceConfig {
     pub name: String,
-    pub worktrees_dir: String,  // 相对路径，如 "worktrees"
+    pub worktrees_dir: String, // 相对路径，如 "worktrees"
     pub projects: Vec<ProjectConfig>,
     #[serde(default = "default_linked_workspace_items")]
-    pub linked_workspace_items: Vec<String>,  // 要链接到每个 worktree 的全局文件/文件夹
+    pub linked_workspace_items: Vec<String>, // 要链接到每个 worktree 的全局文件/文件夹
 }
 
 pub fn default_linked_workspace_items() -> Vec<String> {
@@ -164,7 +185,7 @@ pub struct ProjectConfig {
     pub test_branch: String,
     pub merge_strategy: String,
     #[serde(default)]
-    pub linked_folders: Vec<String>,  // 要链接的文件夹列表
+    pub linked_folders: Vec<String>, // 要链接的文件夹列表
 }
 
 impl Default for WorkspaceConfig {
@@ -223,11 +244,11 @@ pub struct MainProjectStatus {
 
 #[derive(Debug, Serialize, Clone)]
 pub struct ScannedFolder {
-    pub relative_path: String,   // e.g. "packages/web/node_modules"
-    pub display_name: String,    // e.g. "node_modules"
+    pub relative_path: String, // e.g. "packages/web/node_modules"
+    pub display_name: String,  // e.g. "node_modules"
     pub size_bytes: u64,
-    pub size_display: String,    // e.g. "256.3 MB"
-    pub is_recommended: bool,    // 推荐预选
+    pub size_display: String, // e.g. "256.3 MB"
+    pub is_recommended: bool, // 推荐预选
 }
 
 // ==================== Worktree 操作数据结构 ====================
@@ -287,4 +308,3 @@ pub struct OpenEditorRequest {
     pub path: String,
     pub editor: String,
 }
-

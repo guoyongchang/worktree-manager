@@ -1,9 +1,9 @@
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
+use futures_util::{SinkExt, StreamExt};
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
 use tokio::sync::{mpsc, watch};
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD as BASE64;
-use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite::Message;
 
 use tauri::Emitter;
@@ -125,19 +125,26 @@ pub(crate) async fn voice_start_inner(sample_rate: Option<u32>) -> Result<(), St
     }
 
     let config = load_global_config();
-    let api_key = config.dashscope_api_key
+    let api_key = config
+        .dashscope_api_key
         .filter(|k| !k.is_empty())
         .ok_or_else(|| "请先在设置中配置 Dashscope API Key".to_string())?;
 
     let actual_sample_rate = sample_rate.unwrap_or(16000);
 
     // Build WebSocket request with auth header
-    let ws_url = config.dashscope_base_url
+    let ws_url = config
+        .dashscope_base_url
         .filter(|u| !u.is_empty())
         .unwrap_or_else(|| DEFAULT_DASHSCOPE_WS_URL.to_string());
     // Extract host from URL for the Host header
-    let ws_host = ws_url.replace("wss://", "").replace("ws://", "")
-        .split('/').next().unwrap_or("dashscope.aliyuncs.com").to_string();
+    let ws_host = ws_url
+        .replace("wss://", "")
+        .replace("ws://", "")
+        .split('/')
+        .next()
+        .unwrap_or("dashscope.aliyuncs.com")
+        .to_string();
 
     let request = tokio_tungstenite::tungstenite::http::Request::builder()
         .uri(&ws_url)
@@ -146,11 +153,15 @@ pub(crate) async fn voice_start_inner(sample_rate: Option<u32>) -> Result<(), St
         .header("Connection", "Upgrade")
         .header("Upgrade", "websocket")
         .header("Sec-WebSocket-Version", "13")
-        .header("Sec-WebSocket-Key", tokio_tungstenite::tungstenite::handshake::client::generate_key())
+        .header(
+            "Sec-WebSocket-Key",
+            tokio_tungstenite::tungstenite::handshake::client::generate_key(),
+        )
         .body(())
         .map_err(|e| format!("构建 WebSocket 请求失败: {}", e))?;
 
-    let (ws_stream, _) = tokio_tungstenite::connect_async(request).await
+    let (ws_stream, _) = tokio_tungstenite::connect_async(request)
+        .await
         .map_err(|e| format!("WebSocket 连接失败: {}", e))?;
 
     let (mut ws_write, mut ws_read) = ws_stream.split();
@@ -179,37 +190,37 @@ pub(crate) async fn voice_start_inner(sample_rate: Option<u32>) -> Result<(), St
         }
     });
 
-    ws_write.send(Message::Text(run_task.to_string().into()))
+    ws_write
+        .send(Message::Text(run_task.to_string().into()))
         .await
         .map_err(|e| format!("发送 run-task 失败: {}", e))?;
 
     // Wait for task-started event (服务端事件用 header.event)
-    tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        async {
-            while let Some(msg) = ws_read.next().await {
-                match msg {
-                    Ok(Message::Text(text)) => {
-                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-                            let event = get_event_name(&json);
-                            if event == "task-started" {
-                                return Ok(());
-                            }
-                            if event == "task-failed" {
-                                let err_msg = json["header"]["error_message"]
-                                    .as_str()
-                                    .unwrap_or("unknown error");
-                                return Err(format!("Dashscope 任务启动失败: {}", err_msg));
-                            }
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while let Some(msg) = ws_read.next().await {
+            match msg {
+                Ok(Message::Text(text)) => {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                        let event = get_event_name(&json);
+                        if event == "task-started" {
+                            return Ok(());
+                        }
+                        if event == "task-failed" {
+                            let err_msg = json["header"]["error_message"]
+                                .as_str()
+                                .unwrap_or("unknown error");
+                            return Err(format!("Dashscope 任务启动失败: {}", err_msg));
                         }
                     }
-                    Err(e) => return Err(format!("WebSocket 读取错误: {}", e)),
-                    _ => {}
                 }
+                Err(e) => return Err(format!("WebSocket 读取错误: {}", e)),
+                _ => {}
             }
-            Err("WebSocket 连接意外关闭".to_string())
         }
-    ).await.map_err(|_| "等待 Dashscope 响应超时".to_string())??;
+        Err("WebSocket 连接意外关闭".to_string())
+    })
+    .await
+    .map_err(|_| "等待 Dashscope 响应超时".to_string())??;
 
     // Create channels
     let (audio_tx, audio_rx) = mpsc::channel::<Vec<u8>>(64);
@@ -222,7 +233,9 @@ pub(crate) async fn voice_start_inner(sample_rate: Option<u32>) -> Result<(), St
     }
 
     // Spawn background task that owns ws_write, ws_read, and the channel receivers
-    tokio::spawn(voice_session_task(ws_write, ws_read, audio_rx, stop_rx, task_id));
+    tokio::spawn(voice_session_task(
+        ws_write, ws_read, audio_rx, stop_rx, task_id,
+    ));
 
     Ok(())
 }
@@ -236,14 +249,14 @@ pub(crate) async fn voice_start(sample_rate: Option<u32>) -> Result<(), String> 
 async fn voice_session_task(
     mut ws_write: futures_util::stream::SplitSink<
         tokio_tungstenite::WebSocketStream<
-            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
         >,
-        Message
+        Message,
     >,
     mut ws_read: futures_util::stream::SplitStream<
         tokio_tungstenite::WebSocketStream<
-            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>
-        >
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
     >,
     mut audio_rx: mpsc::Receiver<Vec<u8>>,
     mut stop_rx: watch::Receiver<bool>,
@@ -325,17 +338,18 @@ async fn voice_session_task(
 /// Process a single Dashscope event message.
 /// Returns the sentence text if a final (sentence_end) result was emitted, for dedup tracking.
 fn handle_dashscope_message(text: &str, last_final: &mut String) {
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(text) else { return };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(text) else {
+        return;
+    };
     let event = get_event_name(&json);
 
     match event {
         "result-generated" => {
             // sentence 结构: { text, sentence_end, begin_time, end_time, ... }
             if let Some(sentence) = json["payload"]["output"]["sentence"].as_object() {
-                let text = sentence.get("text")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let is_sentence_end = sentence.get("sentence_end")
+                let text = sentence.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                let is_sentence_end = sentence
+                    .get("sentence_end")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
                 if !text.is_empty() {
@@ -346,10 +360,13 @@ fn handle_dashscope_message(text: &str, last_final: &mut String) {
                     if is_sentence_end {
                         *last_final = text.to_string();
                     }
-                    emit_event("voice-result", serde_json::json!({
-                        "text": text,
-                        "is_final": is_sentence_end
-                    }));
+                    emit_event(
+                        "voice-result",
+                        serde_json::json!({
+                            "text": text,
+                            "is_final": is_sentence_end
+                        }),
+                    );
                 }
             }
         }
@@ -368,8 +385,8 @@ fn handle_dashscope_message(text: &str, last_final: &mut String) {
 async fn drain_final_results(
     ws_read: &mut futures_util::stream::SplitStream<
         tokio_tungstenite::WebSocketStream<
-            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>
-        >
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
     >,
     last_final: &mut String,
 ) {
@@ -395,12 +412,14 @@ async fn drain_final_results(
 }
 
 pub(crate) fn voice_send_audio_inner(data: String) -> Result<(), String> {
-    let pcm_bytes = BASE64.decode(&data)
+    let pcm_bytes = BASE64
+        .decode(&data)
         .map_err(|e| format!("Base64 解码失败: {}", e))?;
 
     let session = VOICE_SESSION.lock().map_err(|e| e.to_string())?;
     if let Some(ref s) = *session {
-        s.audio_tx.try_send(pcm_bytes)
+        s.audio_tx
+            .try_send(pcm_bytes)
             .map_err(|e| format!("发送音频数据失败: {}", e))?;
         Ok(())
     } else {
@@ -465,7 +484,8 @@ pub(crate) async fn voice_refine_text_inner(text: String) -> Result<String, Stri
     }
 
     let config = load_global_config();
-    let api_key = config.dashscope_api_key
+    let api_key = config
+        .dashscope_api_key
         .filter(|k| !k.is_empty())
         .ok_or_else(|| "Dashscope API Key 未配置".to_string())?;
 
@@ -500,7 +520,9 @@ pub(crate) async fn voice_refine_text_inner(text: String) -> Result<String, Stri
         return Err(format!("AI API 返回错误 {}: {}", status, text));
     }
 
-    let json: serde_json::Value = resp.json().await
+    let json: serde_json::Value = resp
+        .json()
+        .await
         .map_err(|e| format!("解析 AI 响应失败: {}", e))?;
 
     let refined = json["choices"][0]["message"]["content"]

@@ -1,5 +1,8 @@
 use axum::{
-    extract::{ConnectInfo, Json, Query, Request, ws::{Message, WebSocket, WebSocketUpgrade}},
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        ConnectInfo, Json, Query, Request,
+    },
     http::{header, HeaderMap, HeaderValue, Method, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
@@ -12,31 +15,52 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tauri::Emitter;
 use tokio::sync::Mutex as TokioMutex;
 use tower_http::cors::CorsLayer;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::services::{ServeDir, ServeFile};
-use tauri::Emitter;
 
 use crate::tls::TlsCerts;
 
 use crate::{
+    add_project_to_worktree_impl,
+    archive_worktree_impl,
+    check_worktree_status_impl,
+    clone_project_impl,
+    create_worktree_impl,
+    delete_archived_worktree_impl,
+    get_config_path_info_impl,
     // _impl functions (window-context commands)
-    get_current_workspace_impl, switch_workspace_impl,
-    set_window_workspace_impl, get_workspace_config_impl,
-    save_workspace_config_impl, get_config_path_info_impl,
-    list_worktrees_impl, get_main_workspace_status_impl,
-    create_worktree_impl, archive_worktree_impl,
-    check_worktree_status_impl, restore_worktree_impl,
-    delete_archived_worktree_impl, add_project_to_worktree_impl,
-    clone_project_impl, unregister_window_impl,
-    lock_worktree_impl, unlock_worktree_impl,
+    get_current_workspace_impl,
+    get_main_workspace_status_impl,
+    get_workspace_config_impl,
+    git_ops,
+    list_worktrees_impl,
+    load_workspace_config,
+    lock_worktree_impl,
+    normalize_path,
+    restore_worktree_impl,
+    save_workspace_config_impl,
+    set_window_workspace_impl,
+    switch_workspace_impl,
+    unlock_worktree_impl,
+    unregister_window_impl,
+    AddProjectToWorktreeRequest,
+    CloneProjectRequest,
+    ConnectedClient,
+    CreateWorktreeRequest,
+    OpenEditorRequest,
+    SwitchBranchRequest,
     // Direct functions (no window context)
-    WorkspaceConfig, CreateWorktreeRequest, AddProjectToWorktreeRequest,
-    SwitchBranchRequest, CloneProjectRequest, OpenEditorRequest,
-    PTY_MANAGER, SHARE_STATE, AUTHENTICATED_SESSIONS, CONNECTED_CLIENTS, LOCK_BROADCAST,
-    AUTH_RATE_LIMITER, TERMINAL_STATE_BROADCAST,
-    ConnectedClient, load_workspace_config, git_ops, normalize_path,
+    WorkspaceConfig,
+    AUTHENTICATED_SESSIONS,
+    AUTH_RATE_LIMITER,
+    CONNECTED_CLIENTS,
+    LOCK_BROADCAST,
+    PTY_MANAGER,
+    SHARE_STATE,
+    TERMINAL_STATE_BROADCAST,
 };
 
 // ---------------------------------------------------------------------------
@@ -145,7 +169,9 @@ async fn h_save_workspace_config(headers: HeaderMap, Json(args): Json<Value>) ->
     let sid = session_id(&headers);
     let config: WorkspaceConfig = match serde_json::from_value(args["config"].clone()) {
         Ok(c) => c,
-        Err(e) => return (StatusCode::BAD_REQUEST, format!("Invalid config: {}", e)).into_response(),
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, format!("Invalid config: {}", e)).into_response()
+        }
     };
     result_ok(save_workspace_config_impl(&sid, config))
 }
@@ -172,7 +198,9 @@ async fn h_create_worktree(headers: HeaderMap, Json(args): Json<Value>) -> Respo
     let sid = session_id(&headers);
     let request: CreateWorktreeRequest = match serde_json::from_value(args["request"].clone()) {
         Ok(r) => r,
-        Err(e) => return (StatusCode::BAD_REQUEST, format!("Invalid request: {}", e)).into_response(),
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, format!("Invalid request: {}", e)).into_response()
+        }
     };
     result_json(create_worktree_impl(&sid, request))
 }
@@ -203,9 +231,12 @@ async fn h_delete_archived_worktree(headers: HeaderMap, Json(args): Json<Value>)
 
 async fn h_add_project_to_worktree(headers: HeaderMap, Json(args): Json<Value>) -> Response {
     let sid = session_id(&headers);
-    let request: AddProjectToWorktreeRequest = match serde_json::from_value(args["request"].clone()) {
+    let request: AddProjectToWorktreeRequest = match serde_json::from_value(args["request"].clone())
+    {
         Ok(r) => r,
-        Err(e) => return (StatusCode::BAD_REQUEST, format!("Invalid request: {}", e)).into_response(),
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, format!("Invalid request: {}", e)).into_response()
+        }
     };
     result_ok(add_project_to_worktree_impl(&sid, request))
 }
@@ -214,7 +245,9 @@ async fn h_clone_project(headers: HeaderMap, Json(args): Json<Value>) -> Respons
     let sid = session_id(&headers);
     let request: CloneProjectRequest = match serde_json::from_value(args["request"].clone()) {
         Ok(r) => r,
-        Err(e) => return (StatusCode::BAD_REQUEST, format!("Invalid request: {}", e)).into_response(),
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, format!("Invalid request: {}", e)).into_response()
+        }
     };
     result_ok(clone_project_impl(&sid, request))
 }
@@ -224,7 +257,9 @@ async fn h_clone_project(headers: HeaderMap, Json(args): Json<Value>) -> Respons
 async fn h_switch_branch(Json(args): Json<Value>) -> Response {
     let request: SwitchBranchRequest = match serde_json::from_value(args["request"].clone()) {
         Ok(r) => r,
-        Err(e) => return (StatusCode::BAD_REQUEST, format!("Invalid request: {}", e)).into_response(),
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, format!("Invalid request: {}", e)).into_response()
+        }
     };
     result_ok(crate::switch_branch_internal(&request))
 }
@@ -241,7 +276,10 @@ async fn h_check_remote_branch_exists(Json(args): Json<Value>) -> Response {
     let path = args["path"].as_str().unwrap_or("").to_string();
     let branch_name = args["branchName"].as_str().unwrap_or("").to_string();
     let normalized = normalize_path(&path);
-    result_json(git_ops::check_remote_branch_exists(std::path::Path::new(&normalized), &branch_name))
+    result_json(git_ops::check_remote_branch_exists(
+        std::path::Path::new(&normalized),
+        &branch_name,
+    ))
 }
 
 async fn h_fetch_project_remote(Json(args): Json<Value>) -> Response {
@@ -314,7 +352,12 @@ async fn h_create_pull_request(Json(args): Json<Value>) -> Response {
     let body = args["body"].as_str().unwrap_or("").to_string();
     let normalized = normalize_path(&path);
     let result = tokio::task::spawn_blocking(move || {
-        git_ops::create_pull_request(std::path::Path::new(&normalized), &base_branch, &title, &body)
+        git_ops::create_pull_request(
+            std::path::Path::new(&normalized),
+            &base_branch,
+            &title,
+            &body,
+        )
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))
@@ -351,7 +394,9 @@ async fn h_open_in_terminal(Json(args): Json<Value>) -> Response {
 async fn h_open_in_editor(Json(args): Json<Value>) -> Response {
     let request: OpenEditorRequest = match serde_json::from_value(args["request"].clone()) {
         Ok(r) => r,
-        Err(e) => return (StatusCode::BAD_REQUEST, format!("Invalid request: {}", e)).into_response(),
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, format!("Invalid request: {}", e)).into_response()
+        }
     };
     result_ok(crate::open_in_editor_internal(&request))
 }
@@ -422,7 +467,9 @@ where
     F: FnOnce(&mut crate::pty_manager::PtyManager) -> Result<T, String> + Send + 'static,
 {
     tokio::task::spawn_blocking(move || {
-        let mut manager = PTY_MANAGER.lock().map_err(|e| format!("Lock error: {}", e))?;
+        let mut manager = PTY_MANAGER
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
         f(&mut manager)
     })
     .await
@@ -501,7 +548,11 @@ async fn localhost_only_middleware(
     if restricted_paths.contains(&path.as_str()) {
         let ip = addr.ip();
         if !ip.is_loopback() {
-            return (StatusCode::FORBIDDEN, "This operation is only available from localhost").into_response();
+            return (
+                StatusCode::FORBIDDEN,
+                "This operation is only available from localhost",
+            )
+                .into_response();
         }
     }
 
@@ -512,11 +563,23 @@ async fn localhost_only_middleware(
 async fn security_headers_middleware(request: Request, next: Next) -> Response {
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
-    headers.insert("x-content-type-options", HeaderValue::from_static("nosniff"));
+    headers.insert(
+        "x-content-type-options",
+        HeaderValue::from_static("nosniff"),
+    );
     headers.insert("x-frame-options", HeaderValue::from_static("DENY"));
-    headers.insert("x-xss-protection", HeaderValue::from_static("1; mode=block"));
-    headers.insert("referrer-policy", HeaderValue::from_static("strict-origin-when-cross-origin"));
-    headers.insert("permissions-policy", HeaderValue::from_static("camera=(), geolocation=()"));
+    headers.insert(
+        "x-xss-protection",
+        HeaderValue::from_static("1; mode=block"),
+    );
+    headers.insert(
+        "referrer-policy",
+        HeaderValue::from_static("strict-origin-when-cross-origin"),
+    );
+    headers.insert(
+        "permissions-policy",
+        HeaderValue::from_static("camera=(), geolocation=()"),
+    );
     response
 }
 
@@ -526,7 +589,12 @@ async fn auth_middleware(headers: HeaderMap, request: Request, next: Next) -> Re
     let path = request.uri().path().to_string();
 
     // Allow non-API paths (static files), exempt endpoints, and WebSocket
-    if !path.starts_with("/api/") || path == "/api/auth" || path == "/api/get_share_info" || path == "/api/cert.pem" || path == "/ws" {
+    if !path.starts_with("/api/")
+        || path == "/api/auth"
+        || path == "/api/get_share_info"
+        || path == "/api/cert.pem"
+        || path == "/ws"
+    {
         return next.run(request).await;
     }
 
@@ -573,7 +641,8 @@ async fn h_auth(
     let client_ip = addr.ip().to_string();
 
     // Rate limiting: max 5 attempts per 60 seconds per IP
-    let rate_ok = AUTH_RATE_LIMITER.lock()
+    let rate_ok = AUTH_RATE_LIMITER
+        .lock()
         .map(|mut limiter| limiter.check_and_record(&client_ip))
         .unwrap_or(false);
     if !rate_ok {
@@ -639,18 +708,23 @@ async fn h_auth(
         };
         // Remove old sessions from the same IP that don't have an active WebSocket
         let stale_sids: Vec<String> = if let Ok(mut clients) = CONNECTED_CLIENTS.lock() {
-            let stale: Vec<String> = clients.iter()
+            let stale: Vec<String> = clients
+                .iter()
                 .filter(|(_, c)| c.ip == client_ip && !c.ws_connected)
                 .map(|(s, _)| s.clone())
                 .collect();
-            for s in &stale { clients.remove(s); }
+            for s in &stale {
+                clients.remove(s);
+            }
             clients.insert(sid.clone(), client);
             stale
         } else {
             vec![]
         };
         if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() {
-            for s in &stale_sids { sessions.remove(s); }
+            for s in &stale_sids {
+                sessions.remove(s);
+            }
             sessions.insert(sid.clone());
         }
         Json(json!({ "sessionId": sid })).into_response()
@@ -699,7 +773,8 @@ async fn h_stop_ngrok_tunnel() -> Response {
 // -- Share info --
 
 async fn h_get_share_info() -> Response {
-    let null_response = || Json(json!({ "workspace_name": null, "workspace_path": null })).into_response();
+    let null_response =
+        || Json(json!({ "workspace_name": null, "workspace_path": null })).into_response();
 
     let share_state = match SHARE_STATE.lock() {
         Ok(s) if s.active => s,
@@ -717,7 +792,8 @@ async fn h_get_share_info() -> Response {
     Json(json!({
         "workspace_name": ws_name,
         "workspace_path": ws_path
-    })).into_response()
+    }))
+    .into_response()
 }
 
 // -- Misc --
@@ -851,7 +927,11 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                 };
 
                 if let Some((replay, mut rx)) = subscription {
-                    log::info!("PTY subscribe '{}': replay buffer {} bytes", pty_session_id, replay.len());
+                    log::info!(
+                        "PTY subscribe '{}': replay buffer {} bytes",
+                        pty_session_id,
+                        replay.len()
+                    );
                     let sender = Arc::clone(&ws_sender);
                     let sid = pty_session_id.clone();
                     let handle = tokio::spawn(async move {
@@ -897,7 +977,10 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                     });
                     pty_forwarders.insert(pty_session_id, handle);
                 } else {
-                    log::warn!("PTY subscribe '{}': session not found in PTY manager", pty_session_id);
+                    log::warn!(
+                        "PTY subscribe '{}': session not found in PTY manager",
+                        pty_session_id
+                    );
                 }
             }
 
@@ -923,7 +1006,8 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                         .lock()
                         .map_err(|e| format!("Lock error: {}", e))
                         .and_then(|m| m.write_to_session(&pty_session_id, &data))
-                }).await;
+                })
+                .await;
             }
 
             "subscribe_locks" => {
@@ -945,10 +1029,13 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                         .filter(|((wp, _), _)| *wp == workspace_path)
                         .map(|((_, wt), label)| (wt.clone(), label.clone()))
                         .collect();
-                    Some(json!({
-                        "type": "lock_update",
-                        "locks": lock_snapshot,
-                    }).to_string())
+                    Some(
+                        json!({
+                            "type": "lock_update",
+                            "locks": lock_snapshot,
+                        })
+                        .to_string(),
+                    )
                 } else {
                     None
                 };
@@ -974,7 +1061,11 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                                             "locks": locks,
                                         });
                                         let mut sender = sender.lock().await;
-                                        if sender.send(Message::text(msg.to_string())).await.is_err() {
+                                        if sender
+                                            .send(Message::text(msg.to_string()))
+                                            .await
+                                            .is_err()
+                                        {
                                             break;
                                         }
                                     }
@@ -1004,13 +1095,10 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                 }
 
                 // Send initial terminal state from cache
-                let initial_state = crate::TERMINAL_STATES
-                    .lock()
-                    .ok()
-                    .and_then(|states| {
-                        let key = (workspace_path.clone(), worktree_name.clone());
-                        states.get(&key).cloned()
-                    });
+                let initial_state = crate::TERMINAL_STATES.lock().ok().and_then(|states| {
+                    let key = (workspace_path.clone(), worktree_name.clone());
+                    states.get(&key).cloned()
+                });
 
                 if let Some(state) = initial_state {
                     let msg = json!({
@@ -1038,7 +1126,8 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                                 // Parse the broadcast to check if it's for our workspace/worktree
                                 if let Ok(val) = serde_json::from_str::<Value>(&json_str) {
                                     if val["workspacePath"].as_str() == Some(&ws_path)
-                                        && val["worktreeName"].as_str() == Some(&wt_name) {
+                                        && val["worktreeName"].as_str() == Some(&wt_name)
+                                    {
                                         let msg = json!({
                                             "type": "terminal_state_update",
                                             "workspacePath": &ws_path,
@@ -1049,7 +1138,11 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                                             "clientId": val["clientId"],
                                         });
                                         let mut sender = sender.lock().await;
-                                        if sender.send(Message::text(msg.to_string())).await.is_err() {
+                                        if sender
+                                            .send(Message::text(msg.to_string()))
+                                            .await
+                                            .is_err()
+                                        {
                                             break;
                                         }
                                     }
@@ -1077,22 +1170,31 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                     Some(s) => s.to_string(),
                     None => continue,
                 };
-                let activated_terminals = parsed["activatedTerminals"].as_array().map(|arr| {
-                    arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect::<Vec<_>>()
-                }).unwrap_or_default();
-                let active_terminal_tab = parsed["activeTerminalTab"].as_str().map(|s| s.to_string());
+                let activated_terminals = parsed["activatedTerminals"]
+                    .as_array()
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                let active_terminal_tab =
+                    parsed["activeTerminalTab"].as_str().map(|s| s.to_string());
                 let terminal_visible = parsed["terminalVisible"].as_bool().unwrap_or(false);
                 let client_id = parsed["clientId"].as_str().map(|s| s.to_string());
 
                 // Update cache with client_id
                 if let Ok(mut states) = crate::TERMINAL_STATES.lock() {
                     let key = (workspace_path.clone(), worktree_name.clone());
-                    states.insert(key, crate::TerminalState {
-                        activated_terminals: activated_terminals.clone(),
-                        active_terminal_tab: active_terminal_tab.clone(),
-                        terminal_visible,
-                        client_id: client_id.clone(),
-                    });
+                    states.insert(
+                        key,
+                        crate::TerminalState {
+                            activated_terminals: activated_terminals.clone(),
+                            active_terminal_tab: active_terminal_tab.clone(),
+                            terminal_visible,
+                            client_id: client_id.clone(),
+                        },
+                    );
                 }
 
                 // Broadcast to all connected clients with clientId
@@ -1103,19 +1205,27 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                     "activeTerminalTab": active_terminal_tab,
                     "terminalVisible": terminal_visible,
                     "clientId": client_id,
-                }).to_string();
+                })
+                .to_string();
                 let _ = TERMINAL_STATE_BROADCAST.send(broadcast_msg);
 
                 // Also emit Tauri event for PC端 to receive Web端 changes
-                if let Some(app_handle) = crate::APP_HANDLE.lock().ok().and_then(|h| h.as_ref().cloned()) {
-                    let _ = app_handle.emit("terminal-state-update", json!({
-                        "workspacePath": workspace_path,
-                        "worktreeName": worktree_name,
-                        "activatedTerminals": activated_terminals,
-                        "activeTerminalTab": active_terminal_tab,
-                        "terminalVisible": terminal_visible,
-                        "clientId": client_id,
-                    }));
+                if let Some(app_handle) = crate::APP_HANDLE
+                    .lock()
+                    .ok()
+                    .and_then(|h| h.as_ref().cloned())
+                {
+                    let _ = app_handle.emit(
+                        "terminal-state-update",
+                        json!({
+                            "workspacePath": workspace_path,
+                            "worktreeName": worktree_name,
+                            "activatedTerminals": activated_terminals,
+                            "activeTerminalTab": active_terminal_tab,
+                            "terminalVisible": terminal_visible,
+                            "clientId": client_id,
+                        }),
+                    );
                 }
             }
 
@@ -1229,7 +1339,9 @@ async fn h_get_voice_refine_enabled() -> Response {
 
 async fn h_set_voice_refine_enabled(Json(args): Json<Value>) -> Response {
     let enabled = args["enabled"].as_bool().unwrap_or(true);
-    result_ok(crate::commands::voice::set_voice_refine_enabled_inner(enabled))
+    result_ok(crate::commands::voice::set_voice_refine_enabled_inner(
+        enabled,
+    ))
 }
 
 // -- Connected clients --
@@ -1254,10 +1366,16 @@ async fn h_kick_client(Json(args): Json<Value>) -> Response {
 async fn h_cert_pem(Extension(cert_pem): Extension<Arc<String>>) -> Response {
     (
         StatusCode::OK,
-        [(header::CONTENT_TYPE, "application/x-pem-file"),
-         (header::CONTENT_DISPOSITION, "attachment; filename=\"worktree-manager.pem\"")],
+        [
+            (header::CONTENT_TYPE, "application/x-pem-file"),
+            (
+                header::CONTENT_DISPOSITION,
+                "attachment; filename=\"worktree-manager.pem\"",
+            ),
+        ],
         cert_pem.as_str().to_string(),
-    ).into_response()
+    )
+        .into_response()
 }
 
 // ---------------------------------------------------------------------------
@@ -1277,11 +1395,18 @@ fn is_allowed_origin(origin: &str) -> bool {
         return true;
     }
     // Allow LAN IPs (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
-    if let Some(host) = origin.split("//").nth(1).map(|s| s.split(':').next().unwrap_or(s)) {
+    if let Some(host) = origin
+        .split("//")
+        .nth(1)
+        .map(|s| s.split(':').next().unwrap_or(s))
+    {
         if host.starts_with("192.168.")
             || host.starts_with("10.")
             || (host.starts_with("172.") && {
-                host.split('.').nth(1).and_then(|s| s.parse::<u8>().ok()).map_or(false, |n| (16..=31).contains(&n))
+                host.split('.')
+                    .nth(1)
+                    .and_then(|s| s.parse::<u8>().ok())
+                    .map_or(false, |n| (16..=31).contains(&n))
             })
         {
             return true;
@@ -1300,9 +1425,9 @@ fn is_allowed_origin(origin: &str) -> bool {
 
 pub fn create_router(cert_pem: Option<String>) -> Router {
     let cors = CorsLayer::new()
-        .allow_origin(tower_http::cors::AllowOrigin::predicate(|origin: &HeaderValue, _| {
-            origin.to_str().map_or(false, is_allowed_origin)
-        }))
+        .allow_origin(tower_http::cors::AllowOrigin::predicate(
+            |origin: &HeaderValue, _| origin.to_str().map_or(false, is_allowed_origin),
+        ))
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
         .allow_headers([
             header::CONTENT_TYPE,
@@ -1366,18 +1491,30 @@ pub fn create_router(cert_pem: Option<String>) -> Router {
         .route("/api/get_config_path_info", post(h_get_config_path_info))
         // Worktree operations
         .route("/api/list_worktrees", post(h_list_worktrees))
-        .route("/api/get_main_workspace_status", post(h_get_main_workspace_status))
+        .route(
+            "/api/get_main_workspace_status",
+            post(h_get_main_workspace_status),
+        )
         .route("/api/create_worktree", post(h_create_worktree))
         .route("/api/archive_worktree", post(h_archive_worktree))
         .route("/api/check_worktree_status", post(h_check_worktree_status))
         .route("/api/restore_worktree", post(h_restore_worktree))
-        .route("/api/delete_archived_worktree", post(h_delete_archived_worktree))
-        .route("/api/add_project_to_worktree", post(h_add_project_to_worktree))
+        .route(
+            "/api/delete_archived_worktree",
+            post(h_delete_archived_worktree),
+        )
+        .route(
+            "/api/add_project_to_worktree",
+            post(h_add_project_to_worktree),
+        )
         // Git operations
         .route("/api/switch_branch", post(h_switch_branch))
         .route("/api/clone_project", post(h_clone_project))
         .route("/api/get_branch_diff_stats", post(h_get_branch_diff_stats))
-        .route("/api/check_remote_branch_exists", post(h_check_remote_branch_exists))
+        .route(
+            "/api/check_remote_branch_exists",
+            post(h_check_remote_branch_exists),
+        )
         .route("/api/fetch_project_remote", post(h_fetch_project_remote))
         .route("/api/sync_with_base_branch", post(h_sync_with_base_branch))
         .route("/api/push_to_remote", post(h_push_to_remote))
@@ -1428,10 +1565,22 @@ pub fn create_router(cert_pem: Option<String>) -> Router {
         .route("/api/voice_refine_text", post(h_voice_refine_text))
         .route("/api/get_dashscope_api_key", post(h_get_dashscope_api_key))
         .route("/api/set_dashscope_api_key", post(h_set_dashscope_api_key))
-        .route("/api/get_dashscope_base_url", post(h_get_dashscope_base_url))
-        .route("/api/set_dashscope_base_url", post(h_set_dashscope_base_url))
-        .route("/api/get_voice_refine_enabled", post(h_get_voice_refine_enabled))
-        .route("/api/set_voice_refine_enabled", post(h_set_voice_refine_enabled))
+        .route(
+            "/api/get_dashscope_base_url",
+            post(h_get_dashscope_base_url),
+        )
+        .route(
+            "/api/set_dashscope_base_url",
+            post(h_set_dashscope_base_url),
+        )
+        .route(
+            "/api/get_voice_refine_enabled",
+            post(h_get_voice_refine_enabled),
+        )
+        .route(
+            "/api/set_voice_refine_enabled",
+            post(h_set_voice_refine_enabled),
+        )
         // Misc
         .route("/api/get_app_version", post(h_get_app_version))
         // WebSocket (auth handled in upgrade handler via query param)
@@ -1439,7 +1588,8 @@ pub fn create_router(cert_pem: Option<String>) -> Router {
 
     // Add cert download route when TLS is enabled
     if let Some(pem) = cert_pem {
-        router = router.route("/api/cert.pem", get(h_cert_pem))
+        router = router
+            .route("/api/cert.pem", get(h_cert_pem))
             .layer(Extension(Arc::new(pem)));
     }
 

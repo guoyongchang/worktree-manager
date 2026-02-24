@@ -1,7 +1,7 @@
 use git2::{Repository, StatusOptions};
+use serde::Serialize;
 use std::path::Path;
 use std::process::Command;
-use serde::Serialize;
 
 #[derive(Debug, Serialize, Clone)]
 pub struct WorktreeInfo {
@@ -53,8 +53,7 @@ pub fn get_worktree_info(path: &Path) -> WorktreeInfo {
 
     // Get uncommitted changes count
     let mut opts = StatusOptions::new();
-    opts.include_untracked(true)
-        .recurse_untracked_dirs(false);
+    opts.include_untracked(true).recurse_untracked_dirs(false);
 
     if let Ok(statuses) = repo.statuses(Some(&mut opts)) {
         info.uncommitted_count = statuses.len();
@@ -65,12 +64,13 @@ pub fn get_worktree_info(path: &Path) -> WorktreeInfo {
     let test_branch = get_test_branch_for_path(path);
     if let Ok(test_ref) = repo.find_reference(&format!("refs/remotes/origin/{}", test_branch)) {
         if let Ok(head) = repo.head() {
-            if let (Ok(test_commit), Ok(head_commit)) = (
-                test_ref.peel_to_commit(),
-                head.peel_to_commit(),
-            ) {
+            if let (Ok(test_commit), Ok(head_commit)) =
+                (test_ref.peel_to_commit(), head.peel_to_commit())
+            {
                 // Check if head commit is ancestor of test branch
-                if let Ok(is_ancestor) = repo.graph_descendant_of(test_commit.id(), head_commit.id()) {
+                if let Ok(is_ancestor) =
+                    repo.graph_descendant_of(test_commit.id(), head_commit.id())
+                {
                     info.is_merged_to_test = is_ancestor;
                 }
             }
@@ -81,10 +81,9 @@ pub fn get_worktree_info(path: &Path) -> WorktreeInfo {
     let base_branch = get_base_branch_for_path(path);
     if let Ok(base_ref) = repo.find_reference(&format!("refs/remotes/origin/{}", base_branch)) {
         if let Ok(head) = repo.head() {
-            if let (Ok(base_oid), Ok(head_oid)) = (
-                base_ref.target().ok_or(()),
-                head.target().ok_or(()),
-            ) {
+            if let (Ok(base_oid), Ok(head_oid)) =
+                (base_ref.target().ok_or(()), head.target().ok_or(()))
+            {
                 if let Ok((ahead, behind)) = repo.graph_ahead_behind(head_oid, base_oid) {
                     info.ahead_of_base = ahead;
                     info.behind_base = behind;
@@ -202,7 +201,8 @@ pub fn get_branch_status(path: &Path, project_name: &str) -> BranchStatus {
 
     // Alternative: if branch is pushed and remote branch exists, assume MR might exist
     // (This is a heuristic since we can't query GitLab/GitHub API directly without auth)
-    if status.is_pushed && !status.branch_name.starts_with("uat")
+    if status.is_pushed
+        && !status.branch_name.starts_with("uat")
         && !status.branch_name.starts_with("master")
         && !status.branch_name.starts_with("test")
         && !status.branch_name.starts_with("staging")
@@ -279,7 +279,9 @@ pub fn push_to_remote(path: &Path) -> Result<String, String> {
         return Err("Failed to get current branch".to_string());
     }
 
-    let current_branch = String::from_utf8_lossy(&branch_output.stdout).trim().to_string();
+    let current_branch = String::from_utf8_lossy(&branch_output.stdout)
+        .trim()
+        .to_string();
 
     // Push to remote
     let push_output = Command::new("git")
@@ -304,13 +306,14 @@ pub fn push_to_remote(path: &Path) -> Result<String, String> {
 
 /// Merge current branch to test branch
 pub fn merge_to_test_branch(path: &Path, test_branch: &str) -> Result<String, String> {
-    let repo = Repository::open(path)
-        .map_err(|e| format!("Failed to open repository: {}", e))?;
+    let repo = Repository::open(path).map_err(|e| format!("Failed to open repository: {}", e))?;
 
     // Get current branch name
-    let head = repo.head()
+    let head = repo
+        .head()
         .map_err(|e| format!("Failed to get HEAD: {}", e))?;
-    let current_branch = head.shorthand()
+    let current_branch = head
+        .shorthand()
         .ok_or_else(|| "Failed to get current branch name".to_string())?;
 
     // Checkout test branch
@@ -403,18 +406,22 @@ pub fn merge_to_test_branch(path: &Path, test_branch: &str) -> Result<String, St
         ));
     }
 
-    Ok(format!("Successfully merged {} into {}", current_branch, test_branch))
+    Ok(format!(
+        "Successfully merged {} into {}",
+        current_branch, test_branch
+    ))
 }
 
 /// Merge current branch to base branch
 pub fn merge_to_base_branch(path: &Path, base_branch: &str) -> Result<String, String> {
-    let repo = Repository::open(path)
-        .map_err(|e| format!("Failed to open repository: {}", e))?;
+    let repo = Repository::open(path).map_err(|e| format!("Failed to open repository: {}", e))?;
 
     // Get current branch name
-    let head = repo.head()
+    let head = repo
+        .head()
         .map_err(|e| format!("Failed to get HEAD: {}", e))?;
-    let current_branch = head.shorthand()
+    let current_branch = head
+        .shorthand()
         .ok_or_else(|| "Failed to get current branch name".to_string())?;
 
     // Checkout base branch
@@ -507,14 +514,23 @@ pub fn merge_to_base_branch(path: &Path, base_branch: &str) -> Result<String, St
         ));
     }
 
-    Ok(format!("Successfully merged {} into {}", current_branch, base_branch))
+    Ok(format!(
+        "Successfully merged {} into {}",
+        current_branch, base_branch
+    ))
 }
 
 /// Get branch diff statistics
 pub fn get_branch_diff_stats(path: &Path, base_branch: &str) -> BranchDiffStats {
     let repo = match Repository::open(path) {
         Ok(r) => r,
-        Err(_) => return BranchDiffStats { ahead: 0, behind: 0, changed_files: 0 },
+        Err(_) => {
+            return BranchDiffStats {
+                ahead: 0,
+                behind: 0,
+                changed_files: 0,
+            }
+        }
     };
 
     let mut stats = BranchDiffStats {
@@ -526,10 +542,9 @@ pub fn get_branch_diff_stats(path: &Path, base_branch: &str) -> BranchDiffStats 
     // Get ahead/behind count
     if let Ok(base_ref) = repo.find_reference(&format!("refs/remotes/origin/{}", base_branch)) {
         if let Ok(head) = repo.head() {
-            if let (Ok(base_oid), Ok(head_oid)) = (
-                base_ref.target().ok_or(()),
-                head.target().ok_or(()),
-            ) {
+            if let (Ok(base_oid), Ok(head_oid)) =
+                (base_ref.target().ok_or(()), head.target().ok_or(()))
+            {
                 if let Ok((ahead, behind)) = repo.graph_ahead_behind(head_oid, base_oid) {
                     stats.ahead = ahead;
                     stats.behind = behind;
@@ -540,8 +555,7 @@ pub fn get_branch_diff_stats(path: &Path, base_branch: &str) -> BranchDiffStats 
 
     // Get changed files count
     let mut opts = StatusOptions::new();
-    opts.include_untracked(true)
-        .recurse_untracked_dirs(false);
+    opts.include_untracked(true).recurse_untracked_dirs(false);
 
     if let Ok(statuses) = repo.statuses(Some(&mut opts)) {
         stats.changed_files = statuses.len();
@@ -602,10 +616,10 @@ pub fn create_pull_request(
     match platform {
         GitPlatform::GitHub => {
             // Check if gh CLI is available
-            let gh_check = Command::new("gh")
-                .arg("--version")
-                .output()
-                .map_err(|_| "gh CLI is not installed. Please install it from https://cli.github.com/".to_string())?;
+            let gh_check = Command::new("gh").arg("--version").output().map_err(|_| {
+                "gh CLI is not installed. Please install it from https://cli.github.com/"
+                    .to_string()
+            })?;
 
             if !gh_check.status.success() {
                 return Err("gh CLI is not available".to_string());
@@ -632,7 +646,9 @@ pub fn create_pull_request(
                 ));
             }
 
-            let pr_url = String::from_utf8_lossy(&pr_output.stdout).trim().to_string();
+            let pr_url = String::from_utf8_lossy(&pr_output.stdout)
+                .trim()
+                .to_string();
             Ok(pr_url)
         }
         GitPlatform::GitLab => {
@@ -650,7 +666,9 @@ pub fn create_pull_request(
                 return Err("Failed to get current branch".to_string());
             }
 
-            let current_branch = String::from_utf8_lossy(&branch_output.stdout).trim().to_string();
+            let current_branch = String::from_utf8_lossy(&branch_output.stdout)
+                .trim()
+                .to_string();
 
             // Push with merge request creation options
             // GitLab supports creating MR via git push options
@@ -696,7 +714,10 @@ pub fn create_pull_request(
             }
 
             // If we can't find the URL, return a success message
-            Ok(format!("MR created successfully for branch {} -> {}", current_branch, base_branch))
+            Ok(format!(
+                "MR created successfully for branch {} -> {}",
+                current_branch, base_branch
+            ))
         }
         GitPlatform::Unknown => {
             Err("Unknown git platform. Only GitHub and GitLab are supported.".to_string())

@@ -820,6 +820,9 @@ function App() {
           onUpdateSharePassword={share.handleUpdateSharePassword}
           ngrokLoading={share.ngrokLoading}
           onToggleNgrok={share.handleToggleNgrok}
+          shareWmsUrl={share.shareWmsUrl}
+          wmsLoading={share.wmsLoading}
+          onToggleWms={share.handleToggleWms}
           connectedClients={share.connectedClients}
           onKickClient={share.handleKickClient}
         />
@@ -1090,6 +1093,49 @@ function App() {
             </Button>
             <Button onClick={share.handleSaveNgrokToken} disabled={share.savingNgrokToken || !share.ngrokTokenInput.trim()}>
               {share.savingNgrokToken ? t('app.savingToken') : t('app.saveAndStart')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* WMS Config Dialog */}
+      <Dialog open={share.showWmsConfigDialog} onOpenChange={share.setShowWmsConfigDialog}>
+        <DialogContent className="max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>{t('app.wmsConfigTitle', '配置 WMS 隧道')}</DialogTitle>
+            <DialogDescription>
+              {t('app.wmsConfigDesc', '请配置 WMS 隧道服务器信息。Token 从管理后台注册账号后获取。')}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4 space-y-3">
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">Token</label>
+              <Input
+                type="password"
+                placeholder={t('app.wmsTokenPlaceholder', '从 WMS 管理后台获取')}
+                value={share.wmsConfigInput.token}
+                onChange={(e) => share.setWmsConfigInput({ ...share.wmsConfigInput, token: e.target.value })}
+                className="text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">Subdomain</label>
+              <Input
+                type="text"
+                placeholder="my-workspace"
+                value={share.wmsConfigInput.subdomain}
+                onChange={(e) => share.setWmsConfigInput({ ...share.wmsConfigInput, subdomain: e.target.value })}
+                onKeyDown={(e) => { if (e.key === 'Enter') share.handleSaveWmsConfig(); }}
+                className="text-sm"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => share.setShowWmsConfigDialog(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button onClick={share.handleSaveWmsConfig} disabled={share.savingWmsConfig || !share.wmsConfigInput.token.trim() || !share.wmsConfigInput.subdomain.trim()}>
+              {share.savingWmsConfig ? t('app.savingToken', '保存中...') : t('app.saveAndStart', '保存并启动')}
             </Button>
           </DialogFooter>
         </DialogContent>

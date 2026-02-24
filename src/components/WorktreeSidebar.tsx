@@ -58,15 +58,18 @@ const ShareBar: FC<{
   active: boolean;
   urls: string[];
   ngrokUrl: string | null;
+  wmsUrl: string | null;
   password: string;
   ngrokLoading: boolean;
+  wmsLoading: boolean;
   connectedClients?: ConnectedClient[];
   onToggleNgrok?: () => void;
+  onToggleWms?: () => void;
   onStart?: (port: number) => void;
   onStop?: () => void;
   onUpdatePassword?: (password: string) => void;
   onKickClient?: (sessionId: string) => void;
-}> = ({ active, urls, ngrokUrl, password, ngrokLoading, connectedClients = [], onToggleNgrok, onStart, onStop, onUpdatePassword, onKickClient }) => {
+}> = ({ active, urls, ngrokUrl, wmsUrl, password, ngrokLoading, wmsLoading, connectedClients = [], onToggleNgrok, onToggleWms, onStart, onStop, onUpdatePassword, onKickClient }) => {
   const { t } = useTranslation();
   const [showPassword, setShowPassword] = useState(false);
   const [editingPassword, setEditingPassword] = useState('');
@@ -256,6 +259,46 @@ const ShareBar: FC<{
           }`} />
         </button>
       </div>
+      {/* WMS row */}
+      <div className="flex items-center gap-1.5">
+        <span className="text-[11px] font-medium text-slate-500 shrink-0">WMS:</span>
+        {wmsUrl ? (
+          <>
+            <span className="flex-1 text-xs text-purple-400 truncate min-w-0 select-all" title={wmsUrl}>
+              {wmsUrl.replace(/^https?:\/\//, '')}
+            </span>
+            <TooltipProvider delayDuration={300}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => navigator.clipboard.writeText(wmsUrl)}
+                    className="h-6 w-6 shrink-0"
+                  >
+                    <CopyIcon className="w-3 h-3" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">{t('share.copyExternalLink')}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </>
+        ) : (
+          <span className="flex-1 text-xs text-slate-500">{t('share.ngrokNotStarted')}</span>
+        )}
+        <button
+          type="button"
+          onClick={onToggleWms}
+          disabled={wmsLoading}
+          className={`relative inline-flex h-4 w-7 items-center rounded-full shrink-0 transition-colors ${
+            wmsLoading ? 'opacity-50 cursor-wait' : 'cursor-pointer'
+          } ${wmsUrl ? 'bg-purple-500' : 'bg-slate-600'}`}
+        >
+          <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${
+            wmsUrl ? 'translate-x-3.5' : 'translate-x-0.5'
+          }`} />
+        </button>
+      </div>
       {/* Local URL row */}
       {urls.length > 0 && (() => {
         const localUrl = `http://localhost:${new URL(urls[0]).port}`;
@@ -439,7 +482,11 @@ const ShareBar: FC<{
         </TooltipProvider>
         <button
           type="button"
-          onClick={onStop}
+          onClick={async () => {
+            if (onStop) {
+              await onStop();
+            }
+          }}
           className="text-[11px] text-red-400 hover:text-red-300 transition-colors px-1"
         >
           {t('share.stopSharing')}
@@ -556,6 +603,9 @@ interface WorktreeSidebarProps {
   onUpdateSharePassword?: (password: string) => void;
   ngrokLoading?: boolean;
   onToggleNgrok?: () => void;
+  shareWmsUrl?: string | null;
+  wmsLoading?: boolean;
+  onToggleWms?: () => void;
   connectedClients?: ConnectedClient[];
   onKickClient?: (sessionId: string) => void;
 }
@@ -593,6 +643,9 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
   onUpdateSharePassword,
   ngrokLoading = false,
   onToggleNgrok,
+  shareWmsUrl,
+  wmsLoading = false,
+  onToggleWms,
   connectedClients = [],
   onKickClient,
 }) => {
@@ -1016,10 +1069,13 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
           active={shareActive}
           urls={shareUrls}
           ngrokUrl={shareNgrokUrl || null}
+          wmsUrl={shareWmsUrl || null}
           password={sharePassword}
           ngrokLoading={ngrokLoading}
+          wmsLoading={wmsLoading}
           connectedClients={connectedClients}
           onToggleNgrok={onToggleNgrok}
+          onToggleWms={onToggleWms}
           onStart={onStartShare}
           onStop={onStopShare}
           onUpdatePassword={onUpdateSharePassword}

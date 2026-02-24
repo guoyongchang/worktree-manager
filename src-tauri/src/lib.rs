@@ -1,60 +1,49 @@
-pub mod types;
-pub mod state;
-pub mod config;
-pub mod utils;
 mod commands;
+pub mod config;
 mod git_ops;
-mod pty_manager;
 pub mod http_server;
+mod pty_manager;
+pub mod state;
 pub(crate) mod tls;
+pub mod types;
+pub mod utils;
+pub(crate) mod wms_tunnel;
 
 // Re-exports used by http_server and other modules
-pub use types::*;
-pub(crate) use state::*;
 pub use config::*;
+pub(crate) use state::*;
+pub use types::*;
 pub use utils::normalize_path;
 
 // Re-exports of _impl functions used by http_server
-pub use commands::workspace::{
-    get_current_workspace_impl, switch_workspace_impl,
-    get_workspace_config_impl, save_workspace_config_impl,
-    get_config_path_info_impl,
-    add_workspace_internal, remove_workspace_internal,
-    create_workspace_internal,
-};
-pub use commands::worktree::{
-    list_worktrees_impl, get_main_workspace_status_impl,
-    create_worktree_impl, archive_worktree_impl,
-    check_worktree_status_impl, restore_worktree_impl,
-    delete_archived_worktree_impl, add_project_to_worktree_impl,
-    scan_linked_folders_internal,
-};
-pub use commands::git::{
-    clone_project_impl,
-    switch_branch_internal,
-};
+pub use commands::git::{clone_project_impl, switch_branch_internal};
+pub use commands::sharing::{kick_client_internal, start_ngrok_tunnel_internal};
 pub use commands::system::{
-    open_in_terminal_internal, open_in_editor_internal,
-    reveal_in_finder_internal, open_log_dir_internal,
+    open_in_editor_internal, open_in_terminal_internal, open_log_dir_internal,
+    reveal_in_finder_internal,
 };
 pub use commands::window::{
-    set_window_workspace_impl,
-    unregister_window_impl,
-    lock_worktree_impl, unlock_worktree_impl,
+    lock_worktree_impl, set_window_workspace_impl, unlock_worktree_impl, unregister_window_impl,
 };
-pub use commands::sharing::{
-    start_ngrok_tunnel_internal,
-    kick_client_internal,
+pub use commands::workspace::{
+    add_workspace_internal, create_workspace_internal, get_config_path_info_impl,
+    get_current_workspace_impl, get_workspace_config_impl, remove_workspace_internal,
+    save_workspace_config_impl, switch_workspace_impl,
+};
+pub use commands::worktree::{
+    add_project_to_worktree_impl, archive_worktree_impl, check_worktree_status_impl,
+    create_worktree_impl, delete_archived_worktree_impl, get_main_workspace_status_impl,
+    list_worktrees_impl, restore_worktree_impl, scan_linked_folders_internal,
 };
 
-use commands::workspace::*;
-use commands::worktree::*;
 use commands::git::*;
 use commands::pty::*;
-use commands::system::*;
-use commands::window::*;
 use commands::sharing::*;
+use commands::system::*;
 use commands::voice::*;
+use commands::window::*;
+use commands::workspace::*;
+use commands::worktree::*;
 
 // ==================== Tauri 入口 ====================
 
@@ -68,15 +57,63 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_log::Builder::new()
-            .level(log::LevelFilter::Info)
-            .targets([
-                tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
-            ])
-            .build())
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .level(log::LevelFilter::Info)
+                .targets([tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::Stdout,
+                )])
+                .build(),
+        )
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::Destroyed = event {
-                unregister_window_impl(window.label());
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    // Check if sharing is active and stop it before closing
+                    let share_active = {
+                        if let Ok(state) = SHARE_STATE.lock() {
+                            state.active
+                        } else {
+                            false
+                        }
+                    };
+
+                    if share_active {
+                        // Prevent immediate close
+                        api.prevent_close();
+
+                        // Clone window for async task
+                        let window = window.clone();
+
+                        // Stop sharing in background, then close window
+                        tauri::async_runtime::spawn(async move {
+                            log::info!("Window closing - stopping sharing first");
+
+                            // Stop ngrok tunnel
+                            if let Err(e) = stop_ngrok_tunnel().await {
+                                log::warn!("Failed to stop ngrok tunnel on close: {}", e);
+                            }
+
+                            // Stop WMS tunnel
+                            if let Err(e) = stop_wms_tunnel().await {
+                                log::warn!("Failed to stop WMS tunnel on close: {}", e);
+                            }
+
+                            // Stop sharing
+                            if let Err(e) = stop_sharing().await {
+                                log::warn!("Failed to stop sharing on close: {}", e);
+                            }
+
+                            log::info!("Sharing stopped, closing window");
+
+                            // Now close the window
+                            let _ = window.close();
+                        });
+                    }
+                }
+                tauri::WindowEvent::Destroyed => {
+                    unregister_window_impl(window.label());
+                }
+                _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -151,6 +188,11 @@ pub fn run() {
             get_last_share_password,
             start_ngrok_tunnel,
             stop_ngrok_tunnel,
+            // WMS 隧道
+            get_wms_config,
+            set_wms_config,
+            start_wms_tunnel,
+            stop_wms_tunnel,
             // 语音识别 (Dashscope)
             get_dashscope_api_key,
             set_dashscope_api_key,

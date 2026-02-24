@@ -21,9 +21,7 @@ pub(crate) fn open_in_terminal(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         // Try Windows Terminal first, then fallback to cmd
-        let wt_result = Command::new("wt")
-            .args(["-d", &normalized])
-            .spawn();
+        let wt_result = Command::new("wt").args(["-d", &normalized]).spawn();
 
         if wt_result.is_err() {
             Command::new("cmd")
@@ -43,9 +41,7 @@ pub(crate) fn open_in_terminal(path: String) -> Result<(), String> {
                     .args(["--working-directory", &normalized])
                     .spawn()
             } else {
-                Command::new(term)
-                    .current_dir(&normalized)
-                    .spawn()
+                Command::new(term).current_dir(&normalized).spawn()
             };
             if result.is_ok() {
                 opened = true;
@@ -85,18 +81,26 @@ pub(crate) fn open_editor_at_path(request: &OpenEditorRequest) -> Result<(), Str
     #[cfg(target_os = "macos")]
     {
         let app_name = editor_app_name(&request.editor);
-        if Command::new("open").args(["-a", app_name, path]).spawn().is_ok() {
+        if Command::new("open")
+            .args(["-a", app_name, path])
+            .spawn()
+            .is_ok()
+        {
             return Ok(());
         }
         let cmd = editor_cli_command(&request.editor);
-        Command::new(cmd).arg(path).spawn()
+        Command::new(cmd)
+            .arg(path)
+            .spawn()
             .map_err(|_| format!("无法打开 {}，请确认已安装该编辑器", app_name))?;
     }
 
     #[cfg(not(target_os = "macos"))]
     {
         let cmd = editor_cli_command(&request.editor);
-        Command::new(cmd).arg(path).spawn()
+        Command::new(cmd)
+            .arg(path)
+            .spawn()
             .map_err(|e| format!("无法打开编辑器 {}: {}", cmd, e))?;
     }
 
@@ -141,8 +145,7 @@ pub(crate) fn reveal_in_finder(path: String) -> Result<(), String> {
 
 #[tauri::command]
 pub(crate) fn open_log_dir() -> Result<(), String> {
-    let home = std::env::var("HOME")
-        .map_err(|_| "无法获取用户目录".to_string())?;
+    let home = std::env::var("HOME").map_err(|_| "无法获取用户目录".to_string())?;
     let log_dir = PathBuf::from(&home).join("Library/Logs/com.guo.worktree-manager");
 
     if !log_dir.exists() {

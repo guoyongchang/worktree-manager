@@ -50,9 +50,18 @@ export function clearSessionId(): void {
 // HTTP base URL (browser mode)
 // ---------------------------------------------------------------------------
 
+/**
+ * Get the path prefix when running behind a tunnel proxy (e.g., "/t/guo").
+ * Returns empty string for direct access.
+ */
+function getBasePath(): string {
+  const match = window.location.pathname.match(/^(\/t\/[^/]+)/);
+  return match ? match[1] : '';
+}
+
 /** In dev mode Vite proxies /api to the Rust server; in prod the same origin serves both. */
 function getApiBase(): string {
-  return '/api';
+  return `${getBasePath()}/api`;
 }
 
 // ---------------------------------------------------------------------------
@@ -172,7 +181,14 @@ export interface ShareState {
   active: boolean;
   urls: string[];
   ngrok_url?: string;
+  wms_url?: string;
   workspace_path?: string;
+}
+
+export interface WmsConfig {
+  server_url: string | null;
+  token: string | null;
+  subdomain: string | null;
 }
 
 export interface ShareInfo {
@@ -220,6 +236,26 @@ export async function setNgrokToken(token: string): Promise<void> {
   return callBackend<void>('set_ngrok_token', { token });
 }
 
+// ---------------------------------------------------------------------------
+// WMS Tunnel API
+// ---------------------------------------------------------------------------
+
+export async function getWmsConfig(): Promise<WmsConfig> {
+  return callBackend<WmsConfig>('get_wms_config');
+}
+
+export async function setWmsConfig(serverUrl: string, token: string, subdomain: string): Promise<void> {
+  return callBackend<void>('set_wms_config', { serverUrl, token, subdomain });
+}
+
+export async function startWmsTunnel(): Promise<string> {
+  return callBackend<string>('start_wms_tunnel');
+}
+
+export async function stopWmsTunnel(): Promise<void> {
+  return callBackend<void>('stop_wms_tunnel');
+}
+
 /** Get the last used share port. */
 export async function getLastSharePort(): Promise<number | null> {
   return callBackend<number | null>('get_last_share_port');
@@ -263,7 +299,7 @@ export async function getShareInfo(): Promise<ShareInfo> {
 
 /** Browser mode: authenticate with the share password. */
 export async function authenticate(password: string): Promise<void> {
-  const res = await fetch('/api/auth', {
+  const res = await fetch(`${getApiBase()}/auth`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ password }),

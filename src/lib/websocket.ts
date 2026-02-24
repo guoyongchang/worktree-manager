@@ -51,7 +51,10 @@ class WebSocketManager {
     }
 
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${protocol}//${location.host}/ws?session_id=${encodeURIComponent(this.sessionId)}`;
+    // Detect tunnel path prefix (e.g., /t/guo) for proxy routing
+    const tunnelMatch = location.pathname.match(/^(\/t\/[^/]+)/);
+    const basePath = tunnelMatch ? tunnelMatch[1] : '';
+    const url = `${protocol}//${location.host}${basePath}/ws?session_id=${encodeURIComponent(this.sessionId)}`;
     console.log('[ws] connecting to', url);
 
     try {

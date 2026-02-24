@@ -9,7 +9,10 @@ use crate::types::ScannedFolder;
 // Git command timeout (30 seconds)
 pub(crate) const GIT_COMMAND_TIMEOUT_SECS: u64 = 30;
 
-pub(crate) fn run_git_command_with_timeout(args: &[&str], cwd: &str) -> Result<std::process::Output, String> {
+pub(crate) fn run_git_command_with_timeout(
+    args: &[&str],
+    cwd: &str,
+) -> Result<std::process::Output, String> {
     let mut child = Command::new("git")
         .args(args)
         .current_dir(cwd)
@@ -21,25 +24,36 @@ pub(crate) fn run_git_command_with_timeout(args: &[&str], cwd: &str) -> Result<s
     let timeout = Duration::from_secs(GIT_COMMAND_TIMEOUT_SECS);
     match child.wait_timeout(timeout) {
         Ok(Some(status)) => {
-            let stdout = child.stdout.take()
+            let stdout = child
+                .stdout
+                .take()
                 .map(|mut s| {
                     let mut buf = Vec::new();
                     std::io::Read::read_to_end(&mut s, &mut buf).ok();
                     buf
                 })
                 .unwrap_or_default();
-            let stderr = child.stderr.take()
+            let stderr = child
+                .stderr
+                .take()
                 .map(|mut s| {
                     let mut buf = Vec::new();
                     std::io::Read::read_to_end(&mut s, &mut buf).ok();
                     buf
                 })
                 .unwrap_or_default();
-            Ok(std::process::Output { status, stdout, stderr })
+            Ok(std::process::Output {
+                status,
+                stdout,
+                stderr,
+            })
         }
         Ok(None) => {
             let _ = child.kill();
-            Err(format!("Git command timed out after {} seconds", GIT_COMMAND_TIMEOUT_SECS))
+            Err(format!(
+                "Git command timed out after {} seconds",
+                GIT_COMMAND_TIMEOUT_SECS
+            ))
         }
         Err(e) => Err(format!("Failed to wait for git command: {}", e)),
     }
@@ -102,22 +116,41 @@ pub(crate) fn calculate_dir_size(path: &Path) -> u64 {
 
 pub(crate) const KNOWN_LINKABLE_FOLDERS: &[&str] = &[
     // JS/Node
-    "node_modules", ".next", ".nuxt", ".yarn", ".pnpm-store",
+    "node_modules",
+    ".next",
+    ".nuxt",
+    ".yarn",
+    ".pnpm-store",
     // Python
-    "venv", ".venv", "__pycache__", ".pytest_cache", ".mypy_cache",
+    "venv",
+    ".venv",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
     // Rust
     "target",
     // Go
     "vendor",
     // Java/Kotlin
-    ".gradle", ".m2", "build",
+    ".gradle",
+    ".m2",
+    "build",
     // General
-    "dist", ".cache", ".parcel-cache", ".turbo",
+    "dist",
+    ".cache",
+    ".parcel-cache",
+    ".turbo",
 ];
 
 pub(crate) const RECOMMENDED_LINKABLE_FOLDERS: &[&str] = &[
-    "node_modules", ".next", ".nuxt", ".pnpm-store",
-    "venv", ".venv", "target", ".gradle",
+    "node_modules",
+    ".next",
+    ".nuxt",
+    ".pnpm-store",
+    "venv",
+    ".venv",
+    "target",
+    ".gradle",
 ];
 
 pub(crate) const SKIP_DIRS: &[&str] = &[".git", ".svn", ".hg"];

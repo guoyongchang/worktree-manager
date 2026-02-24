@@ -1,18 +1,13 @@
-use ngrok::config::ForwarderBuilder;  // trait import: provides listen_and_forward()
+use ngrok::config::ForwarderBuilder; // trait import: provides listen_and_forward()
 use ngrok::forwarder::Forwarder;
-use ngrok::tunnel::{EndpointInfo, HttpTunnel};  // EndpointInfo trait import: provides url()
+use ngrok::tunnel::{EndpointInfo, HttpTunnel}; // EndpointInfo trait import: provides url()
 
-use crate::types::{ShareStateInfo, ConnectedClient};
-use crate::config::{
-    load_global_config, save_global_config_internal,
-    get_window_workspace_path,
-};
-use crate::state::{
-    SHARE_STATE, AUTHENTICATED_SESSIONS, CONNECTED_CLIENTS,
-    TOKIO_RT,
-};
+use crate::config::{get_window_workspace_path, load_global_config, save_global_config_internal};
 use crate::http_server;
+use crate::state::{AUTHENTICATED_SESSIONS, CONNECTED_CLIENTS, SHARE_STATE, TOKIO_RT};
 use crate::tls;
+use crate::types::{ConnectedClient, ShareStateInfo};
+use serde::{Deserialize, Serialize};
 
 // ==================== 分享功能命令 ====================
 
@@ -43,9 +38,13 @@ pub(crate) async fn get_last_share_password() -> Result<Option<String>, String> 
 }
 
 #[tauri::command]
-pub(crate) async fn start_sharing(window: tauri::Window, port: u16, password: String) -> Result<String, String> {
-    let workspace_path = get_window_workspace_path(window.label())
-        .ok_or("No workspace selected")?;
+pub(crate) async fn start_sharing(
+    window: tauri::Window,
+    port: u16,
+    password: String,
+) -> Result<String, String> {
+    let workspace_path =
+        get_window_workspace_path(window.label()).ok_or("No workspace selected")?;
 
     // SECURITY: Validate password is not empty (required for remote access security)
     if password.trim().is_empty() {
@@ -55,12 +54,16 @@ pub(crate) async fn start_sharing(window: tauri::Window, port: u16, password: St
     // Validate port range (recommended dynamic/private ports: 49152-65535)
     // Allow common development ports (3000-9999) for convenience
     if port < 3000 {
-        return Err(format!("端口 {} 过小。推荐使用 49152-65535 范围内的端口，或 3000-9999 开发端口", port));
+        return Err(format!(
+            "端口 {} 过小。推荐使用 49152-65535 范围内的端口，或 3000-9999 开发端口",
+            port
+        ));
     }
 
     // Check if already sharing
     {
-        let state = SHARE_STATE.lock()
+        let state = SHARE_STATE
+            .lock()
             .map_err(|_| "Internal state error".to_string())?;
         if state.active {
             return Err("Already sharing. Stop current sharing first.".to_string());
@@ -79,11 +82,13 @@ pub(crate) async fn start_sharing(window: tauri::Window, port: u16, password: St
     let mut lan_ips: Vec<std::net::IpAddr> = local_ip_address::list_afinet_netifas()
         .unwrap_or_default()
         .into_iter()
-        .filter_map(|(_name, ip)| {
-            match ip {
-                std::net::IpAddr::V4(v4) if !v4.is_loopback() && !v4.is_unspecified() && !v4.is_multicast() => Some(ip),
-                _ => None,
+        .filter_map(|(_name, ip)| match ip {
+            std::net::IpAddr::V4(v4)
+                if !v4.is_loopback() && !v4.is_unspecified() && !v4.is_multicast() =>
+            {
+                Some(ip)
             }
+            _ => None,
         })
         .collect();
     lan_ips.sort();
@@ -92,18 +97,23 @@ pub(crate) async fn start_sharing(window: tauri::Window, port: u16, password: St
     // Generate self-signed TLS certificate for HTTPS (includes all LAN IPs in SAN)
     let tls_certs = tls::generate_self_signed(&lan_ips)?;
 
-    let share_urls: Vec<String> = lan_ips.iter()
+    let share_urls: Vec<String> = lan_ips
+        .iter()
         .map(|ip| format!("https://{}:{}", ip, port))
         .collect();
 
-    let share_url = share_urls.first().cloned().unwrap_or_else(|| format!("https://0.0.0.0:{}", port));
+    let share_url = share_urls
+        .first()
+        .cloned()
+        .unwrap_or_else(|| format!("https://0.0.0.0:{}", port));
 
     // Create shutdown channel
     let (tx, rx) = tokio::sync::watch::channel(false);
 
     // Update share state
     {
-        let mut state = SHARE_STATE.lock()
+        let mut state = SHARE_STATE
+            .lock()
             .map_err(|_| "Internal state error".to_string())?;
         state.active = true;
         state.workspace_path = Some(workspace_path.clone());
@@ -128,14 +138,19 @@ pub(crate) async fn start_sharing(window: tauri::Window, port: u16, password: St
     // Spawn HTTP (port) + HTTPS (port+1) servers on the shared tokio runtime
     TOKIO_RT.spawn(http_server::start_server(port, rx, Some(tls_certs)));
 
-    log::info!("Sharing started on {} for workspace {}", share_url, workspace_path);
+    log::info!(
+        "Sharing started on {} for workspace {}",
+        share_url,
+        workspace_path
+    );
 
     Ok(share_url)
 }
 
 pub async fn start_ngrok_tunnel_internal() -> Result<String, String> {
     let port = {
-        let state = SHARE_STATE.lock()
+        let state = SHARE_STATE
+            .lock()
             .map_err(|_| "Internal state error".to_string())?;
         if !state.active {
             return Err("请先开启分享".to_string());
@@ -146,7 +161,8 @@ pub async fn start_ngrok_tunnel_internal() -> Result<String, String> {
         state.port
     };
 
-    let ngrok_token = load_global_config().ngrok_token
+    let ngrok_token = load_global_config()
+        .ngrok_token
         .ok_or("未配置 ngrok token，请先在设置中配置".to_string())?;
 
     let (url_tx, url_rx) = std::sync::mpsc::channel::<Result<String, String>>();
@@ -163,14 +179,15 @@ pub async fn start_ngrok_tunnel_internal() -> Result<String, String> {
                 .http_endpoint()
                 .listen_and_forward(
                     url::Url::parse(&format!("http://localhost:{}", port))
-                        .map_err(|e| format!("URL 解析失败: {}", e))?
+                        .map_err(|e| format!("URL 解析失败: {}", e))?,
                 )
                 .await
                 .map_err(|e| format!("ngrok 隧道创建失败: {}", e))?;
 
             let ngrok_url = forwarder.url().to_string();
             Ok::<(String, Forwarder<HttpTunnel>), String>((ngrok_url, forwarder))
-        }.await;
+        }
+        .await;
 
         match result {
             Ok((url, mut forwarder)) => {
@@ -187,7 +204,8 @@ pub async fn start_ngrok_tunnel_internal() -> Result<String, String> {
     // Wait for the ngrok URL (with timeout)
     match url_rx.recv_timeout(std::time::Duration::from_secs(30)) {
         Ok(Ok(ngrok_url)) => {
-            let mut state = SHARE_STATE.lock()
+            let mut state = SHARE_STATE
+                .lock()
                 .map_err(|_| "Internal state error".to_string())?;
             state.ngrok_url = Some(ngrok_url.clone());
             state.ngrok_task = Some(ngrok_handle);
@@ -212,7 +230,8 @@ pub(crate) async fn start_ngrok_tunnel() -> Result<String, String> {
 
 #[tauri::command]
 pub(crate) async fn stop_ngrok_tunnel() -> Result<(), String> {
-    let mut state = SHARE_STATE.lock()
+    let mut state = SHARE_STATE
+        .lock()
         .map_err(|_| "Internal state error".to_string())?;
     if let Some(handle) = state.ngrok_task.take() {
         // abort() is intentional: the ngrok crate's Forwarder does not expose a graceful
@@ -224,11 +243,142 @@ pub(crate) async fn stop_ngrok_tunnel() -> Result<(), String> {
     Ok(())
 }
 
+// ==================== WMS 隧道 ====================
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct WmsConfig {
+    server_url: Option<String>,
+    token: Option<String>,
+    subdomain: Option<String>,
+}
+
+#[tauri::command]
+pub(crate) async fn get_wms_config() -> Result<WmsConfig, String> {
+    let config = load_global_config();
+    Ok(WmsConfig {
+        server_url: config.wms_server_url,
+        token: config.wms_token,
+        subdomain: config.wms_subdomain,
+    })
+}
+
+#[tauri::command]
+pub(crate) async fn set_wms_config(
+    server_url: String,
+    token: String,
+    subdomain: String,
+) -> Result<(), String> {
+    let mut config = load_global_config();
+    config.wms_server_url = if server_url.is_empty() {
+        None
+    } else {
+        Some(server_url)
+    };
+    config.wms_token = if token.is_empty() { None } else { Some(token) };
+    config.wms_subdomain = if subdomain.is_empty() {
+        None
+    } else {
+        Some(subdomain)
+    };
+    save_global_config_internal(&config)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) async fn start_wms_tunnel() -> Result<String, String> {
+    let port = {
+        let state = SHARE_STATE
+            .lock()
+            .map_err(|_| "Internal state error".to_string())?;
+        if !state.active {
+            return Err("请先开启分享".to_string());
+        }
+        if state.wms_url.is_some() {
+            return Err("WMS 隧道已在运行".to_string());
+        }
+        state.port
+    };
+
+    let config = load_global_config();
+    let server_url = config
+        .wms_server_url
+        .ok_or("未配置 WMS Server URL，请先在设置中配置".to_string())?;
+    let subdomain = config
+        .wms_subdomain
+        .ok_or("未配置 WMS Subdomain，请先在设置中配置".to_string())?;
+    let token = config.wms_token.filter(|t| !t.is_empty());
+    if token.is_none() {
+        return Err("未配置 WMS Token，请先在设置中配置".to_string());
+    }
+
+    let (url_tx, url_rx) = std::sync::mpsc::channel::<Result<String, String>>();
+
+    // Create a shutdown signal so we can gracefully close the WebSocket later
+    let (wms_shutdown_tx, wms_shutdown_rx) = tokio::sync::watch::channel(false);
+
+    let wms_handle = TOKIO_RT.spawn(async move {
+        crate::wms_tunnel::run_tunnel(port, server_url, token, subdomain, url_tx, wms_shutdown_rx)
+            .await;
+    });
+
+    match url_rx.recv_timeout(std::time::Duration::from_secs(30)) {
+        Ok(Ok(wms_url)) => {
+            let mut state = SHARE_STATE
+                .lock()
+                .map_err(|_| "Internal state error".to_string())?;
+            state.wms_url = Some(wms_url.clone());
+            state.wms_task = Some(wms_handle);
+            state.wms_shutdown_tx = Some(wms_shutdown_tx);
+            log::info!("WMS tunnel started: {}", wms_url);
+            Ok(wms_url)
+        }
+        Ok(Err(e)) => {
+            wms_handle.abort();
+            Err(e)
+        }
+        Err(_) => {
+            wms_handle.abort();
+            Err("WMS 隧道启动超时".to_string())
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn stop_wms_tunnel() -> Result<(), String> {
+    let (shutdown_tx, task_handle) = {
+        let mut state = SHARE_STATE
+            .lock()
+            .map_err(|_| "Internal state error".to_string())?;
+        let tx = state.wms_shutdown_tx.take();
+        let handle = state.wms_task.take();
+        state.wms_url = None;
+        (tx, handle)
+    };
+
+    // Signal graceful shutdown (sends WebSocket Close frame)
+    if let Some(tx) = shutdown_tx {
+        let _ = tx.send(true);
+    }
+
+    if let Some(handle) = task_handle {
+        // Wait briefly for graceful shutdown, then abort as fallback
+        match tokio::time::timeout(std::time::Duration::from_secs(3), handle).await {
+            Ok(_) => log::info!("WMS tunnel stopped gracefully"),
+            Err(_) => log::warn!("WMS tunnel graceful shutdown timed out, task will be dropped"),
+        }
+    } else {
+        log::info!("WMS tunnel stopped");
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
 pub(crate) async fn stop_sharing() -> Result<(), String> {
     // Single lock scope: check active, stop ngrok, extract shutdown_tx, and reset state
     let shutdown_tx = {
-        let mut state = SHARE_STATE.lock()
+        let mut state = SHARE_STATE
+            .lock()
             .map_err(|_| "Internal state error".to_string())?;
         if !state.active {
             return Err("Not currently sharing".to_string());
@@ -241,6 +391,15 @@ pub(crate) async fn stop_sharing() -> Result<(), String> {
             handle.abort();
         }
         state.ngrok_url = None;
+
+        // Stop WMS tunnel if active (signal graceful shutdown first)
+        if let Some(tx) = state.wms_shutdown_tx.take() {
+            let _ = tx.send(true);
+        }
+        if let Some(handle) = state.wms_task.take() {
+            handle.abort();
+        }
+        state.wms_url = None;
 
         // Extract shutdown_tx and reset all state atomically
         let tx = state.shutdown_tx.take();
@@ -270,20 +429,27 @@ pub(crate) async fn stop_sharing() -> Result<(), String> {
 
 #[tauri::command]
 pub(crate) async fn get_share_state() -> Result<ShareStateInfo, String> {
-    let state = SHARE_STATE.lock()
+    let state = SHARE_STATE
+        .lock()
         .map_err(|_| "Internal state error".to_string())?;
     let urls = if state.active {
         let mut ips: Vec<std::net::IpAddr> = local_ip_address::list_afinet_netifas()
             .unwrap_or_default()
             .into_iter()
             .filter_map(|(_name, ip)| match ip {
-                std::net::IpAddr::V4(v4) if !v4.is_loopback() && !v4.is_unspecified() && !v4.is_multicast() => Some(ip),
+                std::net::IpAddr::V4(v4)
+                    if !v4.is_loopback() && !v4.is_unspecified() && !v4.is_multicast() =>
+                {
+                    Some(ip)
+                }
                 _ => None,
             })
             .collect();
         ips.sort();
         ips.dedup();
-        ips.iter().map(|ip| format!("https://{}:{}", ip, state.port)).collect()
+        ips.iter()
+            .map(|ip| format!("https://{}:{}", ip, state.port))
+            .collect()
     } else {
         vec![]
     };
@@ -292,6 +458,7 @@ pub(crate) async fn get_share_state() -> Result<ShareStateInfo, String> {
         active: state.active,
         urls,
         ngrok_url: state.ngrok_url.clone(),
+        wms_url: state.wms_url.clone(),
         workspace_path: state.workspace_path.clone(),
     })
 }
@@ -302,7 +469,8 @@ pub(crate) async fn update_share_password(password: String) -> Result<(), String
     if password.trim().is_empty() {
         return Err("分享密码不能为空".to_string());
     }
-    let mut state = SHARE_STATE.lock()
+    let mut state = SHARE_STATE
+        .lock()
         .map_err(|_| "Internal state error".to_string())?;
     if !state.active {
         return Err("Not currently sharing".to_string());
@@ -311,8 +479,12 @@ pub(crate) async fn update_share_password(password: String) -> Result<(), String
     drop(state);
 
     // Clear authenticated sessions and connected clients so everyone must re-auth with the new password
-    if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() { sessions.clear(); }
-    if let Ok(mut clients) = CONNECTED_CLIENTS.lock() { clients.clear(); }
+    if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() {
+        sessions.clear();
+    }
+    if let Ok(mut clients) = CONNECTED_CLIENTS.lock() {
+        clients.clear();
+    }
 
     log::info!("Share password updated");
     Ok(())

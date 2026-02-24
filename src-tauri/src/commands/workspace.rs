@@ -1,17 +1,12 @@
-use std::path::PathBuf;
 use std::fs;
+use std::path::PathBuf;
 
-use crate::types::{
-    WorkspaceRef, WorkspaceConfig,
-    default_linked_workspace_items,
-};
 use crate::config::{
-    load_global_config, save_global_config_internal,
-    save_workspace_config_internal,
-    get_workspace_config_path, get_window_workspace_path,
-    get_window_workspace_config,
+    get_window_workspace_config, get_window_workspace_path, get_workspace_config_path,
+    load_global_config, save_global_config_internal, save_workspace_config_internal,
 };
 use crate::state::{WINDOW_WORKSPACES, WORKSPACE_CONFIG_CACHE};
+use crate::types::{default_linked_workspace_items, WorkspaceConfig, WorkspaceRef};
 use crate::utils::normalize_path;
 
 // ==================== Tauri 命令：Workspace 管理 ====================
@@ -25,7 +20,9 @@ pub(crate) fn list_workspaces() -> Vec<WorkspaceRef> {
 pub fn get_current_workspace_impl(window_label: &str) -> Option<WorkspaceRef> {
     let global = load_global_config();
     let current_path = get_window_workspace_path(window_label)?;
-    global.workspaces.iter()
+    global
+        .workspaces
+        .iter()
         .find(|w| w.path == current_path)
         .cloned()
 }
@@ -150,8 +147,7 @@ pub(crate) fn create_workspace(name: String, path: String) -> Result<(), String>
 // ==================== Tauri 命令：Workspace 配置 ====================
 
 pub fn get_workspace_config_impl(window_label: &str) -> Result<WorkspaceConfig, String> {
-    let (_, config) = get_window_workspace_config(window_label)
-        .ok_or("No workspace selected")?;
+    let (_, config) = get_window_workspace_config(window_label).ok_or("No workspace selected")?;
     Ok(config)
 }
 
@@ -160,14 +156,19 @@ pub(crate) fn get_workspace_config(window: tauri::Window) -> Result<WorkspaceCon
     get_workspace_config_impl(window.label())
 }
 
-pub fn save_workspace_config_impl(window_label: &str, config: WorkspaceConfig) -> Result<(), String> {
-    let workspace_path = get_window_workspace_path(window_label)
-        .ok_or("No workspace selected")?;
+pub fn save_workspace_config_impl(
+    window_label: &str,
+    config: WorkspaceConfig,
+) -> Result<(), String> {
+    let workspace_path = get_window_workspace_path(window_label).ok_or("No workspace selected")?;
     save_workspace_config_internal(&workspace_path, &config)
 }
 
 #[tauri::command]
-pub(crate) fn save_workspace_config(window: tauri::Window, config: WorkspaceConfig) -> Result<(), String> {
+pub(crate) fn save_workspace_config(
+    window: tauri::Window,
+    config: WorkspaceConfig,
+) -> Result<(), String> {
     save_workspace_config_impl(window.label(), config)
 }
 

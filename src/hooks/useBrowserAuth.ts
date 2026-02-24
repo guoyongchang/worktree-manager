@@ -60,7 +60,8 @@ export function useBrowserAuth(): UseBrowserAuthReturn {
     try {
       await authenticate(browserLoginPassword.trim());
       // Full page reload to reset all singletons (WebSocket, etc.) with new session ID
-      window.location.replace('/');
+      // Preserve the current pathname (e.g. /t/{subdomain}/) so tunnel proxy paths are kept
+      window.location.replace(window.location.pathname || '/');
       return; // Page is about to reload, skip cleanup
     } catch (e) {
       setBrowserLoginError(String(e));

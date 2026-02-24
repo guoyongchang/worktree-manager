@@ -21,7 +21,7 @@ import { RefreshCw, Search, Mic } from 'lucide-react';
 import { BackIcon, PlusIcon, TrashIcon } from './Icons';
 import { BranchCombobox } from './BranchCombobox';
 import type { WorkspaceRef, WorkspaceConfig, ProjectConfig, ScannedFolder } from '../types';
-import { getAppVersion, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, voiceStart, voiceStop, isTauri, getRemoteBranches, openLink } from '../lib/backend';
+import { getAppVersion, getNgrokToken, setNgrokToken as saveNgrokToken, getWmsConfig, setWmsConfig as saveWmsConfig, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, voiceStart, voiceStop, isTauri, getRemoteBranches, openLink } from '../lib/backend';
 
 interface SettingsViewProps {
   config: WorkspaceConfig;
@@ -82,6 +82,14 @@ export const SettingsView: FC<SettingsViewProps> = ({
   const [ngrokSaving, setNgrokSaving] = useState(false);
   const [ngrokSaved, setNgrokSaved] = useState(false);
   const [ngrokError, setNgrokError] = useState<string | null>(null);
+
+  // WMS config state
+  const [wmsToken, setWmsToken] = useState('');
+  const [wmsSubdomain, setWmsSubdomain] = useState('');
+  const [wmsLoaded, setWmsLoaded] = useState(false);
+  const [wmsSaving, setWmsSaving] = useState(false);
+  const [wmsSaved, setWmsSaved] = useState(false);
+  const [wmsError, setWmsError] = useState<string | null>(null);
 
   // Dashscope API key state
   const [dashscopeKey, setDashscopeKey] = useState('');
@@ -213,6 +221,11 @@ export const SettingsView: FC<SettingsViewProps> = ({
         setNgrokToken(token || '');
         setNgrokTokenLoaded(true);
       }).catch(() => setNgrokTokenLoaded(true));
+      getWmsConfig().then(cfg => {
+        setWmsToken(cfg.token || '');
+        setWmsSubdomain(cfg.subdomain || '');
+        setWmsLoaded(true);
+      }).catch(() => setWmsLoaded(true));
     }
     // Load Dashscope config in both Tauri and browser modes
     getDashscopeApiKey().then(k => {
@@ -271,7 +284,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
           { id: 'settings-workspace', label: t('settings.workspaceConfig') },
           { id: 'settings-management', label: t('settings.management') },
           { id: 'settings-projects', label: t('settings.projectsNav') },
-          ...(isTauri() ? [{ id: 'settings-ngrok', label: 'ngrok' }] : []),
+          ...(isTauri() ? [{ id: 'settings-external-share', label: t('settings.externalShareNav', '外网分享') }] : []),
           { id: 'settings-voice', label: t('settings.voiceNav') },
           { id: 'settings-about', label: t('settings.about') },
         ].map(({ id, label }) => (
@@ -620,57 +633,124 @@ export const SettingsView: FC<SettingsViewProps> = ({
         </div>
       </div>
 
-      {/* ngrok Config Section (Tauri only) */}
-      {isTauri() && ngrokTokenLoaded && (
+      {/* External Share Config Section (Tauri only) */}
+      {isTauri() && (wmsLoaded || ngrokTokenLoaded) && (
         <div className="mt-8 pt-8 border-t border-slate-700/50">
-          <h2 id="settings-ngrok" className="text-lg font-medium mb-4 scroll-mt-32">{t('settings.ngrokTitle')}</h2>
-          <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 space-y-3">
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">{t('settings.ngrokAuthtokenLabel')}</label>
-              <div className="flex gap-2">
+          <h2 id="settings-external-share" className="text-lg font-medium mb-4 scroll-mt-32">{t('settings.externalShareTitle', '外网分享')}</h2>
+
+          {/* WMS Share */}
+          {wmsLoaded && (
+            <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 space-y-3 mb-4">
+              <h3 className="text-sm font-medium text-slate-300">{t('settings.wmsShareSubtitle', 'WMS 分享')}</h3>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Token</label>
                 <Input
                   type="password"
-                  value={ngrokToken}
-                  onChange={(e) => { setNgrokToken(e.target.value); setNgrokSaved(false); }}
-                  placeholder={t('settings.ngrokAuthtokenPlaceholder')}
-                  className="flex-1"
+                  value={wmsToken}
+                  onChange={(e) => { setWmsToken(e.target.value); setWmsSaved(false); }}
+                  placeholder={t('settings.wmsTokenPlaceholder', '从 WMS Portal 获取')}
+                  className="w-full"
                 />
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={ngrokSaving}
-                  onClick={async () => {
-                    setNgrokSaving(true);
-                    setNgrokError(null);
-                    try {
-                      await saveNgrokToken(ngrokToken.trim());
-                      setNgrokSaved(true);
-                      setTimeout(() => setNgrokSaved(false), 2000);
-                    } catch (e) {
-                      setNgrokError(String(e));
-                    } finally {
-                      setNgrokSaving(false);
-                    }
-                  }}
-                >
-                  {ngrokSaving ? t('common.saving') : ngrokSaved ? t('settings.savedSuccess') : t('common.save')}
-                </Button>
               </div>
-              {ngrokError && (
-                <p className="text-sm text-red-400 mt-1">{ngrokError}</p>
-              )}
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Subdomain</label>
+                <div className="flex gap-2">
+                  <Input
+                    type="text"
+                    value={wmsSubdomain}
+                    onChange={(e) => { setWmsSubdomain(e.target.value); setWmsSaved(false); }}
+                    placeholder="happy-brave-tiger"
+                    className="flex-1"
+                  />
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={wmsSaving}
+                    onClick={async () => {
+                      setWmsSaving(true);
+                      setWmsError(null);
+                      try {
+                        await saveWmsConfig('https://tunnel.kirov-opensource.com', wmsToken.trim(), wmsSubdomain.trim());
+                        setWmsSaved(true);
+                        setTimeout(() => setWmsSaved(false), 2000);
+                      } catch (e) {
+                        setWmsError(String(e));
+                      } finally {
+                        setWmsSaving(false);
+                      }
+                    }}
+                  >
+                    {wmsSaving ? t('common.saving') : wmsSaved ? t('settings.savedSuccess') : t('common.save')}
+                  </Button>
+                </div>
+                {wmsError && (
+                  <p className="text-sm text-red-400 mt-1">{wmsError}</p>
+                )}
+              </div>
+              <p className="text-xs text-slate-500">
+                {t('settings.wmsShareHint', '配置 WMS 隧道后，分享时可通过公网 URL 访问。')}
+                <button
+                  type="button"
+                  className="text-blue-400 hover:text-blue-300 ml-1 underline cursor-pointer transition-colors"
+                  onClick={() => openLink('https://wms.kirov-opensource.com/')}
+                >
+                  {t('settings.wmsPortalLink', '前往 WMS Portal 注册/获取 Token')}
+                </button>
+              </p>
             </div>
-            <p className="text-xs text-slate-500">
-              {t('settings.ngrokHint')}
-              <button
-                type="button"
-                className="text-blue-400 hover:text-blue-300 ml-1 underline cursor-pointer transition-colors"
-                onClick={() => openLink('https://dashboard.ngrok.com/get-started/your-authtoken')}
-              >
-                {t('settings.ngrokGetToken')}
-              </button>
-            </p>
-          </div>
+          )}
+
+          {/* ngrok Share */}
+          {ngrokTokenLoaded && (
+            <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 space-y-3">
+              <h3 className="text-sm font-medium text-slate-300">{t('settings.ngrokShareSubtitle', 'ngrok 分享')}</h3>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">{t('settings.ngrokAuthtokenLabel')}</label>
+                <div className="flex gap-2">
+                  <Input
+                    type="password"
+                    value={ngrokToken}
+                    onChange={(e) => { setNgrokToken(e.target.value); setNgrokSaved(false); }}
+                    placeholder={t('settings.ngrokAuthtokenPlaceholder')}
+                    className="flex-1"
+                  />
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={ngrokSaving}
+                    onClick={async () => {
+                      setNgrokSaving(true);
+                      setNgrokError(null);
+                      try {
+                        await saveNgrokToken(ngrokToken.trim());
+                        setNgrokSaved(true);
+                        setTimeout(() => setNgrokSaved(false), 2000);
+                      } catch (e) {
+                        setNgrokError(String(e));
+                      } finally {
+                        setNgrokSaving(false);
+                      }
+                    }}
+                  >
+                    {ngrokSaving ? t('common.saving') : ngrokSaved ? t('settings.savedSuccess') : t('common.save')}
+                  </Button>
+                </div>
+                {ngrokError && (
+                  <p className="text-sm text-red-400 mt-1">{ngrokError}</p>
+                )}
+              </div>
+              <p className="text-xs text-slate-500">
+                {t('settings.ngrokHint')}
+                <button
+                  type="button"
+                  className="text-blue-400 hover:text-blue-300 ml-1 underline cursor-pointer transition-colors"
+                  onClick={() => openLink('https://dashboard.ngrok.com/get-started/your-authtoken')}
+                >
+                  {t('settings.ngrokGetToken')}
+                </button>
+              </p>
+            </div>
+          )}
         </div>
       )}
 

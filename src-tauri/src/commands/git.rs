@@ -1,14 +1,10 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::types::{
-    SwitchBranchRequest, CloneProjectRequest, ProjectConfig,
-};
-use crate::config::{
-    get_window_workspace_config, save_workspace_config_internal,
-};
-use crate::utils::{normalize_path, parse_repo_url};
+use crate::config::{get_window_workspace_config, save_workspace_config_internal};
 use crate::git_ops;
+use crate::types::{CloneProjectRequest, ProjectConfig, SwitchBranchRequest};
+use crate::utils::{normalize_path, parse_repo_url};
 
 // ==================== Tauri 命令：Git 操作 ====================
 
@@ -17,7 +13,10 @@ pub(crate) fn switch_branch(request: SwitchBranchRequest) -> Result<(), String> 
     let path = PathBuf::from(&request.project_path);
 
     if !path.exists() {
-        return Err(format!("Project path does not exist: {}", request.project_path));
+        return Err(format!(
+            "Project path does not exist: {}",
+            request.project_path
+        ));
     }
 
     // First, fetch to ensure we have latest refs
@@ -60,8 +59,8 @@ pub(crate) fn switch_branch(request: SwitchBranchRequest) -> Result<(), String> 
 }
 
 pub fn clone_project_impl(window_label: &str, request: CloneProjectRequest) -> Result<(), String> {
-    let (workspace_path, mut config) = get_window_workspace_config(window_label)
-        .ok_or("No workspace selected")?;
+    let (workspace_path, mut config) =
+        get_window_workspace_config(window_label).ok_or("No workspace selected")?;
 
     let projects_path = PathBuf::from(&workspace_path).join("projects");
     let target_path = projects_path.join(&request.name);
@@ -93,7 +92,10 @@ pub fn clone_project_impl(window_label: &str, request: CloneProjectRequest) -> R
         .map_err(|e| format!("Failed to checkout base branch: {}", e))?;
 
     if !checkout_output.status.success() {
-        log::warn!("Could not checkout base branch '{}', using default branch", request.base_branch);
+        log::warn!(
+            "Could not checkout base branch '{}', using default branch",
+            request.base_branch
+        );
     }
 
     // Add project to config
@@ -111,7 +113,10 @@ pub fn clone_project_impl(window_label: &str, request: CloneProjectRequest) -> R
 }
 
 #[tauri::command]
-pub(crate) fn clone_project(window: tauri::Window, request: CloneProjectRequest) -> Result<(), String> {
+pub(crate) fn clone_project(
+    window: tauri::Window,
+    request: CloneProjectRequest,
+) -> Result<(), String> {
     clone_project_impl(window.label(), request)
 }
 
@@ -161,15 +166,16 @@ pub(crate) fn create_pull_request(
 #[tauri::command]
 pub(crate) async fn fetch_project_remote(path: String) -> Result<(), String> {
     let normalized = normalize_path(&path);
-    tokio::task::spawn_blocking(move || {
-        git_ops::fetch_remote(Path::new(&normalized))
-    })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
+    tokio::task::spawn_blocking(move || git_ops::fetch_remote(Path::new(&normalized)))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-pub(crate) fn check_remote_branch_exists(path: String, branch_name: String) -> Result<bool, String> {
+pub(crate) fn check_remote_branch_exists(
+    path: String,
+    branch_name: String,
+) -> Result<bool, String> {
     let normalized = normalize_path(&path);
     git_ops::check_remote_branch_exists(Path::new(&normalized), &branch_name)
 }
@@ -185,7 +191,10 @@ pub(crate) fn get_remote_branches(path: String) -> Result<Vec<String>, String> {
 pub fn switch_branch_internal(request: &SwitchBranchRequest) -> Result<(), String> {
     let path = PathBuf::from(&request.project_path);
     if !path.exists() {
-        return Err(format!("Project path does not exist: {}", request.project_path));
+        return Err(format!(
+            "Project path does not exist: {}",
+            request.project_path
+        ));
     }
     let _ = Command::new("git")
         .args(["fetch", "origin"])
