@@ -182,6 +182,7 @@ export interface ShareState {
   urls: string[];
   ngrok_url?: string;
   wms_url?: string;
+  wms_connected: boolean;
   workspace_path?: string;
 }
 

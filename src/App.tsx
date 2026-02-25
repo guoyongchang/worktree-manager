@@ -821,6 +821,7 @@ function App() {
           ngrokLoading={share.ngrokLoading}
           onToggleNgrok={share.handleToggleNgrok}
           shareWmsUrl={share.shareWmsUrl}
+          wmsConnected={share.wmsConnected}
           wmsLoading={share.wmsLoading}
           onToggleWms={share.handleToggleWms}
           connectedClients={share.connectedClients}

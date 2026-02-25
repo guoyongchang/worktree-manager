@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 // ==================== 分享状态 ====================
@@ -16,6 +18,8 @@ pub struct ShareState {
     pub wms_task: Option<tokio::task::JoinHandle<()>>,
     /// Signal to gracefully shut down the WMS tunnel (sends WebSocket Close frame).
     pub wms_shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
+    /// Real-time WMS tunnel connection status (true = connected, false = disconnected/reconnecting).
+    pub wms_connected: Option<Arc<AtomicBool>>,
 }
 
 impl Default for ShareState {
@@ -31,6 +35,7 @@ impl Default for ShareState {
             wms_url: None,
             wms_task: None,
             wms_shutdown_tx: None,
+            wms_connected: None,
         }
     }
 }
@@ -59,6 +64,7 @@ pub struct ShareStateInfo {
     pub urls: Vec<String>,
     pub ngrok_url: Option<String>,
     pub wms_url: Option<String>,
+    pub wms_connected: bool,
     pub workspace_path: Option<String>,
 }
 

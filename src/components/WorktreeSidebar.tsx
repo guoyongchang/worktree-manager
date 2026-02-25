@@ -59,6 +59,7 @@ const ShareBar: FC<{
   urls: string[];
   ngrokUrl: string | null;
   wmsUrl: string | null;
+  wmsConnected?: boolean;
   password: string;
   ngrokLoading: boolean;
   wmsLoading: boolean;
@@ -69,7 +70,7 @@ const ShareBar: FC<{
   onStop?: () => void;
   onUpdatePassword?: (password: string) => void;
   onKickClient?: (sessionId: string) => void;
-}> = ({ active, urls, ngrokUrl, wmsUrl, password, ngrokLoading, wmsLoading, connectedClients = [], onToggleNgrok, onToggleWms, onStart, onStop, onUpdatePassword, onKickClient }) => {
+}> = ({ active, urls, ngrokUrl, wmsUrl, wmsConnected = true, password, ngrokLoading, wmsLoading, connectedClients = [], onToggleNgrok, onToggleWms, onStart, onStop, onUpdatePassword, onKickClient }) => {
   const { t } = useTranslation();
   const [showPassword, setShowPassword] = useState(false);
   const [editingPassword, setEditingPassword] = useState('');
@@ -264,9 +265,16 @@ const ShareBar: FC<{
         <span className="text-[11px] font-medium text-slate-500 shrink-0">WMS:</span>
         {wmsUrl ? (
           <>
-            <span className="flex-1 text-xs text-purple-400 truncate min-w-0 select-all" title={wmsUrl}>
-              {wmsUrl.replace(/^https?:\/\//, '')}
-            </span>
+            {wmsConnected ? (
+              <span className="flex-1 text-xs text-purple-400 truncate min-w-0 select-all" title={wmsUrl}>
+                {wmsUrl.replace(/^https?:\/\//, '')}
+              </span>
+            ) : (
+              <span className="flex-1 text-xs text-yellow-400 truncate min-w-0 flex items-center gap-1">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse shrink-0" />
+                Reconnecting...
+              </span>
+            )}
             <TooltipProvider delayDuration={300}>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -604,6 +612,7 @@ interface WorktreeSidebarProps {
   ngrokLoading?: boolean;
   onToggleNgrok?: () => void;
   shareWmsUrl?: string | null;
+  wmsConnected?: boolean;
   wmsLoading?: boolean;
   onToggleWms?: () => void;
   connectedClients?: ConnectedClient[];
@@ -644,6 +653,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
   ngrokLoading = false,
   onToggleNgrok,
   shareWmsUrl,
+  wmsConnected = true,
   wmsLoading = false,
   onToggleWms,
   connectedClients = [],
@@ -1070,6 +1080,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
           urls={shareUrls}
           ngrokUrl={shareNgrokUrl || null}
           wmsUrl={shareWmsUrl || null}
+          wmsConnected={wmsConnected}
           password={sharePassword}
           ngrokLoading={ngrokLoading}
           wmsLoading={wmsLoading}

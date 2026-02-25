@@ -24,6 +24,7 @@ export interface UseShareFeatureReturn {
   shareUrls: string[];
   shareNgrokUrl: string | null;
   shareWmsUrl: string | null;
+  wmsConnected: boolean;
   sharePassword: string;
   ngrokLoading: boolean;
   wmsLoading: boolean;
@@ -65,6 +66,7 @@ export function useShareFeature(
   const [showWmsConfigDialog, setShowWmsConfigDialog] = useState(false);
   const [wmsConfigInput, setWmsConfigInput] = useState({ token: '', subdomain: '' });
   const [savingWmsConfig, setSavingWmsConfig] = useState(false);
+  const [wmsConnected, setWmsConnected] = useState(false);
   const [connectedClients, setConnectedClients] = useState<ConnectedClient[]>([]);
 
   const generatePassword = useCallback(() => {
@@ -101,6 +103,7 @@ export function useShareFeature(
       setShareUrls([]);
       setShareNgrokUrl(null);
       setShareWmsUrl(null);
+      setWmsConnected(false);
       setConnectedClients([]);
     } catch (e) {
       setError(String(e));
@@ -175,6 +178,7 @@ export function useShareFeature(
       if (shareWmsUrl) {
         await stopWmsTunnel();
         setShareWmsUrl(null);
+        setWmsConnected(false);
       } else {
         const cfg = await getWmsConfig();
         if (!cfg.token || !cfg.subdomain) {
@@ -236,27 +240,36 @@ export function useShareFeature(
     }
   }, []);
 
-  // Poll connected clients when sharing is active (Tauri only)
+  // Poll connected clients and WMS connection state when sharing is active (Tauri only)
   useEffect(() => {
     if (!isTauri() || !shareActive) {
       setConnectedClients([]);
       return;
     }
-    const fetchClients = () => {
+    const fetchStatus = () => {
       getConnectedClients()
         .then(setConnectedClients)
         .catch(() => {});
+      // Also poll WMS connection state when WMS tunnel is active
+      if (shareWmsUrl) {
+        getShareState()
+          .then(state => {
+            setWmsConnected(state.wms_connected);
+          })
+          .catch(() => {});
+      }
     };
-    fetchClients();
-    const interval = setInterval(fetchClients, 5000);
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 5000);
     return () => clearInterval(interval);
-  }, [shareActive]);
+  }, [shareActive, shareWmsUrl]);
 
   return {
     shareActive,
     shareUrls,
     shareNgrokUrl,
     shareWmsUrl,
+    wmsConnected,
     sharePassword,
     ngrokLoading,
     wmsLoading,

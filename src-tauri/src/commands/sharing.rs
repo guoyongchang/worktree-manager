@@ -8,6 +8,8 @@ use crate::state::{AUTHENTICATED_SESSIONS, CONNECTED_CLIENTS, SHARE_STATE, TOKIO
 use crate::tls;
 use crate::types::{ConnectedClient, ShareStateInfo};
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 // ==================== 分享功能命令 ====================
 
@@ -316,9 +318,21 @@ pub(crate) async fn start_wms_tunnel() -> Result<String, String> {
     // Create a shutdown signal so we can gracefully close the WebSocket later
     let (wms_shutdown_tx, wms_shutdown_rx) = tokio::sync::watch::channel(false);
 
+    // Create connected flag for real-time status tracking
+    let connected_flag = Arc::new(AtomicBool::new(false));
+    let connected_flag_clone = connected_flag.clone();
+
     let wms_handle = TOKIO_RT.spawn(async move {
-        crate::wms_tunnel::run_tunnel(port, server_url, token, subdomain, url_tx, wms_shutdown_rx)
-            .await;
+        crate::wms_tunnel::run_tunnel(
+            port,
+            server_url,
+            token,
+            subdomain,
+            url_tx,
+            wms_shutdown_rx,
+            connected_flag_clone,
+        )
+        .await;
     });
 
     match url_rx.recv_timeout(std::time::Duration::from_secs(30)) {
@@ -329,6 +343,7 @@ pub(crate) async fn start_wms_tunnel() -> Result<String, String> {
             state.wms_url = Some(wms_url.clone());
             state.wms_task = Some(wms_handle);
             state.wms_shutdown_tx = Some(wms_shutdown_tx);
+            state.wms_connected = Some(connected_flag);
             log::info!("WMS tunnel started: {}", wms_url);
             Ok(wms_url)
         }
@@ -352,6 +367,7 @@ pub(crate) async fn stop_wms_tunnel() -> Result<(), String> {
         let tx = state.wms_shutdown_tx.take();
         let handle = state.wms_task.take();
         state.wms_url = None;
+        state.wms_connected = None;
         (tx, handle)
     };
 
@@ -400,6 +416,7 @@ pub(crate) async fn stop_sharing() -> Result<(), String> {
             handle.abort();
         }
         state.wms_url = None;
+        state.wms_connected = None;
 
         // Extract shutdown_tx and reset all state atomically
         let tx = state.shutdown_tx.take();
@@ -454,11 +471,17 @@ pub(crate) async fn get_share_state() -> Result<ShareStateInfo, String> {
         vec![]
     };
 
+    let wms_connected = state
+        .wms_connected
+        .as_ref()
+        .map_or(false, |flag| flag.load(Ordering::Relaxed));
+
     Ok(ShareStateInfo {
         active: state.active,
         urls,
         ngrok_url: state.ngrok_url.clone(),
         wms_url: state.wms_url.clone(),
+        wms_connected,
         workspace_path: state.workspace_path.clone(),
     })
 }
