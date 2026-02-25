@@ -275,6 +275,10 @@ type WsStream = tokio_tungstenite::WebSocketStream<
     tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
 >;
 
+/// Server sends Ping every 30s. If we receive nothing within this timeout,
+/// consider the connection dead and trigger reconnection.
+const RECV_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+
 /// Run a single tunnel session on an already-connected WebSocket stream.
 ///
 /// Handles proxying HTTP/WS requests until the connection drops or shutdown is signaled.
@@ -329,7 +333,14 @@ async fn run_tunnel_session(
         tokio::spawn(async move {
             loop {
                 tokio::select! {
-                    msg_result_opt = ws_source.next() => {
+                    recv_result = tokio::time::timeout(RECV_TIMEOUT, ws_source.next()) => {
+                        let msg_result_opt = match recv_result {
+                            Ok(v) => v,
+                            Err(_) => {
+                                log::warn!("WMS tunnel: no message received in {}s, assuming connection dead", RECV_TIMEOUT.as_secs());
+                                break;
+                            }
+                        };
                         let Some(msg_result) = msg_result_opt else { break };
                         let msg = match msg_result {
                             Ok(m) => m,
