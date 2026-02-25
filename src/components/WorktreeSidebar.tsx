@@ -1073,8 +1073,8 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
         ))}
       </div>
 
-      {/* Share Bar (Tauri only) */}
-      {_isTauri && (
+      {/* Share Bar (main window only) */}
+      {_isTauri && isMainWin && (
         <ShareBar
           active={shareActive}
           urls={shareUrls}
