@@ -19,3 +19,4 @@ export {
   UpToDateToast,
 } from './UpdaterDialogs';
 export { ToastProvider, useToast } from './Toast';
+export { GlobalDialogs } from './GlobalDialogs';

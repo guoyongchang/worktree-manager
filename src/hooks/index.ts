@@ -12,3 +12,5 @@ export { useWorktreeLocks } from './useWorktreeLocks';
 export type { UseWorktreeLocksReturn } from './useWorktreeLocks';
 export { useModals } from './useModals';
 export type { UseModalsReturn, ModalStates } from './useModals';
+export { useWorkspaceActions } from './useWorkspaceActions';
+export type { UseWorkspaceActionsReturn } from './useWorkspaceActions';

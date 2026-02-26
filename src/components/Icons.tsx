@@ -34,6 +34,7 @@ import {
   Github,
   Mic,
   Link,
+  QrCode,
 } from 'lucide-react';
 
 interface IconProps {
@@ -192,4 +193,8 @@ export const MicIcon: FC<IconProps> = ({ className = "w-4 h-4" }) => (
 
 export const LinkIcon: FC<IconProps> = ({ className = "w-4 h-4" }) => (
   <Link className={className} />
+);
+
+export const QrCodeIcon: FC<IconProps> = ({ className = "w-4 h-4" }) => (
+  <QrCode className={className} />
 );

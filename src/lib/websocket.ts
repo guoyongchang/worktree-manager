@@ -18,6 +18,8 @@ type TerminalStateCallback = (msg: {
   clientId?: string;
 }) => void;
 type VoiceEventCallback = (event: string, payload: Record<string, unknown>) => void;
+type KickedCallback = (reason: string) => void;
+type ConnectionStateCallback = (connected: boolean) => void;
 
 class WebSocketManager {
   private ws: WebSocket | null = null;
@@ -32,6 +34,8 @@ class WebSocketManager {
   private lockCallback: LockCallback | null = null;
   private terminalStateCallbacks: TerminalStateCallback[] = [];
   private voiceEventCallbacks: VoiceEventCallback[] = [];
+  private kickedCallbacks: KickedCallback[] = [];
+  private connectionStateCallbacks: ConnectionStateCallback[] = [];
 
   // Pending subscriptions to send after reconnect
   private pendingPtySubscriptions = new Set<string>();
@@ -67,6 +71,7 @@ class WebSocketManager {
     this.ws.onopen = () => {
       this.connected = true;
       this.reconnectDelay = 1000;
+      this.notifyConnectionState(true);
       console.log('[ws] connected, re-subscribing', this.pendingPtySubscriptions.size, 'PTY sessions');
 
       // Re-subscribe any active subscriptions after reconnect
@@ -90,10 +95,24 @@ class WebSocketManager {
       }
     };
 
-    this.ws.onclose = () => {
-      console.log('[ws] disconnected');
+    this.ws.onclose = (event) => {
+      console.log('[ws] disconnected, code:', event.code, 'reason:', event.reason);
       this.connected = false;
       this.ws = null;
+      this.notifyConnectionState(false);
+
+      // Check if close was due to authentication failure (code 1008 = policy violation, or 4401 = custom unauthorized)
+      if (event.code === 1008 || event.code === 4401 || event.reason?.includes('auth')) {
+        console.warn('[ws] Authentication failed, clearing session');
+        // Import clearSessionId dynamically to avoid circular dependency
+        import('./backend').then(({ clearSessionId }) => {
+          clearSessionId();
+          // Reload page to show login screen
+          window.location.reload();
+        });
+        return;
+      }
+
       this.scheduleReconnect();
     };
 
@@ -134,6 +153,13 @@ class WebSocketManager {
           for (const cb of this.voiceEventCallbacks) {
             cb(msg.event, msg.payload || {});
           }
+        }
+        break;
+      }
+      case 'kicked': {
+        const reason = msg.reason || '';
+        for (const cb of this.kickedCallbacks) {
+          cb(reason);
         }
         break;
       }
@@ -228,6 +254,32 @@ class WebSocketManager {
         this.pendingVoiceSubscription = false;
       }
     };
+  }
+
+  onKicked(callback: KickedCallback): () => void {
+    this.kickedCallbacks.push(callback);
+    return () => {
+      this.kickedCallbacks = this.kickedCallbacks.filter(cb => cb !== callback);
+    };
+  }
+
+  onConnectionStateChange(callback: ConnectionStateCallback): () => void {
+    this.connectionStateCallbacks.push(callback);
+    // Immediately notify current state
+    callback(this.connected);
+    return () => {
+      this.connectionStateCallbacks = this.connectionStateCallbacks.filter(cb => cb !== callback);
+    };
+  }
+
+  private notifyConnectionState(connected: boolean) {
+    for (const cb of this.connectionStateCallbacks) {
+      cb(connected);
+    }
+  }
+
+  isConnected(): boolean {
+    return this.connected;
   }
 
   disconnect() {

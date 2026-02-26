@@ -22,8 +22,15 @@ export function useToast(): ToastContextValue {
   return ctx;
 }
 
-const TOAST_DURATION = 3000;
 const EXIT_DURATION = 200;
+
+// Duration per type: 0 = persistent (manual close only)
+const TYPE_DURATION: Record<ToastType, number> = {
+  success: 3000,
+  error: 0,
+  info: 3000,
+  warning: 5000,
+};
 
 const typeConfig: Record<ToastType, { bg: string; icon: FC<{ className?: string }>; countdownColor: string }> = {
   success: { bg: 'bg-green-900/30 text-green-300 border-green-800/50', icon: CheckCircle, countdownColor: 'bg-green-500/50' },
@@ -56,7 +63,10 @@ export const ToastProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const toast = useCallback((type: ToastType, message: string) => {
     const id = ++idRef.current;
     setToasts((prev) => [...prev, { id, type, message }]);
-    timersRef.current.set(id, setTimeout(() => dismiss(id), TOAST_DURATION));
+    const duration = TYPE_DURATION[type];
+    if (duration > 0) {
+      timersRef.current.set(id, setTimeout(() => dismiss(id), duration));
+    }
   }, [dismiss]);
 
   return (
@@ -81,10 +91,13 @@ export const ToastProvider: FC<{ children: ReactNode }> = ({ children }) => {
               >
                 <X className="w-3.5 h-3.5" />
               </button>
-              {/* Countdown bar */}
-              {!t.exiting && (
+              {/* Countdown bar (only for auto-dismissing toasts) */}
+              {!t.exiting && TYPE_DURATION[t.type] > 0 && (
                 <div className="absolute bottom-0 left-0 right-0 h-0.5">
-                  <div className={`h-full ${config.countdownColor} toast-countdown`} />
+                  <div
+                    className={`h-full ${config.countdownColor}`}
+                    style={{ animation: `toast-countdown ${TYPE_DURATION[t.type]}ms linear forwards` }}
+                  />
                 </div>
               )}
             </div>

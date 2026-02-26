@@ -232,7 +232,7 @@ pub(crate) async fn open_workspace_window(
     let _webview =
         tauri::WebviewWindowBuilder::new(&app, &window_label, tauri::WebviewUrl::App(url.into()))
             .title(format!("Worktree Manager - {}", ws_name))
-            .inner_size(1100.0, 700.0)
+            .inner_size(1300.0, 900.0)
             .min_inner_size(900.0, 500.0)
             .build()
             .map_err(|e| format!("Failed to create window: {}", e))?;

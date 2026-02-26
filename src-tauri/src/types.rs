@@ -10,7 +10,8 @@ pub struct ShareState {
     pub active: bool,
     pub workspace_path: Option<String>,
     pub port: u16,
-    pub password: Option<String>,
+    pub auth_key: Option<Vec<u8>>,   // PBKDF2 derived key (32 bytes)
+    pub auth_salt: Option<Vec<u8>>,  // PBKDF2 salt (16 bytes)
     pub shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
     pub ngrok_url: Option<String>,
     pub ngrok_task: Option<tokio::task::JoinHandle<()>>,
@@ -20,6 +21,13 @@ pub struct ShareState {
     pub wms_shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
     /// Real-time WMS tunnel connection status (true = connected, false = disconnected/reconnecting).
     pub wms_connected: Option<Arc<AtomicBool>>,
+    /// Detailed reconnection state for the WMS tunnel (attempt count, next retry countdown).
+    pub wms_reconnect_state:
+        Option<Arc<std::sync::Mutex<crate::wms_tunnel::WmsTunnelReconnectState>>>,
+    /// Channel to trigger a manual reconnect (skips backoff wait).
+    pub wms_manual_reconnect_tx: Option<tokio::sync::mpsc::UnboundedSender<()>>,
+    /// Whether LAN sharing was auto-started by WMS tunnel (should auto-stop when WMS stops).
+    pub wms_auto_started_lan: bool,
 }
 
 impl Default for ShareState {
@@ -28,7 +36,8 @@ impl Default for ShareState {
             active: false,
             workspace_path: None,
             port: 0,
-            password: None,
+            auth_key: None,
+            auth_salt: None,
             shutdown_tx: None,
             ngrok_url: None,
             ngrok_task: None,
@@ -36,6 +45,9 @@ impl Default for ShareState {
             wms_task: None,
             wms_shutdown_tx: None,
             wms_connected: None,
+            wms_reconnect_state: None,
+            wms_manual_reconnect_tx: None,
+            wms_auto_started_lan: false,
         }
     }
 }
@@ -65,7 +77,11 @@ pub struct ShareStateInfo {
     pub ngrok_url: Option<String>,
     pub wms_url: Option<String>,
     pub wms_connected: bool,
+    pub wms_reconnecting: bool,
+    pub wms_reconnect_attempt: u32,
+    pub wms_next_retry_secs: u32,
     pub workspace_path: Option<String>,
+    pub current_workspace_name: Option<String>,
 }
 
 // Auth rate limiter: per-IP sliding window (max 5 attempts per 60 seconds)
@@ -108,6 +124,46 @@ impl AuthRateLimiter {
     }
 }
 
+// Nonce cache for challenge-response authentication (one-time use, 60s TTL)
+pub struct NonceCache {
+    entries: HashMap<String, (Instant, Vec<u8>)>, // nonce_hex -> (created_at, nonce_bytes)
+}
+
+impl NonceCache {
+    pub fn new() -> Self {
+        Self {
+            entries: HashMap::new(),
+        }
+    }
+
+    /// Generate new nonce, store and return hex encoding
+    pub fn generate(&mut self) -> Result<String, String> {
+        use ring::rand::{SecureRandom, SystemRandom};
+        let rng = SystemRandom::new();
+        let mut nonce = vec![0u8; 32];
+        rng.fill(&mut nonce)
+            .map_err(|_| "Failed to generate nonce")?;
+        let nonce_hex = hex::encode(&nonce);
+        self.entries
+            .insert(nonce_hex.clone(), (Instant::now(), nonce));
+        Ok(nonce_hex)
+    }
+
+    /// Consume nonce (one-time use), return bytes
+    pub fn consume(&mut self, nonce_hex: &str) -> Option<Vec<u8>> {
+        self.cleanup();
+        self.entries.remove(nonce_hex).map(|(_, bytes)| bytes)
+    }
+
+    /// Clean up expired nonces (TTL: 60 seconds)
+    pub fn cleanup(&mut self) {
+        let now = Instant::now();
+        self.entries.retain(|_, (created, _)| {
+            now.duration_since(*created) < Duration::from_secs(60)
+        });
+    }
+}
+
 // ==================== 配置结构 ====================
 
 // 全局配置：存储在 ~/.config/worktree-manager/global.json
@@ -121,8 +177,6 @@ pub struct GlobalConfig {
     pub ngrok_token: Option<String>,
     #[serde(default)]
     pub last_share_port: Option<u16>, // 上次使用的分享端口
-    #[serde(default)]
-    pub last_share_password: Option<String>, // 上次使用的分享密码
     #[serde(default)]
     pub wms_server_url: Option<String>,
     #[serde(default)]
@@ -154,7 +208,6 @@ impl Default for GlobalConfig {
             current_workspace: None,
             ngrok_token: None,
             last_share_port: None,
-            last_share_password: None,
             wms_server_url: None,
             wms_token: None,
             wms_subdomain: None,

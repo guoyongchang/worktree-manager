@@ -6,6 +6,169 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
+// ==================== Tunnel discovery ====================
+
+/// Configuration returned by the WMS server's discovery endpoint (`GET /api/tunnel/config`).
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+struct TunnelDiscoveryResponse {
+    /// WebSocket connect path, e.g. "/tunnel/connect"
+    #[serde(default)]
+    tunnel_ws_path: Option<String>,
+    /// Public URL template with `{subdomain}` placeholder,
+    /// e.g. "https://{subdomain}.tunnel.kirov-opensource.com"
+    #[serde(default)]
+    tunnel_domain_template: Option<String>,
+    /// Server-recommended heartbeat interval (informational, reserved for future use)
+    #[serde(default)]
+    heartbeat_interval_secs: Option<u64>,
+}
+
+/// Resolved tunnel connection parameters.
+struct ResolvedTunnelConfig {
+    ws_url: String,
+    public_url: String,
+}
+
+/// Default WebSocket path when discovery is unavailable.
+const DEFAULT_TUNNEL_WS_PATH: &str = "/tunnel/connect";
+
+/// Fetch tunnel configuration from the server's discovery endpoint.
+/// Returns `None` on any failure (network, parse, non-2xx).
+async fn discover_tunnel_config(server_url: &str) -> Option<TunnelDiscoveryResponse> {
+    let url = format!("{}/api/tunnel/config", server_url.trim_end_matches('/'));
+    log::info!("WMS tunnel: fetching discovery config from {}", url);
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .ok()?;
+
+    match client.get(&url).send().await {
+        Ok(resp) if resp.status().is_success() => match resp.json::<TunnelDiscoveryResponse>().await
+        {
+            Ok(config) => {
+                log::info!("WMS tunnel: discovery config: {:?}", config);
+                Some(config)
+            }
+            Err(e) => {
+                log::warn!("WMS tunnel: failed to parse discovery response: {}", e);
+                None
+            }
+        },
+        Ok(resp) => {
+            log::warn!(
+                "WMS tunnel: discovery endpoint returned status {}",
+                resp.status()
+            );
+            None
+        }
+        Err(e) => {
+            log::warn!("WMS tunnel: discovery request failed: {}", e);
+            None
+        }
+    }
+}
+
+/// Build resolved tunnel URLs from discovery response (with hardcoded fallback).
+fn resolve_tunnel_config(
+    server_url: &str,
+    token: Option<&str>,
+    subdomain: &str,
+    discovery: Option<&TunnelDiscoveryResponse>,
+) -> ResolvedTunnelConfig {
+    let ws_path = discovery
+        .and_then(|d| d.tunnel_ws_path.as_deref())
+        .unwrap_or(DEFAULT_TUNNEL_WS_PATH);
+
+    // Build WebSocket base URL (https -> wss, http -> ws)
+    let ws_base = if server_url.starts_with("https://") {
+        server_url.replacen("https://", "wss://", 1)
+    } else if server_url.starts_with("http://") {
+        server_url.replacen("http://", "ws://", 1)
+    } else {
+        format!("wss://{}", server_url)
+    };
+
+    let ws_base_trimmed = ws_base.trim_end_matches('/');
+    let ws_path_trimmed = ws_path.trim_start_matches('/');
+
+    let ws_url = if let Some(t) = token {
+        format!(
+            "{}/{}?token={}&subdomain={}",
+            ws_base_trimmed,
+            ws_path_trimmed,
+            urlencoding::encode(t),
+            urlencoding::encode(subdomain)
+        )
+    } else {
+        format!(
+            "{}/{}?subdomain={}",
+            ws_base_trimmed,
+            ws_path_trimmed,
+            urlencoding::encode(subdomain)
+        )
+    };
+
+    // Build public URL from discovery template or hardcoded fallback
+    let public_url =
+        if let Some(template) = discovery.and_then(|d| d.tunnel_domain_template.as_deref()) {
+            let mut url = template.replace("{subdomain}", subdomain);
+            // Ensure trailing slash
+            if !url.ends_with('/') {
+                url.push('/');
+            }
+            // Ensure protocol prefix
+            if !url.starts_with("http://") && !url.starts_with("https://") {
+                url = format!("https://{}", url);
+            }
+            url
+        } else {
+            // Hardcoded default: {protocol}://{host}/t/{subdomain}/
+            let host = server_url
+                .trim_start_matches("https://")
+                .trim_start_matches("http://")
+                .trim_end_matches('/');
+            let protocol = if server_url.starts_with("http://") {
+                "http"
+            } else {
+                "https"
+            };
+            format!("{}://{}/t/{}/", protocol, host, subdomain)
+        };
+
+    ResolvedTunnelConfig {
+        ws_url,
+        public_url,
+    }
+}
+
+// ==================== Reconnection state shared with frontend ====================
+
+/// Shared state for WMS tunnel reconnection, polled by the frontend via get_share_state.
+#[derive(Default)]
+pub struct WmsTunnelReconnectState {
+    /// Whether the tunnel is currently in the reconnection loop (not connected).
+    pub reconnecting: bool,
+    /// Current reconnection attempt number (resets to 0 on successful connect).
+    pub attempt: u32,
+    /// When the next retry will happen (used to compute countdown).
+    pub next_retry_at: Option<std::time::Instant>,
+}
+
+impl WmsTunnelReconnectState {
+    /// Returns the number of seconds until the next retry, or 0 if not waiting.
+    pub fn next_retry_secs(&self) -> u32 {
+        self.next_retry_at
+            .map(|t| {
+                t.checked_duration_since(std::time::Instant::now())
+                    .map(|d| d.as_secs() as u32 + if d.subsec_millis() > 0 { 1 } else { 0 })
+                    .unwrap_or(0)
+            })
+            .unwrap_or(0)
+    }
+}
+
 // ==================== Protocol types (matching WMS server tunnel/protocol.rs) ====================
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -271,9 +434,8 @@ async fn handle_ws_open(
 }
 
 /// Type alias for the WebSocket stream used by tokio-tungstenite.
-type WsStream = tokio_tungstenite::WebSocketStream<
-    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
->;
+type WsStream =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 /// Server sends Ping every 30s. If we receive nothing within this timeout,
 /// consider the connection dead and trigger reconnection.
@@ -434,10 +596,13 @@ async fn run_tunnel_session(
 /// The `url_tx` channel is used to send back the public URL (or an error) once the first connection is established.
 /// The `shutdown_rx` watch channel signals graceful shutdown.
 /// The `connected_flag` reflects real-time connection status for the frontend to poll.
+/// The `reconnect_state` is shared with the frontend for detailed reconnection status.
+/// The `manual_reconnect_rx` allows the frontend to trigger an immediate reconnection attempt.
 ///
 /// On disconnect, automatically reconnects with exponential backoff (1s -> 2s -> 4s -> ... -> 30s cap).
 /// First connection failure returns an error via `url_tx` (no retry, likely config error).
 /// User-initiated shutdown (via `shutdown_rx`) stops reconnection.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_tunnel(
     local_port: u16,
     server_url: String,
@@ -446,42 +611,19 @@ pub async fn run_tunnel(
     url_tx: std::sync::mpsc::Sender<Result<String, String>>,
     shutdown_rx: tokio::sync::watch::Receiver<bool>,
     connected_flag: Arc<AtomicBool>,
+    reconnect_state: Arc<std::sync::Mutex<WmsTunnelReconnectState>>,
+    mut manual_reconnect_rx: tokio::sync::mpsc::UnboundedReceiver<()>,
 ) {
-    // Build the WebSocket URL
-    let ws_base = if server_url.starts_with("https://") {
-        server_url.replacen("https://", "wss://", 1)
-    } else if server_url.starts_with("http://") {
-        server_url.replacen("http://", "ws://", 1)
-    } else {
-        format!("wss://{}", server_url)
-    };
-
-    let ws_url = if let Some(ref t) = token {
-        format!(
-            "{}/tunnel/connect?token={}&subdomain={}",
-            ws_base.trim_end_matches('/'),
-            urlencoding::encode(t),
-            urlencoding::encode(&subdomain)
-        )
-    } else {
-        format!(
-            "{}/tunnel/connect?subdomain={}",
-            ws_base.trim_end_matches('/'),
-            urlencoding::encode(&subdomain)
-        )
-    };
-
-    // Compute public URL
-    let host = server_url
-        .trim_start_matches("https://")
-        .trim_start_matches("http://")
-        .trim_end_matches('/');
-    let protocol = if server_url.starts_with("http://") {
-        "http"
-    } else {
-        "https"
-    };
-    let public_url = format!("{}://{}/t/{}/", protocol, host, subdomain);
+    // Fetch tunnel config from discovery endpoint (falls back to hardcoded defaults)
+    let discovery = discover_tunnel_config(&server_url).await;
+    let resolved = resolve_tunnel_config(
+        &server_url,
+        token.as_deref(),
+        &subdomain,
+        discovery.as_ref(),
+    );
+    let ws_url = resolved.ws_url;
+    let public_url = resolved.public_url;
 
     log::info!("WMS tunnel connecting to: {}", ws_url);
 
@@ -513,6 +655,14 @@ pub async fn run_tunnel(
     // Reconnection loop with exponential backoff
     let mut backoff_secs: u64 = 1;
     const MAX_BACKOFF_SECS: u64 = 30;
+    let mut attempt: u32 = 0;
+
+    // Enter reconnecting state
+    if let Ok(mut rs) = reconnect_state.lock() {
+        rs.reconnecting = true;
+        rs.attempt = 0;
+        rs.next_retry_at = None;
+    }
 
     loop {
         if *shutdown_rx.borrow() {
@@ -520,17 +670,51 @@ pub async fn run_tunnel(
             break;
         }
 
-        log::info!("WMS tunnel: reconnecting in {}s...", backoff_secs);
+        attempt += 1;
+        log::info!(
+            "WMS tunnel: reconnecting in {}s... (attempt {})",
+            backoff_secs,
+            attempt
+        );
 
-        // Sleep with shutdown check
+        // Update reconnect state for frontend polling
+        let sleep_until = std::time::Instant::now() + std::time::Duration::from_secs(backoff_secs);
+        if let Ok(mut rs) = reconnect_state.lock() {
+            rs.reconnecting = true;
+            rs.attempt = attempt;
+            rs.next_retry_at = Some(sleep_until);
+        }
+
+        // Sleep with shutdown check and manual reconnect interrupt
         let mut shutdown_rx_sleep = shutdown_rx.clone();
-        let should_stop = tokio::select! {
-            _ = tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)) => false,
-            _ = shutdown_rx_sleep.changed() => true,
+        enum WakeReason {
+            TimerExpired,
+            Shutdown,
+            ManualReconnect,
+        }
+        let wake_reason = tokio::select! {
+            _ = tokio::time::sleep(std::time::Duration::from_secs(backoff_secs)) => WakeReason::TimerExpired,
+            _ = shutdown_rx_sleep.changed() => WakeReason::Shutdown,
+            _ = manual_reconnect_rx.recv() => WakeReason::ManualReconnect,
         };
-        if should_stop {
-            log::info!("WMS tunnel: shutdown requested during backoff, stopping");
-            break;
+
+        match wake_reason {
+            WakeReason::Shutdown => {
+                log::info!("WMS tunnel: shutdown requested during backoff, stopping");
+                break;
+            }
+            WakeReason::ManualReconnect => {
+                log::info!("WMS tunnel: manual reconnect triggered, skipping backoff");
+                // Reset backoff for a fresh start
+                backoff_secs = 1;
+                attempt = 0;
+            }
+            WakeReason::TimerExpired => {}
+        }
+
+        // Clear next_retry_at since we're about to attempt connection
+        if let Ok(mut rs) = reconnect_state.lock() {
+            rs.next_retry_at = None;
         }
 
         log::info!("WMS tunnel: attempting reconnection...");
@@ -539,10 +723,17 @@ pub async fn run_tunnel(
             Ok((stream, _)) => {
                 connected_flag.store(true, Ordering::Relaxed);
                 backoff_secs = 1;
+                attempt = 0;
                 log::info!("WMS tunnel: reconnected successfully");
 
-                let shutdown_requested =
-                    run_tunnel_session(local_port, stream, &shutdown_rx).await;
+                // Clear reconnecting state
+                if let Ok(mut rs) = reconnect_state.lock() {
+                    rs.reconnecting = false;
+                    rs.attempt = 0;
+                    rs.next_retry_at = None;
+                }
+
+                let shutdown_requested = run_tunnel_session(local_port, stream, &shutdown_rx).await;
                 connected_flag.store(false, Ordering::Relaxed);
 
                 if shutdown_requested {
@@ -551,12 +742,26 @@ pub async fn run_tunnel(
                 }
 
                 log::info!("WMS tunnel disconnected, will attempt to reconnect...");
+
+                // Re-enter reconnecting state
+                if let Ok(mut rs) = reconnect_state.lock() {
+                    rs.reconnecting = true;
+                    rs.attempt = 0;
+                    rs.next_retry_at = None;
+                }
             }
             Err(e) => {
                 log::warn!("WMS tunnel: reconnection failed: {}", e);
                 backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
             }
         }
+    }
+
+    // Clear reconnecting state on exit
+    if let Ok(mut rs) = reconnect_state.lock() {
+        rs.reconnecting = false;
+        rs.attempt = 0;
+        rs.next_retry_at = None;
     }
 
     connected_flag.store(false, Ordering::Relaxed);

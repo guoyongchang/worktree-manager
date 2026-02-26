@@ -1,4 +1,4 @@
-import { useMemo, type FC } from 'react';
+import { useMemo, useState, useEffect, useRef, type FC } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Dialog,
@@ -49,6 +49,36 @@ export const CreateWorktreeModal: FC<CreateWorktreeModalProps> = ({
   creating,
 }) => {
   const { t } = useTranslation();
+
+  // Elapsed time tracking for creation
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (creating) {
+      setElapsedSeconds(0);
+      elapsedTimerRef.current = setInterval(() => {
+        setElapsedSeconds((prev) => prev + 1);
+      }, 1000);
+    } else {
+      if (elapsedTimerRef.current) {
+        clearInterval(elapsedTimerRef.current);
+        elapsedTimerRef.current = null;
+      }
+    }
+    return () => {
+      if (elapsedTimerRef.current) {
+        clearInterval(elapsedTimerRef.current);
+      }
+    };
+  }, [creating]);
+
+  const formatElapsed = (s: number) => {
+    const min = Math.floor(s / 60);
+    const sec = s % 60;
+    return min > 0 ? `${min}:${sec.toString().padStart(2, '0')}` : `${sec}s`;
+  };
+
   const nameValidation = useMemo(() => {
     const trimmed = worktreeName.trim();
     if (!trimmed) {
@@ -137,6 +167,16 @@ export const CreateWorktreeModal: FC<CreateWorktreeModalProps> = ({
             </div>
           </div>
         </div>
+        {creating && (
+          <div className="px-5 pb-1">
+            <div className="flex items-center gap-2 text-xs text-blue-400/80">
+              <div className="flex-1 h-1 bg-slate-700 rounded-full overflow-hidden">
+                <div className="h-full rounded-full animate-progress-indeterminate animate-gradient" />
+              </div>
+              <span className="whitespace-nowrap tabular-nums">{t('common.creating')} {formatElapsed(elapsedSeconds)}</span>
+            </div>
+          </div>
+        )}
         <DialogFooter className="p-5 border-t border-slate-700">
           <Button variant="secondary" onClick={() => onOpenChange(false)} disabled={creating}>{t('common.cancel')}</Button>
           <Button
