@@ -27,12 +27,11 @@ fn find_main_worktree(repo_path: &Path) -> Option<std::path::PathBuf> {
     None
 }
 
-/// Check if a branch is checked out in the main worktree and switch away if needed
-/// Returns (switched, original_branch) - switched=true if we switched away from the target branch
+/// Check if a branch is checked out in the main worktree and switch to detached HEAD if needed
+/// Returns (switched, original_branch) - switched=true if we switched to detached HEAD
 fn handle_branch_checkout_conflict(
     main_worktree_path: &Path,
     target_branch: &str,
-    fallback_branch: &str,
 ) -> Result<(bool, Option<String>), String> {
     // Check if main worktree has the target branch checked out
     let repo = Repository::open(main_worktree_path)
@@ -67,30 +66,35 @@ fn handle_branch_checkout_conflict(
                     ));
                 }
 
-                // Main worktree is clean, switch to fallback branch
+                // Get current commit SHA
+                let head_commit = head.peel_to_commit()
+                    .map_err(|e| format!("Failed to get HEAD commit: {}", e))?;
+                let commit_sha = head_commit.id().to_string();
+
+                // Main worktree is clean, switch to detached HEAD at current commit
                 log::info!(
-                    "Main worktree is clean, switching from {} to {}",
+                    "Main worktree is clean, switching from {} to detached HEAD at {}",
                     target_branch,
-                    fallback_branch
+                    &commit_sha[..8]
                 );
 
                 let checkout_output = Command::new("git")
                     .arg("-C")
                     .arg(main_worktree_path)
                     .arg("checkout")
-                    .arg(fallback_branch)
+                    .arg("--detach")
+                    .arg(&commit_sha)
                     .output()
-                    .map_err(|e| format!("Failed to switch main worktree branch: {}", e))?;
+                    .map_err(|e| format!("Failed to switch to detached HEAD: {}", e))?;
 
                 if !checkout_output.status.success() {
                     return Err(format!(
-                        "无法将主工作区切换到 {} 分支: {}",
-                        fallback_branch,
+                        "无法将主工作区切换到 detached HEAD: {}",
                         String::from_utf8_lossy(&checkout_output.stderr)
                     ));
                 }
 
-                log::info!("Successfully switched main worktree to {}", fallback_branch);
+                log::info!("Successfully switched main worktree to detached HEAD");
                 return Ok((true, Some(target_branch.to_string()))); // Switched, remember original branch
             }
         }
@@ -419,9 +423,7 @@ pub fn merge_to_test_branch(path: &Path, test_branch: &str) -> Result<String, St
 
     if let Some(main_wt) = find_main_worktree(path) {
         main_worktree_path = Some(main_wt.clone());
-        // Use current_branch as fallback (switch main to the feature branch we're merging from)
-        let (switched, orig_branch) =
-            handle_branch_checkout_conflict(&main_wt, test_branch, current_branch)?;
+        let (switched, orig_branch) = handle_branch_checkout_conflict(&main_wt, test_branch)?;
         switched_main = switched;
         original_main_branch = orig_branch;
     }
@@ -579,9 +581,7 @@ pub fn merge_to_base_branch(path: &Path, base_branch: &str) -> Result<String, St
 
     if let Some(main_wt) = find_main_worktree(path) {
         main_worktree_path = Some(main_wt.clone());
-        // Use current_branch as fallback (switch main to the feature branch we're merging from)
-        let (switched, orig_branch) =
-            handle_branch_checkout_conflict(&main_wt, base_branch, current_branch)?;
+        let (switched, orig_branch) = handle_branch_checkout_conflict(&main_wt, base_branch)?;
         switched_main = switched;
         original_main_branch = orig_branch;
     }
