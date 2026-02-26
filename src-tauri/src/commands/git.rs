@@ -10,16 +10,22 @@ use crate::utils::{normalize_path, parse_repo_url};
 
 #[tauri::command]
 pub(crate) fn switch_branch(request: SwitchBranchRequest) -> Result<(), String> {
+    log::info!(
+        "[git] Switching branch: path='{}', target='{}'",
+        request.project_path, request.branch
+    );
     let path = PathBuf::from(&request.project_path);
 
     if !path.exists() {
+        log::error!("[git] Project path does not exist: {}", request.project_path);
         return Err(format!(
             "Project path does not exist: {}",
             request.project_path
         ));
     }
 
-    // First, fetch to ensure we have latest refs
+    // Step 1: Fetch to ensure we have latest refs
+    log::info!("[git] Step 1/3: git fetch origin");
     let fetch_output = Command::new("git")
         .args(["fetch", "origin"])
         .current_dir(&path)
@@ -28,10 +34,16 @@ pub(crate) fn switch_branch(request: SwitchBranchRequest) -> Result<(), String> 
 
     if !fetch_output.status.success() {
         // Fetch failure is not critical, continue with checkout
-        log::warn!("git fetch failed, continuing with checkout");
+        log::warn!(
+            "[git] Step 1/3: git fetch failed (non-critical), continuing: {}",
+            String::from_utf8_lossy(&fetch_output.stderr)
+        );
+    } else {
+        log::info!("[git] Step 1/3: git fetch origin succeeded");
     }
 
-    // Checkout the branch
+    // Step 2: Checkout the branch
+    log::info!("[git] Step 2/3: git checkout {}", request.branch);
     let checkout_output = Command::new("git")
         .args(["checkout", &request.branch])
         .current_dir(&path)
@@ -40,10 +52,13 @@ pub(crate) fn switch_branch(request: SwitchBranchRequest) -> Result<(), String> 
 
     if !checkout_output.status.success() {
         let stderr = String::from_utf8_lossy(&checkout_output.stderr);
+        log::error!("[git] Step 2/3 FAILED: git checkout {}: {}", request.branch, stderr);
         return Err(format!("Failed to checkout {}: {}", request.branch, stderr));
     }
+    log::info!("[git] Step 2/3: git checkout {} succeeded", request.branch);
 
-    // Pull latest changes
+    // Step 3: Pull latest changes
+    log::info!("[git] Step 3/3: git pull origin {}", request.branch);
     let pull_output = Command::new("git")
         .args(["pull", "origin", &request.branch])
         .current_dir(&path)
@@ -52,9 +67,15 @@ pub(crate) fn switch_branch(request: SwitchBranchRequest) -> Result<(), String> 
 
     if !pull_output.status.success() {
         let stderr = String::from_utf8_lossy(&pull_output.stderr);
-        log::warn!("git pull failed: {}", stderr);
+        log::warn!("[git] Step 3/3: git pull failed (non-critical): {}", stderr);
+    } else {
+        log::info!("[git] Step 3/3: git pull origin {} succeeded", request.branch);
     }
 
+    log::info!(
+        "[git] Successfully switched to branch '{}' at '{}'",
+        request.branch, request.project_path
+    );
     Ok(())
 }
 
@@ -65,15 +86,30 @@ pub fn clone_project_impl(window_label: &str, request: CloneProjectRequest) -> R
     let projects_path = PathBuf::from(&workspace_path).join("projects");
     let target_path = projects_path.join(&request.name);
 
+    // Sanitize URL for logging (may contain tokens)
+    let safe_url = if request.repo_url.contains('@') && request.repo_url.contains("://") {
+        // URL with possible embedded credentials: scheme://user:token@host/...
+        request.repo_url.split('@').next_back().map(|h| format!("***@{}", h)).unwrap_or_else(|| "<redacted>".to_string())
+    } else {
+        request.repo_url.clone()
+    };
+
+    log::info!(
+        "[git] Cloning project: name='{}', url='{}', target='{}', base_branch='{}'",
+        request.name, safe_url, target_path.display(), request.base_branch
+    );
+
     // Check if project already exists
     if target_path.exists() {
+        log::error!("[git] Project '{}' already exists at {}", request.name, target_path.display());
         return Err(format!("Project '{}' already exists", request.name));
     }
 
     // Parse repo URL and convert to git-compatible format
     let git_url = parse_repo_url(&request.repo_url)?;
 
-    // Clone the repository
+    // Step 1: Clone the repository
+    log::info!("[git] Step 1/3: git clone to {}", target_path.display());
     let clone_output = Command::new("git")
         .args(["clone", &git_url, target_path.to_str().unwrap()])
         .output()
@@ -81,10 +117,13 @@ pub fn clone_project_impl(window_label: &str, request: CloneProjectRequest) -> R
 
     if !clone_output.status.success() {
         let stderr = String::from_utf8_lossy(&clone_output.stderr);
+        log::error!("[git] Step 1/3 FAILED: git clone: {}", stderr);
         return Err(format!("Git clone failed: {}", stderr));
     }
+    log::info!("[git] Step 1/3: git clone succeeded");
 
-    // Checkout base branch if not already on it
+    // Step 2: Checkout base branch if not already on it
+    log::info!("[git] Step 2/3: git checkout {}", request.base_branch);
     let checkout_output = Command::new("git")
         .args(["checkout", &request.base_branch])
         .current_dir(&target_path)
@@ -93,12 +132,15 @@ pub fn clone_project_impl(window_label: &str, request: CloneProjectRequest) -> R
 
     if !checkout_output.status.success() {
         log::warn!(
-            "Could not checkout base branch '{}', using default branch",
+            "[git] Step 2/3: Could not checkout base branch '{}', using default branch",
             request.base_branch
         );
+    } else {
+        log::info!("[git] Step 2/3: Checked out base branch '{}'", request.base_branch);
     }
 
-    // Add project to config
+    // Step 3: Add project to config
+    log::info!("[git] Step 3/3: Adding project '{}' to workspace config", request.name);
     config.projects.push(ProjectConfig {
         name: request.name.clone(),
         base_branch: request.base_branch,
@@ -109,6 +151,7 @@ pub fn clone_project_impl(window_label: &str, request: CloneProjectRequest) -> R
 
     save_workspace_config_internal(&workspace_path, &config)?;
 
+    log::info!("[git] Successfully cloned project '{}'", request.name);
     Ok(())
 }
 
@@ -189,17 +232,24 @@ pub(crate) fn get_remote_branches(path: String) -> Result<Vec<String>, String> {
 // ==================== HTTP Server 共享接口 ====================
 
 pub fn switch_branch_internal(request: &SwitchBranchRequest) -> Result<(), String> {
+    log::info!(
+        "[git] switch_branch_internal: path='{}', target='{}'",
+        request.project_path, request.branch
+    );
     let path = PathBuf::from(&request.project_path);
     if !path.exists() {
+        log::error!("[git] Project path does not exist: {}", request.project_path);
         return Err(format!(
             "Project path does not exist: {}",
             request.project_path
         ));
     }
+    log::info!("[git] Step 1/3: git fetch origin");
     let _ = Command::new("git")
         .args(["fetch", "origin"])
         .current_dir(&path)
         .output();
+    log::info!("[git] Step 2/3: git checkout {}", request.branch);
     let checkout_output = Command::new("git")
         .args(["checkout", &request.branch])
         .current_dir(&path)
@@ -207,11 +257,14 @@ pub fn switch_branch_internal(request: &SwitchBranchRequest) -> Result<(), Strin
         .map_err(|e| format!("Failed to checkout: {}", e))?;
     if !checkout_output.status.success() {
         let stderr = String::from_utf8_lossy(&checkout_output.stderr);
+        log::error!("[git] Step 2/3 FAILED: git checkout {}: {}", request.branch, stderr);
         return Err(format!("Failed to checkout {}: {}", request.branch, stderr));
     }
+    log::info!("[git] Step 3/3: git pull origin {}", request.branch);
     let _ = Command::new("git")
         .args(["pull", "origin", &request.branch])
         .current_dir(&path)
         .output();
+    log::info!("[git] Successfully switched to branch '{}'", request.branch);
     Ok(())
 }

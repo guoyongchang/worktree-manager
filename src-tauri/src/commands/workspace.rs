@@ -35,8 +35,15 @@ pub(crate) fn get_current_workspace(window: tauri::Window) -> Option<WorkspaceRe
 pub fn switch_workspace_impl(window_label: &str, path: String) -> Result<(), String> {
     let mut global = load_global_config();
 
+    let previous = global.current_workspace.clone().unwrap_or_else(|| "<none>".to_string());
+    log::info!(
+        "[workspace] Switching workspace: from='{}' to='{}' (window={})",
+        previous, path, window_label
+    );
+
     // 验证 workspace 存在
     if !global.workspaces.iter().any(|w| w.path == path) {
+        log::error!("[workspace] Workspace not found: {}", path);
         return Err("Workspace not found".to_string());
     }
 
@@ -46,7 +53,7 @@ pub fn switch_workspace_impl(window_label: &str, path: String) -> Result<(), Str
     // 绑定窗口 workspace
     {
         let mut map = WINDOW_WORKSPACES.lock().unwrap();
-        map.insert(window_label.to_string(), path);
+        map.insert(window_label.to_string(), path.clone());
     }
 
     // 清除 workspace 配置缓存
@@ -55,6 +62,7 @@ pub fn switch_workspace_impl(window_label: &str, path: String) -> Result<(), Str
         *cache = None;
     }
 
+    log::info!("[workspace] Successfully switched to workspace '{}'", path);
     Ok(())
 }
 
@@ -65,16 +73,19 @@ pub(crate) fn switch_workspace(window: tauri::Window, path: String) -> Result<()
 
 #[tauri::command]
 pub(crate) fn add_workspace(name: String, path: String) -> Result<(), String> {
+    log::info!("[workspace] Adding workspace: name='{}', path='{}'", name, path);
     let mut global = load_global_config();
 
     // 检查是否已存在
     if global.workspaces.iter().any(|w| w.path == path) {
+        log::warn!("[workspace] Workspace already exists at path: {}", path);
         return Err("Workspace with this path already exists".to_string());
     }
 
     // 检查路径是否存在
     let workspace_path = PathBuf::from(&path);
     if !workspace_path.exists() {
+        log::error!("[workspace] Path does not exist: {}", path);
         return Err("Path does not exist".to_string());
     }
 
@@ -86,6 +97,7 @@ pub(crate) fn add_workspace(name: String, path: String) -> Result<(), String> {
 
     // 如果是第一个或者当前没有选中的，则设为当前
     if global.current_workspace.is_none() {
+        log::info!("[workspace] Setting as current workspace (first workspace)");
         global.current_workspace = Some(path.clone());
     }
 
@@ -94,42 +106,60 @@ pub(crate) fn add_workspace(name: String, path: String) -> Result<(), String> {
     // 如果 workspace 目录下没有配置文件，创建默认配置
     let ws_config_path = get_workspace_config_path(&path);
     if !ws_config_path.exists() {
+        log::info!("[workspace] Creating default workspace config at {:?}", ws_config_path);
         let mut default_ws_config = WorkspaceConfig::default();
-        default_ws_config.name = name;
+        default_ws_config.name = name.clone();
         save_workspace_config_internal(&path, &default_ws_config)?;
     }
 
+    log::info!("[workspace] Successfully added workspace '{}' at '{}'", name, path);
     Ok(())
 }
 
 #[tauri::command]
 pub(crate) fn remove_workspace(path: String) -> Result<(), String> {
+    log::info!("[workspace] Removing workspace at path: '{}'", path);
     let mut global = load_global_config();
 
+    let count_before = global.workspaces.len();
     // 移除
     global.workspaces.retain(|w| w.path != path);
+    let removed = count_before - global.workspaces.len();
+
+    if removed == 0 {
+        log::warn!("[workspace] No workspace found at path: {}", path);
+    }
 
     // 如果删除的是当前选中的，切换到第一个
     if global.current_workspace.as_ref() == Some(&path) {
-        global.current_workspace = global.workspaces.first().map(|w| w.path.clone());
+        let new_current = global.workspaces.first().map(|w| w.path.clone());
+        log::info!(
+            "[workspace] Removed current workspace, switching to: {}",
+            new_current.as_deref().unwrap_or("<none>")
+        );
+        global.current_workspace = new_current;
     }
 
     save_global_config_internal(&global)?;
 
+    log::info!("[workspace] Successfully removed workspace '{}'", path);
     Ok(())
 }
 
 #[tauri::command]
 pub(crate) fn create_workspace(name: String, path: String) -> Result<(), String> {
+    log::info!("[workspace] Creating new workspace: name='{}', path='{}'", name, path);
     let workspace_path = PathBuf::from(&path);
 
     // 创建目录结构
+    log::info!("[workspace] Creating directory structure at {}", path);
     fs::create_dir_all(workspace_path.join("projects"))
         .map_err(|e| format!("Failed to create workspace directory: {}", e))?;
     fs::create_dir_all(workspace_path.join("worktrees"))
         .map_err(|e| format!("Failed to create worktrees directory: {}", e))?;
 
     // 创建 workspace 配置
+    log::info!("[workspace] Saving workspace config");
     let ws_config = WorkspaceConfig {
         name: name.clone(),
         worktrees_dir: "worktrees".to_string(),
@@ -139,8 +169,9 @@ pub(crate) fn create_workspace(name: String, path: String) -> Result<(), String>
     save_workspace_config_internal(&path, &ws_config)?;
 
     // 添加到全局配置
-    add_workspace(name, path)?;
+    add_workspace(name.clone(), path.clone())?;
 
+    log::info!("[workspace] Successfully created workspace '{}' at '{}'", name, path);
     Ok(())
 }
 
