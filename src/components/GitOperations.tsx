@@ -218,7 +218,7 @@ export const GitOperations: FC<GitOperationsProps> = ({
           onClick={errorPersistent ? undefined : dismissError}
         >
           <div className="flex items-center justify-between gap-2">
-            <span className="text-red-300 flex-1">{error}</span>
+            <span className="text-red-300 flex-1 whitespace-pre-wrap break-all">{error}</span>
             <button
               onClick={(e) => { e.stopPropagation(); dismissError(); }}
               className="shrink-0 p-0.5 rounded hover:bg-red-800/50 transition-colors"
