@@ -70,6 +70,7 @@ interface WorktreeDetailProps {
   onAddProject?: () => void;
   onAddProjectToWorktree?: () => void;
   onRefresh?: () => void;
+  onOpenTerminalPanel?: (path: string) => void;
   error: string | null;
   onClearError: () => void;
   restoring?: boolean;
@@ -145,6 +146,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
   onAddProject,
   onAddProjectToWorktree,
   onRefresh,
+  onOpenTerminalPanel,
   error,
   onClearError,
   restoring = false,
@@ -496,6 +498,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                   testBranch={proj.test_branch}
                   currentBranch={proj.current_branch}
                   onRefresh={onRefresh}
+                  onOpenTerminal={onOpenTerminalPanel}
                 />
               </div>
             </div>

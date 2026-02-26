@@ -4,7 +4,8 @@ use std::sync::Mutex;
 
 use crate::pty_manager::PtyManager;
 use crate::types::{
-    AuthRateLimiter, ConnectedClient, GlobalConfig, ShareState, TerminalState, WorkspaceConfig,
+    AuthRateLimiter, ConnectedClient, GlobalConfig, NonceCache, ShareState, TerminalState,
+    WorkspaceConfig,
 };
 
 // PTY Manager 全局实例
@@ -64,11 +65,23 @@ pub(crate) static APP_HANDLE: Lazy<Mutex<Option<tauri::AppHandle>>> =
 pub(crate) static AUTH_RATE_LIMITER: Lazy<Mutex<AuthRateLimiter>> =
     Lazy::new(|| Mutex::new(AuthRateLimiter::new()));
 
+// Nonce cache for challenge-response authentication
+pub(crate) static NONCE_CACHE: Lazy<Mutex<NonceCache>> =
+    Lazy::new(|| Mutex::new(NonceCache::new()));
+
 // Broadcast channel for voice events (WebSocket push to browser clients)
 pub(crate) static VOICE_BROADCAST: Lazy<tokio::sync::broadcast::Sender<String>> = Lazy::new(|| {
     let (tx, _) = tokio::sync::broadcast::channel(64);
     tx
 });
+
+// Broadcast channel for per-client notifications (kick events, etc.)
+// Messages are JSON strings with a "session_id" field for filtering.
+pub(crate) static CLIENT_NOTIFICATION_BROADCAST: Lazy<tokio::sync::broadcast::Sender<String>> =
+    Lazy::new(|| {
+        let (tx, _) = tokio::sync::broadcast::channel(64);
+        tx
+    });
 
 // ==================== 全局配置缓存 ====================
 

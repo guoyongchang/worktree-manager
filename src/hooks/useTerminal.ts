@@ -19,6 +19,8 @@ export interface UseTerminalReturn {
   setIsResizing: (resizing: boolean) => void;
   handleTerminalTabClick: (path: string) => void;
   handleCloseTerminalTab: (path: string) => void;
+  handleCloseOtherTerminalTabs: (keepPath: string) => void;
+  handleCloseAllTerminalTabs: () => void;
   handleDuplicateTerminal: (path: string) => void;
   handleToggleTerminal: () => void;
   cleanupTerminalsForPath: (pathPrefix: string) => void;
@@ -112,6 +114,8 @@ export function useTerminal(
     });
 
   const terminalTabs = [...baseTabs, ...duplicatedTabs];
+  const terminalTabsRef = useRef(terminalTabs);
+  terminalTabsRef.current = terminalTabs;
 
   // Explicit broadcast function — reads from refs (synchronously updated)
   const scheduleBroadcast = useCallback(() => {
@@ -289,7 +293,7 @@ export function useTerminal(
     return unsubscribe;
   }, [selectedWorktree, workspacePath, worktreeName, _isTauri, handleTerminalStateMessage]);
 
-  // Handle terminal resize drag
+  // Handle terminal resize drag (mouse + touch)
   useEffect(() => {
     if (!isResizing) return;
 
@@ -298,18 +302,30 @@ export function useTerminal(
       setTerminalHeight(Math.max(TERMINAL.MIN_HEIGHT, Math.min(TERMINAL.MAX_HEIGHT, newHeight)));
     };
 
-    const handleMouseUp = () => {
+    const handleTouchMove = (e: TouchEvent) => {
+      e.preventDefault();
+      const newHeight = window.innerHeight - e.touches[0].clientY;
+      setTerminalHeight(Math.max(TERMINAL.MIN_HEIGHT, Math.min(TERMINAL.MAX_HEIGHT, newHeight)));
+    };
+
+    const handleEnd = () => {
       setIsResizing(false);
     };
 
     document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
+    document.addEventListener('mouseup', handleEnd);
+    document.addEventListener('touchmove', handleTouchMove, { passive: false });
+    document.addEventListener('touchend', handleEnd);
+    document.addEventListener('touchcancel', handleEnd);
     document.body.style.cursor = 'ns-resize';
     document.body.style.userSelect = 'none';
 
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
+      document.removeEventListener('mouseup', handleEnd);
+      document.removeEventListener('touchmove', handleTouchMove);
+      document.removeEventListener('touchend', handleEnd);
+      document.removeEventListener('touchcancel', handleEnd);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     };
@@ -357,14 +373,75 @@ export function useTerminal(
 
     let newActiveTab = activeTerminalTabRef.current;
     if (activeTerminalTabRef.current === path) {
-      const remaining = Array.from(newActivated);
-      newActiveTab = remaining.length > 0 ? remaining[0] : null;
+      // Select adjacent tab: prefer next, then previous, based on tab order
+      const tabs = terminalTabsRef.current;
+      const closedIndex = tabs.findIndex(t => t.path === path);
+      const activatedArr = tabs.filter(t => newActivated.has(t.path));
+      if (activatedArr.length > 0) {
+        // Find the nearest activated tab after the closed index, otherwise before
+        const after = activatedArr.find(t => tabs.indexOf(t) > closedIndex);
+        const before = [...activatedArr].reverse().find(t => tabs.indexOf(t) < closedIndex);
+        newActiveTab = (after || before)?.path ?? activatedArr[0].path;
+      } else {
+        newActiveTab = null;
+      }
       setActiveTerminalTab(newActiveTab);
     }
 
     // Update refs synchronously for broadcast
     activatedTerminalsRef.current = newActivated;
     activeTerminalTabRef.current = newActiveTab;
+
+    scheduleBroadcast();
+  }, [scheduleBroadcast]);
+
+  const handleCloseOtherTerminalTabs = useCallback((keepPath: string) => {
+    const toClose = Array.from(activatedTerminalsRef.current).filter(p => p !== keepPath);
+    if (toClose.length === 0) return;
+
+    const newActivated = new Set([keepPath]);
+    setActivatedTerminals(newActivated);
+
+    // Remove closed terminals from mountedTerminals and close their PTY sessions
+    setMountedTerminals(prev => {
+      const next = new Set(prev);
+      for (const p of toClose) next.delete(p);
+      return next;
+    });
+    for (const p of toClose) {
+      const sessionId = `pty-${p.replace(/[\/#]/g, '-')}`;
+      callBackend('pty_close', { sessionId }).catch(() => {});
+    }
+
+    setActiveTerminalTab(keepPath);
+
+    activatedTerminalsRef.current = newActivated;
+    activeTerminalTabRef.current = keepPath;
+
+    scheduleBroadcast();
+  }, [scheduleBroadcast]);
+
+  const handleCloseAllTerminalTabs = useCallback(() => {
+    const toClose = Array.from(activatedTerminalsRef.current);
+    if (toClose.length === 0) return;
+
+    const newActivated = new Set<string>();
+    setActivatedTerminals(newActivated);
+
+    setMountedTerminals(prev => {
+      const next = new Set(prev);
+      for (const p of toClose) next.delete(p);
+      return next;
+    });
+    for (const p of toClose) {
+      const sessionId = `pty-${p.replace(/[\/#]/g, '-')}`;
+      callBackend('pty_close', { sessionId }).catch(() => {});
+    }
+
+    setActiveTerminalTab(null);
+
+    activatedTerminalsRef.current = newActivated;
+    activeTerminalTabRef.current = null;
 
     scheduleBroadcast();
   }, [scheduleBroadcast]);
@@ -443,6 +520,8 @@ export function useTerminal(
     setIsResizing,
     handleTerminalTabClick,
     handleCloseTerminalTab,
+    handleCloseOtherTerminalTabs,
+    handleCloseAllTerminalTabs,
     handleDuplicateTerminal,
     handleToggleTerminal,
     cleanupTerminalsForPath,

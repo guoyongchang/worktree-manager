@@ -52,12 +52,19 @@ use crate::{
     CreateWorktreeRequest,
     OpenEditorRequest,
     SwitchBranchRequest,
+    // WMS config & tunnel
+    load_global_config,
+    save_global_config_internal,
+    start_wms_tunnel_internal,
+    stop_wms_tunnel_internal,
+    WmsConfig,
     // Direct functions (no window context)
     WorkspaceConfig,
     AUTHENTICATED_SESSIONS,
     AUTH_RATE_LIMITER,
     CONNECTED_CLIENTS,
     LOCK_BROADCAST,
+    NONCE_CACHE,
     PTY_MANAGER,
     SHARE_STATE,
     TERMINAL_STATE_BROADCAST,
@@ -590,7 +597,8 @@ async fn auth_middleware(headers: HeaderMap, request: Request, next: Next) -> Re
 
     // Allow non-API paths (static files), exempt endpoints, and WebSocket
     if !path.starts_with("/api/")
-        || path == "/api/auth"
+        || path == "/api/auth/challenge"
+        || path == "/api/auth/verify"
         || path == "/api/get_share_info"
         || path == "/api/cert.pem"
         || path == "/ws"
@@ -601,7 +609,7 @@ async fn auth_middleware(headers: HeaderMap, request: Request, next: Next) -> Re
     // Check if sharing is active and has a password
     let needs_auth = SHARE_STATE
         .lock()
-        .map(|state| state.active && state.password.is_some())
+        .map(|state| state.active && state.auth_key.is_some())
         .unwrap_or(false);
 
     if !needs_auth {
@@ -633,11 +641,7 @@ async fn auth_middleware(headers: HeaderMap, request: Request, next: Next) -> Re
     (StatusCode::UNAUTHORIZED, "Authentication required").into_response()
 }
 
-async fn h_auth(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
-    Json(args): Json<Value>,
-) -> Response {
+async fn h_auth_challenge(ConnectInfo(addr): ConnectInfo<SocketAddr>) -> Response {
     let client_ip = addr.ip().to_string();
 
     // Rate limiting: max 5 attempts per 60 seconds per IP
@@ -650,87 +654,131 @@ async fn h_auth(
         return (StatusCode::TOO_MANY_REQUESTS, "请求过于频繁，请稍后再试").into_response();
     }
 
-    let password = args["password"].as_str().unwrap_or("");
-
-    let expected = SHARE_STATE
+    // Get salt
+    let salt = SHARE_STATE
         .lock()
-        .map(|state| state.password.clone().unwrap_or_default())
+        .ok()
+        .and_then(|state| state.auth_salt.clone())
         .unwrap_or_default();
 
-    // Constant-time comparison to prevent timing attacks.
-    // We hash both inputs with a fixed-length output to avoid leaking length information.
-    use std::hash::{Hash, Hasher};
-    let password_match = {
-        // Use SipHash (Rust default) on both values to normalize length, then compare.
-        // This prevents timing leaks from early-exit on length mismatch.
-        let hash_val = |s: &str| -> u64 {
-            let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            s.hash(&mut hasher);
-            hasher.finish()
-        };
-        let h_input = hash_val(password);
-        let h_expected = hash_val(&expected);
-        // Constant-time XOR comparison on fixed 8-byte values
-        let mut diff = h_input ^ h_expected;
-        // Also require exact string match to avoid hash collisions
-        diff |= (password.len() != expected.len()) as u64;
-        // Iterate bytes for actual comparison (both hashed to same length first)
-        let a = password.as_bytes();
-        let b = expected.as_bytes();
-        let max_len = a.len().max(b.len());
-        let mut byte_diff = 0u8;
-        for i in 0..max_len {
-            let x = if i < a.len() { a[i] } else { 0 };
-            let y = if i < b.len() { b[i] } else { 1 }; // different default to avoid false match
-            byte_diff |= x ^ y;
-        }
-        diff == 0 && byte_diff == 0
-    };
-    if password_match {
-        // Generate a server-side session ID to prevent client forgery
-        let sid = uuid::Uuid::new_v4().to_string();
-        let now = chrono::Utc::now().to_rfc3339();
-        let user_agent = headers
-            .get("user-agent")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("unknown")
-            .to_string();
-
-        // Record connected client, removing stale entries from the same IP
-        let client_ip = addr.ip().to_string();
-        let client = ConnectedClient {
-            session_id: sid.clone(),
-            ip: client_ip.clone(),
-            user_agent,
-            authenticated_at: now.clone(),
-            last_active: now,
-            ws_connected: false,
-        };
-        // Remove old sessions from the same IP that don't have an active WebSocket
-        let stale_sids: Vec<String> = if let Ok(mut clients) = CONNECTED_CLIENTS.lock() {
-            let stale: Vec<String> = clients
-                .iter()
-                .filter(|(_, c)| c.ip == client_ip && !c.ws_connected)
-                .map(|(s, _)| s.clone())
-                .collect();
-            for s in &stale {
-                clients.remove(s);
-            }
-            clients.insert(sid.clone(), client);
-            stale
-        } else {
-            vec![]
-        };
-        if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() {
-            for s in &stale_sids {
-                sessions.remove(s);
-            }
-            sessions.insert(sid.clone());
-        }
-        Json(json!({ "sessionId": sid })).into_response()
-    } else {
-        (StatusCode::UNAUTHORIZED, "密码错误").into_response()
+    if salt.is_empty() {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "No password configured").into_response();
     }
+
+    // Generate nonce
+    let nonce_hex = match NONCE_CACHE.lock() {
+        Ok(mut cache) => match cache.generate() {
+            Ok(n) => n,
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+        },
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response(),
+    };
+
+    Json(json!({
+        "nonce": nonce_hex,
+        "salt": hex::encode(&salt),
+    }))
+    .into_response()
+}
+
+#[derive(serde::Deserialize)]
+struct VerifyRequest {
+    proof: String,  // hex-encoded HMAC
+    nonce: String,  // hex-encoded nonce
+}
+
+async fn h_auth_verify(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(req): Json<VerifyRequest>,
+) -> Response {
+    // Consume nonce (one-time use)
+    let nonce_bytes = match NONCE_CACHE.lock() {
+        Ok(mut cache) => match cache.consume(&req.nonce) {
+            Some(n) => n,
+            None => {
+                log::warn!("Invalid or expired nonce: {}", req.nonce);
+                return (StatusCode::UNAUTHORIZED, "Invalid or expired nonce").into_response();
+            }
+        },
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response(),
+    };
+
+    // Get auth key
+    let auth_key = SHARE_STATE
+        .lock()
+        .ok()
+        .and_then(|state| state.auth_key.clone())
+        .unwrap_or_default();
+
+    if auth_key.is_empty() {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "No password configured").into_response();
+    }
+
+    // Compute expected HMAC
+    use ring::hmac;
+    let key = hmac::Key::new(hmac::HMAC_SHA256, &auth_key);
+    let expected_tag = hmac::sign(&key, &nonce_bytes);
+    let expected_hex = hex::encode(expected_tag.as_ref());
+
+    // Constant-time comparison
+    let proof_match = req.proof.len() == expected_hex.len()
+        && req
+            .proof
+            .as_bytes()
+            .iter()
+            .zip(expected_hex.as_bytes())
+            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+            == 0;
+
+    if !proof_match {
+        log::warn!("Auth failed: invalid proof from {}", addr.ip());
+        return (StatusCode::UNAUTHORIZED, "密码错误").into_response();
+    }
+
+    // Generate session ID (same logic as before)
+    let sid = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+    let user_agent = headers
+        .get("user-agent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let client_ip = addr.ip().to_string();
+    let client = ConnectedClient {
+        session_id: sid.clone(),
+        ip: client_ip.clone(),
+        user_agent,
+        authenticated_at: now.clone(),
+        last_active: now,
+        ws_connected: false,
+    };
+
+    // Remove old sessions from the same IP that don't have an active WebSocket
+    let stale_sids: Vec<String> = if let Ok(mut clients) = CONNECTED_CLIENTS.lock() {
+        let stale: Vec<String> = clients
+            .iter()
+            .filter(|(_, c)| c.ip == client_ip && !c.ws_connected)
+            .map(|(s, _)| s.clone())
+            .collect();
+        for s in &stale {
+            clients.remove(s);
+        }
+        clients.insert(sid.clone(), client);
+        stale
+    } else {
+        vec![]
+    };
+
+    if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() {
+        for s in &stale_sids {
+            sessions.remove(s);
+        }
+        sessions.insert(sid.clone());
+    }
+
+    Json(json!({ "sessionId": sid })).into_response()
 }
 
 // -- ngrok token --
@@ -770,28 +818,100 @@ async fn h_stop_ngrok_tunnel() -> Response {
     }
 }
 
+// -- WMS config & tunnel --
+
+async fn h_get_wms_config() -> Response {
+    let config = load_global_config();
+    let wms = WmsConfig {
+        server_url: config.wms_server_url,
+        token: config.wms_token,
+        subdomain: config.wms_subdomain,
+    };
+    Json(json!(wms)).into_response()
+}
+
+#[derive(Deserialize)]
+struct SetWmsConfigReq {
+    server_url: Option<String>,
+    token: Option<String>,
+    subdomain: Option<String>,
+}
+
+async fn h_set_wms_config(Json(body): Json<SetWmsConfigReq>) -> Response {
+    let mut config = load_global_config();
+    config.wms_server_url = body.server_url.filter(|s| !s.is_empty());
+    config.wms_token = body.token.filter(|s| !s.is_empty());
+    config.wms_subdomain = body.subdomain.filter(|s| !s.is_empty());
+    result_ok(save_global_config_internal(&config))
+}
+
+async fn h_start_wms_tunnel() -> Response {
+    match start_wms_tunnel_internal(None).await {
+        Ok(url) => Json(json!(url)).into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+async fn h_stop_wms_tunnel() -> Response {
+    match stop_wms_tunnel_internal().await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+async fn h_wms_manual_reconnect() -> Response {
+    match crate::wms_manual_reconnect_internal() {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
 // -- Share info --
 
 async fn h_get_share_info() -> Response {
-    let null_response =
-        || Json(json!({ "workspace_name": null, "workspace_path": null })).into_response();
-
-    let share_state = match SHARE_STATE.lock() {
-        Ok(s) if s.active => s,
-        _ => return null_response(),
+    let null_response = || {
+        Json(json!({
+            "workspace_name": null,
+            "workspace_path": null,
+            "current_worktree": null,
+        }))
+        .into_response()
     };
 
-    let (ws_name, ws_path) = match share_state.workspace_path {
-        Some(ref path) => {
-            let config = load_workspace_config(path);
-            (Some(config.name), Some(path.clone()))
+    // Extract share state data, then drop the lock before acquiring WORKTREE_LOCKS
+    let (ws_name, ws_path) = {
+        let share_state = match SHARE_STATE.lock() {
+            Ok(s) if s.active => s,
+            _ => return null_response(),
+        };
+        match share_state.workspace_path {
+            Some(ref path) => {
+                let config = load_workspace_config(path);
+                (Some(config.name), Some(path.clone()))
+            }
+            None => (None, None),
         }
-        None => (None, None),
+    };
+
+    // Get current locked worktree (the one the desktop user is viewing)
+    let current_worktree = if let Some(ref ws_path) = ws_path {
+        if let Ok(locks) = crate::WORKTREE_LOCKS.lock() {
+            // Find the first locked worktree for this workspace
+            locks
+                .iter()
+                .find(|((wp, _), _)| wp == ws_path)
+                .map(|((_, wt), _)| wt.clone())
+        } else {
+            None
+        }
+    } else {
+        None
     };
 
     Json(json!({
         "workspace_name": ws_name,
-        "workspace_path": ws_path
+        "workspace_path": ws_path,
+        "current_worktree": current_worktree,
     }))
     .into_response()
 }
@@ -839,7 +959,7 @@ async fn h_ws_upgrade(
 
     let needs_auth = SHARE_STATE
         .lock()
-        .map(|state| state.active && state.password.is_some())
+        .map(|state| state.active && state.auth_key.is_some())
         .unwrap_or(false);
 
     if needs_auth {
@@ -884,6 +1004,42 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
     let mut lock_forwarder: Option<tokio::task::JoinHandle<()>> = None;
     let mut terminal_state_forwarder: Option<tokio::task::JoinHandle<()>> = None;
     let mut voice_forwarder: Option<tokio::task::JoinHandle<()>> = None;
+
+    // Always-on: subscribe to per-client notifications (kick events, etc.)
+    let notification_forwarder: tokio::task::JoinHandle<()> = {
+        let mut rx = crate::state::CLIENT_NOTIFICATION_BROADCAST.subscribe();
+        let sender = Arc::clone(&ws_sender);
+        let sid = session_id.clone();
+        tokio::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(json_str) => {
+                        if let Ok(val) = serde_json::from_str::<Value>(&json_str) {
+                            // Only forward notifications targeted at this session
+                            if val["session_id"].as_str() == Some(&sid) {
+                                let msg_type = val["type"].as_str().unwrap_or("");
+                                let reason =
+                                    val["reason"].as_str().unwrap_or("").to_string();
+                                let msg = json!({
+                                    "type": msg_type,
+                                    "reason": reason,
+                                });
+                                let mut sender = sender.lock().await;
+                                let _ = sender.send(Message::text(msg.to_string())).await;
+                                // After sending kick notification, close the connection
+                                if msg_type == "kicked" {
+                                    let _ = sender.close().await;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        })
+    };
 
     // Process incoming messages
     while let Some(msg) = ws_receiver.next().await {
@@ -1280,6 +1436,7 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
     if let Some(handle) = voice_forwarder {
         handle.abort();
     }
+    notification_forwarder.abort();
 
     // Mark WebSocket disconnected
     if let Ok(mut clients) = CONNECTED_CLIENTS.lock() {
@@ -1546,7 +1703,8 @@ pub fn create_router(cert_pem: Option<String>) -> Router {
         .route("/api/pty_exists", post(h_pty_exists))
         .route("/api/pty_close_by_path", post(h_pty_close_by_path))
         // Auth
-        .route("/api/auth", post(h_auth))
+        .route("/api/auth/challenge", post(h_auth_challenge))
+        .route("/api/auth/verify", post(h_auth_verify))
         // Share info
         .route("/api/get_share_info", get(h_get_share_info))
         // Connected clients
@@ -1557,6 +1715,12 @@ pub fn create_router(cert_pem: Option<String>) -> Router {
         .route("/api/set_ngrok_token", post(h_set_ngrok_token))
         .route("/api/start_ngrok_tunnel", post(h_start_ngrok_tunnel))
         .route("/api/stop_ngrok_tunnel", post(h_stop_ngrok_tunnel))
+        // WMS config & tunnel
+        .route("/api/get_wms_config", post(h_get_wms_config))
+        .route("/api/set_wms_config", post(h_set_wms_config))
+        .route("/api/start_wms_tunnel", post(h_start_wms_tunnel))
+        .route("/api/stop_wms_tunnel", post(h_stop_wms_tunnel))
+        .route("/api/wms_manual_reconnect", post(h_wms_manual_reconnect))
         // Voice
         .route("/api/voice_start", post(h_voice_start))
         .route("/api/voice_send_audio", post(h_voice_send_audio))

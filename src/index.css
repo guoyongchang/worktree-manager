@@ -98,10 +98,6 @@
   animation: slide-out-to-right 0.2s ease-in forwards;
 }
 
-.toast-countdown {
-  animation: toast-countdown 3s linear forwards;
-}
-
 /* Indeterminate progress bar animation */
 @keyframes progress-indeterminate {
   0% { width: 0%; margin-left: 0%; }
@@ -113,8 +109,8 @@
   animation: progress-indeterminate 1.5s ease-in-out infinite;
 }
 
-/* Disable browser-like behaviors for native app feel */
-* {
+/* Disable browser-like behaviors for native app feel (Tauri desktop mode) */
+body.tauri * {
   /* Disable text selection */
   -webkit-user-select: none;
   user-select: none;
@@ -124,11 +120,23 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-/* Allow text selection only in input fields */
-input,
-textarea,
-select,
-[contenteditable="true"] {
+/* Browser mode: allow text selection by default, disable drag */
+body.browser * {
+  -webkit-user-drag: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body.browser button,
+body.browser [role="button"] {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Allow text selection only in input fields (Tauri mode) */
+body.tauri input,
+body.tauri textarea,
+body.tauri select,
+body.tauri [contenteditable="true"] {
   -webkit-user-select: text;
   user-select: text;
 }
@@ -138,6 +146,11 @@ select,
   -webkit-user-select: text;
   user-select: text;
   cursor: text;
+}
+
+/* Fallback for when body class is not yet set */
+* {
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* Disable context menu visual feedback */

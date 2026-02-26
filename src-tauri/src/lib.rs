@@ -17,7 +17,10 @@ pub use utils::normalize_path;
 
 // Re-exports of _impl functions used by http_server
 pub use commands::git::{clone_project_impl, switch_branch_internal};
-pub use commands::sharing::{kick_client_internal, start_ngrok_tunnel_internal};
+pub use commands::sharing::{
+    kick_client_internal, start_ngrok_tunnel_internal, start_wms_tunnel_internal,
+    stop_wms_tunnel_internal, wms_manual_reconnect_internal, WmsConfig,
+};
 pub use commands::system::{
     open_in_editor_internal, open_in_terminal_internal, open_log_dir_internal,
     reveal_in_finder_internal,
@@ -193,6 +196,7 @@ pub fn run() {
             set_wms_config,
             start_wms_tunnel,
             stop_wms_tunnel,
+            wms_manual_reconnect,
             // 语音识别 (Dashscope)
             get_dashscope_api_key,
             set_dashscope_api_key,

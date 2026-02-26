@@ -17,60 +17,119 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { RefreshCw, Search, Mic } from 'lucide-react';
+import { RefreshCw, Search, Mic, Eye, EyeOff } from 'lucide-react';
 import { BackIcon, PlusIcon, TrashIcon } from './Icons';
 import { BranchCombobox } from './BranchCombobox';
 import type { WorkspaceRef, WorkspaceConfig, ProjectConfig, ScannedFolder } from '../types';
-import { getAppVersion, getNgrokToken, setNgrokToken as saveNgrokToken, getWmsConfig, setWmsConfig as saveWmsConfig, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, voiceStart, voiceStop, isTauri, getRemoteBranches, openLink } from '../lib/backend';
+import { getAppVersion, getNgrokToken, setNgrokToken as saveNgrokToken, getWmsConfig, setWmsConfig as saveWmsConfig, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, voiceStart, voiceStop, isTauri, getRemoteBranches, openLink, callBackend } from '../lib/backend';
 
 interface SettingsViewProps {
-  config: WorkspaceConfig;
+  workspaceConfig: WorkspaceConfig;
   configPath: string;
   error: string | null;
-  saving: boolean;
   onBack: () => void;
-  onSave: () => void;
-  onUpdateField: (field: 'name' | 'worktrees_dir', value: string) => void;
-  onUpdateProject: (index: number, field: keyof ProjectConfig, value: string | boolean | string[]) => void;
-  onAddProject: () => void;
-  onRemoveProject: (index: number) => void;
-  onAddLinkedItem: (item: string) => void;
-  onRemoveLinkedItem: (index: number) => void;
+  onSaveConfig: (config: WorkspaceConfig) => Promise<void>;
   onClearError: () => void;
   onCheckUpdate?: () => void;
   checkingUpdate?: boolean;
-  onScanProject?: (projectName: string) => void;
-  scanningProject?: string | null;
-  scanResultsMap?: Record<string, ScannedFolder[]>;
   workspaces?: WorkspaceRef[];
   currentWorkspace?: WorkspaceRef | null;
   onRemoveWorkspace?: (path: string) => void;
 }
 
 export const SettingsView: FC<SettingsViewProps> = ({
-  config,
+  workspaceConfig,
   configPath,
   error,
-  saving,
   onBack,
-  onSave,
-  onUpdateField,
-  onUpdateProject,
-  onAddProject,
-  onRemoveProject,
-  onAddLinkedItem,
-  onRemoveLinkedItem,
+  onSaveConfig,
   onClearError,
   onCheckUpdate,
   checkingUpdate = false,
-  onScanProject,
-  scanningProject = null,
-  scanResultsMap = {},
   workspaces = [],
   currentWorkspace = null,
   onRemoveWorkspace,
 }) => {
   const { t, i18n } = useTranslation();
+
+  // Internal editing state — cloned from workspaceConfig on mount/change
+  const [config, setConfig] = useState<WorkspaceConfig>(() => JSON.parse(JSON.stringify(workspaceConfig)));
+  const [saving, setSaving] = useState(false);
+  const [scanningProject, setScanningProject] = useState<string | null>(null);
+  const [scanResultsMap, setScanResultsMap] = useState<Record<string, ScannedFolder[]>>({});
+
+  // Reset editing config when the source config changes (e.g. save succeeded, re-entering settings)
+  useEffect(() => {
+    setConfig(JSON.parse(JSON.stringify(workspaceConfig)));
+  }, [workspaceConfig]);
+
+  // Internal config update helpers
+  const updateField = useCallback((field: 'name' | 'worktrees_dir', value: string) => {
+    setConfig(prev => ({ ...prev, [field]: value }));
+  }, []);
+
+  const updateProject = useCallback((index: number, field: keyof ProjectConfig, value: string | boolean | string[]) => {
+    setConfig(prev => {
+      const newProjects = [...prev.projects];
+      newProjects[index] = { ...newProjects[index], [field]: value };
+      return { ...prev, projects: newProjects };
+    });
+  }, []);
+
+  const addNewProject = useCallback(() => {
+    setConfig(prev => ({
+      ...prev,
+      projects: [
+        ...prev.projects,
+        { name: '', base_branch: 'uat', test_branch: 'test', merge_strategy: 'merge', linked_folders: [] },
+      ],
+    }));
+  }, []);
+
+  const removeProject = useCallback((index: number) => {
+    setConfig(prev => ({
+      ...prev,
+      projects: prev.projects.filter((_, i) => i !== index),
+    }));
+  }, []);
+
+  const addLinkedItem = useCallback((item: string) => {
+    setConfig(prev => ({
+      ...prev,
+      linked_workspace_items: [...prev.linked_workspace_items, item],
+    }));
+  }, []);
+
+  const removeLinkedItem = useCallback((index: number) => {
+    setConfig(prev => ({
+      ...prev,
+      linked_workspace_items: prev.linked_workspace_items.filter((_, i) => i !== index),
+    }));
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    setSaving(true);
+    try {
+      await onSaveConfig(config);
+    } finally {
+      setSaving(false);
+    }
+  }, [config, onSaveConfig]);
+
+  const handleScanProject = useCallback(async (projectName: string) => {
+    setScanningProject(projectName);
+    setScanResultsMap(prev => ({ ...prev, [projectName]: [] }));
+    try {
+      const projectPath = `${configPath.replace('/.worktree-manager.json', '')}/projects/${projectName}`;
+      const results = await callBackend('scan_linked_folders', { projectPath }) as ScannedFolder[];
+      setScanResultsMap(prev => ({ ...prev, [projectName]: results }));
+    } catch {
+      // silently fail
+    } finally {
+      setScanningProject(null);
+    }
+  }, [configPath]);
+
   const [newLinkedItem, setNewLinkedItem] = useState('');
   const [newProjectLinkedFolder, setNewProjectLinkedFolder] = useState<Record<number, string>>({});
   const [appVersion, setAppVersion] = useState('');
@@ -122,6 +181,11 @@ export const SettingsView: FC<SettingsViewProps> = ({
   const micTestAudioCtxRef = useRef<AudioContext | null>(null);
   const micTestAnimRef = useRef<number>(0);
   const micTestTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Token visibility toggles
+  const [showWmsToken, setShowWmsToken] = useState(false);
+  const [showNgrokToken, setShowNgrokToken] = useState(false);
+  const [showDashscopeKey, setShowDashscopeKey] = useState(false);
 
   // Dashscope connection test state
   const [dashscopeTesting, setDashscopeTesting] = useState(false);
@@ -271,7 +335,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
           <h1 className="text-xl font-semibold">{t('settings.workspaceSettings')}</h1>
         </div>
         <Button
-          onClick={onSave}
+          onClick={handleSave}
           disabled={saving}
         >
           {saving ? t('common.saving') : t('settings.saveConfig')}
@@ -320,7 +384,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
             <Input
               type="text"
               value={config.name}
-              onChange={(e) => onUpdateField('name', e.target.value)}
+              onChange={(e) => updateField('name', e.target.value)}
             />
           </div>
           <div>
@@ -328,7 +392,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
             <Input
               type="text"
               value={config.worktrees_dir}
-              onChange={(e) => onUpdateField('worktrees_dir', e.target.value)}
+              onChange={(e) => updateField('worktrees_dir', e.target.value)}
             />
           </div>
 
@@ -341,7 +405,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                   <span className="flex-1 text-sm text-slate-300 select-text">{item}</span>
                   <button
                     type="button"
-                    onClick={() => onRemoveLinkedItem(index)}
+                    onClick={() => removeLinkedItem(index)}
                     className="text-slate-500 hover:text-red-400 text-xs transition-colors"
                   >
                     {t('common.delete')}
@@ -358,7 +422,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && newLinkedItem.trim()) {
                     e.preventDefault();
-                    onAddLinkedItem(newLinkedItem.trim());
+                    addLinkedItem(newLinkedItem.trim());
                     setNewLinkedItem('');
                   }
                 }}
@@ -369,7 +433,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                 size="sm"
                 onClick={() => {
                   if (newLinkedItem.trim()) {
-                    onAddLinkedItem(newLinkedItem.trim());
+                    addLinkedItem(newLinkedItem.trim());
                     setNewLinkedItem('');
                   }
                 }}
@@ -436,7 +500,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
           <Button
             variant="secondary"
             size="sm"
-            onClick={onAddProject}
+            onClick={addNewProject}
           >
             <PlusIcon className="w-4 h-4" />
             {t('settings.addProject')}
@@ -456,7 +520,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                     <Input
                       type="text"
                       value={proj.name}
-                      onChange={(e) => onUpdateProject(index, 'name', e.target.value)}
+                      onChange={(e) => updateProject(index,'name', e.target.value)}
                       placeholder="project-name"
                       className="h-8 text-sm"
                     />
@@ -465,7 +529,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                     <label className="block text-xs text-slate-500 mb-1">{t('settings.baseBranchLabel')}</label>
                     <BranchCombobox
                       value={proj.base_branch}
-                      onChange={(value) => onUpdateProject(index, 'base_branch', value)}
+                      onChange={(value) => updateProject(index,'base_branch', value)}
                       onLoadBranches={async () => {
                         const projectPath = `${configPath.replace('/.worktree-manager.json', '')}/projects/${proj.name}`;
                         return await getRemoteBranches(projectPath);
@@ -477,7 +541,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                     <label className="block text-xs text-slate-500 mb-1">{t('settings.testBranchLabel')}</label>
                     <BranchCombobox
                       value={proj.test_branch}
-                      onChange={(value) => onUpdateProject(index, 'test_branch', value)}
+                      onChange={(value) => updateProject(index,'test_branch', value)}
                       onLoadBranches={async () => {
                         const projectPath = `${configPath.replace('/.worktree-manager.json', '')}/projects/${proj.name}`;
                         return await getRemoteBranches(projectPath);
@@ -489,7 +553,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                     <label className="block text-xs text-slate-500 mb-1">{t('settings.mergeStrategyLabel')}</label>
                     <Select
                       value={proj.merge_strategy}
-                      onValueChange={(value) => onUpdateProject(index, 'merge_strategy', value)}
+                      onValueChange={(value) => updateProject(index,'merge_strategy', value)}
                     >
                       <SelectTrigger className="w-full h-8 text-sm">
                         <SelectValue />
@@ -505,7 +569,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => onRemoveProject(index)}
+                  onClick={() => removeProject(index)}
                   className="h-8 w-8 text-red-400 hover:text-red-300 hover:bg-red-900/30 shrink-0"
                   title={t('settings.deleteProject')}
                   aria-label={t('settings.deleteProjectLabel', { name: proj.name || '' })}
@@ -517,13 +581,13 @@ export const SettingsView: FC<SettingsViewProps> = ({
               <div className="border-t border-slate-700/50 pt-3">
                 <div className="flex items-center justify-between mb-2">
                   <label className="block text-xs text-slate-500">{t('settings.linkedFoldersLabel')}</label>
-                  {onScanProject && (
+                  {handleScanProject && (
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
                       className="h-6 text-xs gap-1 text-slate-400 hover:text-slate-200"
-                      onClick={() => onScanProject(proj.name)}
+                      onClick={() => handleScanProject(proj.name)}
                       disabled={scanningProject === proj.name || !proj.name}
                     >
                       {scanningProject === proj.name ? (
@@ -558,7 +622,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                             className="w-full flex items-center justify-between px-2 py-1 text-left rounded hover:bg-blue-900/30 transition-colors"
                             onClick={() => {
                               const newFolders = [...(proj.linked_folders || []), result.relative_path];
-                              onUpdateProject(index, 'linked_folders', newFolders);
+                              updateProject(index,'linked_folders', newFolders);
                             }}
                           >
                             <span className="text-xs text-slate-300 font-mono">{result.relative_path}</span>
@@ -582,7 +646,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                           onClick={() => {
                             const newFolders = [...(proj.linked_folders || [])];
                             newFolders.splice(folderIdx, 1);
-                            onUpdateProject(index, 'linked_folders', newFolders);
+                            updateProject(index,'linked_folders', newFolders);
                           }}
                           className="text-slate-500 hover:text-red-400 text-xs ml-2 transition-colors"
                         >
@@ -604,7 +668,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                       if (e.key === 'Enter' && val) {
                         e.preventDefault();
                         const newFolders = [...(proj.linked_folders || []), val];
-                        onUpdateProject(index, 'linked_folders', newFolders);
+                        updateProject(index,'linked_folders', newFolders);
                         setNewProjectLinkedFolder(prev => ({ ...prev, [index]: '' }));
                       }
                     }}
@@ -618,7 +682,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                       const val = (newProjectLinkedFolder[index] || '').trim();
                       if (val) {
                         const newFolders = [...(proj.linked_folders || []), val];
-                        onUpdateProject(index, 'linked_folders', newFolders);
+                        updateProject(index,'linked_folders', newFolders);
                         setNewProjectLinkedFolder(prev => ({ ...prev, [index]: '' }));
                       }
                     }}
@@ -636,21 +700,35 @@ export const SettingsView: FC<SettingsViewProps> = ({
       {/* External Share Config Section (Tauri only) */}
       {isTauri() && (wmsLoaded || ngrokTokenLoaded) && (
         <div className="mt-8 pt-8 border-t border-slate-700/50">
-          <h2 id="settings-external-share" className="text-lg font-medium mb-4 scroll-mt-32">{t('settings.externalShareTitle', '外网分享')}</h2>
+          <h2 id="settings-external-share" className="text-lg font-medium mb-2 scroll-mt-32">{t('settings.externalShareTitle', '外网分享')}</h2>
+          <p className="text-xs text-amber-500/80 mb-4">
+            {t('settings.tokenStorageWarning')}
+          </p>
 
-          {/* WMS Share */}
+          {/* Remote Share */}
           {wmsLoaded && (
             <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 space-y-3 mb-4">
-              <h3 className="text-sm font-medium text-slate-300">{t('settings.wmsShareSubtitle', 'WMS 分享')}</h3>
+              <h3 className="text-sm font-medium text-slate-300">{t('settings.wmsShareSubtitle', 'Remote Share')}</h3>
               <div>
                 <label className="block text-sm text-slate-400 mb-1">Token</label>
-                <Input
-                  type="password"
-                  value={wmsToken}
-                  onChange={(e) => { setWmsToken(e.target.value); setWmsSaved(false); }}
-                  placeholder={t('settings.wmsTokenPlaceholder', '从 WMS Portal 获取')}
-                  className="w-full"
-                />
+                <div className="relative">
+                  <Input
+                    type={showWmsToken ? 'text' : 'password'}
+                    value={wmsToken}
+                    onChange={(e) => { setWmsToken(e.target.value); setWmsSaved(false); }}
+                    placeholder={t('settings.wmsTokenPlaceholder', 'Get from remote share portal')}
+                    className="w-full pr-9"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowWmsToken(v => !v)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
+                    title={showWmsToken ? t('settings.hideToken') : t('settings.showToken')}
+                    aria-label={showWmsToken ? t('settings.hideToken') : t('settings.showToken')}
+                  >
+                    {showWmsToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
               <div>
                 <label className="block text-sm text-slate-400 mb-1">Subdomain</label>
@@ -688,13 +766,13 @@ export const SettingsView: FC<SettingsViewProps> = ({
                 )}
               </div>
               <p className="text-xs text-slate-500">
-                {t('settings.wmsShareHint', '配置 WMS 隧道后，分享时可通过公网 URL 访问。')}
+                {t('settings.wmsShareHint', 'After configuring the remote share tunnel, sharing will be accessible via a public URL.')}
                 <button
                   type="button"
                   className="text-blue-400 hover:text-blue-300 ml-1 underline cursor-pointer transition-colors"
                   onClick={() => openLink('https://wms.kirov-opensource.com/')}
                 >
-                  {t('settings.wmsPortalLink', '前往 WMS Portal 注册/获取 Token')}
+                  {t('settings.wmsPortalLink', 'Go to portal to register/get Token')}
                 </button>
               </p>
             </div>
@@ -707,13 +785,24 @@ export const SettingsView: FC<SettingsViewProps> = ({
               <div>
                 <label className="block text-sm text-slate-400 mb-1">{t('settings.ngrokAuthtokenLabel')}</label>
                 <div className="flex gap-2">
-                  <Input
-                    type="password"
-                    value={ngrokToken}
-                    onChange={(e) => { setNgrokToken(e.target.value); setNgrokSaved(false); }}
-                    placeholder={t('settings.ngrokAuthtokenPlaceholder')}
-                    className="flex-1"
-                  />
+                  <div className="relative flex-1">
+                    <Input
+                      type={showNgrokToken ? 'text' : 'password'}
+                      value={ngrokToken}
+                      onChange={(e) => { setNgrokToken(e.target.value); setNgrokSaved(false); }}
+                      placeholder={t('settings.ngrokAuthtokenPlaceholder')}
+                      className="w-full pr-9"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNgrokToken(v => !v)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
+                      title={showNgrokToken ? t('settings.hideToken') : t('settings.showToken')}
+                      aria-label={showNgrokToken ? t('settings.hideToken') : t('settings.showToken')}
+                    >
+                      {showNgrokToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                   <Button
                     variant="secondary"
                     size="sm"
@@ -841,13 +930,24 @@ export const SettingsView: FC<SettingsViewProps> = ({
             <div>
               <label className="block text-sm text-slate-400 mb-1">{t('settings.dashscopeKeyLabel')}</label>
               <div className="flex gap-2">
-                <Input
-                  type="password"
-                  value={dashscopeKey}
-                  onChange={(e) => { setDashscopeKey(e.target.value); setDashscopeSaved(false); }}
-                  placeholder={t('settings.dashscopeKeyPlaceholder')}
-                  className="flex-1"
-                />
+                <div className="relative flex-1">
+                  <Input
+                    type={showDashscopeKey ? 'text' : 'password'}
+                    value={dashscopeKey}
+                    onChange={(e) => { setDashscopeKey(e.target.value); setDashscopeSaved(false); }}
+                    placeholder={t('settings.dashscopeKeyPlaceholder')}
+                    className="w-full pr-9"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowDashscopeKey(v => !v)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
+                    title={showDashscopeKey ? t('settings.hideToken') : t('settings.showToken')}
+                    aria-label={showDashscopeKey ? t('settings.hideToken') : t('settings.showToken')}
+                  >
+                    {showDashscopeKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
                 <Button
                   variant="secondary"
                   size="sm"

@@ -183,6 +183,9 @@ export interface ShareState {
   ngrok_url?: string;
   wms_url?: string;
   wms_connected: boolean;
+  wms_reconnecting: boolean;
+  wms_reconnect_attempt: number;
+  wms_next_retry_secs: number;
   workspace_path?: string;
 }
 
@@ -195,6 +198,7 @@ export interface WmsConfig {
 export interface ShareInfo {
   workspace_name: string;
   workspace_path: string;
+  current_worktree: string | null;
 }
 
 /** Start sharing the current workspace with a password. Returns the share URL. */
@@ -257,6 +261,11 @@ export async function stopWmsTunnel(): Promise<void> {
   return callBackend<void>('stop_wms_tunnel');
 }
 
+/** Trigger a manual WMS tunnel reconnect (skips backoff wait). */
+export async function wmsManualReconnect(): Promise<void> {
+  return callBackend<void>('wms_manual_reconnect');
+}
+
 /** Get the last used share port. */
 export async function getLastSharePort(): Promise<number | null> {
   return callBackend<number | null>('get_last_share_port');
@@ -298,23 +307,91 @@ export async function getShareInfo(): Promise<ShareInfo> {
   return res.json() as Promise<ShareInfo>;
 }
 
-/** Browser mode: authenticate with the share password. */
+/** Browser mode: authenticate with challenge-response protocol. */
 export async function authenticate(password: string): Promise<void> {
-  const res = await fetch(`${getApiBase()}/auth`, {
+  // Step 1: Request challenge (nonce + salt)
+  const challengeRes = await fetch(`${getApiBase()}/auth/challenge`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password }),
   });
-  if (!res.ok) {
-    const text = await res.text();
+  if (!challengeRes.ok) {
+    const text = await challengeRes.text();
+    throw new Error(text || 'Challenge request failed');
+  }
+  const { nonce, salt } = await challengeRes.json();
+
+  // Step 2: Derive key using PBKDF2 (Web Crypto API)
+  const encoder = new TextEncoder();
+  const passwordKey = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(password),
+    'PBKDF2',
+    false,
+    ['deriveBits']
+  );
+
+  const derivedKeyBits = await crypto.subtle.deriveBits(
+    {
+      name: 'PBKDF2',
+      salt: hexToBytes(salt),
+      iterations: 100_000,
+      hash: 'SHA-256',
+    },
+    passwordKey,
+    256 // 32 bytes
+  );
+
+  // Step 3: Compute HMAC proof
+  const hmacKey = await crypto.subtle.importKey(
+    'raw',
+    derivedKeyBits,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+
+  const proofBytes = await crypto.subtle.sign(
+    'HMAC',
+    hmacKey,
+    hexToBytes(nonce)
+  );
+
+  // Step 4: Send proof for verification
+  const verifyRes = await fetch(`${getApiBase()}/auth/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      proof: bytesToHex(new Uint8Array(proofBytes)),
+      nonce,
+    }),
+  });
+
+  if (!verifyRes.ok) {
+    const text = await verifyRes.text();
     throw new Error(text || 'Authentication failed');
   }
-  // Server returns a generated session ID — clear old and store new
-  const data = await res.json();
+
+  // Server returns session ID
+  const data = await verifyRes.json();
   if (data.sessionId) {
     clearSessionId();
     setSessionId(data.sessionId);
   }
+}
+
+// Hex encoding/decoding helpers
+function hexToBytes(hex: string): Uint8Array {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+  }
+  return bytes;
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 /** Get cached terminal state for a worktree (used for initial sync) */

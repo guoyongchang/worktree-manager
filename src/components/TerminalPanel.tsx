@@ -230,6 +230,7 @@ interface TerminalPanelProps {
   onTabClick: (path: string) => void;
   onTabContextMenu: (e: React.MouseEvent, path: string, name: string) => void;
   onCloseTab: (path: string) => void;
+  onCloseAllTabs: () => void;
   onToggle: () => void;
   onCollapse: () => void;
   isFullscreen?: boolean;
@@ -255,6 +256,7 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
   onTabClick,
   onTabContextMenu,
   onCloseTab,
+  onCloseAllTabs,
   onToggle,
   onCollapse,
   isFullscreen = false,
@@ -273,6 +275,37 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showAltVHint, setShowAltVHint] = useState(false);
   const hintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Long-press support for terminal tab context menus on touch devices
+  const tabLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tabLongPressFiredRef = useRef(false);
+
+  const handleTabTouchStart = useCallback((e: React.TouchEvent, path: string, name: string) => {
+    tabLongPressFiredRef.current = false;
+    const touch = e.touches[0];
+    tabLongPressTimerRef.current = setTimeout(() => {
+      tabLongPressFiredRef.current = true;
+      onTabContextMenu(
+        { preventDefault: () => {}, clientX: touch.clientX, clientY: touch.clientY } as unknown as React.MouseEvent,
+        path,
+        name,
+      );
+    }, 500);
+  }, [onTabContextMenu]);
+
+  const handleTabTouchEnd = useCallback(() => {
+    if (tabLongPressTimerRef.current) {
+      clearTimeout(tabLongPressTimerRef.current);
+      tabLongPressTimerRef.current = null;
+    }
+  }, []);
+
+  const handleTabTouchMove = useCallback(() => {
+    if (tabLongPressTimerRef.current) {
+      clearTimeout(tabLongPressTimerRef.current);
+      tabLongPressTimerRef.current = null;
+    }
+  }, []);
 
   // Show voice errors as a visible toast
   useEffect(() => {
@@ -304,8 +337,12 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
       {/* Resize handle - hidden in fullscreen */}
       {visible && !isFullscreen && (
         <div
-          className="h-3 flex items-center justify-center cursor-ns-resize shrink-0 group"
+          className="h-3 flex items-center justify-center cursor-ns-resize shrink-0 group touch-none"
           onMouseDown={(e) => {
+            e.preventDefault();
+            onStartResize();
+          }}
+          onTouchStart={(e) => {
             e.preventDefault();
             onStartResize();
           }}
@@ -323,7 +360,14 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
           tabIndex={0}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); } }}
         >
-          <TerminalIcon className="w-4 h-4" />
+          <span className="relative">
+            <TerminalIcon className="w-4 h-4" />
+            {activatedTerminals.size > 1 && (
+              <span className="absolute -top-1.5 -right-2 min-w-[14px] h-[14px] rounded-full bg-blue-600 text-[9px] text-white font-bold flex items-center justify-center px-0.5 leading-none">
+                {activatedTerminals.size}
+              </span>
+            )}
+          </span>
           <ChevronIcon expanded={visible} className="w-3 h-3 text-slate-500" />
         </div>
         {/* Project tabs - horizontal scroll */}
@@ -342,8 +386,20 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
                         ? 'text-slate-300 hover:bg-slate-700/50'
                         : 'text-slate-500 hover:bg-slate-700/50 hover:text-slate-400'
                   }`}
-                  onClick={() => onTabClick(tab.path)}
+                  onClick={() => {
+                    if (tabLongPressFiredRef.current) return;
+                    onTabClick(tab.path);
+                  }}
+                  onAuxClick={(e) => {
+                    if (e.button === 1 && isActivated) {
+                      e.preventDefault();
+                      onCloseTab(tab.path);
+                    }
+                  }}
                   onContextMenu={(e) => onTabContextMenu(e, tab.path, tab.name)}
+                  onTouchStart={(e) => handleTabTouchStart(e, tab.path, tab.name)}
+                  onTouchEnd={handleTabTouchEnd}
+                  onTouchMove={handleTabTouchMove}
                 >
                   {tab.isRoot && <FolderIcon className="w-3 h-3" />}
                   <span>{tab.name}</span>
@@ -368,9 +424,19 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
             })}
           </div>
         </div>
-        {/* Voice, Fullscreen & Collapse buttons */}
+        {/* Close All, Voice, Fullscreen & Collapse buttons */}
         {visible && (
           <div className="flex items-center mx-1">
+            {activatedTerminals.size >= 2 && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onCloseAllTabs(); }}
+                className="p-1.5 hover:bg-slate-700 rounded text-slate-500 hover:text-slate-300 transition-colors"
+                title={t('terminal.closeAllTerminals')}
+                aria-label={t('terminal.closeAllTerminals')}
+              >
+                <CloseIcon className="w-3.5 h-3.5" />
+              </button>
+            )}
             {onToggleVoice && (
               <button
                 onClick={(e) => { e.stopPropagation(); onToggleVoice(); }}
