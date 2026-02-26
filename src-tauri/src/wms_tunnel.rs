@@ -37,7 +37,7 @@ const DEFAULT_TUNNEL_WS_PATH: &str = "/tunnel/connect";
 /// Returns `None` on any failure (network, parse, non-2xx).
 async fn discover_tunnel_config(server_url: &str) -> Option<TunnelDiscoveryResponse> {
     let url = format!("{}/api/tunnel/config", server_url.trim_end_matches('/'));
-    log::info!("WMS tunnel: fetching discovery config from {}", url);
+    log::info!("[wms-tunnel] Fetching discovery config from {}", url);
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
@@ -48,23 +48,23 @@ async fn discover_tunnel_config(server_url: &str) -> Option<TunnelDiscoveryRespo
         Ok(resp) if resp.status().is_success() => match resp.json::<TunnelDiscoveryResponse>().await
         {
             Ok(config) => {
-                log::info!("WMS tunnel: discovery config: {:?}", config);
+                log::info!("[wms-tunnel] Discovery config: {:?}", config);
                 Some(config)
             }
             Err(e) => {
-                log::warn!("WMS tunnel: failed to parse discovery response: {}", e);
+                log::warn!("[wms-tunnel] Failed to parse discovery response: {}", e);
                 None
             }
         },
         Ok(resp) => {
             log::warn!(
-                "WMS tunnel: discovery endpoint returned status {}",
+                "[wms-tunnel] Discovery endpoint returned status {}",
                 resp.status()
             );
             None
         }
         Err(e) => {
-            log::warn!("WMS tunnel: discovery request failed: {}", e);
+            log::warn!("[wms-tunnel] Discovery request failed: {}", e);
             None
         }
     }
@@ -253,6 +253,12 @@ async fn proxy_http(
     body: Option<String>,
 ) -> ClientMessage {
     let url = format!("http://localhost:{}{}", local_port, uri);
+    log::debug!(
+        "[wms-tunnel] Proxying HTTP request: {} {} (request_id={})",
+        method,
+        uri,
+        request_id
+    );
 
     let req_method = match method.to_uppercase().as_str() {
         "GET" => reqwest::Method::GET,
@@ -283,6 +289,11 @@ async fn proxy_http(
     match builder.send().await {
         Ok(resp) => {
             let status = resp.status().as_u16();
+            log::debug!(
+                "[wms-tunnel] Proxy response: status={} (request_id={})",
+                status,
+                request_id
+            );
             let resp_headers: Vec<(String, String)> = resp
                 .headers()
                 .iter()
@@ -314,12 +325,19 @@ async fn proxy_http(
                 },
             }
         }
-        Err(e) => ClientMessage::HttpResponse {
-            request_id,
-            status: 502,
-            headers: vec![("content-type".to_string(), "text/plain".to_string())],
-            body: Some(BASE64.encode(format!("Proxy error: {}", e).as_bytes())),
-        },
+        Err(e) => {
+            log::error!(
+                "[wms-tunnel] Proxy error for request_id={}: {}",
+                request_id,
+                e
+            );
+            ClientMessage::HttpResponse {
+                request_id,
+                status: 502,
+                headers: vec![("content-type".to_string(), "text/plain".to_string())],
+                body: Some(BASE64.encode(format!("Proxy error: {}", e).as_bytes())),
+            }
+        }
     }
 }
 
@@ -333,9 +351,18 @@ async fn handle_ws_open(
     ws_streams: Arc<tokio::sync::Mutex<HashMap<String, mpsc::UnboundedSender<String>>>>,
 ) {
     let url = format!("ws://localhost:{}{}", local_port, path);
+    log::info!(
+        "[wms-tunnel] Opening WS bridge: stream_id={}, path={}",
+        stream_id,
+        path
+    );
 
     match tokio_tungstenite::connect_async(&url).await {
         Ok((ws_stream, _)) => {
+            log::info!(
+                "[wms-tunnel] WS bridge connected: stream_id={}",
+                stream_id
+            );
             let _ = send_tx.send(ClientMessage::WsOpened {
                 stream_id: stream_id.clone(),
             });
@@ -425,6 +452,11 @@ async fn handle_ws_open(
             streams.remove(&stream_id);
         }
         Err(e) => {
+            log::error!(
+                "[wms-tunnel] WS bridge connection failed: stream_id={}, error={}",
+                stream_id,
+                e
+            );
             let _ = send_tx.send(ClientMessage::WsError {
                 stream_id,
                 error: format!("Failed to connect to local WS: {}", e),
@@ -450,6 +482,10 @@ async fn run_tunnel_session(
     ws_stream: WsStream,
     shutdown_rx: &tokio::sync::watch::Receiver<bool>,
 ) -> bool {
+    log::info!(
+        "[wms-tunnel] Session started, proxying to localhost:{}",
+        local_port
+    );
     let (mut ws_sink, mut ws_source) = ws_stream.split();
 
     let (send_tx, mut send_rx) = mpsc::unbounded_channel::<ClientMessage>();
@@ -479,7 +515,7 @@ async fn run_tunnel_session(
                     }
                 }
                 _ = shutdown_rx_send.changed() => {
-                    log::info!("WMS tunnel: sending Close frame for graceful shutdown");
+                    log::info!("[wms-tunnel] Sending Close frame for graceful shutdown");
                     let _ = ws_sink.send(tokio_tungstenite::tungstenite::Message::Close(None)).await;
                     let _ = ws_sink.close().await;
                     break;
@@ -499,7 +535,7 @@ async fn run_tunnel_session(
                         let msg_result_opt = match recv_result {
                             Ok(v) => v,
                             Err(_) => {
-                                log::warn!("WMS tunnel: no message received in {}s, assuming connection dead", RECV_TIMEOUT.as_secs());
+                                log::warn!("[wms-tunnel] No message received in {}s, assuming connection dead", RECV_TIMEOUT.as_secs());
                                 break;
                             }
                         };
@@ -507,7 +543,7 @@ async fn run_tunnel_session(
                         let msg = match msg_result {
                             Ok(m) => m,
                             Err(e) => {
-                                log::error!("WMS tunnel WS error: {}", e);
+                                log::error!("[wms-tunnel] WebSocket error: {}", e);
                                 break;
                             }
                         };
@@ -525,7 +561,7 @@ async fn run_tunnel_session(
                         let server_msg: ServerMessage = match serde_json::from_str(&text) {
                             Ok(m) => m,
                             Err(e) => {
-                                log::warn!("WMS tunnel: failed to parse server message: {}", e);
+                                log::warn!("[wms-tunnel] Failed to parse server message: {}", e);
                                 continue;
                             }
                         };
@@ -538,6 +574,7 @@ async fn run_tunnel_session(
                                 headers,
                                 body,
                             } => {
+                                log::debug!("[wms-tunnel] Received HttpRequest: {} {} (id={})", method, uri, request_id);
                                 let client = http_client.clone();
                                 let tx = send_tx.clone();
                                 tokio::spawn(async move {
@@ -552,6 +589,7 @@ async fn run_tunnel_session(
                                 path,
                                 headers,
                             } => {
+                                log::debug!("[wms-tunnel] Received WsOpen: stream_id={}, path={}", stream_id, path);
                                 let tx = send_tx.clone();
                                 let streams = ws_streams.clone();
                                 tokio::spawn(handle_ws_open(
@@ -565,16 +603,18 @@ async fn run_tunnel_session(
                                 }
                             }
                             ServerMessage::WsClose { stream_id } => {
+                                log::debug!("[wms-tunnel] Received WsClose: stream_id={}", stream_id);
                                 let mut streams = ws_streams.lock().await;
                                 streams.remove(&stream_id);
                             }
                             ServerMessage::Ping { timestamp } => {
+                                log::trace!("[wms-tunnel] Received Ping, sending Pong (timestamp={})", timestamp);
                                 let _ = send_tx.send(ClientMessage::Pong { timestamp });
                             }
                         }
                     }
                     _ = shutdown_rx_recv.changed() => {
-                        log::info!("WMS tunnel recv loop: shutdown signal received");
+                        log::info!("[wms-tunnel] Recv loop: shutdown signal received");
                         break;
                     }
                 }
@@ -625,12 +665,17 @@ pub async fn run_tunnel(
     let ws_url = resolved.ws_url;
     let public_url = resolved.public_url;
 
-    log::info!("WMS tunnel connecting to: {}", ws_url);
+    log::info!("[wms-tunnel] Connecting to: {}", ws_url);
 
     // First connection attempt — failure here means config error, don't retry
+    log::info!("[wms-tunnel] First connection attempt...");
     let first_stream = match tokio_tungstenite::connect_async(&ws_url).await {
-        Ok((stream, _)) => stream,
+        Ok((stream, _)) => {
+            log::info!("[wms-tunnel] First connection succeeded");
+            stream
+        }
         Err(e) => {
+            log::error!("[wms-tunnel] First connection failed (no retry): {}", e);
             let _ = url_tx.send(Err(format!("WMS 连接失败: {}", e)));
             return;
         }
@@ -639,18 +684,18 @@ pub async fn run_tunnel(
     // First connection succeeded — send URL back
     let _ = url_tx.send(Ok(public_url));
     connected_flag.store(true, Ordering::Relaxed);
-    log::info!("WMS tunnel connected");
+    log::info!("[wms-tunnel] Connected, public URL sent to caller");
 
     // Run the first session
     let shutdown_requested = run_tunnel_session(local_port, first_stream, &shutdown_rx).await;
     connected_flag.store(false, Ordering::Relaxed);
 
     if shutdown_requested {
-        log::info!("WMS tunnel disconnected (shutdown requested)");
+        log::info!("[wms-tunnel] Disconnected (shutdown requested)");
         return;
     }
 
-    log::info!("WMS tunnel disconnected, will attempt to reconnect...");
+    log::info!("[wms-tunnel] Disconnected, will attempt to reconnect...");
 
     // Reconnection loop with exponential backoff
     let mut backoff_secs: u64 = 1;
@@ -666,13 +711,13 @@ pub async fn run_tunnel(
 
     loop {
         if *shutdown_rx.borrow() {
-            log::info!("WMS tunnel: shutdown requested, stopping reconnection");
+            log::info!("[wms-tunnel] Shutdown requested, stopping reconnection");
             break;
         }
 
         attempt += 1;
         log::info!(
-            "WMS tunnel: reconnecting in {}s... (attempt {})",
+            "[wms-tunnel] Reconnecting in {}s (attempt {})",
             backoff_secs,
             attempt
         );
@@ -700,11 +745,11 @@ pub async fn run_tunnel(
 
         match wake_reason {
             WakeReason::Shutdown => {
-                log::info!("WMS tunnel: shutdown requested during backoff, stopping");
+                log::info!("[wms-tunnel] Shutdown requested during backoff, stopping");
                 break;
             }
             WakeReason::ManualReconnect => {
-                log::info!("WMS tunnel: manual reconnect triggered, skipping backoff");
+                log::info!("[wms-tunnel] Manual reconnect triggered, skipping backoff");
                 // Reset backoff for a fresh start
                 backoff_secs = 1;
                 attempt = 0;
@@ -717,14 +762,14 @@ pub async fn run_tunnel(
             rs.next_retry_at = None;
         }
 
-        log::info!("WMS tunnel: attempting reconnection...");
+        log::info!("[wms-tunnel] Attempting reconnection...");
 
         match tokio_tungstenite::connect_async(&ws_url).await {
             Ok((stream, _)) => {
                 connected_flag.store(true, Ordering::Relaxed);
                 backoff_secs = 1;
                 attempt = 0;
-                log::info!("WMS tunnel: reconnected successfully");
+                log::info!("[wms-tunnel] Reconnected successfully");
 
                 // Clear reconnecting state
                 if let Ok(mut rs) = reconnect_state.lock() {
@@ -737,11 +782,11 @@ pub async fn run_tunnel(
                 connected_flag.store(false, Ordering::Relaxed);
 
                 if shutdown_requested {
-                    log::info!("WMS tunnel disconnected (shutdown requested)");
+                    log::info!("[wms-tunnel] Disconnected (shutdown requested)");
                     break;
                 }
 
-                log::info!("WMS tunnel disconnected, will attempt to reconnect...");
+                log::info!("[wms-tunnel] Disconnected, will attempt to reconnect...");
 
                 // Re-enter reconnecting state
                 if let Ok(mut rs) = reconnect_state.lock() {
@@ -751,7 +796,7 @@ pub async fn run_tunnel(
                 }
             }
             Err(e) => {
-                log::warn!("WMS tunnel: reconnection failed: {}", e);
+                log::warn!("[wms-tunnel] Reconnection failed: {}", e);
                 backoff_secs = (backoff_secs * 2).min(MAX_BACKOFF_SECS);
             }
         }
@@ -765,5 +810,5 @@ pub async fn run_tunnel(
     }
 
     connected_flag.store(false, Ordering::Relaxed);
-    log::info!("WMS tunnel stopped");
+    log::info!("[wms-tunnel] Tunnel stopped");
 }

@@ -48,14 +48,23 @@ pub async fn start_sharing_internal(
     port: u16,
     password: String,
 ) -> Result<String, String> {
+    log::info!(
+        "[sharing] Starting LAN sharing: workspace={}, port={}, password_len={}",
+        workspace_path,
+        port,
+        password.len()
+    );
+
     // SECURITY: Validate password is not empty (required for remote access security)
     if password.trim().is_empty() {
+        log::warn!("[sharing] Rejected: empty password");
         return Err("分享密码不能为空".to_string());
     }
 
     // Validate port range (recommended dynamic/private ports: 49152-65535)
     // Allow common development ports (3000-9999) for convenience
     if port < 3000 {
+        log::warn!("[sharing] Rejected: port {} too low (minimum 3000)", port);
         return Err(format!(
             "端口 {} 过小。推荐使用 49152-65535 范围内的端口，或 3000-9999 开发端口",
             port
@@ -68,6 +77,7 @@ pub async fn start_sharing_internal(
             .lock()
             .map_err(|_| "Internal state error".to_string())?;
         if state.active {
+            log::warn!("[sharing] Rejected: already sharing on port {}", state.port);
             return Err("Already sharing. Stop current sharing first.".to_string());
         }
     }
@@ -76,6 +86,7 @@ pub async fn start_sharing_internal(
     // Bind to 0.0.0.0 to allow LAN access (security handled by password auth)
     let bind_addr = format!("0.0.0.0:{}", port);
     if let Err(e) = tokio::net::TcpListener::bind(&bind_addr).await {
+        log::error!("[sharing] Port {} unavailable: {}", port, e);
         return Err(format!("端口 {} 已被占用: {}", port, e));
     }
 
@@ -95,9 +106,18 @@ pub async fn start_sharing_internal(
         .collect();
     lan_ips.sort();
     lan_ips.dedup();
+    log::info!(
+        "[sharing] Detected {} LAN IPs: {:?}",
+        lan_ips.len(),
+        lan_ips
+    );
 
     // Generate self-signed TLS certificate for HTTPS (includes all LAN IPs in SAN)
     let tls_certs = tls::generate_self_signed(&lan_ips)?;
+    log::info!(
+        "[sharing] TLS certificate generated for {} LAN IPs",
+        lan_ips.len()
+    );
 
     let share_urls: Vec<String> = lan_ips
         .iter()
@@ -129,6 +149,7 @@ pub async fn start_sharing_internal(
         password.as_bytes(),
         &mut auth_key,
     );
+    log::info!("[sharing] PBKDF2 key derived, auth state updated");
 
     // Update share state
     {
@@ -149,18 +170,19 @@ pub async fn start_sharing_internal(
         config.last_share_port = Some(port);
         let _ = save_global_config_internal(&config);
     }
+    log::info!("[sharing] Port {} saved to global config", port);
 
     // Clear any previous authenticated sessions
     if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() {
         sessions.clear();
     }
+    log::info!("[sharing] Previous authenticated sessions cleared");
 
     // Spawn HTTP (port) + HTTPS (port+1) servers on the shared tokio runtime
     TOKIO_RT.spawn(http_server::start_server(port, rx, Some(tls_certs)));
-
     log::info!(
-        "Sharing started on {} for workspace {}",
-        share_url,
+        "[sharing] HTTP/HTTPS server spawned on port {} for workspace {}",
+        port,
         workspace_path
     );
 
@@ -179,14 +201,17 @@ pub(crate) async fn start_sharing(
 }
 
 pub async fn start_ngrok_tunnel_internal() -> Result<String, String> {
+    log::info!("[ngrok] Starting ngrok tunnel");
     let port = {
         let state = SHARE_STATE
             .lock()
             .map_err(|_| "Internal state error".to_string())?;
         if !state.active {
+            log::warn!("[ngrok] Rejected: LAN sharing not active");
             return Err("请先开启分享".to_string());
         }
         if state.ngrok_url.is_some() {
+            log::warn!("[ngrok] Rejected: ngrok tunnel already running");
             return Err("ngrok 隧道已在运行".to_string());
         }
         state.port
@@ -195,16 +220,19 @@ pub async fn start_ngrok_tunnel_internal() -> Result<String, String> {
     let ngrok_token = load_global_config()
         .ngrok_token
         .ok_or("未配置 ngrok token，请先在设置中配置".to_string())?;
+    log::info!("[ngrok] Token configured, forwarding to port {}", port);
 
     let (url_tx, url_rx) = std::sync::mpsc::channel::<Result<String, String>>();
 
     let ngrok_handle = TOKIO_RT.spawn(async move {
         let result = async {
+            log::info!("[ngrok] Connecting to ngrok service...");
             let session = ngrok::Session::builder()
                 .authtoken(ngrok_token)
                 .connect()
                 .await
                 .map_err(|e| format!("ngrok 连接失败: {}", e))?;
+            log::info!("[ngrok] Session established, creating HTTP tunnel to localhost:{}", port);
 
             let forwarder = session
                 .http_endpoint()
@@ -216,6 +244,7 @@ pub async fn start_ngrok_tunnel_internal() -> Result<String, String> {
                 .map_err(|e| format!("ngrok 隧道创建失败: {}", e))?;
 
             let ngrok_url = forwarder.url().to_string();
+            log::info!("[ngrok] Tunnel created, URL: {}", ngrok_url);
             Ok::<(String, Forwarder<HttpTunnel>), String>((ngrok_url, forwarder))
         }
         .await;
@@ -225,8 +254,10 @@ pub async fn start_ngrok_tunnel_internal() -> Result<String, String> {
                 let _ = url_tx.send(Ok(url));
                 // join() keeps the forwarder actively forwarding traffic
                 let _ = forwarder.join().await;
+                log::info!("[ngrok] Forwarder join() returned, tunnel closed");
             }
             Err(e) => {
+                log::error!("[ngrok] Tunnel creation failed: {}", e);
                 let _ = url_tx.send(Err(e));
             }
         }
@@ -240,14 +271,16 @@ pub async fn start_ngrok_tunnel_internal() -> Result<String, String> {
                 .map_err(|_| "Internal state error".to_string())?;
             state.ngrok_url = Some(ngrok_url.clone());
             state.ngrok_task = Some(ngrok_handle);
-            log::info!("ngrok tunnel started: {}", ngrok_url);
+            log::info!("[ngrok] Tunnel started successfully: {}", ngrok_url);
             Ok(ngrok_url)
         }
         Ok(Err(e)) => {
+            log::error!("[ngrok] Tunnel startup error: {}", e);
             ngrok_handle.abort();
             Err(e)
         }
         Err(_) => {
+            log::error!("[ngrok] Tunnel startup timed out after 30s");
             ngrok_handle.abort();
             Err("ngrok 隧道启动超时".to_string())
         }
@@ -261,6 +294,7 @@ pub(crate) async fn start_ngrok_tunnel() -> Result<String, String> {
 
 #[tauri::command]
 pub(crate) async fn stop_ngrok_tunnel() -> Result<(), String> {
+    log::info!("[ngrok] Stopping ngrok tunnel");
     let mut state = SHARE_STATE
         .lock()
         .map_err(|_| "Internal state error".to_string())?;
@@ -268,9 +302,12 @@ pub(crate) async fn stop_ngrok_tunnel() -> Result<(), String> {
         // abort() is intentional: the ngrok crate's Forwarder does not expose a graceful
         // shutdown API. Aborting the task triggers its Drop impl, which handles cleanup.
         handle.abort();
+        log::info!("[ngrok] Tunnel task aborted");
+    } else {
+        log::info!("[ngrok] No active tunnel task to stop");
     }
     state.ngrok_url = None;
-    log::info!("ngrok tunnel stopped");
+    log::info!("[ngrok] Tunnel stopped");
     Ok(())
 }
 
@@ -323,17 +360,25 @@ pub(crate) async fn start_wms_tunnel(window: tauri::Window) -> Result<String, St
 /// Internal function for starting WMS tunnel, callable from both Tauri command and HTTP handler.
 /// If LAN sharing is not active, automatically starts it using saved port/password.
 pub async fn start_wms_tunnel_internal(window: Option<tauri::Window>) -> Result<String, String> {
+    log::info!("[wms-tunnel] Starting WMS tunnel");
+
     // Auto-start LAN sharing if not active
     let port = {
         let state = SHARE_STATE
             .lock()
             .map_err(|_| "Internal state error".to_string())?;
         if state.wms_url.is_some() {
+            log::warn!("[wms-tunnel] Rejected: WMS tunnel already running");
             return Err("WMS 隧道已在运行".to_string());
         }
         if state.active {
+            log::info!(
+                "[wms-tunnel] LAN sharing already active on port {}",
+                state.port
+            );
             Some(state.port)
         } else {
+            log::info!("[wms-tunnel] LAN sharing not active, checking auto-start");
             None
         }
     };
@@ -353,6 +398,7 @@ pub async fn start_wms_tunnel_internal(window: Option<tauri::Window>) -> Result<
         .ok_or("无法确定当前工作区，请先选择一个工作区".to_string())?;
 
         // Since passwords are no longer persisted for security, WMS auto-start requires manual LAN sharing first
+        log::warn!("[wms-tunnel] Cannot auto-start: LAN sharing requires manual password entry");
         return Err(
             "WMS 隧道需要先手动启动 LAN 分享。出于安全考虑，密码不再自动保存。"
                 .to_string(),
@@ -366,8 +412,16 @@ pub async fn start_wms_tunnel_internal(window: Option<tauri::Window>) -> Result<
         .ok_or("未配置 WMS Subdomain，请先在设置中配置".to_string())?;
     let token = config.wms_token.filter(|t| !t.is_empty());
     if token.is_none() {
+        log::warn!("[wms-tunnel] Rejected: WMS token not configured");
         return Err("未配置 WMS Token，请先在设置中配置".to_string());
     }
+
+    log::info!(
+        "[wms-tunnel] Config: server_url={}, subdomain={}, token=Some, port={}",
+        server_url,
+        subdomain,
+        port
+    );
 
     let (url_tx, url_rx) = std::sync::mpsc::channel::<Result<String, String>>();
 
@@ -387,6 +441,7 @@ pub async fn start_wms_tunnel_internal(window: Option<tauri::Window>) -> Result<
     // Create manual reconnect channel
     let (manual_reconnect_tx, manual_reconnect_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
 
+    log::info!("[wms-tunnel] Spawning tunnel task");
     let wms_handle = TOKIO_RT.spawn(async move {
         crate::wms_tunnel::run_tunnel(
             port,
@@ -410,6 +465,7 @@ pub async fn start_wms_tunnel_internal(window: Option<tauri::Window>) -> Result<
             .unwrap_or(false)
     };
 
+    log::info!("[wms-tunnel] Waiting for tunnel URL (timeout: 30s)");
     match url_rx.recv_timeout(std::time::Duration::from_secs(30)) {
         Ok(Ok(wms_url)) => {
             let mut state = SHARE_STATE
@@ -421,23 +477,25 @@ pub async fn start_wms_tunnel_internal(window: Option<tauri::Window>) -> Result<
             state.wms_connected = Some(connected_flag);
             state.wms_reconnect_state = Some(reconnect_state);
             state.wms_manual_reconnect_tx = Some(manual_reconnect_tx);
-            log::info!("WMS tunnel started: {}", wms_url);
+            log::info!("[wms-tunnel] Tunnel started successfully: {}", wms_url);
             Ok(wms_url)
         }
         Ok(Err(e)) => {
+            log::error!("[wms-tunnel] Tunnel startup error: {}", e);
             wms_handle.abort();
             // Roll back auto-started LAN sharing on failure
             if auto_started_lan {
-                log::info!("WMS tunnel failed, rolling back auto-started LAN sharing");
+                log::info!("[wms-tunnel] Rolling back auto-started LAN sharing after failure");
                 let _ = stop_sharing_internal();
             }
             Err(e)
         }
         Err(_) => {
+            log::error!("[wms-tunnel] Tunnel startup timed out after 30s");
             wms_handle.abort();
             // Roll back auto-started LAN sharing on timeout
             if auto_started_lan {
-                log::info!("WMS tunnel timed out, rolling back auto-started LAN sharing");
+                log::info!("[wms-tunnel] Rolling back auto-started LAN sharing after timeout");
                 let _ = stop_sharing_internal();
             }
             Err("WMS 隧道启动超时".to_string())
@@ -453,6 +511,7 @@ pub(crate) async fn stop_wms_tunnel() -> Result<(), String> {
 /// Internal function for stopping WMS tunnel.
 /// If LAN sharing was auto-started by WMS, also stops LAN sharing.
 pub async fn stop_wms_tunnel_internal() -> Result<(), String> {
+    log::info!("[wms-tunnel] Stopping WMS tunnel");
     let (shutdown_tx, task_handle, should_stop_lan) = {
         let mut state = SHARE_STATE
             .lock()
@@ -470,24 +529,29 @@ pub async fn stop_wms_tunnel_internal() -> Result<(), String> {
 
     // Signal graceful shutdown (sends WebSocket Close frame)
     if let Some(tx) = shutdown_tx {
+        log::info!("[wms-tunnel] Sending shutdown signal");
         let _ = tx.send(true);
     }
 
     if let Some(handle) = task_handle {
         // Wait briefly for graceful shutdown, then abort as fallback
+        log::info!("[wms-tunnel] Waiting for graceful shutdown (timeout: 3s)");
         match tokio::time::timeout(std::time::Duration::from_secs(3), handle).await {
-            Ok(_) => log::info!("WMS tunnel stopped gracefully"),
-            Err(_) => log::warn!("WMS tunnel graceful shutdown timed out, task will be dropped"),
+            Ok(_) => log::info!("[wms-tunnel] Tunnel stopped gracefully"),
+            Err(_) => log::warn!("[wms-tunnel] Graceful shutdown timed out, task will be dropped"),
         }
     } else {
-        log::info!("WMS tunnel stopped");
+        log::info!("[wms-tunnel] No active tunnel task, stopped");
     }
 
     // Auto-stop LAN sharing if it was auto-started by WMS
     if should_stop_lan {
-        log::info!("WMS tunnel: auto-stopping LAN sharing (was auto-started)");
+        log::info!("[wms-tunnel] Auto-stopping LAN sharing (was auto-started by WMS)");
         if let Err(e) = stop_sharing_internal() {
-            log::warn!("WMS tunnel: failed to auto-stop LAN sharing: {}", e);
+            log::warn!(
+                "[wms-tunnel] Failed to auto-stop LAN sharing: {}",
+                e
+            );
         }
     }
 
@@ -512,7 +576,7 @@ pub(crate) async fn wms_manual_reconnect() -> Result<(), String> {
     tx.send(())
         .map_err(|_| "发送手动重连信号失败".to_string())?;
 
-    log::info!("WMS tunnel: manual reconnect triggered by user");
+    log::info!("[wms-tunnel] Manual reconnect triggered by user");
     Ok(())
 }
 
@@ -534,18 +598,21 @@ pub fn wms_manual_reconnect_internal() -> Result<(), String> {
     tx.send(())
         .map_err(|_| "发送手动重连信号失败".to_string())?;
 
-    log::info!("WMS tunnel: manual reconnect triggered via HTTP");
+    log::info!("[wms-tunnel] Manual reconnect triggered via HTTP");
     Ok(())
 }
 
 /// Internal function to stop LAN sharing. Can be called from Tauri command or from WMS tunnel auto-stop.
 pub fn stop_sharing_internal() -> Result<(), String> {
+    log::info!("[sharing] Stopping LAN sharing");
+
     // Single lock scope: check active, stop ngrok, extract shutdown_tx, and reset state
     let shutdown_tx = {
         let mut state = SHARE_STATE
             .lock()
             .map_err(|_| "Internal state error".to_string())?;
         if !state.active {
+            log::warn!("[sharing] Stop rejected: not currently sharing");
             return Err("Not currently sharing".to_string());
         }
 
@@ -554,15 +621,18 @@ pub fn stop_sharing_internal() -> Result<(), String> {
         // a graceful shutdown API; aborting the task triggers its Drop impl for cleanup.
         if let Some(handle) = state.ngrok_task.take() {
             handle.abort();
+            log::info!("[sharing] Stopped ngrok tunnel");
         }
         state.ngrok_url = None;
 
         // Stop WMS tunnel if active (signal graceful shutdown first)
         if let Some(tx) = state.wms_shutdown_tx.take() {
             let _ = tx.send(true);
+            log::info!("[sharing] Sent WMS tunnel shutdown signal");
         }
         if let Some(handle) = state.wms_task.take() {
             handle.abort();
+            log::info!("[sharing] Stopped WMS tunnel task");
         }
         state.wms_url = None;
         state.wms_connected = None;
@@ -583,17 +653,25 @@ pub fn stop_sharing_internal() -> Result<(), String> {
     // Stop HTTP server (outside SHARE_STATE lock to avoid holding it during send)
     if let Some(tx) = shutdown_tx {
         let _ = tx.send(true);
+        log::info!("[sharing] HTTP server shutdown signal sent");
     }
 
     // Clear authenticated sessions and connected clients
     if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() {
+        let count = sessions.len();
         sessions.clear();
+        log::info!(
+            "[sharing] Cleared {} authenticated sessions",
+            count
+        );
     }
     if let Ok(mut clients) = CONNECTED_CLIENTS.lock() {
+        let count = clients.len();
         clients.clear();
+        log::info!("[sharing] Cleared {} connected clients", count);
     }
 
-    log::info!("Sharing stopped");
+    log::info!("[sharing] LAN sharing stopped");
     Ok(())
 }
 
@@ -665,8 +743,14 @@ pub(crate) async fn get_share_state() -> Result<ShareStateInfo, String> {
 
 #[tauri::command]
 pub(crate) async fn update_share_password(password: String) -> Result<(), String> {
+    log::info!(
+        "[sharing] Updating share password (new password_len={})",
+        password.len()
+    );
+
     // SECURITY: Validate password is not empty
     if password.trim().is_empty() {
+        log::warn!("[sharing] Password update rejected: empty password");
         return Err("分享密码不能为空".to_string());
     }
 
@@ -687,11 +771,13 @@ pub(crate) async fn update_share_password(password: String) -> Result<(), String
         password.as_bytes(),
         &mut auth_key,
     );
+    log::info!("[sharing] New PBKDF2 key derived");
 
     let mut state = SHARE_STATE
         .lock()
         .map_err(|_| "Internal state error".to_string())?;
     if !state.active {
+        log::warn!("[sharing] Password update rejected: not currently sharing");
         return Err("Not currently sharing".to_string());
     }
     state.auth_key = Some(auth_key);
@@ -700,13 +786,23 @@ pub(crate) async fn update_share_password(password: String) -> Result<(), String
 
     // Clear authenticated sessions and connected clients so everyone must re-auth with the new password
     if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() {
+        let count = sessions.len();
         sessions.clear();
+        log::info!(
+            "[sharing] Cleared {} authenticated sessions after password change",
+            count
+        );
     }
     if let Ok(mut clients) = CONNECTED_CLIENTS.lock() {
+        let count = clients.len();
         clients.clear();
+        log::info!(
+            "[sharing] Cleared {} connected clients after password change",
+            count
+        );
     }
 
-    log::info!("Share password updated");
+    log::info!("[sharing] Share password updated successfully");
     Ok(())
 }
 
@@ -722,7 +818,7 @@ pub(crate) fn get_connected_clients() -> Vec<ConnectedClient> {
 
 /// Kick a client by session ID: send WebSocket notification, then disconnect and remove session.
 pub fn kick_client_internal(session_id: &str) -> Result<(), String> {
-    log::info!("Kicking client with session ID: {}", session_id);
+    log::info!("[sharing] Kicking client: session_id={}", session_id);
 
     // Send kick notification via WebSocket broadcast before removing session
     let notification = serde_json::json!({
@@ -732,15 +828,26 @@ pub fn kick_client_internal(session_id: &str) -> Result<(), String> {
     })
     .to_string();
     let _ = CLIENT_NOTIFICATION_BROADCAST.send(notification);
+    log::info!("[sharing] Kick notification broadcast sent for session {}", session_id);
 
     // Remove from authenticated sessions
     if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() {
-        sessions.remove(session_id);
+        let removed = sessions.remove(session_id);
+        log::info!(
+            "[sharing] Session {} {} from authenticated sessions",
+            session_id,
+            if removed { "removed" } else { "not found" }
+        );
     }
 
     // Remove from connected clients
     if let Ok(mut clients) = CONNECTED_CLIENTS.lock() {
-        clients.remove(session_id);
+        let removed = clients.remove(session_id).is_some();
+        log::info!(
+            "[sharing] Session {} {} from connected clients",
+            session_id,
+            if removed { "removed" } else { "not found" }
+        );
     }
 
     Ok(())

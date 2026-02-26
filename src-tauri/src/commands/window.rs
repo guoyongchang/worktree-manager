@@ -12,11 +12,21 @@ use crate::types::TerminalState;
 pub fn set_window_workspace_impl(window_label: &str, workspace_path: String) -> Result<(), String> {
     let global = load_global_config();
     if !global.workspaces.iter().any(|w| w.path == workspace_path) {
+        log::warn!(
+            "[window] Workspace not found for binding: label={}, path={}",
+            window_label,
+            workspace_path
+        );
         return Err("Workspace not found".to_string());
     }
 
     let mut map = WINDOW_WORKSPACES.lock().unwrap();
-    map.insert(window_label.to_string(), workspace_path);
+    map.insert(window_label.to_string(), workspace_path.clone());
+    log::info!(
+        "[window] Window '{}' bound to workspace '{}'",
+        window_label,
+        workspace_path
+    );
     Ok(())
 }
 
@@ -35,6 +45,7 @@ pub(crate) fn get_opened_workspaces() -> Vec<String> {
 }
 
 pub fn unregister_window_impl(window_label: &str) {
+    log::info!("[window] Unregistering window '{}'", window_label);
     let label = window_label.to_string();
     {
         let mut map = WINDOW_WORKSPACES.lock().unwrap();
@@ -43,12 +54,18 @@ pub fn unregister_window_impl(window_label: &str) {
     // 同时释放该窗口持有的所有 worktree 锁
     let affected_workspaces: Vec<String> = {
         let mut locks = WORKTREE_LOCKS.lock().unwrap();
+        let lock_count = locks.iter().filter(|(_, v)| **v == label).count();
         let affected: Vec<String> = locks
             .iter()
             .filter(|(_, v)| **v == label)
             .map(|((ws_path, _), _)| ws_path.clone())
             .collect();
         locks.retain(|_, v| *v != label);
+        log::info!(
+            "[window] Window '{}' unregistered, released {} locks",
+            window_label,
+            lock_count
+        );
         affected
     };
     for ws_path in affected_workspaces {
@@ -74,11 +91,23 @@ pub fn lock_worktree_impl(
 
         if let Some(existing_label) = locks.get(&key) {
             if *existing_label != label {
+                log::warn!(
+                    "[window] Lock conflict: wt={} already locked by '{}', requested by '{}'",
+                    worktree_name,
+                    existing_label,
+                    label
+                );
                 return Err(format!("Worktree \"{}\" 已在其他窗口中打开", worktree_name));
             }
         }
         locks.insert(key, label);
     }
+    log::info!(
+        "[window] Worktree locked: ws={}, wt={}, by={}",
+        workspace_path,
+        worktree_name,
+        window_label
+    );
     broadcast_lock_state(&workspace_path);
     Ok(())
 }
@@ -97,10 +126,16 @@ pub fn unlock_worktree_impl(window_label: &str, workspace_path: String, worktree
     let label = window_label.to_string();
     {
         let mut locks = WORKTREE_LOCKS.lock().unwrap();
-        let key = (workspace_path.clone(), worktree_name);
+        let key = (workspace_path.clone(), worktree_name.clone());
         if let Some(existing_label) = locks.get(&key) {
             if *existing_label == label {
                 locks.remove(&key);
+                log::info!(
+                    "[window] Worktree unlocked: ws={}, wt={}, by={}",
+                    workspace_path,
+                    worktree_name,
+                    window_label
+                );
             }
         }
     }
@@ -158,6 +193,11 @@ pub(crate) fn broadcast_terminal_state(
     terminal_visible: bool,
     client_id: Option<String>,
 ) {
+    log::debug!(
+        "[window] Broadcasting terminal state: ws={}, wt={}",
+        workspace_path,
+        worktree_name
+    );
     let key = (workspace_path.clone(), worktree_name.clone());
 
     // 更新缓存
@@ -204,8 +244,16 @@ pub(crate) async fn open_workspace_window(
     app: tauri::AppHandle,
     workspace_path: String,
 ) -> Result<String, String> {
+    log::info!(
+        "[window] Opening new workspace window for: {}",
+        workspace_path
+    );
     let global = load_global_config();
     if !global.workspaces.iter().any(|w| w.path == workspace_path) {
+        log::warn!(
+            "[window] Workspace not found when opening window: {}",
+            workspace_path
+        );
         return Err("Workspace not found".to_string());
     }
 
@@ -235,14 +283,22 @@ pub(crate) async fn open_workspace_window(
             .inner_size(1300.0, 900.0)
             .min_inner_size(900.0, 500.0)
             .build()
-            .map_err(|e| format!("Failed to create window: {}", e))?;
+            .map_err(|e| {
+                log::error!("[window] Failed to create window: {}", e);
+                format!("Failed to create window: {}", e)
+            })?;
 
     // 注册窗口绑定
     {
         let mut map = WINDOW_WORKSPACES.lock().unwrap();
-        map.insert(window_label.clone(), workspace_path);
+        map.insert(window_label.clone(), workspace_path.clone());
     }
 
+    log::info!(
+        "[window] Created window '{}' for workspace '{}'",
+        window_label,
+        workspace_path
+    );
     Ok(window_label)
 }
 
@@ -257,6 +313,11 @@ pub(crate) fn broadcast_lock_state(workspace_path: &str) {
             .map(|((_, wt), lbl)| (wt.clone(), lbl.clone()))
             .collect()
     };
+    log::debug!(
+        "[window] Broadcasting lock state for ws={}, locks={}",
+        workspace_path,
+        lock_snapshot.len()
+    );
     if let Ok(json_str) = serde_json::to_string(&serde_json::json!({
         "workspacePath": workspace_path,
         "locks": lock_snapshot,

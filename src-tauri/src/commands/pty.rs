@@ -7,10 +7,22 @@ pub(crate) fn pty_create(
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
+    log::info!(
+        "[pty] Creating session: id={}, cwd={}, cols={}, rows={}",
+        session_id,
+        cwd,
+        cols,
+        rows
+    );
     let mut manager = PTY_MANAGER
         .lock()
         .map_err(|e| format!("Lock error: {}", e))?;
-    manager.create_session(&session_id, &cwd, cols, rows)
+    let result = manager.create_session(&session_id, &cwd, cols, rows);
+    match &result {
+        Ok(()) => log::info!("[pty] Session created: {}", session_id),
+        Err(e) => log::error!("[pty] Failed to create session {}: {}", session_id, e),
+    }
+    result
 }
 
 #[tauri::command]
@@ -39,10 +51,16 @@ pub(crate) fn pty_resize(session_id: String, cols: u16, rows: u16) -> Result<(),
 
 #[tauri::command]
 pub(crate) fn pty_close(session_id: String) -> Result<(), String> {
+    log::info!("[pty] Closing session: {}", session_id);
     let mut manager = PTY_MANAGER
         .lock()
         .map_err(|e| format!("Lock error: {}", e))?;
-    manager.close_session(&session_id)
+    let result = manager.close_session(&session_id);
+    match &result {
+        Ok(()) => log::info!("[pty] Closed session: {}", session_id),
+        Err(e) => log::error!("[pty] Failed to close session {}: {}", session_id, e),
+    }
+    result
 }
 
 #[tauri::command]
@@ -58,8 +76,15 @@ pub(crate) fn pty_exists(session_id: String) -> Result<bool, String> {
 /// and exposed via the HTTP server for remote access mode.
 #[tauri::command]
 pub(crate) fn pty_close_by_path(path_prefix: String) -> Result<Vec<String>, String> {
+    log::info!("[pty] Closing sessions by path prefix: {}", path_prefix);
     let mut manager = PTY_MANAGER
         .lock()
         .map_err(|e| format!("Lock error: {}", e))?;
-    Ok(manager.close_sessions_by_path_prefix(&path_prefix))
+    let closed = manager.close_sessions_by_path_prefix(&path_prefix);
+    log::info!(
+        "[pty] Closed {} sessions matching path prefix: {}",
+        closed.len(),
+        path_prefix
+    );
+    Ok(closed)
 }

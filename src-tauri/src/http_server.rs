@@ -643,6 +643,7 @@ async fn auth_middleware(headers: HeaderMap, request: Request, next: Next) -> Re
 
 async fn h_auth_challenge(ConnectInfo(addr): ConnectInfo<SocketAddr>) -> Response {
     let client_ip = addr.ip().to_string();
+    log::info!("[auth] Challenge requested from IP: {}", client_ip);
 
     // Rate limiting: max 5 attempts per 60 seconds per IP
     let rate_ok = AUTH_RATE_LIMITER
@@ -650,7 +651,10 @@ async fn h_auth_challenge(ConnectInfo(addr): ConnectInfo<SocketAddr>) -> Respons
         .map(|mut limiter| limiter.check_and_record(&client_ip))
         .unwrap_or(false);
     if !rate_ok {
-        log::warn!("Auth rate limited for IP: {}", client_ip);
+        log::warn!(
+            "[auth] Rate limited: IP {} exceeded 5 attempts/60s",
+            client_ip
+        );
         return (StatusCode::TOO_MANY_REQUESTS, "请求过于频繁，请稍后再试").into_response();
     }
 
@@ -662,14 +666,21 @@ async fn h_auth_challenge(ConnectInfo(addr): ConnectInfo<SocketAddr>) -> Respons
         .unwrap_or_default();
 
     if salt.is_empty() {
+        log::error!("[auth] No password configured for challenge");
         return (StatusCode::INTERNAL_SERVER_ERROR, "No password configured").into_response();
     }
 
     // Generate nonce
     let nonce_hex = match NONCE_CACHE.lock() {
         Ok(mut cache) => match cache.generate() {
-            Ok(n) => n,
-            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+            Ok(n) => {
+                log::info!("[auth] Nonce generated successfully for IP: {}", client_ip);
+                n
+            }
+            Err(e) => {
+                log::error!("[auth] Failed to generate nonce: {}", e);
+                return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+            }
         },
         Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response(),
     };
@@ -692,12 +703,18 @@ async fn h_auth_verify(
     headers: HeaderMap,
     Json(req): Json<VerifyRequest>,
 ) -> Response {
+    let client_ip = addr.ip().to_string();
+    log::info!("[auth] Verification attempt from IP: {}", client_ip);
+
     // Consume nonce (one-time use)
     let nonce_bytes = match NONCE_CACHE.lock() {
         Ok(mut cache) => match cache.consume(&req.nonce) {
             Some(n) => n,
             None => {
-                log::warn!("Invalid or expired nonce: {}", req.nonce);
+                log::warn!(
+                    "[auth] Invalid or expired nonce from IP: {}",
+                    client_ip
+                );
                 return (StatusCode::UNAUTHORIZED, "Invalid or expired nonce").into_response();
             }
         },
@@ -712,6 +729,7 @@ async fn h_auth_verify(
         .unwrap_or_default();
 
     if auth_key.is_empty() {
+        log::error!("[auth] No password configured for verification");
         return (StatusCode::INTERNAL_SERVER_ERROR, "No password configured").into_response();
     }
 
@@ -732,7 +750,7 @@ async fn h_auth_verify(
             == 0;
 
     if !proof_match {
-        log::warn!("Auth failed: invalid proof from {}", addr.ip());
+        log::warn!("[auth] Verification failed from IP: {}", client_ip);
         return (StatusCode::UNAUTHORIZED, "密码错误").into_response();
     }
 
@@ -778,6 +796,11 @@ async fn h_auth_verify(
         sessions.insert(sid.clone());
     }
 
+    log::info!(
+        "[auth] Verification successful for session: {}, IP: {}",
+        sid,
+        client_ip
+    );
     Json(json!({ "sessionId": sid })).into_response()
 }
 
@@ -1784,10 +1807,11 @@ pub async fn start_server(
 ) {
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
+    log::info!("[http-server] Starting server on {}", addr);
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(l) => l,
         Err(e) => {
-            log::error!("Failed to bind server on {}: {}", addr, e);
+            log::error!("[http-server] Failed to bind server on {}: {}", addr, e);
             return;
         }
     };
@@ -1795,7 +1819,7 @@ pub async fn start_server(
     match tls_certs {
         Some(certs) => {
             // Dual-protocol: HTTP for localhost, HTTPS for LAN — same port
-            log::info!("Server on {} (localhost: HTTP, LAN: HTTPS)", addr);
+            log::info!("[http-server] Server on {} (localhost: HTTP, LAN: HTTPS)", addr);
 
             let app = create_router(Some(certs.cert_pem.clone()));
 
@@ -1823,7 +1847,7 @@ pub async fn start_server(
             loop {
                 tokio::select! {
                     _ = shutdown_rx.changed() => {
-                        log::info!("Server shutting down gracefully");
+                        log::info!("[http-server] Server shutting down gracefully");
                         break;
                     }
                     result = listener.accept() => {
@@ -1903,7 +1927,7 @@ pub async fn start_server(
         }
         None => {
             // Pure HTTP mode
-            log::info!("HTTP server listening on http://{}", addr);
+            log::info!("[http-server] HTTP server listening on http://{}", addr);
             let app = create_router(None);
 
             if let Err(e) = axum::serve(
@@ -1912,11 +1936,11 @@ pub async fn start_server(
             )
             .with_graceful_shutdown(async move {
                 let _ = shutdown_rx.changed().await;
-                log::info!("HTTP server shutting down");
+                log::info!("[http-server] HTTP server shutting down");
             })
             .await
             {
-                log::error!("HTTP server error: {}", e);
+                log::error!("[http-server] HTTP server error: {}", e);
             }
         }
     }
