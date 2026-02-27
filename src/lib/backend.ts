@@ -97,6 +97,11 @@ export async function callBackend<T = unknown>(
   });
 
   if (!res.ok) {
+    if (res.status === 401) {
+      clearSessionId();
+      window.location.replace(window.location.pathname || '/');
+      throw new Error('Session expired');
+    }
     const text = await res.text();
     logError(new Error(text || `HTTP ${res.status}`));
   }
