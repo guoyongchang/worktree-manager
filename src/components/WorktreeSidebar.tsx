@@ -418,13 +418,15 @@ const ShareBar: FC<{
           </button>
         </div>
       </div>
-      {/* LAN section: localhost + LAN IPs */}
+      {/* LAN section: LAN IPs first, localhost last (collapsed) */}
       {urls.length > 0 && (() => {
         const localUrl = `http://localhost:${new URL(urls[0]).port}`;
-        const allLanUrls = [localUrl, ...urls];
+        const allLanUrls = [...urls, localUrl];
+        const visibleUrls = lanExpanded ? allLanUrls : urls.slice(0, 1);
+        const hiddenCount = allLanUrls.length - 1;
         return (
           <div className="space-y-0.5">
-            {(lanExpanded ? allLanUrls : allLanUrls.slice(0, 1)).map((lanUrl, i) => (
+            {visibleUrls.map((lanUrl, i) => (
               <div key={lanUrl} className="flex items-center gap-2 min-h-[24px]">
                 {i === 0 ? (
                   <span className="text-[11px] font-bold px-1.5 py-0.5 rounded shrink-0 bg-slate-600/30 text-slate-500 w-[52px] text-center">
@@ -465,16 +467,16 @@ const ShareBar: FC<{
                       <TooltipContent side="top">{t('share.copyLinkWithPassword')}</TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
-                  {i === 0 && allLanUrls.length > 1 && (
+                  {i === 0 && hiddenCount > 0 && (
                     <Button
                       variant="ghost"
                       size="icon"
                       onClick={() => setLanExpanded(!lanExpanded)}
                       className="h-5 w-5 text-blue-400 hover:text-blue-300 hover:bg-blue-500/20"
-                      title={lanExpanded ? '收起' : t('share.showMoreIps', { count: allLanUrls.length - 1 })}
+                      title={lanExpanded ? '收起' : t('share.showMoreIps', { count: hiddenCount })}
                     >
                       <span className="text-[10px] font-semibold">
-                        {lanExpanded ? '−' : `+${allLanUrls.length - 1}`}
+                        {lanExpanded ? '−' : `+${hiddenCount}`}
                       </span>
                     </Button>
                   )}

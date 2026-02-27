@@ -41,8 +41,56 @@ fn get_default_shell() -> String {
     }
 }
 
+/// Split raw bytes into valid UTF-8 text + incomplete trailing bytes.
+///
+/// Invalid bytes in the middle are replaced with U+FFFD (same as `from_utf8_lossy`).
+/// Incomplete multi-byte sequences at the very end are returned as pending bytes
+/// to be prepended to the next chunk.
+pub(crate) fn bytes_to_utf8_with_pending(data: &[u8]) -> (String, Vec<u8>) {
+    if data.is_empty() {
+        return (String::new(), vec![]);
+    }
+
+    // Fast path: all valid UTF-8
+    if let Ok(s) = std::str::from_utf8(data) {
+        return (s.to_string(), vec![]);
+    }
+
+    let mut result = String::with_capacity(data.len());
+    let mut remaining = data;
+
+    loop {
+        match std::str::from_utf8(remaining) {
+            Ok(s) => {
+                result.push_str(s);
+                return (result, vec![]);
+            }
+            Err(e) => {
+                let valid_up_to = e.valid_up_to();
+                // from_utf8 already validated this range, unwrap cannot panic
+                result.push_str(std::str::from_utf8(&remaining[..valid_up_to]).unwrap());
+
+                match e.error_len() {
+                    Some(invalid_len) => {
+                        // Genuinely invalid byte(s) — replace with U+FFFD and continue
+                        result.push('\u{FFFD}');
+                        remaining = &remaining[valid_up_to + invalid_len..];
+                    }
+                    None => {
+                        // Incomplete multi-byte sequence at end — carry over
+                        return (result, remaining[valid_up_to..].to_vec());
+                    }
+                }
+            }
+        }
+    }
+}
+
 struct PtyReader {
     receiver: Receiver<Vec<u8>>,
+    /// Leftover bytes from the previous `read_from_session` call that formed
+    /// an incomplete UTF-8 multi-byte sequence at a chunk boundary.
+    utf8_pending: Vec<u8>,
 }
 
 pub struct PtySession {
@@ -204,7 +252,10 @@ impl PtyManager {
         let session = PtySession {
             master: pair.master,
             writer,
-            reader: PtyReader { receiver: rx },
+            reader: PtyReader {
+                receiver: rx,
+                utf8_pending: Vec::new(),
+            },
             child,
             broadcast_tx,
             replay_buffer,
@@ -239,15 +290,17 @@ impl PtyManager {
             .get(id)
             .ok_or_else(|| "Session not found".to_string())?;
 
-        let session = session.lock().map_err(|e| format!("Lock error: {}", e))?;
+        let mut session = session.lock().map_err(|e| format!("Lock error: {}", e))?;
 
         // Non-blocking: collect all available data
-        let mut result = Vec::new();
+        let mut result = std::mem::take(&mut session.reader.utf8_pending);
         while let Ok(data) = session.reader.receiver.try_recv() {
             result.extend(data);
         }
 
-        Ok(String::from_utf8_lossy(&result).to_string())
+        let (text, pending) = bytes_to_utf8_with_pending(&result);
+        session.reader.utf8_pending = pending;
+        Ok(text)
     }
 
     pub fn resize_session(&self, id: &str, cols: u16, rows: u16) -> Result<(), String> {
@@ -321,5 +374,102 @@ impl PtyManager {
 impl Default for PtyManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bytes_to_utf8_with_pending;
+
+    #[test]
+    fn empty_input() {
+        let (text, pending) = bytes_to_utf8_with_pending(&[]);
+        assert_eq!(text, "");
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn valid_ascii() {
+        let (text, pending) = bytes_to_utf8_with_pending(b"hello world");
+        assert_eq!(text, "hello world");
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn valid_multibyte() {
+        let input = "你好世界🚀".as_bytes();
+        let (text, pending) = bytes_to_utf8_with_pending(input);
+        assert_eq!(text, "你好世界🚀");
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn incomplete_2byte_at_end() {
+        // 'é' = 0xC3 0xA9 — send only the leading byte
+        let (text, pending) = bytes_to_utf8_with_pending(&[b'a', 0xC3]);
+        assert_eq!(text, "a");
+        assert_eq!(pending, vec![0xC3]);
+    }
+
+    #[test]
+    fn incomplete_3byte_at_end() {
+        // '你' = 0xE4 0xBD 0xA0 — send first 2 bytes
+        let (text, pending) = bytes_to_utf8_with_pending(&[b'a', 0xE4, 0xBD]);
+        assert_eq!(text, "a");
+        assert_eq!(pending, vec![0xE4, 0xBD]);
+    }
+
+    #[test]
+    fn incomplete_4byte_at_end() {
+        // '🚀' = 0xF0 0x9F 0x9A 0x80 — send first 3 bytes
+        let (text, pending) = bytes_to_utf8_with_pending(&[b'x', 0xF0, 0x9F, 0x9A]);
+        assert_eq!(text, "x");
+        assert_eq!(pending, vec![0xF0, 0x9F, 0x9A]);
+    }
+
+    #[test]
+    fn invalid_byte_in_middle() {
+        // 0xFF is never valid UTF-8
+        let (text, pending) = bytes_to_utf8_with_pending(&[b'a', 0xFF, b'b']);
+        assert_eq!(text, "a\u{FFFD}b");
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn invalid_middle_and_incomplete_end() {
+        // Invalid byte in middle + incomplete 3-byte at end
+        let (text, pending) = bytes_to_utf8_with_pending(&[b'a', 0xFF, b'b', 0xE4, 0xBD]);
+        assert_eq!(text, "a\u{FFFD}b");
+        assert_eq!(pending, vec![0xE4, 0xBD]);
+    }
+
+    #[test]
+    fn sequential_chunks_reassemble() {
+        // Simulate '你' (0xE4 0xBD 0xA0) split across two chunks
+        let (text1, pending1) = bytes_to_utf8_with_pending(&[0xE4, 0xBD]);
+        assert_eq!(text1, "");
+        assert_eq!(pending1, vec![0xE4, 0xBD]);
+
+        // Second chunk: prepend pending + remaining byte
+        let mut chunk2 = pending1;
+        chunk2.push(0xA0);
+        let (text2, pending2) = bytes_to_utf8_with_pending(&chunk2);
+        assert_eq!(text2, "你");
+        assert!(pending2.is_empty());
+    }
+
+    #[test]
+    fn multiple_invalid_bytes_consecutive() {
+        let (text, pending) = bytes_to_utf8_with_pending(&[0xFF, 0xFE, b'a']);
+        assert_eq!(text, "\u{FFFD}\u{FFFD}a");
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn only_incomplete_bytes() {
+        // Just one leading byte, nothing else
+        let (text, pending) = bytes_to_utf8_with_pending(&[0xE4]);
+        assert_eq!(text, "");
+        assert_eq!(pending, vec![0xE4]);
     }
 }
