@@ -21,6 +21,7 @@ use tower_http::cors::CorsLayer;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
+use crate::pty_manager::bytes_to_utf8_with_pending;
 use crate::tls::TlsCerts;
 
 use crate::{
@@ -1114,17 +1115,23 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                     let sender = Arc::clone(&ws_sender);
                     let sid = pty_session_id.clone();
                     let handle = tokio::spawn(async move {
+                        // Pending buffer for incomplete UTF-8 sequences across chunk boundaries
+                        let mut utf8_pending: Vec<u8> = Vec::new();
+
                         // Send replay buffer first so new subscribers see existing content
                         if !replay.is_empty() {
-                            let text = String::from_utf8_lossy(&replay).to_string();
-                            let msg = json!({
-                                "type": "pty_output",
-                                "sessionId": sid,
-                                "data": text,
-                            });
-                            let mut s = sender.lock().await;
-                            if s.send(Message::text(msg.to_string())).await.is_err() {
-                                return;
+                            let (text, pending) = bytes_to_utf8_with_pending(&replay);
+                            utf8_pending = pending;
+                            if !text.is_empty() {
+                                let msg = json!({
+                                    "type": "pty_output",
+                                    "sessionId": sid,
+                                    "data": text,
+                                });
+                                let mut s = sender.lock().await;
+                                if s.send(Message::text(msg.to_string())).await.is_err() {
+                                    return;
+                                }
                             }
                         }
 
@@ -1132,20 +1139,34 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                         loop {
                             match rx.recv().await {
                                 Ok(data) => {
-                                    let text = String::from_utf8_lossy(&data).to_string();
-                                    let msg = json!({
-                                        "type": "pty_output",
-                                        "sessionId": sid,
-                                        "data": text,
-                                    });
-                                    let mut sender = sender.lock().await;
-                                    if sender.send(Message::text(msg.to_string())).await.is_err() {
-                                        break;
+                                    // Prepend any leftover bytes from the previous chunk
+                                    let combined = if utf8_pending.is_empty() {
+                                        data
+                                    } else {
+                                        let mut buf = std::mem::take(&mut utf8_pending);
+                                        buf.extend(data);
+                                        buf
+                                    };
+                                    let (text, pending) = bytes_to_utf8_with_pending(&combined);
+                                    utf8_pending = pending;
+                                    if !text.is_empty() {
+                                        let msg = json!({
+                                            "type": "pty_output",
+                                            "sessionId": sid,
+                                            "data": text,
+                                        });
+                                        let mut sender = sender.lock().await;
+                                        if sender.send(Message::text(msg.to_string())).await.is_err() {
+                                            break;
+                                        }
                                     }
                                 }
                                 Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
                                     log::warn!("PTY output broadcast lagged, skipped {} messages for session {}",
                                         skipped, sid);
+                                    // Clear pending buffer on lag — skipped messages may have
+                                    // contained the continuation bytes we were waiting for.
+                                    utf8_pending.clear();
                                     continue;
                                 }
                                 Err(tokio::sync::broadcast::error::RecvError::Closed) => {
