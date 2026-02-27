@@ -528,7 +528,7 @@
   "share.collapseSidebar": "收起侧边栏",
   "share.ngrokLabel": "NGROK:",
   "share.remoteLabel": "远程:",
-  "share.local": "Local",
+  "share.wan": "WAN",
   "share.lan": "LAN",
   "share.moreIps": "+{{count}} 个",
   "share.showMoreIps": "显示另外 {{count}} 个 IP 地址",

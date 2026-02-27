@@ -262,93 +262,19 @@ const ShareBar: FC<{
 
   return (
     <div className="px-3 py-2.5 border-t border-slate-700/50 space-y-1.5">
-      {/* ngrok row - always show */}
-      <div className="flex items-center gap-2 min-h-[24px]">
-        <span className="text-[11px] font-medium text-slate-500 shrink-0 w-[52px]">{t('share.ngrokLabel')}</span>
-        {ngrokUrl ? (
-          <>
-            <span className="flex-1 text-xs text-blue-400 truncate min-w-0 select-all" title={ngrokUrl}>
-              {ngrokUrl.replace(/^https?:\/\//, '')}
-            </span>
-            <div className="flex items-center gap-0.5 shrink-0">
-              <TooltipProvider delayDuration={300}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-5 w-5">
-                      <QrCodeIcon className="w-3 h-3" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top" className="bg-white p-3 rounded-lg shadow-xl">
-                    <QRCodeSVG value={`${ngrokUrl}#pwd=${encodeURIComponent(editingPassword)}`} size={160} />
-                    <p className="text-center text-xs text-gray-600 mt-2 font-mono">{t('share.password')} {editingPassword}</p>
-                    <p className="text-center text-[10px] text-gray-400 mt-1">{t('share.scanToOpen')}</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-              <TooltipProvider delayDuration={300}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => navigator.clipboard.writeText(ngrokUrl)}
-                      className="h-5 w-5"
-                    >
-                      <CopyIcon className="w-3 h-3" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top">{t('share.copyExternalLink')}</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            </div>
-          </>
-        ) : (
-          <span className="flex-1 text-xs text-slate-500">{t('share.ngrokNotStarted')}</span>
-        )}
-        <button
-          type="button"
-          onClick={onToggleNgrok}
-          disabled={ngrokLoading}
-          className={`relative inline-flex h-4 w-7 items-center rounded-full shrink-0 transition-colors ${
-            ngrokLoading ? 'opacity-50 cursor-wait' : 'cursor-pointer'
-          } ${ngrokUrl ? 'bg-blue-500' : 'bg-slate-600'}`}
-        >
-          <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${
-            ngrokUrl ? 'translate-x-3.5' : 'translate-x-0.5'
-          }`} />
-        </button>
-      </div>
-      {/* Remote share row */}
-      <div className="flex items-center gap-2 min-h-[24px]">
-        <span className="text-[11px] font-medium text-slate-500 shrink-0 w-[52px]">{t('share.remoteLabel')}</span>
-        {wmsUrl ? (
-          <>
-            {wmsConnected ? (
-              /* Connected state: green dot + URL + QR icon */
-              <span className="flex-1 text-xs text-purple-400 truncate min-w-0 select-all flex items-center gap-1" title={wmsUrl}>
-                <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
-                {wmsUrl.replace(/^https?:\/\//, '')}
+      {/* WAN section: NGROK + Remote */}
+      <div className="space-y-0.5">
+        {/* NGROK row */}
+        <div className="flex items-center gap-2 min-h-[24px]">
+          <span className="text-[11px] font-bold px-1.5 py-0.5 rounded shrink-0 bg-slate-600/30 text-slate-500 w-[52px] text-center">
+            {t('share.wan')}
+          </span>
+          <span className="text-[11px] font-medium text-slate-500 shrink-0">{t('share.ngrokLabel')}</span>
+          {ngrokUrl ? (
+            <>
+              <span className="flex-1 text-xs text-blue-400 truncate min-w-0 select-all" title={ngrokUrl}>
+                {ngrokUrl.replace(/^https?:\/\//, '')}
               </span>
-            ) : wmsReconnecting ? (
-              /* Reconnecting state: yellow dot + pulse + attempt info */
-              <span className="flex-1 text-xs text-yellow-400 truncate min-w-0 flex items-center gap-1">
-                <span className="inline-block w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse shrink-0" />
-                {wmsNextRetrySecs > 0
-                  ? t('share.wmsRetryIn', { seconds: wmsNextRetrySecs })
-                  : t('share.wmsReconnecting')}
-                {wmsReconnectAttempt > 0 && (
-                  <span className="text-[10px] text-yellow-500/70">#{wmsReconnectAttempt}</span>
-                )}
-              </span>
-            ) : (
-              /* Disconnected state: red dot + manual reconnect */
-              <span className="flex-1 text-xs text-red-400 truncate min-w-0 flex items-center gap-1">
-                <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" />
-                {t('share.wmsDisconnected')}
-              </span>
-            )}
-            {/* QR + Copy buttons (when connected) */}
-            {wmsConnected && (
               <div className="flex items-center gap-0.5 shrink-0">
                 <TooltipProvider delayDuration={300}>
                   <Tooltip>
@@ -358,7 +284,7 @@ const ShareBar: FC<{
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent side="top" className="bg-white p-3 rounded-lg shadow-xl">
-                      <QRCodeSVG value={`${wmsUrl}#pwd=${encodeURIComponent(editingPassword)}`} size={160} />
+                      <QRCodeSVG value={`${ngrokUrl}#pwd=${encodeURIComponent(editingPassword)}`} size={160} />
                       <p className="text-center text-xs text-gray-600 mt-2 font-mono">{t('share.password')} {editingPassword}</p>
                       <p className="text-center text-[10px] text-gray-400 mt-1">{t('share.scanToOpen')}</p>
                     </TooltipContent>
@@ -370,7 +296,7 @@ const ShareBar: FC<{
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => navigator.clipboard.writeText(wmsUrl)}
+                        onClick={() => navigator.clipboard.writeText(ngrokUrl)}
                         className="h-5 w-5"
                       >
                         <CopyIcon className="w-3 h-3" />
@@ -380,148 +306,184 @@ const ShareBar: FC<{
                   </Tooltip>
                 </TooltipProvider>
               </div>
-            )}
-            {/* Manual reconnect button (when disconnected or reconnecting) */}
-            {!wmsConnected && (
-              <TooltipProvider delayDuration={300}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={onWmsManualReconnect}
-                      className="h-5 w-5 shrink-0"
-                    >
-                      <RefreshIcon className={`w-3 h-3 ${wmsReconnecting ? 'animate-spin' : ''}`} />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top">{t('share.wmsManualReconnect')}</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            )}
-          </>
-        ) : (
-          <span className="flex-1 text-xs text-slate-500">{t('share.ngrokNotStarted')}</span>
-        )}
-        <button
-          type="button"
-          onClick={onToggleWms}
-          disabled={wmsLoading}
-          className={`relative inline-flex h-4 w-7 items-center rounded-full shrink-0 transition-colors ${
-            wmsLoading ? 'opacity-50 cursor-wait' : 'cursor-pointer'
-          } ${wmsUrl ? 'bg-purple-500' : 'bg-slate-600'}`}
-        >
-          <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${
-            wmsUrl ? 'translate-x-3.5' : 'translate-x-0.5'
-          }`} />
-        </button>
-      </div>
-      {/* Local URL row */}
-      {urls.length > 0 && (() => {
-        const localUrl = `http://localhost:${new URL(urls[0]).port}`;
-        return (
-          <div className="flex items-center gap-2 min-h-[24px]">
-            <span className="text-[11px] font-bold px-1.5 py-0.5 rounded shrink-0 bg-slate-600/30 text-slate-500 w-[52px] text-center">
-              {t('share.local')}
-            </span>
-            <span className="flex-1 text-xs text-emerald-400 truncate min-w-0 select-all" title={localUrl}>
-              {localUrl}
-            </span>
-            <div className="flex items-center gap-0.5 shrink-0">
-              <TooltipProvider delayDuration={300}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => navigator.clipboard.writeText(localUrl)}
-                      className="h-5 w-5"
-                    >
-                      <CopyIcon className="w-3 h-3" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top">{t('share.copyLink')}</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => navigator.clipboard.writeText(`${localUrl}#pwd=${encodeURIComponent(editingPassword)}`)}
-                      className="h-5 w-5 text-slate-400 hover:text-slate-200"
-                    >
-                      <LinkIcon className="w-3 h-3" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top">{t('share.copyLinkWithPassword')}</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            </div>
-          </div>
-        );
-      })()}
-      {/* LAN URL rows */}
-      {urls.length > 0 && (
-        <div className="space-y-0.5">
-          {(lanExpanded ? urls : urls.slice(0, 1)).map((lanUrl, i) => (
-            <div key={lanUrl} className="flex items-center gap-2 min-h-[24px]">
-              {i === 0 ? (
-                <span className="text-[11px] font-bold px-1.5 py-0.5 rounded shrink-0 bg-slate-600/30 text-slate-500 w-[52px] text-center">
-                  {t('share.lan')}
+            </>
+          ) : (
+            <span className="flex-1 text-xs text-slate-500">{t('share.ngrokNotStarted')}</span>
+          )}
+          <button
+            type="button"
+            onClick={onToggleNgrok}
+            disabled={ngrokLoading}
+            className={`relative inline-flex h-4 w-7 items-center rounded-full shrink-0 transition-colors ${
+              ngrokLoading ? 'opacity-50 cursor-wait' : 'cursor-pointer'
+            } ${ngrokUrl ? 'bg-blue-500' : 'bg-slate-600'}`}
+          >
+            <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${
+              ngrokUrl ? 'translate-x-3.5' : 'translate-x-0.5'
+            }`} />
+          </button>
+        </div>
+        {/* Remote row */}
+        <div className="flex items-center gap-2 min-h-[24px]">
+          <span className="shrink-0 w-[52px]" />
+          <span className="text-[11px] font-medium text-slate-500 shrink-0">{t('share.remoteLabel')}</span>
+          {wmsUrl ? (
+            <>
+              {wmsConnected ? (
+                <span className="flex-1 text-xs text-purple-400 truncate min-w-0 select-all flex items-center gap-1" title={wmsUrl}>
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                  {wmsUrl.replace(/^https?:\/\//, '')}
+                </span>
+              ) : wmsReconnecting ? (
+                <span className="flex-1 text-xs text-yellow-400 truncate min-w-0 flex items-center gap-1">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse shrink-0" />
+                  {wmsNextRetrySecs > 0
+                    ? t('share.wmsRetryIn', { seconds: wmsNextRetrySecs })
+                    : t('share.wmsReconnecting')}
+                  {wmsReconnectAttempt > 0 && (
+                    <span className="text-[10px] text-yellow-500/70">#{wmsReconnectAttempt}</span>
+                  )}
                 </span>
               ) : (
-                <span className="shrink-0 w-[52px]" />
+                <span className="flex-1 text-xs text-red-400 truncate min-w-0 flex items-center gap-1">
+                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" />
+                  {t('share.wmsDisconnected')}
+                </span>
               )}
-              <span className="flex-1 text-xs text-emerald-400 truncate min-w-0 select-all" title={lanUrl}>
-                {lanUrl}
-              </span>
-              <div className="flex items-center gap-0.5 shrink-0">
+              {wmsConnected && (
+                <div className="flex items-center gap-0.5 shrink-0">
+                  <TooltipProvider delayDuration={300}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-5 w-5">
+                          <QrCodeIcon className="w-3 h-3" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="bg-white p-3 rounded-lg shadow-xl">
+                        <QRCodeSVG value={`${wmsUrl}#pwd=${encodeURIComponent(editingPassword)}`} size={160} />
+                        <p className="text-center text-xs text-gray-600 mt-2 font-mono">{t('share.password')} {editingPassword}</p>
+                        <p className="text-center text-[10px] text-gray-400 mt-1">{t('share.scanToOpen')}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                  <TooltipProvider delayDuration={300}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => navigator.clipboard.writeText(wmsUrl)}
+                          className="h-5 w-5"
+                        >
+                          <CopyIcon className="w-3 h-3" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top">{t('share.copyExternalLink')}</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
+              )}
+              {!wmsConnected && (
                 <TooltipProvider delayDuration={300}>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => navigator.clipboard.writeText(lanUrl)}
-                        className="h-5 w-5"
+                        onClick={onWmsManualReconnect}
+                        className="h-5 w-5 shrink-0"
                       >
-                        <CopyIcon className="w-3 h-3" />
+                        <RefreshIcon className={`w-3 h-3 ${wmsReconnecting ? 'animate-spin' : ''}`} />
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent side="top">{t('share.copyLink')}</TooltipContent>
-                  </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => navigator.clipboard.writeText(`${lanUrl}#pwd=${encodeURIComponent(editingPassword)}`)}
-                        className="h-5 w-5 text-slate-400 hover:text-slate-200"
-                      >
-                        <LinkIcon className="w-3 h-3" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top">{t('share.copyLinkWithPassword')}</TooltipContent>
+                    <TooltipContent side="top">{t('share.wmsManualReconnect')}</TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
-                {i === 0 && urls.length > 1 && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setLanExpanded(!lanExpanded)}
-                    className="h-5 w-5 text-blue-400 hover:text-blue-300 hover:bg-blue-500/20"
-                    title={lanExpanded ? '收起' : t('share.showMoreIps', { count: urls.length - 1 })}
-                  >
-                    <span className="text-[10px] font-semibold">
-                      {lanExpanded ? '−' : `+${urls.length - 1}`}
-                    </span>
-                  </Button>
-                )}
-              </div>
-            </div>
-          ))}
+              )}
+            </>
+          ) : (
+            <span className="flex-1 text-xs text-slate-500">{t('share.ngrokNotStarted')}</span>
+          )}
+          <button
+            type="button"
+            onClick={onToggleWms}
+            disabled={wmsLoading}
+            className={`relative inline-flex h-4 w-7 items-center rounded-full shrink-0 transition-colors ${
+              wmsLoading ? 'opacity-50 cursor-wait' : 'cursor-pointer'
+            } ${wmsUrl ? 'bg-purple-500' : 'bg-slate-600'}`}
+          >
+            <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${
+              wmsUrl ? 'translate-x-3.5' : 'translate-x-0.5'
+            }`} />
+          </button>
         </div>
-      )}
+      </div>
+      {/* LAN section: localhost + LAN IPs */}
+      {urls.length > 0 && (() => {
+        const localUrl = `http://localhost:${new URL(urls[0]).port}`;
+        const allLanUrls = [localUrl, ...urls];
+        return (
+          <div className="space-y-0.5">
+            {(lanExpanded ? allLanUrls : allLanUrls.slice(0, 1)).map((lanUrl, i) => (
+              <div key={lanUrl} className="flex items-center gap-2 min-h-[24px]">
+                {i === 0 ? (
+                  <span className="text-[11px] font-bold px-1.5 py-0.5 rounded shrink-0 bg-slate-600/30 text-slate-500 w-[52px] text-center">
+                    {t('share.lan')}
+                  </span>
+                ) : (
+                  <span className="shrink-0 w-[52px]" />
+                )}
+                <span className="flex-1 text-xs text-emerald-400 truncate min-w-0 select-all" title={lanUrl}>
+                  {lanUrl}
+                </span>
+                <div className="flex items-center gap-0.5 shrink-0">
+                  <TooltipProvider delayDuration={300}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => navigator.clipboard.writeText(lanUrl)}
+                          className="h-5 w-5"
+                        >
+                          <CopyIcon className="w-3 h-3" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top">{t('share.copyLink')}</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => navigator.clipboard.writeText(`${lanUrl}#pwd=${encodeURIComponent(editingPassword)}`)}
+                          className="h-5 w-5 text-slate-400 hover:text-slate-200"
+                        >
+                          <LinkIcon className="w-3 h-3" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top">{t('share.copyLinkWithPassword')}</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                  {i === 0 && allLanUrls.length > 1 && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setLanExpanded(!lanExpanded)}
+                      className="h-5 w-5 text-blue-400 hover:text-blue-300 hover:bg-blue-500/20"
+                      title={lanExpanded ? '收起' : t('share.showMoreIps', { count: allLanUrls.length - 1 })}
+                    >
+                      <span className="text-[10px] font-semibold">
+                        {lanExpanded ? '−' : `+${allLanUrls.length - 1}`}
+                      </span>
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
       {urls.length === 0 && (
         <div className="flex items-center gap-2 min-h-[24px]">
           <span className="text-[11px] font-bold px-1.5 py-0.5 rounded shrink-0 bg-slate-600/30 text-slate-500 w-[52px] text-center">

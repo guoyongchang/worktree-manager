@@ -539,7 +539,7 @@
   "share.collapseSidebar": "Collapse sidebar",
   "share.ngrokLabel": "NGROK:",
   "share.remoteLabel": "Remote:",
-  "share.local": "Local",
+  "share.wan": "WAN",
   "share.lan": "LAN",
   "share.moreIps": "+{{count}} more",
   "share.showMoreIps": "Show {{count}} more IP address(es)",

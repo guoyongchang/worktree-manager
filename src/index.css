@@ -1,5 +1,22 @@
 @import "tailwindcss";
 
+/* Maple Mono NF CN — bundled terminal font with Nerd Font icons + CJK */
+@font-face {
+  font-family: "Maple Mono NF CN";
+  src: url("./assets/fonts/MapleMono-NF-CN-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "Maple Mono NF CN";
+  src: url("./assets/fonts/MapleMono-NF-CN-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: block;
+}
+
 /* shadcn/ui animations */
 @keyframes animate-in {
   from {

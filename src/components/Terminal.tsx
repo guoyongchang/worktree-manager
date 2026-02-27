@@ -78,7 +78,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible 
         brightWhite: '#ffffff',
       },
       fontSize: 13,
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      fontFamily: '"Maple Mono NF CN", Menlo, Monaco, "Courier New", monospace',
       cursorBlink: true,
       cursorStyle: 'bar',
       scrollback: TERMINAL.SCROLLBACK_LINES,
@@ -135,6 +135,9 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible 
       if (!term || !fitAddon) return;
 
       try {
+        // Wait for bundled font to be loaded before measuring terminal dimensions
+        await document.fonts.ready;
+
         // Fit first to get correct dimensions
         fitAddon.fit();
 
