@@ -1161,7 +1161,14 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
                 >
                   <div className="flex items-center gap-2.5">
                     <FolderIcon className={`w-4 h-4 ${isLockedByOther || isDeployed ? 'text-slate-500' : 'text-blue-400'}`} />
-                    <span className="font-medium text-sm truncate flex-1">{wt.name}</span>
+                    <TooltipProvider delayDuration={300}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="font-medium text-sm truncate flex-1">{wt.name}</span>
+                        </TooltipTrigger>
+                        <TooltipContent side="right">{wt.name}</TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                     {isDeployed && (
                       <TooltipProvider delayDuration={300}>
                         <Tooltip>
