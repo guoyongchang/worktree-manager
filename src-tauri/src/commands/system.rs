@@ -78,6 +78,7 @@ fn editor_cli_command(editor: &str) -> &'static str {
     match editor {
         "vscode" => "code",
         "cursor" => "cursor",
+        "antigravity" => "antigravity",
         "idea" => "idea",
         _ => "code",
     }
@@ -88,6 +89,7 @@ fn editor_app_name(editor: &str) -> &'static str {
     match editor {
         "vscode" => "Visual Studio Code",
         "cursor" => "Cursor",
+        "antigravity" => "Antigravity",
         "idea" => "IntelliJ IDEA",
         _ => "Visual Studio Code",
     }

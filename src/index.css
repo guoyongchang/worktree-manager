@@ -23,6 +23,7 @@
     opacity: 0;
     transform: scale(0.95);
   }
+
   to {
     opacity: 1;
     transform: scale(1);
@@ -34,6 +35,7 @@
     opacity: 1;
     transform: scale(1);
   }
+
   to {
     opacity: 0;
     transform: scale(0.95);
@@ -41,38 +43,77 @@
 }
 
 @keyframes fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes fade-out {
-  from { opacity: 1; }
-  to { opacity: 0; }
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
 }
 
 @keyframes slide-in-from-top {
-  from { transform: translateY(-0.5rem); }
-  to { transform: translateY(0); }
+  from {
+    transform: translateY(-0.5rem);
+  }
+
+  to {
+    transform: translateY(0);
+  }
 }
 
 @keyframes slide-in-from-bottom {
-  from { transform: translateY(0.5rem); }
-  to { transform: translateY(0); }
+  from {
+    transform: translateY(0.5rem);
+  }
+
+  to {
+    transform: translateY(0);
+  }
 }
 
 @keyframes slide-in-from-bottom-4 {
-  from { transform: translateY(1rem); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+  from {
+    transform: translateY(1rem);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
 @keyframes slide-out-to-right {
-  from { transform: translateX(0); opacity: 1; }
-  to { transform: translateX(100%); opacity: 0; }
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+
+  to {
+    transform: translateX(100%);
+    opacity: 0;
+  }
 }
 
 @keyframes toast-countdown {
-  from { width: 100%; }
-  to { width: 0%; }
+  from {
+    width: 100%;
+  }
+
+  to {
+    width: 0%;
+  }
 }
 
 .animate-in {
@@ -117,9 +158,20 @@
 
 /* Indeterminate progress bar animation */
 @keyframes progress-indeterminate {
-  0% { width: 0%; margin-left: 0%; }
-  50% { width: 60%; margin-left: 20%; }
-  100% { width: 0%; margin-left: 100%; }
+  0% {
+    width: 0%;
+    margin-left: 0%;
+  }
+
+  50% {
+    width: 60%;
+    margin-left: 20%;
+  }
+
+  100% {
+    width: 0%;
+    margin-left: 100%;
+  }
 }
 
 .animate-progress-indeterminate {
@@ -158,8 +210,9 @@ body.tauri [contenteditable="true"] {
   user-select: text;
 }
 
-/* Allow text selection for specific elements */
-.select-text {
+/* Allow text selection for specific elements (must beat body.tauri * specificity) */
+.select-text,
+body.tauri .select-text {
   -webkit-user-select: text;
   user-select: text;
   cursor: text;
@@ -238,8 +291,15 @@ button {
 
 /* Subtle breathing animation for icons */
 @keyframes subtle-pulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.03); }
+
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.03);
+  }
 }
 
 .animate-subtle-pulse {
@@ -248,12 +308,43 @@ button {
 
 /* Progress bar gradient animation */
 @keyframes gradient-shift {
-  0% { background-position: 0% 50%; }
-  100% { background-position: 200% 50%; }
+  0% {
+    background-position: 0% 50%;
+  }
+
+  100% {
+    background-position: 200% 50%;
+  }
 }
 
 .animate-gradient {
   background: linear-gradient(90deg, #3b82f6, #6366f1, #3b82f6);
   background-size: 200% 100%;
   animation: gradient-shift 2s linear infinite;
+}
+
+/* Marquee scrolling text for sidebar overflow */
+@keyframes marquee-scroll {
+  0% {
+    transform: translateX(0);
+  }
+
+  100% {
+    transform: translateX(calc(-100% + 100cqi));
+  }
+}
+
+.sidebar-marquee-container {
+  overflow: hidden;
+  max-width: 160px;
+  container-type: inline-size;
+}
+
+.sidebar-marquee-container:hover .sidebar-marquee-text {
+  animation: marquee-scroll 5s ease-in-out infinite alternate;
+}
+
+.sidebar-marquee-text {
+  white-space: nowrap;
+  display: inline-block;
 }

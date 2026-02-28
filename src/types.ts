@@ -35,8 +35,13 @@ export interface ProjectStatus {
 
 export interface MainProjectStatus {
   name: string;
+  path: string;
   current_branch: string;
   has_uncommitted: boolean;
+  uncommitted_count: number;
+  is_merged_to_test: boolean;
+  ahead_of_base: number;
+  behind_base: number;
   base_branch: string;
   test_branch: string;
   linked_folders: string[];
@@ -88,7 +93,7 @@ export interface WorktreeArchiveStatus {
 }
 
 // Editor types
-export type EditorType = 'vscode' | 'cursor' | 'idea';
+export type EditorType = 'vscode' | 'cursor' | 'antigravity' | 'idea';
 
 export interface EditorConfig {
   id: EditorType;
@@ -136,4 +141,17 @@ export interface ScannedFolder {
   size_bytes: number;
   size_display: string;
   is_recommended: boolean;
+}
+
+// Deploy to main workspace
+export interface MainWorkspaceOccupation {
+  worktree_name: string;
+  original_branches: Record<string, string>;
+  deployed_at: string;
+}
+
+export interface DeployToMainResult {
+  success: boolean;
+  switched_projects: string[];
+  failed_projects: { project_name: string; error: string }[];
 }

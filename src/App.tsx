@@ -19,7 +19,7 @@ import {
   ToastProvider,
   GlobalDialogs,
 } from "./components";
-import { useWorkspace, useTerminal, useUpdater, useShareFeature, useBrowserAuth, useWorktreeLocks, useModals, useWorkspaceActions } from "./hooks";
+import { useWorkspace, useTerminal, useUpdater, useShareFeature, useBrowserAuth, useWorktreeLocks, useModals, useWorkspaceActions, useMainOccupation } from "./hooks";
 import { useVoiceInput } from "./hooks/useVoiceInput";
 import { Input } from "@/components/ui/input";
 import { callBackend, isTauri, setWindowTitle, getShareInfo, clearSessionId } from "./lib/backend";
@@ -84,6 +84,7 @@ function App() {
   const modals = useModals();
   const share = useShareFeature(workspace.setError);
   const locks = useWorktreeLocks(workspace.currentWorkspace?.path, workspace.getLockedWorktrees);
+  const mainOccupation = useMainOccupation(workspace.currentWorkspace?.path);
   const [selectedWorktree, setSelectedWorktree] = useState<import('./types').WorktreeListItem | null>(null);
   const terminalHook = useTerminal(selectedWorktree, workspace.mainWorkspace, workspace.currentWorkspace?.path);
   const actions = useWorkspaceActions(workspace, modals, terminalHook.cleanupTerminalsForPath, locks, isMobileWeb, selectedWorktree, setSelectedWorktree);
@@ -420,6 +421,7 @@ function App() {
           onKickClient={share.handleKickClient}
           hasLastConfig={share.hasLastConfig}
           onQuickShare={share.handleQuickShare}
+          occupation={mainOccupation.occupation}
         />
         )}
 
@@ -448,6 +450,12 @@ function App() {
               onClearError={() => workspace.setError(null)}
               onRefresh={workspace.loadData}
               onOpenTerminalPanel={terminalHook.handleTerminalTabClick}
+              occupation={mainOccupation.occupation}
+              deploying={mainOccupation.deploying}
+              exiting={mainOccupation.exiting}
+              onDeployToMain={mainOccupation.deployToMain}
+              onExitOccupation={mainOccupation.exitOccupation}
+              onRefreshAfterDeploy={workspace.loadData}
             />
           </div>
           )}

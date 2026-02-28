@@ -35,7 +35,8 @@ pub use commands::workspace::{
 };
 pub use commands::worktree::{
     add_project_to_worktree_impl, archive_worktree_impl, check_worktree_status_impl,
-    create_worktree_impl, delete_archived_worktree_impl, get_main_workspace_status_impl,
+    create_worktree_impl, delete_archived_worktree_impl, deploy_to_main_impl,
+    exit_main_occupation_impl, get_main_occupation_impl, get_main_workspace_status_impl,
     list_worktrees_impl, restore_worktree_impl, scan_linked_folders_internal,
 };
 
@@ -140,6 +141,9 @@ pub fn run() {
             delete_archived_worktree,
             check_worktree_status,
             add_project_to_worktree,
+            deploy_to_main,
+            exit_main_occupation,
+            get_main_occupation,
             // Git 操作
             switch_branch,
             clone_project,

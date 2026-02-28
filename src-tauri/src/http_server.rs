@@ -31,9 +31,12 @@ use crate::{
     clone_project_impl,
     create_worktree_impl,
     delete_archived_worktree_impl,
+    deploy_to_main_impl,
+    exit_main_occupation_impl,
     get_config_path_info_impl,
     // _impl functions (window-context commands)
     get_current_workspace_impl,
+    get_main_occupation_impl,
     get_main_workspace_status_impl,
     get_workspace_config_impl,
     git_ops,
@@ -247,6 +250,23 @@ async fn h_add_project_to_worktree(headers: HeaderMap, Json(args): Json<Value>) 
         }
     };
     result_ok(add_project_to_worktree_impl(&sid, request))
+}
+
+async fn h_deploy_to_main(headers: HeaderMap, Json(args): Json<Value>) -> Response {
+    let sid = session_id(&headers);
+    let worktree_name = args["worktreeName"].as_str().unwrap_or("").to_string();
+    result_json(deploy_to_main_impl(&sid, worktree_name))
+}
+
+async fn h_exit_main_occupation(headers: HeaderMap, Json(args): Json<Value>) -> Response {
+    let sid = session_id(&headers);
+    let force = args["force"].as_bool().unwrap_or(false);
+    result_ok(exit_main_occupation_impl(&sid, force))
+}
+
+async fn h_get_main_occupation(headers: HeaderMap) -> Response {
+    let sid = session_id(&headers);
+    result_json(get_main_occupation_impl(&sid))
 }
 
 async fn h_clone_project(headers: HeaderMap, Json(args): Json<Value>) -> Response {
@@ -1708,6 +1728,9 @@ pub fn create_router(cert_pem: Option<String>) -> Router {
             "/api/add_project_to_worktree",
             post(h_add_project_to_worktree),
         )
+        .route("/api/deploy_to_main", post(h_deploy_to_main))
+        .route("/api/exit_main_occupation", post(h_exit_main_occupation))
+        .route("/api/get_main_occupation", post(h_get_main_occupation))
         // Git operations
         .route("/api/switch_branch", post(h_switch_branch))
         .route("/api/clone_project", post(h_clone_project))

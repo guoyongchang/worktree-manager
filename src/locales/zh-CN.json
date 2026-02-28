@@ -19,7 +19,6 @@
   "common.path": "路径",
   "common.retry": "重试",
   "common.default": "默认",
-
   "sidebar.worktrees": "Worktrees",
   "sidebar.archived": "已归档",
   "sidebar.showArchived": "已归档 ({{count}})",
@@ -50,7 +49,6 @@
   "sidebar.confirmDelete": "确定要永久删除「{{name}}」吗？此操作不可恢复。",
   "sidebar.restoring": "恢复中...",
   "sidebar.deleting": "删除中...",
-
   "detail.projectStatus": "项目状态",
   "detail.uncommittedChanges": "{{count}} 个未提交更改",
   "detail.branchBehindBase": "落后 {{branch}} {{count}} 个提交",
@@ -95,7 +93,6 @@
   "detail.baseBranchPrefix": "BASE: {{branch}}",
   "detail.testBranchPrefix": "TEST: {{branch}}",
   "detail.branchInfo": "base: {{base}} · test: {{test}}",
-
   "git.syncBase": "同步 Base",
   "git.push": "Push",
   "git.mergeToTest": "合并到测试",
@@ -132,7 +129,6 @@
   "git.confirmMergeBase": "确认合并",
   "git.openTerminalToResolve": "打开终端解决冲突",
   "git.pushAheadTooltip": "推送 {{count}} 个提交到远程",
-
   "terminal.workspace": "工作区",
   "terminal.duplicateTerminal": "复制终端",
   "terminal.newTerminal": "新建终端",
@@ -170,7 +166,6 @@
   "terminal.recordingHint": "正在录音... 松开 Alt+V 停止",
   "terminal.closeAllTerminals": "关闭所有终端",
   "terminal.terminalCount": "{{count}} 个终端",
-
   "app.loadingWorkspace": "加载 Workspace...",
   "app.errorPrefix": "错误",
   "app.dismiss": "知道了",
@@ -211,7 +206,6 @@
   "app.kickedDesc": "您已被主持人移出会话。",
   "app.kickedReconnect": "重新连接",
   "app.wsDisconnected": "连接已断开，正在重连...",
-
   "settings.title": "设置",
   "settings.back": "返回",
   "settings.workspaceConfig": "Workspace 配置",
@@ -348,7 +342,6 @@
   "settings.removeWorkspaceDesc": "确定要移除工作区 \"{{name}}\" 吗？此操作仅从列表中移除，不会删除实际文件。",
   "settings.confirmRemove": "确认移除",
   "settings.current": "当前",
-
   "addProject.title": "添加项目",
   "addProject.repoUrl": "仓库 URL",
   "addProject.repoUrlPlaceholder": "https://github.com/user/repo.git",
@@ -384,7 +377,6 @@
   "addProject.skip": "跳过",
   "addProject.savingFolders": "保存中...",
   "addProject.saveLinkedFolders": "保存链接文件夹 ({{count}})",
-
   "addWorkspace.importTitle": "导入现有 Workspace",
   "addWorkspace.importDesc": "选择一个已有的项目目录作为 Workspace",
   "addWorkspace.dirPath": "目录路径",
@@ -397,7 +389,6 @@
   "addWorkspace.selectParentDir": "选择父目录",
   "addWorkspace.willCreate": "将创建目录：",
   "addWorkspace.promptInputPath": "请输入目录路径：",
-
   "archive.title": "归档 Worktree",
   "archive.checkingStatus": "检查分支状态...",
   "archive.projectStatus": "项目状态",
@@ -409,7 +400,6 @@
   "archive.noIssues": "无问题",
   "archive.confirmArchive": "确认归档",
   "archive.archiving": "归档中...",
-
   "addProjectToWorktree.title": "添加项目到 Worktree",
   "addProjectToWorktree.desc": "将主工作区中的项目添加到 <0>{{name}}</0>",
   "addProjectToWorktree.descPlain": "将主工作区中的项目添加到",
@@ -422,7 +412,6 @@
   "addProjectToWorktree.baseBranch": "Base 分支",
   "addProjectToWorktree.defaultLabel": "(默认)",
   "addProjectToWorktree.addProject": "添加项目",
-
   "welcome.title": "欢迎使用 Worktree Manager",
   "welcome.desc": "一款 Git Worktree 可视化管理工具，帮助你高效管理多分支开发工作流。",
   "welcome.whatIsWorkspace": "什么是 Workspace？",
@@ -432,7 +421,6 @@
   "welcome.hint": "导入：选择已有项目目录 | 新建：创建全新的 Workspace 结构",
   "welcome.dirMainRepo": "主仓库目录",
   "welcome.dirWorktrees": "Worktree 目录",
-
   "createWorktree.title": "新建 Worktree",
   "createWorktree.nameLabel": "Worktree 名称",
   "createWorktree.selectProjects": "选择项目",
@@ -441,26 +429,22 @@
   "createWorktree.defaultAndTest": "默认: {{base}} · 测试: {{test}}",
   "createWorktree.createWithCount": "创建 ({{count}})",
   "createWorktree.createCount": "创建 ({{count}})",
-
   "createPR.title": "创建 PR/MR",
   "createPR.titleLabel": "标题",
   "createPR.titlePlaceholder": "PR/MR 标题",
   "createPR.bodyLabel": "描述 (可选)",
   "createPR.bodyPlaceholder": "PR/MR 描述",
   "createPR.success": "PR/MR 创建成功: {{url}}",
-
   "contextMenu.archive": "归档",
   "contextMenu.duplicateTerminal": "复制终端",
   "contextMenu.closeTab": "关闭",
   "contextMenu.closeOtherTabs": "关闭其他",
   "contextMenu.closeAllTabs": "关闭全部",
-
   "branchCombobox.placeholder": "选择或输入分支",
   "branchCombobox.search": "搜索分支...",
   "branchCombobox.loading": "加载中...",
   "branchCombobox.noMatch": "未找到匹配的分支",
   "branchCombobox.noBranches": "未找到远程分支",
-
   "updater.newVersionAvailable": "新版本可用",
   "updater.versionReleased": "Worktree Manager v{{version}} 已发布",
   "updater.releaseNotes": "更新内容:",
@@ -485,7 +469,6 @@
   "updater.retryUpdate": "重试更新",
   "updater.upToDate": "已是最新版本",
   "updater.usingLatest": "您正在使用最新版本的 Worktree Manager",
-
   "voice.micNeedsHttps": "麦克风需要 HTTPS 或 localhost 环境，当前 HTTP 连接不支持",
   "voice.permissionDenied": "麦克风权限被拒绝，请在系统设置中允许",
   "voice.noMicDetected": "未检测到麦克风设备",
@@ -493,9 +476,7 @@
   "voice.refinedText": "AI 整理",
   "voice.refining": "整理中...",
   "voice.refineFailed": "AI 整理失败，将使用原始文本",
-
   "backend.authFailed": "认证失败",
-
   "share.title": "分享",
   "share.shareSettings": "分享设置",
   "share.shareSettingsDesc": "配置分享端口，局域网内的其他设备可以通过此端口访问",
@@ -534,7 +515,18 @@
   "share.showMoreIps": "显示另外 {{count}} 个 IP 地址",
   "share.scanToOpen": "扫码打开",
   "share.quickShare": "使用上次配置快速分享",
-
+  "deploy.deployToMain": "部署到主工作区",
+  "deploy.exitOccupation": "退出已部署的 Worktree",
+  "deploy.deploying": "部署中...",
+  "deploy.exiting": "退出中...",
+  "deploy.deployed": "已部署",
+  "deploy.occupiedBanner": "Worktree '{{name}}' 已部署到此工作区",
+  "deploy.deploySuccess": "成功部署到主工作区",
+  "deploy.exitSuccess": "成功退出已部署的 Worktree",
+  "deploy.confirmExit": "退出已部署的 Worktree?",
+  "deploy.confirmExitDesc": "这将把所有主工作区项目切换回原来的分支。",
+  "deploy.forceExit": "强制退出（丢弃未提交的更改）",
+  "deploy.deployedTooltip": "此 Worktree 已部署到主工作区",
   "sidebar.selectWorkspace": "选择 Workspace",
   "sidebar.current": "当前",
   "sidebar.openInNewWindow": "在新窗口打开",

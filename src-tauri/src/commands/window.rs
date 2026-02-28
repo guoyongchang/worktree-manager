@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use tauri::Emitter;
 
-use crate::config::load_global_config;
+use crate::config::{load_global_config, load_occupation_state};
 use crate::state::{
     LOCK_BROADCAST, TERMINAL_STATES, TERMINAL_STATE_BROADCAST, WINDOW_WORKSPACES, WORKTREE_LOCKS,
 };
@@ -318,9 +318,11 @@ pub(crate) fn broadcast_lock_state(workspace_path: &str) {
         workspace_path,
         lock_snapshot.len()
     );
+    let occupation = load_occupation_state(workspace_path);
     if let Ok(json_str) = serde_json::to_string(&serde_json::json!({
         "workspacePath": workspace_path,
         "locks": lock_snapshot,
+        "occupation": occupation,
     })) {
         let _ = LOCK_BROADCAST.send(json_str);
     }

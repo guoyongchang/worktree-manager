@@ -292,8 +292,13 @@ pub struct MainWorkspaceStatus {
 #[derive(Debug, Serialize)]
 pub struct MainProjectStatus {
     pub name: String,
+    pub path: String,
     pub current_branch: String,
     pub has_uncommitted: bool,
+    pub uncommitted_count: usize,
+    pub is_merged_to_test: bool,
+    pub ahead_of_base: usize,
+    pub behind_base: usize,
     pub base_branch: String,
     pub test_branch: String,
     pub linked_folders: Vec<String>,
@@ -366,4 +371,26 @@ pub struct CloneProjectRequest {
 pub struct OpenEditorRequest {
     pub path: String,
     pub editor: String,
+}
+
+// ==================== 部署到主工作区 ====================
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MainWorkspaceOccupation {
+    pub worktree_name: String,
+    pub original_branches: HashMap<String, String>, // project_name → original_branch
+    pub deployed_at: String, // ISO8601
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DeployToMainResult {
+    pub success: bool,
+    pub switched_projects: Vec<String>,
+    pub failed_projects: Vec<DeployProjectError>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DeployProjectError {
+    pub project_name: String,
+    pub error: String,
 }

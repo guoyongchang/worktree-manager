@@ -3,6 +3,7 @@ import type { EditorConfig } from './types';
 export const EDITORS: EditorConfig[] = [
   { id: 'vscode', name: 'VS Code', icon: 'V' },
   { id: 'cursor', name: 'Cursor', icon: 'C' },
+  { id: 'antigravity', name: 'Antigravity', icon: 'A' },
   { id: 'idea', name: 'IDEA', icon: 'I' },
 ];
 

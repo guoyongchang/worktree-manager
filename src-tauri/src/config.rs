@@ -2,7 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::state::{GLOBAL_CONFIG_CACHE, WINDOW_WORKSPACES, WORKSPACE_CONFIG_CACHE};
-use crate::types::{GlobalConfig, WorkspaceConfig};
+use crate::types::{GlobalConfig, MainWorkspaceOccupation, WorkspaceConfig};
 
 // ==================== 配置路径 ====================
 
@@ -187,4 +187,33 @@ pub(crate) fn get_window_workspace_config(window_label: &str) -> Option<(String,
     let workspace_path = get_window_workspace_path(window_label)?;
     let config = load_workspace_config(&workspace_path);
     Some((workspace_path, config))
+}
+
+// ==================== 主工作区占用状态 ====================
+
+pub fn load_occupation_state(workspace_path: &str) -> Option<MainWorkspaceOccupation> {
+    let path = std::path::PathBuf::from(workspace_path).join(".worktree-manager-occupation.json");
+    if !path.exists() {
+        return None;
+    }
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|content| serde_json::from_str(&content).ok())
+}
+
+pub fn save_occupation_state(workspace_path: &str, state: &MainWorkspaceOccupation) -> Result<(), String> {
+    let path = std::path::PathBuf::from(workspace_path).join(".worktree-manager-occupation.json");
+    let content = serde_json::to_string_pretty(state)
+        .map_err(|e| format!("Failed to serialize occupation state: {}", e))?;
+    std::fs::write(&path, content)
+        .map_err(|e| format!("Failed to write occupation state: {}", e))
+}
+
+pub fn clear_occupation_state(workspace_path: &str) -> Result<(), String> {
+    let path = std::path::PathBuf::from(workspace_path).join(".worktree-manager-occupation.json");
+    if path.exists() {
+        std::fs::remove_file(&path)
+            .map_err(|e| format!("Failed to clear occupation state: {}", e))?;
+    }
+    Ok(())
 }

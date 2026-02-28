@@ -14,3 +14,5 @@ export { useModals } from './useModals';
 export type { UseModalsReturn, ModalStates } from './useModals';
 export { useWorkspaceActions } from './useWorkspaceActions';
 export type { UseWorkspaceActionsReturn } from './useWorkspaceActions';
+export { useMainOccupation } from './useMainOccupation';
+export type { UseMainOccupationReturn } from './useMainOccupation';

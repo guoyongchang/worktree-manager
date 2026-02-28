@@ -1,13 +1,19 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-use crate::config::get_window_workspace_config;
+use crate::commands::window::broadcast_lock_state;
+use crate::config::{
+    clear_occupation_state, get_window_workspace_config, load_occupation_state,
+    save_occupation_state,
+};
 use crate::git_ops::{get_branch_status, get_worktree_info};
 use crate::state::PTY_MANAGER;
 use crate::types::{
-    AddProjectToWorktreeRequest, CreateWorktreeRequest, MainProjectStatus, MainWorkspaceStatus,
-    ProjectConfig, ProjectStatus, ScannedFolder, WorktreeArchiveStatus, WorktreeListItem,
+    AddProjectToWorktreeRequest, CreateWorktreeRequest, DeployProjectError, DeployToMainResult,
+    MainProjectStatus, MainWorkspaceOccupation, MainWorkspaceStatus, ProjectConfig, ProjectStatus,
+    ScannedFolder, WorktreeArchiveStatus, WorktreeListItem,
 };
 use crate::utils::{normalize_path, run_git_command_with_timeout, scan_dir_for_linkable_folders};
 
@@ -154,8 +160,13 @@ pub fn get_main_workspace_status_impl(window_label: &str) -> Result<MainWorkspac
 
         projects.push(MainProjectStatus {
             name: proj_config.name.clone(),
+            path: normalize_path(&proj_path.to_string_lossy()),
             current_branch: info.current_branch,
             has_uncommitted: info.uncommitted_count > 0,
+            uncommitted_count: info.uncommitted_count,
+            is_merged_to_test: info.is_merged_to_test,
+            ahead_of_base: info.ahead_of_base,
+            behind_base: info.behind_base,
             base_branch: proj_config.base_branch.clone(),
             test_branch: proj_config.test_branch.clone(),
             linked_folders: proj_config.linked_folders.clone(),
@@ -1036,4 +1047,374 @@ fn scan_linked_folders_sync(project_path: &str) -> Result<Vec<ScannedFolder>, St
             .then_with(|| b.size_bytes.cmp(&a.size_bytes))
     });
     Ok(results)
+}
+
+// ==================== 部署到主工作区 ====================
+
+pub fn deploy_to_main_impl(
+    window_label: &str,
+    worktree_name: String,
+) -> Result<DeployToMainResult, String> {
+    let (workspace_path, config) =
+        get_window_workspace_config(window_label).ok_or("No workspace selected")?;
+
+    // Check not already occupied
+    if let Some(existing) = load_occupation_state(&workspace_path) {
+        return Err(format!(
+            "Main workspace is already occupied by worktree '{}'",
+            existing.worktree_name
+        ));
+    }
+
+    let root = PathBuf::from(&workspace_path);
+    let worktree_path = root.join(&config.worktrees_dir).join(&worktree_name);
+
+    if !worktree_path.exists() {
+        return Err(format!("Worktree '{}' does not exist", worktree_name));
+    }
+
+    let wt_projects_path = worktree_path.join("projects");
+    if !wt_projects_path.exists() {
+        return Err("Worktree has no projects directory".to_string());
+    }
+
+    // Collect worktree project branches
+    let mut wt_branches: HashMap<String, String> = HashMap::new();
+    if let Ok(entries) = std::fs::read_dir(&wt_projects_path) {
+        for entry in entries.flatten() {
+            let proj_path = entry.path();
+            if !proj_path.is_dir() {
+                continue;
+            }
+            let proj_name = proj_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+
+            let info = crate::git_ops::get_worktree_info(&proj_path);
+            wt_branches.insert(proj_name, info.current_branch);
+        }
+    }
+
+    if wt_branches.is_empty() {
+        return Err("No projects found in worktree".to_string());
+    }
+
+    // Check main workspace projects for uncommitted changes
+    let main_projects_path = root.join("projects");
+    let mut original_branches: HashMap<String, String> = HashMap::new();
+
+    for (proj_name, _) in &wt_branches {
+        let main_proj_path = main_projects_path.join(proj_name);
+        if !main_proj_path.exists() {
+            continue;
+        }
+
+        let info = crate::git_ops::get_worktree_info(&main_proj_path);
+        if info.uncommitted_count > 0 {
+            return Err(format!(
+                "Project '{}' in main workspace has {} uncommitted changes. Please commit or stash them first.",
+                proj_name, info.uncommitted_count
+            ));
+        }
+        original_branches.insert(proj_name.clone(), info.current_branch);
+    }
+
+    let occupation = MainWorkspaceOccupation {
+        worktree_name: worktree_name.clone(),
+        original_branches: original_branches.clone(),
+        deployed_at: chrono::Utc::now().to_rfc3339(),
+    };
+
+    let mut switched_projects = Vec::new();
+    let mut failed_projects = Vec::new();
+
+    // Detach worktree project HEADs and switch main workspace branches
+    for (proj_name, wt_branch) in &wt_branches {
+        let wt_proj_path = wt_projects_path.join(proj_name);
+        let main_proj_path = main_projects_path.join(proj_name);
+
+        if !main_proj_path.exists() {
+            continue;
+        }
+
+        // Step 1: Detach worktree HEAD
+        log::info!(
+            "[deploy] Detaching HEAD in worktree project '{}'",
+            proj_name
+        );
+        let detach_output = Command::new("git")
+            .args(["-C", wt_proj_path.to_str().unwrap(), "checkout", "--detach"])
+            .output();
+
+        match &detach_output {
+            Ok(o) if o.status.success() => {
+                log::info!("[deploy] Detached HEAD in worktree project '{}'", proj_name);
+            }
+            Ok(o) => {
+                let stderr = String::from_utf8_lossy(&o.stderr);
+                log::error!(
+                    "[deploy] Failed to detach HEAD in '{}': {}",
+                    proj_name,
+                    stderr
+                );
+                failed_projects.push(DeployProjectError {
+                    project_name: proj_name.clone(),
+                    error: format!("Failed to detach worktree HEAD: {}", stderr),
+                });
+                continue;
+            }
+            Err(e) => {
+                log::error!(
+                    "[deploy] Failed to run git detach in '{}': {}",
+                    proj_name,
+                    e
+                );
+                failed_projects.push(DeployProjectError {
+                    project_name: proj_name.clone(),
+                    error: format!("Failed to run git: {}", e),
+                });
+                continue;
+            }
+        }
+
+        // Step 2: Switch main workspace project to worktree branch
+        log::info!(
+            "[deploy] Switching main project '{}' to branch '{}'",
+            proj_name,
+            wt_branch
+        );
+        let switch_output = Command::new("git")
+            .args([
+                "-C",
+                main_proj_path.to_str().unwrap(),
+                "checkout",
+                wt_branch,
+            ])
+            .output();
+
+        match switch_output {
+            Ok(o) if o.status.success() => {
+                log::info!(
+                    "[deploy] Switched main project '{}' to '{}'",
+                    proj_name,
+                    wt_branch
+                );
+                switched_projects.push(proj_name.clone());
+            }
+            Ok(o) => {
+                let stderr = String::from_utf8_lossy(&o.stderr);
+                log::error!(
+                    "[deploy] Failed to switch main '{}' to '{}': {}",
+                    proj_name,
+                    wt_branch,
+                    stderr
+                );
+                failed_projects.push(DeployProjectError {
+                    project_name: proj_name.clone(),
+                    error: format!("Failed to switch branch: {}", stderr),
+                });
+            }
+            Err(e) => {
+                log::error!(
+                    "[deploy] Failed to run git checkout in main '{}': {}",
+                    proj_name,
+                    e
+                );
+                failed_projects.push(DeployProjectError {
+                    project_name: proj_name.clone(),
+                    error: format!("Failed to run git: {}", e),
+                });
+            }
+        }
+    }
+
+    // Only persist occupation state if at least one project deployed successfully
+    if !switched_projects.is_empty() {
+        save_occupation_state(&workspace_path, &occupation)?;
+    }
+
+    log::info!(
+        "[deploy] Deploy complete: {} switched, {} failed",
+        switched_projects.len(),
+        failed_projects.len()
+    );
+
+    broadcast_lock_state(&workspace_path);
+
+    Ok(DeployToMainResult {
+        success: failed_projects.is_empty(),
+        switched_projects,
+        failed_projects,
+    })
+}
+
+#[tauri::command]
+pub(crate) fn deploy_to_main(
+    window: tauri::Window,
+    worktree_name: String,
+) -> Result<DeployToMainResult, String> {
+    deploy_to_main_impl(window.label(), worktree_name)
+}
+
+pub fn exit_main_occupation_impl(window_label: &str, force: bool) -> Result<(), String> {
+    let (workspace_path, config) =
+        get_window_workspace_config(window_label).ok_or("No workspace selected")?;
+
+    let occupation = load_occupation_state(&workspace_path)
+        .ok_or("Main workspace is not currently occupied")?;
+
+    let root = PathBuf::from(&workspace_path);
+    let main_projects_path = root.join("projects");
+    let worktree_path = root
+        .join(&config.worktrees_dir)
+        .join(&occupation.worktree_name);
+    let wt_projects_path = worktree_path.join("projects");
+
+    // If not force, check for uncommitted changes in main workspace
+    if !force {
+        for (proj_name, _) in &occupation.original_branches {
+            let main_proj_path = main_projects_path.join(proj_name);
+            if !main_proj_path.exists() {
+                continue;
+            }
+
+            let info = crate::git_ops::get_worktree_info(&main_proj_path);
+            if info.uncommitted_count > 0 {
+                return Err(format!(
+                    "Project '{}' in main workspace has {} uncommitted changes. Use force to discard them.",
+                    proj_name, info.uncommitted_count
+                ));
+            }
+        }
+    }
+
+    // Switch main workspace projects back to original branches
+    for (proj_name, original_branch) in &occupation.original_branches {
+        let main_proj_path = main_projects_path.join(proj_name);
+        if !main_proj_path.exists() {
+            continue;
+        }
+
+        log::info!(
+            "[deploy] Switching main project '{}' back to '{}'",
+            proj_name,
+            original_branch
+        );
+
+        // If force, fully discard all changes (staged, tracked, and untracked)
+        if force {
+            Command::new("git")
+                .args(["-C", main_proj_path.to_str().unwrap(), "reset", "HEAD"])
+                .output()
+                .ok();
+            Command::new("git")
+                .args([
+                    "-C",
+                    main_proj_path.to_str().unwrap(),
+                    "checkout",
+                    "--",
+                    ".",
+                ])
+                .output()
+                .ok();
+            Command::new("git")
+                .args(["-C", main_proj_path.to_str().unwrap(), "clean", "-fd"])
+                .output()
+                .ok();
+        }
+
+        let output = Command::new("git")
+            .args([
+                "-C",
+                main_proj_path.to_str().unwrap(),
+                "checkout",
+                original_branch,
+            ])
+            .output()
+            .map_err(|e| format!("Failed to switch project '{}': {}", proj_name, e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!(
+                "Failed to switch project '{}' back to '{}': {}",
+                proj_name, original_branch, stderr
+            ));
+        }
+    }
+
+    // Re-attach worktree project branches
+    for (proj_name, _) in &occupation.original_branches {
+        let wt_proj_path = wt_projects_path.join(proj_name);
+        if !wt_proj_path.exists() {
+            continue;
+        }
+
+        // The branch name should be the worktree name (convention)
+        let branch = &occupation.worktree_name;
+        log::info!(
+            "[deploy] Re-attaching worktree project '{}' to branch '{}'",
+            proj_name,
+            branch
+        );
+
+        let output = Command::new("git")
+            .args(["-C", wt_proj_path.to_str().unwrap(), "checkout", branch])
+            .output();
+
+        match output {
+            Ok(o) if o.status.success() => {
+                log::info!("[deploy] Re-attached worktree project '{}'", proj_name);
+            }
+            Ok(o) => {
+                let stderr = String::from_utf8_lossy(&o.stderr);
+                log::warn!(
+                    "[deploy] Failed to re-attach worktree '{}': {}",
+                    proj_name,
+                    stderr
+                );
+            }
+            Err(e) => {
+                log::warn!(
+                    "[deploy] Failed to run git checkout in worktree '{}': {}",
+                    proj_name,
+                    e
+                );
+            }
+        }
+    }
+
+    // Clear occupation state
+    clear_occupation_state(&workspace_path)?;
+
+    log::info!(
+        "[deploy] Exited occupation from worktree '{}'",
+        occupation.worktree_name
+    );
+
+    broadcast_lock_state(&workspace_path);
+
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn exit_main_occupation(window: tauri::Window, force: bool) -> Result<(), String> {
+    exit_main_occupation_impl(window.label(), force)
+}
+
+pub fn get_main_occupation_impl(
+    window_label: &str,
+) -> Result<Option<MainWorkspaceOccupation>, String> {
+    let (workspace_path, _config) =
+        get_window_workspace_config(window_label).ok_or("No workspace selected")?;
+
+    Ok(load_occupation_state(&workspace_path))
+}
+
+#[tauri::command]
+pub(crate) fn get_main_occupation(
+    window: tauri::Window,
+) -> Result<Option<MainWorkspaceOccupation>, String> {
+    get_main_occupation_impl(window.label())
 }
