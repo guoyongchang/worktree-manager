@@ -17,6 +17,47 @@ use crate::types::{
 };
 use crate::utils::{normalize_path, run_git_command_with_timeout, scan_dir_for_linkable_folders};
 
+/// Cross-platform symlink creation.
+/// On Unix: uses std::os::unix::fs::symlink.
+/// On Windows: uses symlink_dir for directories, symlink_file for files.
+///             Falls back to junction for directories if symlink fails (no admin/dev mode).
+fn create_symlink(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(src, dst)
+    }
+    #[cfg(windows)]
+    {
+        if src.is_dir() {
+            // Try symlink_dir first (requires admin or developer mode)
+            match std::os::windows::fs::symlink_dir(src, dst) {
+                Ok(()) => Ok(()),
+                Err(_) => {
+                    // Fallback: use junction (works without admin rights)
+                    let status = std::process::Command::new("cmd")
+                        .args(["/c", "mklink", "/J"])
+                        .arg(dst.as_os_str())
+                        .arg(src.as_os_str())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .status()
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                    if status.success() {
+                        Ok(())
+                    } else {
+                        Err(std::io::Error::new(
+                            std::io::ErrorKind::PermissionDenied,
+                            "Failed to create junction",
+                        ))
+                    }
+                }
+            }
+        } else {
+            std::os::windows::fs::symlink_file(src, dst)
+        }
+    }
+}
+
 // ==================== Tauri 命令：Worktree 操作 ====================
 
 pub fn list_worktrees_impl(
@@ -219,9 +260,9 @@ pub fn create_worktree_impl(
         let src = root.join(name);
         let dst = worktree_path.join(name);
         if src.exists() && !dst.exists() {
-            #[cfg(unix)]
-            std::os::unix::fs::symlink(&src, &dst).ok();
-            log::debug!("[worktree] Linked workspace item: {}", name);
+            #[allow(unused_variables)]
+            let link_result = create_symlink(&src, &dst);
+            log::debug!("[worktree] Linked workspace item: {} (result: {:?})", name, link_result);
         }
     }
 
@@ -329,8 +370,7 @@ pub fn create_worktree_impl(
             let wt_folder = wt_proj_path.join(folder_name);
 
             if main_folder.exists() && !wt_folder.exists() {
-                #[cfg(unix)]
-                std::os::unix::fs::symlink(&main_folder, &wt_folder).ok();
+                create_symlink(&main_folder, &wt_folder).ok();
 
                 // Remove from git index if it's tracked
                 Command::new("git")
@@ -712,8 +752,7 @@ pub fn restore_worktree_impl(window_label: &str, name: String) -> Result<(), Str
                         let wt_folder = wt_proj_path.join(folder_name);
 
                         if main_folder.exists() && !wt_folder.exists() {
-                            #[cfg(unix)]
-                            std::os::unix::fs::symlink(&main_folder, &wt_folder).ok();
+                            create_symlink(&main_folder, &wt_folder).ok();
                         }
                     }
                 }
@@ -730,8 +769,7 @@ pub fn restore_worktree_impl(window_label: &str, name: String) -> Result<(), Str
         let src = root.join(item_name);
         let dst = worktree_path.join(item_name);
         if src.exists() && !dst.exists() {
-            #[cfg(unix)]
-            std::os::unix::fs::symlink(&src, &dst).ok();
+            create_symlink(&src, &dst).ok();
         }
     }
 
@@ -987,8 +1025,7 @@ pub fn add_project_to_worktree_impl(
         let wt_folder = wt_proj_path.join(folder_name);
 
         if main_folder.exists() && !wt_folder.exists() {
-            #[cfg(unix)]
-            std::os::unix::fs::symlink(&main_folder, &wt_folder).ok();
+            create_symlink(&main_folder, &wt_folder).ok();
 
             // Remove from git index if it's tracked
             Command::new("git")

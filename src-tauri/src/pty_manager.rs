@@ -179,14 +179,23 @@ impl PtyManager {
         // Windows-specific environment variables
         #[cfg(target_os = "windows")]
         {
-            if let Ok(userprofile) = std::env::var("USERPROFILE") {
-                cmd.env("USERPROFILE", userprofile);
-            }
-            if let Ok(homedrive) = std::env::var("HOMEDRIVE") {
-                cmd.env("HOMEDRIVE", homedrive);
-            }
-            if let Ok(homepath) = std::env::var("HOMEPATH") {
-                cmd.env("HOMEPATH", homepath);
+            for var in &[
+                "USERPROFILE",
+                "HOMEDRIVE",
+                "HOMEPATH",
+                "APPDATA",
+                "LOCALAPPDATA",
+                "TEMP",
+                "TMP",
+                "SystemRoot",
+                "COMPUTERNAME",
+                "PSModulePath",
+                "PATHEXT",
+                "OS",
+            ] {
+                if let Ok(val) = std::env::var(var) {
+                    cmd.env(var, val);
+                }
             }
         }
 

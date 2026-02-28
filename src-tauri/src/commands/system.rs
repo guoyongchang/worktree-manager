@@ -191,8 +191,7 @@ pub(crate) fn reveal_in_finder(path: String) -> Result<(), String> {
 
 #[tauri::command]
 pub(crate) fn open_log_dir() -> Result<(), String> {
-    let home = std::env::var("HOME").map_err(|_| "无法获取用户目录".to_string())?;
-    let log_dir = PathBuf::from(&home).join("Library/Logs/com.guo.worktree-manager");
+    let log_dir = get_platform_log_dir()?;
     log::info!("[system] Opening log directory: {:?}", log_dir);
 
     if !log_dir.exists() {
@@ -200,12 +199,11 @@ pub(crate) fn open_log_dir() -> Result<(), String> {
         return Err("日志目录不存在".to_string());
     }
 
+    let dir_str = log_dir.to_str().unwrap_or("");
+
     #[cfg(target_os = "macos")]
     {
-        match Command::new("open")
-            .arg(log_dir.to_str().unwrap_or(""))
-            .spawn()
-        {
+        match Command::new("open").arg(dir_str).spawn() {
             Ok(_) => log::info!("[system] Spawned Finder for log directory"),
             Err(e) => {
                 log::error!("[system] Failed to open log directory: {}", e);
@@ -214,12 +212,20 @@ pub(crate) fn open_log_dir() -> Result<(), String> {
         }
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
     {
-        match Command::new("xdg-open")
-            .arg(log_dir.to_str().unwrap_or(""))
-            .spawn()
-        {
+        match Command::new("explorer").arg(dir_str).spawn() {
+            Ok(_) => log::info!("[system] Spawned Explorer for log directory"),
+            Err(e) => {
+                log::error!("[system] Failed to open log directory: {}", e);
+                return Err(format!("无法打开日志目录: {}", e));
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        match Command::new("xdg-open").arg(dir_str).spawn() {
             Ok(_) => log::info!("[system] Spawned xdg-open for log directory"),
             Err(e) => {
                 log::error!("[system] Failed to open log directory: {}", e);
@@ -229,6 +235,32 @@ pub(crate) fn open_log_dir() -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Get the platform-appropriate log directory.
+fn get_platform_log_dir() -> Result<PathBuf, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var("HOME").map_err(|_| "无法获取用户目录".to_string())?;
+        Ok(PathBuf::from(home).join("Library/Logs/com.guo.worktree-manager"))
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // Tauri on Windows logs to %APPDATA%/{identifier}/logs
+        let appdata = std::env::var("APPDATA")
+            .or_else(|_| std::env::var("LOCALAPPDATA"))
+            .map_err(|_| "无法获取 APPDATA 目录".to_string())?;
+        Ok(PathBuf::from(appdata).join("com.guo.worktree-manager").join("logs"))
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // Tauri on Linux logs to $XDG_DATA_HOME/{identifier}/logs or ~/.local/share/...
+        let data_home = std::env::var("XDG_DATA_HOME").unwrap_or_else(|_| {
+            let home = std::env::var("HOME").unwrap_or_default();
+            format!("{}/.local/share", home)
+        });
+        Ok(PathBuf::from(data_home).join("com.guo.worktree-manager").join("logs"))
+    }
 }
 
 // ==================== HTTP Server 共享接口 ====================
