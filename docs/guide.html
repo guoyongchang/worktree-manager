@@ -86,6 +86,7 @@
         <div class="hidden md:flex items-center gap-6">
           <a href="index.html" class="text-slate-300 hover:text-blue-300 transition">首页</a>
           <a href="guide.html" class="text-blue-400 hover:text-blue-300 transition">使用指南</a>
+          <span class="text-slate-300">中文 | <a href="en/guide.html" class="text-slate-300 hover:text-blue-300 transition">English</a></span>
           <a href="https://github.com/guoyongchang/worktree-manager" target="_blank" class="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition">
             <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
             GitHub
@@ -101,6 +102,7 @@
         <a href="index.html" class="block py-2 text-slate-300 hover:text-blue-300">首页</a>
         <a href="guide.html" class="block py-2 text-blue-400">使用指南</a>
         <a href="https://github.com/guoyongchang/worktree-manager" target="_blank" class="block py-2 text-slate-300 hover:text-blue-300">GitHub</a>
+        <span class="block py-2 text-slate-300">中文 | <a href="en/guide.html" class="text-slate-300 hover:text-blue-300 transition">English</a></span>
       </div>
     </div>
   </nav>
@@ -570,6 +572,34 @@ npm run tauri build</code></pre>
               </div>
               <p class="text-slate-400 text-sm mt-4">例如：按住 Alt+V 说 <code>git status</code>，松开后再按住说 <code>回车</code>，等同于在终端中输入 <code>git status</code> 并按回车执行。</p>
             </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">AI 语音精炼</h3>
+              <p class="text-slate-300 mb-4">语音转写的结果往往包含口语化的填充词（"嗯"、"那个"、"就是说"等）和语法错误。AI 语音精炼功能集成了 <strong>Qwen 大语言模型</strong>，自动优化转写文本：</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li><strong>去除填充词</strong>：自动识别并移除"嗯"、"啊"、"那个"等无意义词汇</li>
+                <li><strong>语法修正</strong>：修正口语化表达为规范的命令格式</li>
+                <li><strong>语义保持</strong>：优化过程保持原始意图不变，不会改变命令含义</li>
+              </ul>
+              <div class="bg-slate-950 rounded-lg p-4 mt-4 font-mono text-sm">
+                <span class="text-slate-500"># 语音精炼示例</span><br>
+                <span class="text-red-400">原始转写:</span> <span class="text-slate-300">嗯 那个 git status 就是看一下</span><br>
+                <span class="text-green-400">精炼结果:</span> <span class="text-slate-300">git status</span>
+              </div>
+              <div class="bg-blue-900/20 border border-blue-700 rounded-lg p-4 mt-4">
+                <p class="text-blue-200 text-sm"><strong>&#x1F4A1; 配置：</strong>在设置页面的语音识别区域，配置 Qwen API Key（使用 Dashscope 平台）即可启用 AI 精炼功能。精炼功能可单独开关。</p>
+              </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">移动端语音输入</h3>
+              <p class="text-slate-300 mb-4">在浏览器远程模式下（手机/平板访问），终端面板提供专门的<strong>按住说话按钮</strong>：</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li><strong>长按说话</strong>：在终端底部长按麦克风按钮开始录音，松开即停止</li>
+                <li><strong>触屏优化</strong>：按钮尺寸和交互针对触摸屏优化，单手即可操作</li>
+                <li><strong>同样支持 AI 精炼</strong>：移动端的语音输入同样经过 AI 精炼处理</li>
+              </ul>
+            </div>
           </div>
         </section>
 
@@ -734,7 +764,7 @@ npm run tauri build</code></pre>
                   <li>移动办公 -- 在平板或手机浏览器上临时查看工作区状态</li>
                 </ul>
               </div>
-              <p class="text-slate-300 text-sm">分享功能支持两种模式：<strong>局域网分享</strong>（同一 Wi-Fi / 内网）和<strong>外网分享</strong>（通过 ngrok 穿透公网）。</p>
+              <p class="text-slate-300 text-sm">分享功能支持三种模式：<strong>局域网直连</strong>（同一 Wi-Fi / 内网）、<strong>WMS 内置隧道</strong>（无需安装额外工具）和<strong>ngrok 穿透</strong>（使用 ngrok 服务）。</p>
             </div>
 
             <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
@@ -799,6 +829,40 @@ npm run tauri build</code></pre>
                 <span class="text-green-400">外网地址: https://a1b2c3d4.ngrok-free.app</span><br>
                 <span class="text-slate-500"># 任何能上网的人都可以通过此地址访问</span>
               </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">WMS 内置隧道</h3>
+              <p class="text-slate-300 mb-4">除了 ngrok，Worktree Manager 还内置了 WMS 隧道服务，无需安装任何额外工具即可实现公网访问：</p>
+              <ol class="list-decimal list-inside space-y-3 text-slate-300">
+                <li>先按上述步骤开启<strong>局域网分享</strong></li>
+                <li>在分享面板中点击<strong>"WMS 隧道"</strong>按钮</li>
+                <li>系统会自动连接 <code>tunnel.kirov-opensource.com</code> 并分配唯一子域名</li>
+                <li>生成的公网地址（如 <code>https://your-name.tunnel.kirov-opensource.com</code>）即可分享给任何人</li>
+              </ol>
+              <div class="bg-green-900/20 border border-green-700/50 rounded-lg p-3 mt-4">
+                <p class="text-green-300 text-sm"><strong>优势：</strong>无需注册第三方账号，无需安装额外软件。支持断线自动重连，连接断开时会显示重试倒计时。</p>
+              </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">QR 码分享</h3>
+              <p class="text-slate-300 mb-4">开启分享后，分享面板会自动生成当前分享地址的二维码：</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li><strong>扫码访问</strong>：用手机/平板扫描二维码，直接在移动浏览器中打开工作区</li>
+                <li><strong>密码内嵌</strong>：二维码链接中可以内嵌访问密码（通过 URL fragment），扫码后自动完成认证，无需手动输入密码</li>
+                <li><strong>多种模式</strong>：局域网、WMS 隧道和 ngrok 三种模式均支持 QR 码</li>
+              </ul>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">客户端管理</h3>
+              <p class="text-slate-300 mb-4">在分享面板中可以实时查看和管理所有连接的客户端：</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li><strong>连接列表</strong>：显示所有已连接的浏览器客户端，包括 IP 地址、连接时间等信息</li>
+                <li><strong>踢出会话</strong>：可以单独踢出指定的客户端会话，被踢出的用户需要重新输入密码</li>
+                <li><strong>密码更新</strong>：修改密码后，所有已连接的客户端会被自动踢出</li>
+              </ul>
             </div>
 
             <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
@@ -1164,7 +1228,7 @@ git push</code></pre>
         <span>MIT License</span>
       </p>
       <p class="mt-4 text-slate-500">Made with &#x2764;&#xFE0F; using Tauri + React + Rust</p>
-      <p class="mt-2 text-xs text-slate-600">&copy; 2025 Worktree Manager Team</p>
+      <p class="mt-2 text-xs text-slate-600">&copy; 2025-2026 Worktree Manager Team</p>
     </div>
   </footer>
 
