@@ -546,3 +546,14 @@ export async function setVoiceRefineEnabled(enabled: boolean): Promise<void> {
   return callBackend<void>('set_voice_refine_enabled', { enabled });
 }
 
+// ---------------------------------------------------------------------------
+// Workspace config (by path — for cross-workspace editing)
+// ---------------------------------------------------------------------------
+
+export async function loadWorkspaceConfigByPath(path: string): Promise<import('../types').WorkspaceConfig> {
+  return callBackend<import('../types').WorkspaceConfig>('load_workspace_config_by_path', { path });
+}
+
+export async function saveWorkspaceConfigByPath(path: string, config: import('../types').WorkspaceConfig): Promise<void> {
+  return callBackend<void>('save_workspace_config_by_path', { path, config });
+}

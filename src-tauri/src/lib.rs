@@ -131,6 +131,8 @@ pub fn run() {
             // Workspace 配置
             get_workspace_config,
             save_workspace_config,
+            load_workspace_config_by_path,
+            save_workspace_config_by_path,
             get_config_path_info,
             // Worktree 操作
             list_worktrees,

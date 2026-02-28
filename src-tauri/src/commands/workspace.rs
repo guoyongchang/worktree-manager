@@ -203,6 +203,16 @@ pub(crate) fn save_workspace_config(
     save_workspace_config_impl(window.label(), config)
 }
 
+#[tauri::command]
+pub(crate) fn load_workspace_config_by_path(path: String) -> Result<WorkspaceConfig, String> {
+    Ok(crate::config::load_workspace_config(&path))
+}
+
+#[tauri::command]
+pub(crate) fn save_workspace_config_by_path(path: String, config: WorkspaceConfig) -> Result<(), String> {
+    save_workspace_config_internal(&path, &config)
+}
+
 pub fn get_config_path_info_impl(window_label: &str) -> String {
     if let Some(workspace_path) = get_window_workspace_path(window_label) {
         normalize_path(&get_workspace_config_path(&workspace_path).to_string_lossy())
