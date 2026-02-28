@@ -421,6 +421,7 @@ function App() {
               onKickClient={share.handleKickClient}
               hasLastConfig={share.hasLastConfig}
               onQuickShare={share.handleQuickShare}
+              hasNgrokToken={share.hasNgrokToken}
               occupation={mainOccupation.occupation}
             />
           )}

@@ -79,7 +79,8 @@ const ShareBar: FC<{
   onKickClient?: (sessionId: string) => void;
   hasLastConfig?: boolean;
   onQuickShare?: () => void;
-}> = ({ active, urls, ngrokUrl, wmsUrl, wmsConnected = true, wmsReconnecting = false, wmsReconnectAttempt = 0, wmsNextRetrySecs = 0, password, ngrokLoading, wmsLoading, connectedClients = [], onToggleNgrok, onToggleWms, onWmsManualReconnect, onStart, onStop, onUpdatePassword, onKickClient, hasLastConfig = false, onQuickShare }) => {
+  hasNgrokToken?: boolean;
+}> = ({ active, urls, ngrokUrl, wmsUrl, wmsConnected = true, wmsReconnecting = false, wmsReconnectAttempt = 0, wmsNextRetrySecs = 0, password, ngrokLoading, wmsLoading, connectedClients = [], onToggleNgrok, onToggleWms, onWmsManualReconnect, onStart, onStop, onUpdatePassword, onKickClient, hasLastConfig = false, onQuickShare, hasNgrokToken = false }) => {
   const { t } = useTranslation();
   const [showPassword, setShowPassword] = useState(false);
   const [editingPassword, setEditingPassword] = useState('');
@@ -265,63 +266,65 @@ const ShareBar: FC<{
     <div className="px-3 py-2.5 border-t border-slate-700/50 space-y-1.5">
       {/* WAN section: NGROK + Remote */}
       <div className="space-y-0.5">
-        {/* NGROK row */}
-        <div className="flex items-center gap-2 min-h-[24px]">
-          <span className="text-[11px] font-bold px-1.5 py-0.5 rounded shrink-0 bg-slate-600/30 text-slate-500 w-[52px] text-center">
-            {t('share.wan')}
-          </span>
-          <span className="text-[11px] font-medium text-slate-500 shrink-0">{t('share.ngrokLabel')}</span>
-          {ngrokUrl ? (
-            <>
-              <span className="flex-1 text-xs text-blue-400 truncate min-w-0 select-all" title={ngrokUrl}>
-                {ngrokUrl.replace(/^https?:\/\//, '')}
-              </span>
-              <div className="flex items-center gap-0.5 shrink-0">
-                <TooltipProvider delayDuration={300}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-5 w-5">
-                        <QrCodeIcon className="w-3 h-3" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top" className="bg-white p-3 rounded-lg shadow-xl">
-                      <QRCodeSVG value={`${ngrokUrl}#pwd=${encodeURIComponent(editingPassword)}`} size={160} />
-                      <p className="text-center text-xs text-gray-600 mt-2 font-mono">{t('share.password')} {editingPassword}</p>
-                      <p className="text-center text-[10px] text-gray-400 mt-1">{t('share.scanToOpen')}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-                <TooltipProvider delayDuration={300}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => navigator.clipboard.writeText(ngrokUrl)}
-                        className="h-5 w-5"
-                      >
-                        <CopyIcon className="w-3 h-3" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="top">{t('share.copyExternalLink')}</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </div>
-            </>
-          ) : (
-            <span className="flex-1 text-xs text-slate-500">{t('share.ngrokNotStarted')}</span>
-          )}
-          <button
-            type="button"
-            onClick={onToggleNgrok}
-            disabled={ngrokLoading}
-            className={`relative inline-flex h-4 w-7 items-center rounded-full shrink-0 transition-colors ${ngrokLoading ? 'opacity-50 cursor-wait' : 'cursor-pointer'
-              } ${ngrokUrl ? 'bg-blue-500' : 'bg-slate-600'}`}
-          >
-            <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${ngrokUrl ? 'translate-x-3.5' : 'translate-x-0.5'
-              }`} />
-          </button>
-        </div>
+        {/* NGROK row — only shown if ngrok token is configured */}
+        {hasNgrokToken && (
+          <div className="flex items-center gap-2 min-h-[24px]">
+            <span className="text-[11px] font-bold px-1.5 py-0.5 rounded shrink-0 bg-slate-600/30 text-slate-500 w-[52px] text-center">
+              {t('share.wan')}
+            </span>
+            <span className="text-[11px] font-medium text-slate-500 shrink-0">{t('share.ngrokLabel')}</span>
+            {ngrokUrl ? (
+              <>
+                <span className="flex-1 text-xs text-blue-400 truncate min-w-0 select-all" title={ngrokUrl}>
+                  {ngrokUrl.replace(/^https?:\/\//, '')}
+                </span>
+                <div className="flex items-center gap-0.5 shrink-0">
+                  <TooltipProvider delayDuration={300}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-5 w-5">
+                          <QrCodeIcon className="w-3 h-3" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="bg-white p-3 rounded-lg shadow-xl">
+                        <QRCodeSVG value={`${ngrokUrl}#pwd=${encodeURIComponent(editingPassword)}`} size={160} />
+                        <p className="text-center text-xs text-gray-600 mt-2 font-mono">{t('share.password')} {editingPassword}</p>
+                        <p className="text-center text-[10px] text-gray-400 mt-1">{t('share.scanToOpen')}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                  <TooltipProvider delayDuration={300}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => navigator.clipboard.writeText(ngrokUrl)}
+                          className="h-5 w-5"
+                        >
+                          <CopyIcon className="w-3 h-3" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top">{t('share.copyExternalLink')}</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
+              </>
+            ) : (
+              <span className="flex-1 text-xs text-slate-500">{t('share.ngrokNotStarted')}</span>
+            )}
+            <button
+              type="button"
+              onClick={onToggleNgrok}
+              disabled={ngrokLoading}
+              className={`relative inline-flex h-4 w-7 items-center rounded-full shrink-0 transition-colors ${ngrokLoading ? 'opacity-50 cursor-wait' : 'cursor-pointer'
+                } ${ngrokUrl ? 'bg-blue-500' : 'bg-slate-600'}`}
+            >
+              <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${ngrokUrl ? 'translate-x-3.5' : 'translate-x-0.5'
+                }`} />
+            </button>
+          </div>
+        )}
         {/* Remote row */}
         <div className="flex items-center gap-2 min-h-[24px]">
           <span className="shrink-0 w-[52px]" />
@@ -717,6 +720,7 @@ interface WorktreeSidebarProps {
   hasLastConfig?: boolean;
   onQuickShare?: () => void;
   occupation?: MainWorkspaceOccupation | null;
+  hasNgrokToken?: boolean;
 }
 
 export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
@@ -765,6 +769,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
   hasLastConfig = false,
   onQuickShare,
   occupation,
+  hasNgrokToken = false,
 }) => {
   const { t } = useTranslation();
   const _isTauri = isTauri();
@@ -1259,6 +1264,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
             onKickClient={onKickClient}
             hasLastConfig={hasLastConfig}
             onQuickShare={onQuickShare}
+            hasNgrokToken={hasNgrokToken}
           />
         )}
 

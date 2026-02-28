@@ -258,6 +258,10 @@ export async function setWmsConfig(serverUrl: string, token: string, subdomain: 
   return callBackend<void>('set_wms_config', { serverUrl, token, subdomain });
 }
 
+export async function autoRegisterTunnel(): Promise<WmsConfig> {
+  return callBackend<WmsConfig>('auto_register_tunnel');
+}
+
 export async function startWmsTunnel(): Promise<string> {
   return callBackend<string>('start_wms_tunnel');
 }

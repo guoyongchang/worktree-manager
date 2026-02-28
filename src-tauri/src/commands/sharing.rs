@@ -352,6 +352,84 @@ pub(crate) async fn set_wms_config(
     Ok(())
 }
 
+/// Auto-register this device with the WMS server.
+/// Generates a persistent device_id (UUID), calls POST /api/device/register,
+/// and saves the returned token + subdomain to GlobalConfig.
+#[tauri::command]
+pub(crate) async fn auto_register_tunnel() -> Result<WmsConfig, String> {
+    auto_register_tunnel_internal().await
+}
+
+pub async fn auto_register_tunnel_internal() -> Result<WmsConfig, String> {
+    let mut config = load_global_config();
+
+    // Generate device_id if not yet assigned
+    let device_id = match config.device_id.clone() {
+        Some(id) => id,
+        None => {
+            let id = uuid::Uuid::new_v4().to_string();
+            config.device_id = Some(id.clone());
+            save_global_config_internal(&config)?;
+            log::info!("[wms-tunnel] Generated new device_id: {}", id);
+            id
+        }
+    };
+
+    let server_url = config.wms_server_url.clone()
+        .unwrap_or_else(|| "https://tunnel.kirov-opensource.com".to_string());
+
+    let register_url = format!("{}/api/device/register", server_url.trim_end_matches('/'));
+    log::info!("[wms-tunnel] Auto-registering device at {}", register_url);
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("HTTP 客户端创建失败: {}", e))?;
+
+    #[derive(serde::Deserialize)]
+    struct DeviceRegisterResponse {
+        token: String,
+        subdomain: String,
+    }
+
+    let resp = client
+        .post(&register_url)
+        .json(&serde_json::json!({ "device_id": device_id }))
+        .send()
+        .await
+        .map_err(|e| format!("设备注册请求失败: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("设备注册失败 ({}): {}", status, body));
+    }
+
+    let result: DeviceRegisterResponse = resp
+        .json()
+        .await
+        .map_err(|e| format!("解析注册响应失败: {}", e))?;
+
+    log::info!(
+        "[wms-tunnel] Device registered: subdomain={}, token_len={}",
+        result.subdomain,
+        result.token.len()
+    );
+
+    // Save to config
+    let mut config = load_global_config();
+    config.wms_server_url = Some(server_url.clone());
+    config.wms_token = Some(result.token.clone());
+    config.wms_subdomain = Some(result.subdomain.clone());
+    save_global_config_internal(&config)?;
+
+    Ok(WmsConfig {
+        server_url: Some(server_url),
+        token: Some(result.token),
+        subdomain: Some(result.subdomain),
+    })
+}
+
 #[tauri::command]
 pub(crate) async fn start_wms_tunnel(window: tauri::Window) -> Result<String, String> {
     start_wms_tunnel_internal(Some(window)).await
@@ -359,6 +437,7 @@ pub(crate) async fn start_wms_tunnel(window: tauri::Window) -> Result<String, St
 
 /// Internal function for starting WMS tunnel, callable from both Tauri command and HTTP handler.
 /// If LAN sharing is not active, automatically starts it using saved port/password.
+/// If token/subdomain not configured, auto-registers first.
 pub async fn start_wms_tunnel_internal(window: Option<tauri::Window>) -> Result<String, String> {
     log::info!("[wms-tunnel] Starting WMS tunnel");
 
@@ -405,15 +484,32 @@ pub async fn start_wms_tunnel_internal(window: Option<tauri::Window>) -> Result<
         );
     };
 
+    // Auto-register if token/subdomain not configured
     let config = load_global_config();
-    let server_url = "https://tunnel.kirov-opensource.com".to_string();
-    let subdomain = config
-        .wms_subdomain
-        .ok_or("未配置 WMS Subdomain，请先在设置中配置".to_string())?;
-    let token = config.wms_token.filter(|t| !t.is_empty());
+    let (server_url, subdomain, token) = {
+        let has_token = config.wms_token.as_ref().is_some_and(|t| !t.is_empty());
+        let has_subdomain = config.wms_subdomain.as_ref().is_some_and(|s| !s.is_empty());
+
+        if !has_token || !has_subdomain {
+            log::info!("[wms-tunnel] Token/subdomain missing, auto-registering...");
+            let registered = auto_register_tunnel_internal().await?;
+            (
+                registered.server_url.unwrap_or_else(|| "https://tunnel.kirov-opensource.com".to_string()),
+                registered.subdomain.ok_or("注册后未获得 subdomain".to_string())?,
+                registered.token.filter(|t| !t.is_empty()),
+            )
+        } else {
+            (
+                "https://tunnel.kirov-opensource.com".to_string(),
+                config.wms_subdomain.unwrap(),
+                config.wms_token.filter(|t| !t.is_empty()),
+            )
+        }
+    };
+
     if token.is_none() {
-        log::warn!("[wms-tunnel] Rejected: WMS token not configured");
-        return Err("未配置 WMS Token，请先在设置中配置".to_string());
+        log::warn!("[wms-tunnel] Rejected: WMS token not available after registration");
+        return Err("未能获取 WMS Token".to_string());
     }
 
     log::info!(

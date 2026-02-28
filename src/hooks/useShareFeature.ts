@@ -10,7 +10,6 @@ import {
   setNgrokToken,
   startNgrokTunnel,
   stopNgrokTunnel,
-  getWmsConfig,
   setWmsConfig,
   startWmsTunnel,
   stopWmsTunnel,
@@ -55,6 +54,7 @@ export interface UseShareFeatureReturn {
   handleKickClient: (sessionId: string) => Promise<void>;
   handleQuickShare: () => Promise<void>;
   generatePassword: () => string;
+  hasNgrokToken: boolean;
 }
 
 export function useShareFeature(
@@ -78,6 +78,7 @@ export function useShareFeature(
   const [wmsReconnectAttempt, setWmsReconnectAttempt] = useState(0);
   const [wmsNextRetrySecs, setWmsNextRetrySecs] = useState(0);
   const [connectedClients, setConnectedClients] = useState<ConnectedClient[]>([]);
+  const [hasNgrokToken, setHasNgrokToken] = useState(false);
 
   const generatePassword = useCallback(() => {
     const chars = 'abcdefghijkmnpqrstuvwxyz23456789';
@@ -196,17 +197,7 @@ export function useShareFeature(
         setWmsReconnectAttempt(0);
         setWmsNextRetrySecs(0);
       } else {
-        const cfg = await getWmsConfig();
-        if (!cfg.token || !cfg.subdomain) {
-          setWmsLoading(false);
-          setWmsConfigInput({
-            token: cfg.token || '',
-            subdomain: cfg.subdomain || '',
-          });
-          setShowWmsConfigDialog(true);
-          return;
-        }
-        // Backend auto-starts LAN if not active
+        // Backend auto-registers if token/subdomain not configured
         const wmsUrl = await startWmsTunnel();
         setShareWmsUrl(wmsUrl);
         // Sync LAN state (backend may have auto-started it)
@@ -230,7 +221,6 @@ export function useShareFeature(
       await setWmsConfig('https://tunnel.kirov-opensource.com', wmsConfigInput.token.trim(), wmsConfigInput.subdomain.trim());
       setShowWmsConfigDialog(false);
       setWmsLoading(true);
-      // Backend auto-starts LAN if not active
       const wmsUrl = await startWmsTunnel();
       setShareWmsUrl(wmsUrl);
       // Sync LAN state
@@ -258,40 +248,25 @@ export function useShareFeature(
   // Track if we have a previous share config for quick-share
   const [hasLastConfig, setHasLastConfig] = useState(false);
 
-  // Quick share: restart sharing with last-used config
+  // Quick share: restart sharing with WMS tunnel (auto-registers if needed)
   const handleQuickShare = useCallback(async () => {
     try {
-      // Try to start WMS first (which auto-starts LAN)
-      const cfg = await getWmsConfig();
-      if (cfg.token && cfg.subdomain) {
-        setWmsLoading(true);
-        const wmsUrl = await startWmsTunnel();
-        setShareWmsUrl(wmsUrl);
-        // Sync LAN state
-        const state = await getShareState();
-        if (state.active) {
-          setShareActive(true);
-          setShareUrls(state.urls);
-        }
-        setWmsLoading(false);
-      } else {
-        // No WMS config, just start LAN with last port
-        const { getLastSharePort } = await import('../lib/backend');
-        const lastPort = await getLastSharePort();
-        if (lastPort) {
-          const pwd = sharePassword || generatePassword();
-          await startSharing(lastPort, pwd);
-          const state = await getShareState();
-          setShareActive(true);
-          setShareUrls(state.urls);
-          setSharePassword(pwd);
-        }
+      // Try to start WMS tunnel (which auto-registers and auto-starts LAN)
+      setWmsLoading(true);
+      const wmsUrl = await startWmsTunnel();
+      setShareWmsUrl(wmsUrl);
+      // Sync LAN state
+      const state = await getShareState();
+      if (state.active) {
+        setShareActive(true);
+        setShareUrls(state.urls);
       }
+      setWmsLoading(false);
     } catch (e) {
       setError(String(e));
       setWmsLoading(false);
     }
-  }, [setError, sharePassword, generatePassword]);
+  }, [setError]);
 
   // Restore share state and load last password on mount (Tauri only)
   useEffect(() => {
@@ -307,13 +282,17 @@ export function useShareFeature(
             setShareWmsUrl(state.wms_url);
           }
         }
-      }).catch(() => {});
+      }).catch(() => { });
       getLastSharePassword().then(pwd => {
         if (pwd) {
           setSharePassword(pwd);
           setHasLastConfig(true);
         }
-      }).catch(() => {});
+      }).catch(() => { });
+      // Check if ngrok token is configured
+      getNgrokToken().then(token => {
+        setHasNgrokToken(!!token);
+      }).catch(() => { });
     }
   }, []);
 
@@ -328,7 +307,7 @@ export function useShareFeature(
     const fetchStatus = () => {
       getConnectedClients()
         .then(setConnectedClients)
-        .catch(() => {});
+        .catch(() => { });
       // Also poll WMS connection state when WMS tunnel is active
       if (shareWmsUrl) {
         getShareState()
@@ -338,7 +317,7 @@ export function useShareFeature(
             setWmsReconnectAttempt(state.wms_reconnect_attempt);
             setWmsNextRetrySecs(state.wms_next_retry_secs);
           })
-          .catch(() => {});
+          .catch(() => { });
       }
     };
     fetchStatus();
@@ -381,5 +360,6 @@ export function useShareFeature(
     handleKickClient,
     handleQuickShare,
     generatePassword,
+    hasNgrokToken,
   };
 }

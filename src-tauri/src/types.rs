@@ -189,6 +189,8 @@ pub struct GlobalConfig {
     pub dashscope_base_url: Option<String>,
     #[serde(default = "default_true")]
     pub voice_refine_enabled: bool,
+    #[serde(default)]
+    pub device_id: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -214,6 +216,7 @@ impl Default for GlobalConfig {
             dashscope_api_key: None,
             dashscope_base_url: None,
             voice_refine_enabled: true,
+            device_id: None,
         }
     }
 }

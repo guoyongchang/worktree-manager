@@ -18,8 +18,8 @@ pub use utils::normalize_path;
 // Re-exports of _impl functions used by http_server
 pub use commands::git::{clone_project_impl, switch_branch_internal};
 pub use commands::sharing::{
-    kick_client_internal, start_ngrok_tunnel_internal, start_wms_tunnel_internal,
-    stop_wms_tunnel_internal, wms_manual_reconnect_internal, WmsConfig,
+    auto_register_tunnel_internal, kick_client_internal, start_ngrok_tunnel_internal,
+    start_wms_tunnel_internal, stop_wms_tunnel_internal, wms_manual_reconnect_internal, WmsConfig,
 };
 pub use commands::system::{
     open_in_editor_internal, open_in_terminal_internal, open_log_dir_internal,
@@ -198,6 +198,7 @@ pub fn run() {
             // WMS 隧道
             get_wms_config,
             set_wms_config,
+            auto_register_tunnel,
             start_wms_tunnel,
             stop_wms_tunnel,
             wms_manual_reconnect,
