@@ -198,6 +198,7 @@ export interface WmsConfig {
   server_url: string | null;
   token: string | null;
   subdomain: string | null;
+  jwt: string | null;
 }
 
 export interface ShareInfo {

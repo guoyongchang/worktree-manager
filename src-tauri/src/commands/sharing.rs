@@ -319,6 +319,7 @@ pub struct WmsConfig {
     pub server_url: Option<String>,
     pub token: Option<String>,
     pub subdomain: Option<String>,
+    pub jwt: Option<String>,
 }
 
 #[tauri::command]
@@ -328,6 +329,7 @@ pub(crate) async fn get_wms_config() -> Result<WmsConfig, String> {
         server_url: config.wms_server_url,
         token: config.wms_token,
         subdomain: config.wms_subdomain,
+        jwt: config.wms_jwt,
     })
 }
 
@@ -449,6 +451,7 @@ pub async fn auto_register_tunnel_internal() -> Result<WmsConfig, String> {
         server_url: Some(server_url),
         token: Some(result.token),
         subdomain: Some(result.subdomain),
+        jwt: config.wms_jwt,
     })
 }
 

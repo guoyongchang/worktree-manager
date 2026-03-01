@@ -203,7 +203,7 @@ export function useShareFeature(
       } else {
         // Check if logged in first
         const config = await getWmsConfig();
-        if (!config.token) {
+        if (!config.jwt) {
           // Need to login first
           await wmsBrowserLogin();
           setWmsLoggedIn(true);
@@ -264,7 +264,7 @@ export function useShareFeature(
       setWmsLoading(true);
       // Check if logged in first
       const config = await getWmsConfig();
-      if (!config.token) {
+      if (!config.jwt) {
         // Need to login first
         await wmsBrowserLogin();
         setWmsLoggedIn(true);
@@ -311,7 +311,7 @@ export function useShareFeature(
       }).catch(() => { });
       // Check if WMS is logged in
       getWmsConfig().then(config => {
-        setWmsLoggedIn(!!config.token);
+        setWmsLoggedIn(!!config.jwt);
       }).catch(() => { });
     }
   }, []);

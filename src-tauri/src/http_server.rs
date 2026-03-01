@@ -867,6 +867,7 @@ async fn h_get_wms_config() -> Response {
         server_url: config.wms_server_url,
         token: config.wms_token,
         subdomain: config.wms_subdomain,
+        jwt: config.wms_jwt,
     };
     Json(json!(wms)).into_response()
 }
