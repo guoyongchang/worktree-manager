@@ -20,3 +20,6 @@ export {
 } from './UpdaterDialogs';
 export { ToastProvider, useToast } from './Toast';
 export { GlobalDialogs } from './GlobalDialogs';
+export { MobileWorktreeList } from './MobileWorktreeList';
+export { MobileWorktreeDetail } from './MobileWorktreeDetail';
+export { MobileTabBar } from './MobileTabBar';

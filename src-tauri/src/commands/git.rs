@@ -229,6 +229,18 @@ pub(crate) fn get_remote_branches(path: String) -> Result<Vec<String>, String> {
     git_ops::get_remote_branches(Path::new(&normalized))
 }
 
+#[tauri::command]
+pub(crate) fn get_git_diff(path: String) -> Result<String, String> {
+    let normalized = normalize_path(&path);
+    git_ops::get_git_diff(Path::new(&normalized))
+}
+
+#[tauri::command]
+pub(crate) fn commit_all(path: String, message: String) -> Result<String, String> {
+    let normalized = normalize_path(&path);
+    git_ops::commit_all(Path::new(&normalized), &message)
+}
+
 // ==================== HTTP Server 共享接口 ====================
 
 pub fn switch_branch_internal(request: &SwitchBranchRequest) -> Result<(), String> {

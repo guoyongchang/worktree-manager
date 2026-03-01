@@ -117,8 +117,11 @@ pub struct WorktreeInfo {
     pub current_branch: String,
     pub uncommitted_count: usize,
     pub is_merged_to_test: bool,
+    pub is_merged_to_base: bool,
     pub ahead_of_base: usize,
     pub behind_base: usize,
+    pub ahead_of_test: usize,
+    pub unpushed_commits: usize,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -139,8 +142,11 @@ impl Default for WorktreeInfo {
             current_branch: "unknown".to_string(),
             uncommitted_count: 0,
             is_merged_to_test: false,
+            is_merged_to_base: false,
             ahead_of_base: 0,
             behind_base: 0,
+            ahead_of_test: 0,
+            unpushed_commits: 0,
         }
     }
 }
@@ -183,6 +189,12 @@ pub fn get_worktree_info(path: &Path) -> WorktreeInfo {
                     info.is_merged_to_test = is_ancestor;
                 }
             }
+            // Get ahead count relative to test branch
+            if let (Some(head_oid), Some(test_oid)) = (head.target(), test_ref.target()) {
+                if let Ok((ahead, _)) = repo.graph_ahead_behind(head_oid, test_oid) {
+                    info.ahead_of_test = ahead;
+                }
+            }
         }
     }
 
@@ -196,6 +208,33 @@ pub fn get_worktree_info(path: &Path) -> WorktreeInfo {
                 if let Ok((ahead, behind)) = repo.graph_ahead_behind(head_oid, base_oid) {
                     info.ahead_of_base = ahead;
                     info.behind_base = behind;
+                }
+                // Check if merged to base (base contains HEAD)
+                if let Ok(is_ancestor) = repo.graph_descendant_of(base_oid, head_oid) {
+                    info.is_merged_to_base = is_ancestor;
+                }
+            }
+        }
+    }
+
+    // Get unpushed commits (ahead of origin/<current_branch>)
+    let remote_branch = format!("refs/remotes/origin/{}", info.current_branch);
+    if let Ok(remote_ref) = repo.find_reference(&remote_branch) {
+        if let Ok(head) = repo.head() {
+            if let (Some(head_oid), Some(remote_oid)) = (head.target(), remote_ref.target()) {
+                if let Ok((ahead, _)) = repo.graph_ahead_behind(head_oid, remote_oid) {
+                    info.unpushed_commits = ahead;
+                }
+            }
+        }
+    } else {
+        // Remote branch doesn't exist — all local commits are unpushed
+        if let Ok(base_ref) = repo.find_reference(&format!("refs/remotes/origin/{}", base_branch)) {
+            if let Ok(head) = repo.head() {
+                if let (Some(head_oid), Some(base_oid)) = (head.target(), base_ref.target()) {
+                    if let Ok((ahead, _)) = repo.graph_ahead_behind(head_oid, base_oid) {
+                        info.unpushed_commits = ahead;
+                    }
                 }
             }
         }
@@ -1106,4 +1145,110 @@ pub fn get_remote_branches(path: &Path) -> Result<Vec<String>, String> {
 
     log::info!("[git] Found {} remote branches", branches.len());
     Ok(branches)
+}
+
+/// Get combined git diff for AI commit message generation
+pub fn get_git_diff(path: &Path) -> Result<String, String> {
+    log::info!("[git] Getting diff for: {}", path.display());
+
+    // Get staged diff
+    let staged = Command::new("git")
+        .arg("-C").arg(path)
+        .args(["diff", "--cached", "--stat"])
+        .output()
+        .map_err(|e| format!("Failed to get staged diff: {}", e))?;
+
+    // Get unstaged diff (tracked files)
+    let unstaged = Command::new("git")
+        .arg("-C").arg(path)
+        .args(["diff", "--stat"])
+        .output()
+        .map_err(|e| format!("Failed to get unstaged diff: {}", e))?;
+
+    // Get untracked files
+    let untracked = Command::new("git")
+        .arg("-C").arg(path)
+        .args(["ls-files", "--others", "--exclude-standard"])
+        .output()
+        .map_err(|e| format!("Failed to get untracked files: {}", e))?;
+
+    // Also get a compact diff of actual content changes (limited size for AI)
+    let content_diff = Command::new("git")
+        .arg("-C").arg(path)
+        .args(["diff", "HEAD", "--no-color", "-U2"])
+        .output()
+        .map_err(|e| format!("Failed to get content diff: {}", e))?;
+
+    let mut result = String::new();
+
+    let staged_str = String::from_utf8_lossy(&staged.stdout);
+    if !staged_str.trim().is_empty() {
+        result.push_str("Staged changes:\n");
+        result.push_str(&staged_str);
+        result.push('\n');
+    }
+
+    let unstaged_str = String::from_utf8_lossy(&unstaged.stdout);
+    if !unstaged_str.trim().is_empty() {
+        result.push_str("Unstaged changes:\n");
+        result.push_str(&unstaged_str);
+        result.push('\n');
+    }
+
+    let untracked_str = String::from_utf8_lossy(&untracked.stdout);
+    if !untracked_str.trim().is_empty() {
+        result.push_str("New files:\n");
+        result.push_str(&untracked_str);
+        result.push('\n');
+    }
+
+    let diff_str = String::from_utf8_lossy(&content_diff.stdout);
+    if !diff_str.trim().is_empty() {
+        // Truncate to ~4000 chars to keep token usage reasonable
+        let truncated: String = diff_str.chars().take(4000).collect();
+        result.push_str("Diff:\n");
+        result.push_str(&truncated);
+        if diff_str.len() > 4000 {
+            result.push_str("\n... (truncated)");
+        }
+    }
+
+    if result.trim().is_empty() {
+        return Err("No changes to commit".to_string());
+    }
+
+    Ok(result)
+}
+
+/// Stage all changes and commit with the given message
+pub fn commit_all(path: &Path, message: &str) -> Result<String, String> {
+    log::info!("[git] Committing all changes at: {}", path.display());
+
+    // git add -A
+    let add_output = Command::new("git")
+        .arg("-C").arg(path)
+        .args(["add", "-A"])
+        .output()
+        .map_err(|e| format!("Failed to stage changes: {}", e))?;
+
+    if !add_output.status.success() {
+        let stderr = String::from_utf8_lossy(&add_output.stderr);
+        return Err(format!("git add failed: {}", stderr));
+    }
+
+    // git commit -m
+    let commit_output = Command::new("git")
+        .arg("-C").arg(path)
+        .args(["commit", "-m", message])
+        .output()
+        .map_err(|e| format!("Failed to commit: {}", e))?;
+
+    if !commit_output.status.success() {
+        let stderr = String::from_utf8_lossy(&commit_output.stderr);
+        return Err(format!("git commit failed: {}", stderr));
+    }
+
+    let stdout = String::from_utf8_lossy(&commit_output.stdout).trim().to_string();
+    log::info!("[git] Commit successful: {}", stdout);
+    Ok(format!("Committed: {}", message))
 }

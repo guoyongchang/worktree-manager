@@ -164,8 +164,11 @@ fn scan_worktrees_dir(
                     has_uncommitted: info.uncommitted_count > 0,
                     uncommitted_count: info.uncommitted_count,
                     is_merged_to_test: info.is_merged_to_test,
+                    is_merged_to_base: info.is_merged_to_base,
                     ahead_of_base: info.ahead_of_base,
                     behind_base: info.behind_base,
+                    ahead_of_test: info.ahead_of_test,
+                    unpushed_commits: info.unpushed_commits,
                 });
             }
         }
@@ -206,8 +209,11 @@ pub fn get_main_workspace_status_impl(window_label: &str) -> Result<MainWorkspac
             has_uncommitted: info.uncommitted_count > 0,
             uncommitted_count: info.uncommitted_count,
             is_merged_to_test: info.is_merged_to_test,
+            is_merged_to_base: info.is_merged_to_base,
             ahead_of_base: info.ahead_of_base,
             behind_base: info.behind_base,
+            ahead_of_test: info.ahead_of_test,
+            unpushed_commits: info.unpushed_commits,
             base_branch: proj_config.base_branch.clone(),
             test_branch: proj_config.test_branch.clone(),
             linked_folders: proj_config.linked_folders.clone(),

@@ -355,6 +355,7 @@ pub(crate) async fn set_wms_config(
 /// Auto-register this device with the WMS server.
 /// Generates a persistent device_id (UUID), calls POST /api/device/register,
 /// and saves the returned token + subdomain to GlobalConfig.
+/// If wms_jwt is set in config, sends it as Bearer header (authenticated mode).
 #[tauri::command]
 pub(crate) async fn auto_register_tunnel() -> Result<WmsConfig, String> {
     auto_register_tunnel_internal().await
@@ -375,11 +376,13 @@ pub async fn auto_register_tunnel_internal() -> Result<WmsConfig, String> {
         }
     };
 
+    let jwt = config.wms_jwt.clone();
     let server_url = config.wms_server_url.clone()
         .unwrap_or_else(|| "https://tunnel.kirov-opensource.com".to_string());
 
     let register_url = format!("{}/api/device/register", server_url.trim_end_matches('/'));
-    log::info!("[wms-tunnel] Auto-registering device at {}", register_url);
+    let mode = if jwt.is_some() { "authenticated" } else { "anonymous" };
+    log::info!("[wms-tunnel] Auto-registering device at {} (mode={})", register_url, mode);
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
@@ -392,9 +395,16 @@ pub async fn auto_register_tunnel_internal() -> Result<WmsConfig, String> {
         subdomain: String,
     }
 
-    let resp = client
+    let mut request = client
         .post(&register_url)
-        .json(&serde_json::json!({ "device_id": device_id }))
+        .json(&serde_json::json!({ "device_id": device_id }));
+
+    // If user is logged in, send JWT for authenticated device registration
+    if let Some(ref token) = jwt {
+        request = request.header("Authorization", format!("Bearer {}", token));
+    }
+
+    let resp = request
         .send()
         .await
         .map_err(|e| format!("设备注册请求失败: {}", e))?;
@@ -411,7 +421,8 @@ pub async fn auto_register_tunnel_internal() -> Result<WmsConfig, String> {
         .map_err(|e| format!("解析注册响应失败: {}", e))?;
 
     log::info!(
-        "[wms-tunnel] Device registered: subdomain={}, token_len={}",
+        "[wms-tunnel] Device registered ({}): subdomain={}, token_len={}",
+        mode,
         result.subdomain,
         result.token.len()
     );
@@ -428,6 +439,104 @@ pub async fn auto_register_tunnel_internal() -> Result<WmsConfig, String> {
         token: Some(result.token),
         subdomain: Some(result.subdomain),
     })
+}
+
+/// Destroy current device registration: stop tunnel, clear wms config, regenerate device_id.
+async fn destroy_current_device_registration() -> Result<(), String> {
+    log::info!("[wms-tunnel] Destroying current device registration");
+
+    // Check if WMS tunnel is running (drop MutexGuard before async)
+    let tunnel_running = SHARE_STATE
+        .lock()
+        .map(|s| s.wms_url.is_some())
+        .unwrap_or(false);
+
+    if tunnel_running {
+        stop_wms_tunnel_internal().await?;
+    }
+
+    // Clear wms config and regenerate device_id
+    let mut config = load_global_config();
+    config.wms_token = None;
+    config.wms_subdomain = None;
+    config.device_id = Some(uuid::Uuid::new_v4().to_string());
+    save_global_config_internal(&config)?;
+
+    log::info!("[wms-tunnel] Device registration destroyed, new device_id: {:?}", config.device_id);
+    Ok(())
+}
+
+/// WMS Login: authenticate with server, destroy current device, re-register under logged-in user.
+#[tauri::command]
+pub(crate) async fn wms_login(username: String, password: String) -> Result<WmsConfig, String> {
+    let config = load_global_config();
+    let server_url = config.wms_server_url.clone()
+        .unwrap_or_else(|| "https://tunnel.kirov-opensource.com".to_string());
+
+    let login_url = format!("{}/api/login", server_url.trim_end_matches('/'));
+    log::info!("[wms-tunnel] Logging in to WMS server: {}", login_url);
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("HTTP 客户端创建失败: {}", e))?;
+
+    #[derive(serde::Deserialize)]
+    struct LoginResponse {
+        token: String,
+    }
+
+    let resp = client
+        .post(&login_url)
+        .json(&serde_json::json!({ "username": username, "password": password }))
+        .send()
+        .await
+        .map_err(|e| format!("登录请求失败: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("登录失败 ({}): {}", status, body));
+    }
+
+    let login_result: LoginResponse = resp
+        .json()
+        .await
+        .map_err(|e| format!("解析登录响应失败: {}", e))?;
+
+    log::info!("[wms-tunnel] Login successful, jwt_len={}", login_result.token.len());
+
+    // 1. Destroy current device registration (stop tunnel, clear old wms config, new device_id)
+    destroy_current_device_registration().await?;
+
+    // 2. Save JWT to config
+    {
+        let mut config = load_global_config();
+        config.wms_jwt = Some(login_result.token);
+        save_global_config_internal(&config)?;
+    }
+
+    // 3. Re-register device under the logged-in user
+    auto_register_tunnel_internal().await
+}
+
+/// WMS Logout: clear JWT, destroy current device, re-register as anonymous.
+#[tauri::command]
+pub(crate) async fn wms_logout() -> Result<WmsConfig, String> {
+    log::info!("[wms-tunnel] Logging out of WMS");
+
+    // 1. Destroy current device registration
+    destroy_current_device_registration().await?;
+
+    // 2. Clear JWT
+    {
+        let mut config = load_global_config();
+        config.wms_jwt = None;
+        save_global_config_internal(&config)?;
+    }
+
+    // 3. Re-register as anonymous device
+    auto_register_tunnel_internal().await
 }
 
 #[tauri::command]

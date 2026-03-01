@@ -190,6 +190,8 @@ pub struct GlobalConfig {
     #[serde(default = "default_true")]
     pub voice_refine_enabled: bool,
     #[serde(default)]
+    pub wms_jwt: Option<String>,
+    #[serde(default)]
     pub device_id: Option<String>,
 }
 
@@ -216,6 +218,7 @@ impl Default for GlobalConfig {
             dashscope_api_key: None,
             dashscope_base_url: None,
             voice_refine_enabled: true,
+            wms_jwt: None,
             device_id: None,
         }
     }
@@ -281,8 +284,11 @@ pub struct ProjectStatus {
     pub has_uncommitted: bool,
     pub uncommitted_count: usize,
     pub is_merged_to_test: bool,
+    pub is_merged_to_base: bool,
     pub ahead_of_base: usize,
     pub behind_base: usize,
+    pub ahead_of_test: usize,
+    pub unpushed_commits: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -300,8 +306,11 @@ pub struct MainProjectStatus {
     pub has_uncommitted: bool,
     pub uncommitted_count: usize,
     pub is_merged_to_test: bool,
+    pub is_merged_to_base: bool,
     pub ahead_of_base: usize,
     pub behind_base: usize,
+    pub ahead_of_test: usize,
+    pub unpushed_commits: usize,
     pub base_branch: String,
     pub test_branch: String,
     pub linked_folders: Vec<String>,

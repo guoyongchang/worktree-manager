@@ -19,7 +19,6 @@
   "common.path": "Path",
   "common.retry": "Retry",
   "common.default": "Default",
-
   "sidebar.worktrees": "Worktrees",
   "sidebar.archived": "Archived",
   "sidebar.showArchived": "Archived ({{count}})",
@@ -51,7 +50,6 @@
   "sidebar.confirmDelete": "Permanently delete \"{{name}}\"? This action cannot be undone.",
   "sidebar.restoring": "Restoring...",
   "sidebar.deleting": "Deleting...",
-
   "detail.projectStatus": "Project Status",
   "detail.uncommittedChanges_one": "{{count}} uncommitted change",
   "detail.uncommittedChanges_other": "{{count}} uncommitted changes",
@@ -60,7 +58,7 @@
   "detail.branchAheadBase_one": "{{count}} commit ahead of {{branch}}",
   "detail.branchAheadBase_other": "{{count}} commits ahead of {{branch}}",
   "detail.mergedToTest": "Merged to {{branch}}",
-  "detail.notMergedToTest": "Not merged to {{branch}}",
+  "detail.notMergedToTest": "{{count}} not merged to {{branch}}",
   "detail.fetchingRemote": "Fetching remote repository info...",
   "detail.switchBranch": "Switch branch",
   "detail.currentBranch": "Current branch",
@@ -90,16 +88,33 @@
   "detail.restoring": "Restoring...",
   "detail.delete": "Delete",
   "detail.archive": "Archive",
-  "detail.uncommitted": "{{count}} uncommitted",
+  "detail.uncommitted": "{{count}} changed files",
   "detail.mergedTo": "Merged to {{branch}}",
   "detail.behind": "Behind {{count}}",
   "detail.ahead": "Ahead {{count}}",
   "detail.clean": "Clean",
+  "detail.unpushedCommits": "{{count}} unpushed",
+  "detail.notMergedToBase": "{{count}} not merged to {{branch}}",
+  "detail.switchToBase": "Switch to Base",
+  "detail.switchToTest": "Switch to Test",
+  "detail.switchToHead": "Switch to HEAD",
+  "detail.syncBase": "Sync Base",
+  "detail.syncTest": "Sync Test",
+  "detail.syncing": "Syncing...",
+  "git.commitAll": "Commit",
+  "git.commitOnly": "Commit Only",
+  "git.committing": "Committing...",
+  "git.commitMessage": "Commit Message",
+  "git.generating": "AI generating...",
+  "git.regenerate": "Regenerate",
+  "git.commitSuccess": "Committed successfully",
+  "git.commitAndPush": "Commit & Push",
+  "git.commitAndPushSuccess": "Committed and pushed successfully",
+  "git.noChanges": "No changes to commit",
   "detail.linkedFolders": "Linked folders",
   "detail.baseBranchPrefix": "BASE: {{branch}}",
   "detail.testBranchPrefix": "TEST: {{branch}}",
   "detail.branchInfo": "base: {{base}} · test: {{test}}",
-
   "git.syncBase": "Sync Base",
   "git.push": "Push",
   "git.mergeToTest": "Merge to test",
@@ -141,7 +156,6 @@
   "git.openTerminalToResolve": "Open terminal to resolve",
   "git.pushAheadTooltip_one": "Push {{count}} commit to remote",
   "git.pushAheadTooltip_other": "Push {{count}} commits to remote",
-
   "terminal.workspace": "Workspace",
   "terminal.duplicateTerminal": "Duplicate terminal",
   "terminal.newTerminal": "New terminal",
@@ -179,7 +193,6 @@
   "terminal.recordingHint": "Recording... Release Alt+V to stop",
   "terminal.closeAllTerminals": "Close all terminals",
   "terminal.terminalCount": "{{count}} terminals",
-
   "app.loadingWorkspace": "Loading Workspace...",
   "app.errorPrefix": "Error",
   "app.dismiss": "Dismiss",
@@ -220,7 +233,6 @@
   "app.kickedDesc": "You have been removed by the host.",
   "app.kickedReconnect": "Reconnect",
   "app.wsDisconnected": "Connection lost, reconnecting...",
-
   "settings.title": "Settings",
   "settings.back": "Back",
   "settings.workspaceConfig": "Workspace Configuration",
@@ -357,7 +369,6 @@
   "settings.removeWorkspaceDesc": "Remove workspace \"{{name}}\"? This only removes it from the list, files will not be deleted.",
   "settings.confirmRemove": "Confirm remove",
   "settings.current": "Current",
-
   "addProject.title": "Add Project",
   "addProject.repoUrl": "Repository URL",
   "addProject.repoUrlPlaceholder": "https://github.com/user/repo.git",
@@ -393,7 +404,6 @@
   "addProject.skip": "Skip",
   "addProject.savingFolders": "Saving...",
   "addProject.saveLinkedFolders": "Save linked folders ({{count}})",
-
   "addWorkspace.importTitle": "Import Existing Workspace",
   "addWorkspace.importDesc": "Select an existing project directory as a Workspace",
   "addWorkspace.dirPath": "Directory Path",
@@ -406,7 +416,6 @@
   "addWorkspace.selectParentDir": "Select parent directory",
   "addWorkspace.willCreate": "Will create directory:",
   "addWorkspace.promptInputPath": "Please enter the directory path:",
-
   "archive.title": "Archive Worktree",
   "archive.checkingStatus": "Checking branch status...",
   "archive.projectStatus": "Project Status",
@@ -420,7 +429,6 @@
   "archive.noIssues": "No issues",
   "archive.confirmArchive": "Confirm Archive",
   "archive.archiving": "Archiving...",
-
   "addProjectToWorktree.title": "Add Project to Worktree",
   "addProjectToWorktree.desc": "Add a project from the main workspace to <0>{{name}}</0>",
   "addProjectToWorktree.descPlain": "Add a project from the main workspace to",
@@ -433,7 +441,6 @@
   "addProjectToWorktree.baseBranch": "Base Branch",
   "addProjectToWorktree.defaultLabel": "(default)",
   "addProjectToWorktree.addProject": "Add project",
-
   "welcome.title": "Welcome to Worktree Manager",
   "welcome.desc": "A visual Git Worktree management tool to help you efficiently manage multi-branch development workflows.",
   "welcome.whatIsWorkspace": "What is a Workspace?",
@@ -443,7 +450,6 @@
   "welcome.hint": "Import: select an existing project directory | New: create a fresh Workspace structure",
   "welcome.dirMainRepo": "Main repositories",
   "welcome.dirWorktrees": "Worktree directory",
-
   "createWorktree.title": "Create Worktree",
   "createWorktree.nameLabel": "Worktree Name",
   "createWorktree.selectProjects": "Select projects",
@@ -452,26 +458,22 @@
   "createWorktree.defaultAndTest": "Default: {{base}} · Test: {{test}}",
   "createWorktree.createWithCount": "Create ({{count}})",
   "createWorktree.createCount": "Create ({{count}})",
-
   "createPR.title": "Create PR/MR",
   "createPR.titleLabel": "Title",
   "createPR.titlePlaceholder": "PR/MR title",
   "createPR.bodyLabel": "Description (optional)",
   "createPR.bodyPlaceholder": "PR/MR description",
   "createPR.success": "PR/MR created successfully: {{url}}",
-
   "contextMenu.archive": "Archive",
   "contextMenu.duplicateTerminal": "Duplicate terminal",
   "contextMenu.closeTab": "Close",
   "contextMenu.closeOtherTabs": "Close Others",
   "contextMenu.closeAllTabs": "Close All",
-
   "branchCombobox.placeholder": "Select or enter branch",
   "branchCombobox.search": "Search branches...",
   "branchCombobox.loading": "Loading...",
   "branchCombobox.noMatch": "No matching branches found",
   "branchCombobox.noBranches": "No remote branches found",
-
   "updater.newVersionAvailable": "New Version Available",
   "updater.versionReleased": "Worktree Manager v{{version}} is now available",
   "updater.releaseNotes": "Release notes:",
@@ -496,7 +498,6 @@
   "updater.retryUpdate": "Retry update",
   "updater.upToDate": "Up to Date",
   "updater.usingLatest": "You are using the latest version of Worktree Manager",
-
   "voice.micNeedsHttps": "Microphone requires HTTPS or localhost, current HTTP connection is not supported",
   "voice.permissionDenied": "Microphone permission denied, please allow in system settings",
   "voice.noMicDetected": "No microphone device detected",
@@ -504,9 +505,7 @@
   "voice.refinedText": "AI Refined",
   "voice.refining": "Refining...",
   "voice.refineFailed": "AI refinement failed, will use raw text",
-
   "backend.authFailed": "Authentication failed",
-
   "share.title": "Share",
   "share.shareSettings": "Share Settings",
   "share.shareSettingsDesc": "Configure the sharing port for LAN access from other devices",
@@ -545,7 +544,6 @@
   "share.showMoreIps": "Show {{count}} more IP address(es)",
   "share.scanToOpen": "Scan to open",
   "share.quickShare": "Quick share with last config",
-
   "deploy.deployToMain": "Deploy to Main",
   "deploy.exitOccupation": "Exit Deployed Worktree",
   "deploy.deploying": "Deploying...",
@@ -558,7 +556,6 @@
   "deploy.confirmExitDesc": "This will switch all main workspace projects back to their original branches.",
   "deploy.forceExit": "Force exit (discard uncommitted changes)",
   "deploy.deployedTooltip": "This Worktree is deployed to the main workspace",
-
   "sidebar.selectWorkspace": "Select Workspace",
   "sidebar.current": "Current",
   "sidebar.openInNewWindow": "Open in new window",

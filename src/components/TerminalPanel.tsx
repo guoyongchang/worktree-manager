@@ -105,7 +105,7 @@ const FloatingMicButton: FC<{
   onStopRecording?: () => void;
 }> = ({ voiceStatus, onStartRecording, onStopRecording }) => {
   const { t } = useTranslation();
-  const [pos, setPos] = useState<{ x: number | null; y: number }>({ x: null, y: 80 });
+  const [pos, setPos] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
   const posRef = useRef(pos);
   posRef.current = pos;
 
@@ -141,7 +141,7 @@ const FloatingMicButton: FC<{
     d.startX = touch.clientX;
     d.startY = touch.clientY;
     d.startPosX = currentX ?? 0;
-    d.startPosY = cur.y;
+    d.startPosY = cur.y ?? 0;
     d.isDragging = false;
     onStartRecording?.();
   }, [onStartRecording]);
@@ -167,17 +167,16 @@ const FloatingMicButton: FC<{
   const isRecording = voiceStatus === 'recording';
 
   const style: React.CSSProperties = pos.x === null
-    ? { position: 'absolute', right: FLOATING_BTN_MARGIN, top: pos.y }
-    : { position: 'absolute', left: pos.x, top: pos.y };
+    ? { position: 'absolute', right: FLOATING_BTN_MARGIN, bottom: 80 }
+    : { position: 'absolute', left: pos.x, top: pos.y ?? undefined };
 
   return (
     <button
       ref={btnRef}
-      className={`z-20 w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-sm touch-none ${
-        isRecording
-          ? 'bg-red-900/70 border-2 border-red-500 shadow-[0_0_12px_rgba(239,68,68,0.5)] animate-pulse'
-          : 'bg-slate-800/70 border-2 border-green-500/60'
-      }`}
+      className={`z-20 w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-sm touch-none ${isRecording
+        ? 'bg-red-900/70 border-2 border-red-500 shadow-[0_0_12px_rgba(239,68,68,0.5)] animate-pulse'
+        : 'bg-slate-800/70 border-2 border-green-500/60'
+        }`}
       style={style}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
@@ -211,9 +210,9 @@ function getVoiceButtonTitle(
 function getVoiceButtonClass(voiceStatus: VoiceStatus): string {
   switch (voiceStatus) {
     case 'recording': return 'text-red-400 hover:bg-red-900/30';
-    case 'ready':     return 'text-green-400 hover:bg-green-900/30';
-    case 'error':     return 'text-red-400 hover:bg-slate-700';
-    default:          return 'text-slate-500 hover:text-slate-300 hover:bg-slate-700';
+    case 'ready': return 'text-green-400 hover:bg-green-900/30';
+    case 'error': return 'text-red-400 hover:bg-slate-700';
+    default: return 'text-slate-500 hover:text-slate-300 hover:bg-slate-700';
   }
 }
 
@@ -286,7 +285,7 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
     tabLongPressTimerRef.current = setTimeout(() => {
       tabLongPressFiredRef.current = true;
       onTabContextMenu(
-        { preventDefault: () => {}, clientX: touch.clientX, clientY: touch.clientY } as unknown as React.MouseEvent,
+        { preventDefault: () => { }, clientX: touch.clientX, clientY: touch.clientY } as unknown as React.MouseEvent,
         path,
         name,
       );
@@ -379,13 +378,12 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
               return (
                 <div
                   key={tab.path}
-                  className={`group px-2 py-1.5 text-xs font-medium whitespace-nowrap rounded-t transition-colors flex items-center gap-1 cursor-pointer ${
-                    isActive
-                      ? 'bg-slate-900 text-blue-400 border-t border-l border-r border-slate-600'
-                      : isActivated
-                        ? 'text-slate-300 hover:bg-slate-700/50'
-                        : 'text-slate-500 hover:bg-slate-700/50 hover:text-slate-400'
-                  }`}
+                  className={`group px-2 py-1.5 text-xs font-medium whitespace-nowrap rounded-t transition-colors flex items-center gap-1 cursor-pointer ${isActive
+                    ? 'bg-slate-900 text-blue-400 border-t border-l border-r border-slate-600'
+                    : isActivated
+                      ? 'text-slate-300 hover:bg-slate-700/50'
+                      : 'text-slate-500 hover:bg-slate-700/50 hover:text-slate-400'
+                    }`}
                   onClick={() => {
                     if (tabLongPressFiredRef.current) return;
                     onTabClick(tab.path);
@@ -556,11 +554,10 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
 
                 {/* AI 整理 */}
                 {(staging.refinedText || staging.isRefining || staging.refineFailed) && (
-                  <div className={`rounded-lg p-3 ${
-                    staging.refineFailed
-                      ? 'bg-red-900/30 border border-red-700/50'
-                      : 'bg-slate-800/80 border border-blue-500/40'
-                  }`}>
+                  <div className={`rounded-lg p-3 ${staging.refineFailed
+                    ? 'bg-red-900/30 border border-red-700/50'
+                    : 'bg-slate-800/80 border border-blue-500/40'
+                    }`}>
                     <div className="text-[10px] mb-1 font-medium uppercase tracking-wider flex items-center gap-1">
                       <span className={staging.refineFailed ? 'text-red-400' : 'text-blue-400'}>
                         {t('voice.refinedText')}
@@ -587,33 +584,47 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
           </div>
         )}
 
-        {/* 移动端 Web 暂存区卡片（在悬浮按钮上方）*/}
-        {voiceStatus === 'recording' && IS_MOBILE_WEB && staging && (staging.rawText || staging.interimText) && (
+        {/* 移动端 Web 录音指示器 + 暂存区卡片 */}
+        {voiceStatus === 'recording' && IS_MOBILE_WEB && (
           <div className="absolute bottom-20 left-2 right-2 z-15 rounded-xl bg-slate-800/95 border border-slate-600/50 p-3 shadow-2xl backdrop-blur-sm">
-            <div className="text-[10px] text-slate-500 mb-1 font-medium uppercase tracking-wider">{t('voice.rawText')}</div>
-            <div className="text-sm text-slate-200 leading-relaxed break-all mb-2">
-              {staging.rawText}
-              {staging.interimText && (
-                <span className="text-slate-500 italic">{staging.interimText}</span>
-              )}
+            {/* 录音中标题 — 始终显示 */}
+            <div className="flex items-center gap-2 mb-1">
+              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+              <span className="text-[10px] text-red-400 font-medium uppercase tracking-wider">{t('terminal.recordingHint')}</span>
             </div>
-            {(staging.refinedText || staging.isRefining || staging.refineFailed) && (
+
+            {/* 波形 */}
+            {analyserNode && <AudioWaveform analyserNode={analyserNode} />}
+
+            {/* 暂存区内容（有文字时才显示） */}
+            {staging && (staging.rawText || staging.interimText) && (
               <>
-                <div className="text-[10px] font-medium uppercase tracking-wider flex items-center gap-1 mb-1">
-                  <span className={staging.refineFailed ? 'text-red-400' : 'text-blue-400'}>
-                    {t('voice.refinedText')}
-                  </span>
-                  {staging.isRefining && (
-                    <span className="text-slate-500 animate-pulse">{t('voice.refining')}</span>
+                <div className="text-[10px] text-slate-500 mb-1 mt-2 font-medium uppercase tracking-wider">{t('voice.rawText')}</div>
+                <div className="text-sm text-slate-200 leading-relaxed break-all mb-2">
+                  {staging.rawText}
+                  {staging.interimText && (
+                    <span className="text-slate-500 italic">{staging.interimText}</span>
                   )}
                 </div>
-                <div className="text-sm leading-relaxed break-all">
-                  {staging.refineFailed ? (
-                    <span className="text-red-300/80">{t('voice.refineFailed')}</span>
-                  ) : (
-                    <span className="text-blue-200">{staging.refinedText}</span>
-                  )}
-                </div>
+                {(staging.refinedText || staging.isRefining || staging.refineFailed) && (
+                  <>
+                    <div className="text-[10px] font-medium uppercase tracking-wider flex items-center gap-1 mb-1">
+                      <span className={staging.refineFailed ? 'text-red-400' : 'text-blue-400'}>
+                        {t('voice.refinedText')}
+                      </span>
+                      {staging.isRefining && (
+                        <span className="text-slate-500 animate-pulse">{t('voice.refining')}</span>
+                      )}
+                    </div>
+                    <div className="text-sm leading-relaxed break-all">
+                      {staging.refineFailed ? (
+                        <span className="text-red-300/80">{t('voice.refineFailed')}</span>
+                      ) : (
+                        <span className="text-blue-200">{staging.refinedText}</span>
+                      )}
+                    </div>
+                  </>
+                )}
               </>
             )}
           </div>

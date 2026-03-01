@@ -7,6 +7,8 @@ import { getWebSocketManager } from '../lib/websocket';
 import { TERMINAL } from '../constants';
 import '@xterm/xterm/css/xterm.css';
 
+const IS_MOBILE = typeof window !== 'undefined' && 'ontouchstart' in window;
+
 interface TerminalProps {
   cwd: string;
   visible: boolean;
@@ -77,7 +79,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible 
         brightCyan: '#67e8f9',
         brightWhite: '#ffffff',
       },
-      fontSize: 13,
+      fontSize: IS_MOBILE ? 12 : 13,
       fontFamily: '"Maple Mono NF CN", Menlo, Monaco, "Courier New", monospace',
       cursorBlink: true,
       cursorStyle: 'bar',
@@ -102,6 +104,45 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible 
 
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
+
+    // Mobile: two-finger scroll to browse terminal history
+    if (IS_MOBILE && terminalRef.current) {
+      let touchStartY = 0;
+      let isTwoFinger = false;
+      let scrollAccum = 0;
+
+      const el = terminalRef.current;
+
+      el.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 2) {
+          isTwoFinger = true;
+          touchStartY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+          scrollAccum = 0;
+        } else {
+          isTwoFinger = false;
+        }
+      }, { passive: true });
+
+      el.addEventListener('touchmove', (e) => {
+        if (isTwoFinger && e.touches.length === 2) {
+          e.preventDefault();
+          const nowY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+          scrollAccum += touchStartY - nowY;
+          const lineHeight = 16; // approximate line height in px
+          const lines = Math.trunc(scrollAccum / lineHeight);
+          if (lines !== 0) {
+            term.scrollLines(lines);
+            scrollAccum -= lines * lineHeight;
+          }
+          touchStartY = nowY;
+        }
+      }, { passive: false });
+
+      el.addEventListener('touchend', () => {
+        isTwoFinger = false;
+        scrollAccum = 0;
+      }, { passive: true });
+    }
 
     // Handle user input
     term.onData(async (data) => {

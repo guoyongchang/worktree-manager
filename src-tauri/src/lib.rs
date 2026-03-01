@@ -158,6 +158,9 @@ pub fn run() {
             fetch_project_remote,
             check_remote_branch_exists,
             get_remote_branches,
+            get_git_diff,
+            commit_all,
+            generate_commit_message,
             // 工具
             open_in_terminal,
             open_in_editor,
@@ -201,6 +204,8 @@ pub fn run() {
             get_wms_config,
             set_wms_config,
             auto_register_tunnel,
+            wms_login,
+            wms_logout,
             start_wms_tunnel,
             stop_wms_tunnel,
             wms_manual_reconnect,

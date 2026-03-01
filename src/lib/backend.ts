@@ -275,6 +275,16 @@ export async function wmsManualReconnect(): Promise<void> {
   return callBackend<void>('wms_manual_reconnect');
 }
 
+/** WMS Login: authenticate → destroy current device → re-register under logged-in user. */
+export async function wmsLogin(username: string, password: string): Promise<WmsConfig> {
+  return callBackend<WmsConfig>('wms_login', { username, password });
+}
+
+/** WMS Logout: clear JWT → destroy current device → re-register as anonymous. */
+export async function wmsLogout(): Promise<WmsConfig> {
+  return callBackend<WmsConfig>('wms_logout');
+}
+
 /** Get the last used share port. */
 export async function getLastSharePort(): Promise<number | null> {
   return callBackend<number | null>('get_last_share_port');
@@ -496,6 +506,21 @@ export async function checkRemoteBranchExists(
 /** Get list of remote branches */
 export async function getRemoteBranches(path: string): Promise<string[]> {
   return callBackend<string[]>('get_remote_branches', { path });
+}
+
+/** Get git diff for AI commit message generation */
+export async function getGitDiff(path: string): Promise<string> {
+  return callBackend<string>('get_git_diff', { path });
+}
+
+/** Stage all changes and commit with message */
+export async function commitAll(path: string, message: string): Promise<string> {
+  return callBackend<string>('commit_all', { path, message });
+}
+
+/** Generate commit message using AI */
+export async function generateCommitMessage(diff: string): Promise<string> {
+  return callBackend<string>('generate_commit_message', { diff });
 }
 
 // ---------------------------------------------------------------------------

@@ -9,12 +9,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
+
 import {
   RefreshIcon,
   SyncIcon,
@@ -33,6 +28,9 @@ import {
   getBranchDiffStats,
   checkRemoteBranchExists,
   fetchProjectRemote,
+  getGitDiff,
+  commitAll,
+  generateCommitMessage,
   type BranchDiffStats,
 } from '@/lib/backend';
 import { CreatePRModal } from './CreatePRModal';
@@ -73,6 +71,10 @@ export const GitOperations: FC<GitOperationsProps> = ({
   const [baseBranchExists, setBaseBranchExists] = useState<boolean | null>(null);
   const [dismissing, setDismissing] = useState<'error' | 'success' | null>(null);
   const [showMergeBaseConfirm, setShowMergeBaseConfirm] = useState(false);
+  const [showCommitDialog, setShowCommitDialog] = useState(false);
+  const [commitMessage, setCommitMessage] = useState('');
+  const [generatingMessage, setGeneratingMessage] = useState(false);
+  const [committing, setCommitting] = useState(false);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -199,22 +201,88 @@ export const GitOperations: FC<GitOperationsProps> = ({
     runGitAction('mergeBase', () => mergeToBaseBranch(projectPath, baseBranch));
   };
 
-  const actionsDisabled = fetchingSyncing || activeAction !== null;
+  const handleCommitClick = async () => {
+    setShowCommitDialog(true);
+    setCommitMessage('');
+    setGeneratingMessage(true);
+    try {
+      const diff = await getGitDiff(projectPath);
+      const msg = await generateCommitMessage(diff);
+      setCommitMessage(msg);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('No changes')) {
+        setShowCommitDialog(false);
+        setErrorMsg(t('git.noChanges'));
+      } else {
+        setCommitMessage('');
+        setErrorMsg(msg);
+      }
+    } finally {
+      setGeneratingMessage(false);
+    }
+  };
 
-  // Push tooltip: show ahead commit count
-  const pushTooltip = stats && stats.ahead > 0
-    ? t('git.pushAheadTooltip', { count: stats.ahead })
-    : t('git.pushTooltip');
+  const handleRegenerateMessage = async () => {
+    setGeneratingMessage(true);
+    try {
+      const diff = await getGitDiff(projectPath);
+      const msg = await generateCommitMessage(diff);
+      setCommitMessage(msg);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGeneratingMessage(false);
+    }
+  };
+
+  const handleConfirmCommit = async (withPush: boolean) => {
+    if (!commitMessage.trim()) return;
+    setCommitting(true);
+    try {
+      await commitAll(projectPath, commitMessage.trim());
+      setShowCommitDialog(false);
+      if (withPush) {
+        try {
+          await pushToRemote(projectPath);
+          setSuccessWithAutoDismiss(t('git.commitAndPushSuccess'));
+        } catch (pushErr) {
+          setSuccessWithAutoDismiss(t('git.commitSuccess'));
+          setErrorMsg(pushErr instanceof Error ? pushErr.message : String(pushErr));
+        }
+      } else {
+        setSuccessWithAutoDismiss(t('git.commitSuccess'));
+      }
+      await loadStats();
+      onRefresh?.();
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCommitting(false);
+    }
+  };
+
+  // Smart Commit & Push: if uncommitted changes → commit dialog, else just push
+  const handleCommitAndPush = async () => {
+    if (stats && stats.changed_files > 0) {
+      // Has uncommitted changes → show commit dialog (will auto-push after commit)
+      handleCommitClick();
+    } else {
+      // No uncommitted changes → just push
+      runGitAction('push', () => pushToRemote(projectPath));
+    }
+  };
+
+  const actionsDisabled = fetchingSyncing || activeAction !== null;
 
   return (
     <div className="space-y-3">
       {error && (
         <div
-          className={`p-2 rounded text-xs transition-opacity duration-200 ${
-            errorPersistent
-              ? 'bg-red-900/50 border border-red-700/60'
-              : 'bg-red-900/40 border border-red-800/50 cursor-pointer'
-          } ${dismissing === 'error' ? 'opacity-0' : 'opacity-100'}`}
+          className={`p-2 rounded text-xs transition-opacity duration-200 ${errorPersistent
+            ? 'bg-red-900/50 border border-red-700/60'
+            : 'bg-red-900/40 border border-red-800/50 cursor-pointer'
+            } ${dismissing === 'error' ? 'opacity-0' : 'opacity-100'}`}
           onClick={errorPersistent ? undefined : dismissError}
         >
           <div className="flex items-center justify-between gap-2">
@@ -277,7 +345,7 @@ export const GitOperations: FC<GitOperationsProps> = ({
       </div>
 
       <div className="flex flex-col gap-2">
-        <div className="grid grid-cols-1 min-[420px]:grid-cols-2 sm:grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-2">
           <Button
             variant="secondary"
             size="sm"
@@ -290,38 +358,27 @@ export const GitOperations: FC<GitOperationsProps> = ({
             <span className="truncate">{activeAction === 'sync' ? t('git.syncing') : t('git.syncBranch', { branch: baseBranch })}</span>
           </Button>
 
-          <TooltipProvider delayDuration={300}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => runGitAction('push', () => pushToRemote(projectPath))}
-                  disabled={loading || actionsDisabled}
-                  className="text-xs min-w-0"
-                >
-                  <UploadIcon className="w-3 h-3 mr-1 shrink-0" />
-                  <span className="truncate">{activeAction === 'push' ? t('git.pushing') : t('git.pushLabel')}</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="top">{pushTooltip}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-
           <Button
             variant="secondary"
             size="sm"
-            onClick={() => setShowPRModal(true)}
-            disabled={loading || baseBranchExists === false || actionsDisabled}
+            onClick={handleCommitAndPush}
+            disabled={loading || actionsDisabled || committing}
             className="text-xs min-w-0"
-            title={baseBranchExists === false ? t('git.remoteBranchNotExists', { branch: baseBranch }) : ''}
           >
-            <GitPullRequestIcon className="w-3 h-3 mr-1 shrink-0" />
-            <span className="truncate">{t('git.createPR')}</span>
+            <UploadIcon className="w-3 h-3 mr-1 shrink-0" />
+            <span className="truncate">
+              {committing
+                ? t('git.committing')
+                : activeAction === 'push'
+                  ? t('git.pushing')
+                  : stats && stats.changed_files > 0
+                    ? t('git.commitAndPush')
+                    : t('git.pushLabel')}
+            </span>
           </Button>
         </div>
 
-        <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 min-[420px]:grid-cols-3 gap-2">
           <Button
             variant="secondary"
             size="sm"
@@ -344,6 +401,18 @@ export const GitOperations: FC<GitOperationsProps> = ({
           >
             <GitMergeIcon className="w-3 h-3 mr-1 shrink-0 text-orange-400" />
             <span className="truncate text-orange-300">{activeAction === 'mergeBase' ? t('git.merging') : t('git.mergeToBranch', { branch: baseBranch })}</span>
+          </Button>
+
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setShowPRModal(true)}
+            disabled={loading || baseBranchExists === false || actionsDisabled}
+            className="text-xs min-w-0"
+            title={baseBranchExists === false ? t('git.remoteBranchNotExists', { branch: baseBranch }) : ''}
+          >
+            <GitPullRequestIcon className="w-3 h-3 mr-1 shrink-0" />
+            <span className="truncate">{t('git.createPR')}</span>
           </Button>
         </div>
       </div>
@@ -386,6 +455,57 @@ export const GitOperations: FC<GitOperationsProps> = ({
               className="bg-orange-600 hover:bg-orange-700 text-white"
             >
               {t('git.confirmMergeBase')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Commit dialog */}
+      <Dialog open={showCommitDialog} onOpenChange={setShowCommitDialog}>
+        <DialogContent className="max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>{t('git.commitMessage')}</DialogTitle>
+            <DialogDescription>
+              {generatingMessage ? t('git.generating') : t('git.commitAll')}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <textarea
+              value={commitMessage}
+              onChange={(e) => setCommitMessage(e.target.value)}
+              placeholder={generatingMessage ? t('git.generating') : ''}
+              disabled={generatingMessage}
+              className="w-full h-24 bg-slate-800 border border-slate-600 rounded-lg p-3 text-sm text-slate-200 placeholder-slate-500 resize-none focus:border-blue-500 focus:outline-none"
+            />
+            <div className="flex justify-end">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleRegenerateMessage}
+                disabled={generatingMessage}
+                className="text-xs"
+              >
+                <RefreshIcon className={`w-3 h-3 mr-1 ${generatingMessage ? 'animate-spin' : ''}`} />
+                {t('git.regenerate')}
+              </Button>
+            </div>
+          </div>
+          <DialogFooter className="flex gap-2">
+            <Button variant="secondary" onClick={() => setShowCommitDialog(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => handleConfirmCommit(false)}
+              disabled={!commitMessage.trim() || committing || generatingMessage}
+            >
+              {t('git.commitOnly')}
+            </Button>
+            <Button
+              onClick={() => handleConfirmCommit(true)}
+              disabled={!commitMessage.trim() || committing || generatingMessage}
+            >
+              {committing ? t('git.committing') : t('git.commitAndPush')}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -41,15 +41,16 @@ import type {
 
 const StatusBadges: FC<{ project: ProjectStatus }> = ({ project }) => {
   const { t } = useTranslation();
-  const badges: { label: string; variant: 'warning' | 'success' | 'default' }[] = [];
+  const badges: { label: string; variant: 'warning' | 'success' | 'default' | 'error' }[] = [];
   if (project.has_uncommitted) badges.push({ label: t('detail.uncommitted', { count: project.uncommitted_count }), variant: 'warning' });
-  if (project.is_merged_to_test) badges.push({ label: t('detail.mergedTo', { branch: project.test_branch }), variant: 'success' });
+  if (project.unpushed_commits > 0) badges.push({ label: t('detail.unpushedCommits', { count: project.unpushed_commits }), variant: 'warning' });
+  if (project.ahead_of_base > 0) badges.push({ label: t('detail.notMergedToBase', { branch: project.base_branch, count: project.ahead_of_base }), variant: 'default' });
+  if (project.ahead_of_test > 0) badges.push({ label: t('detail.notMergedToTest', { branch: project.test_branch, count: project.ahead_of_test }), variant: 'default' });
   if (project.behind_base > 0) badges.push({ label: t('detail.behind', { count: project.behind_base }), variant: 'default' });
-  if (project.ahead_of_base > 0) badges.push({ label: t('detail.ahead', { count: project.ahead_of_base }), variant: 'default' });
   if (badges.length === 0) return <Badge variant="success">{t('detail.clean')}</Badge>;
   return (
     <div className="flex flex-wrap gap-1 justify-end">
-      {badges.map((b, i) => <Badge key={i} variant={b.variant}>{b.label}</Badge>)}
+      {badges.map((b, i) => <Badge key={i} variant={b.variant === 'error' ? 'warning' : b.variant}>{b.label}</Badge>)}
     </div>
   );
 };
@@ -342,8 +343,11 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                   has_uncommitted: proj.has_uncommitted,
                   uncommitted_count: proj.uncommitted_count,
                   is_merged_to_test: proj.is_merged_to_test,
+                  is_merged_to_base: proj.is_merged_to_base,
                   ahead_of_base: proj.ahead_of_base,
                   behind_base: proj.behind_base,
+                  ahead_of_test: proj.ahead_of_test,
+                  unpushed_commits: proj.unpushed_commits,
                 };
                 const status = getProjectStatus(projAsStatus);
                 return (
@@ -443,44 +447,67 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                       <span className="select-text">{proj.current_branch}</span>
                       {isSwitching && <RefreshIcon className="w-3 h-3 animate-spin ml-1" />}
                     </div>
-                    <div className="flex items-center gap-1">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 px-2 text-xs"
-                            disabled={isSwitching}
-                          >
-                            {t('detail.switchBranch')}
-                            <ChevronDownIcon className="w-3 h-3 ml-1" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            onClick={() => handleSwitchBranch(proj.base_branch)}
-                            disabled={proj.current_branch === proj.base_branch}
-                          >
-                            <GitBranchIcon className="w-3.5 h-3.5 mr-2" />
-                            <span>{t('detail.baseBranchPrefix', { branch: proj.base_branch })}</span>
-                            {proj.current_branch === proj.base_branch && (
-                              <CheckIcon className="w-3 h-3 ml-2 text-green-400" />
-                            )}
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            onClick={() => handleSwitchBranch(proj.test_branch)}
-                            disabled={proj.current_branch === proj.test_branch}
-                          >
-                            <GitBranchIcon className="w-3.5 h-3.5 mr-2" />
-                            <span>{t('detail.testBranchPrefix', { branch: proj.test_branch })}</span>
-                            {proj.current_branch === proj.test_branch && (
-                              <CheckIcon className="w-3 h-3 ml-2 text-green-400" />
-                            )}
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                    <div className="flex items-center gap-1 flex-wrap">
+                      <Button
+                        variant={proj.current_branch === proj.base_branch ? 'default' : 'ghost'}
+                        size="sm"
+                        className="h-6 px-2 text-xs"
+                        disabled={isSwitching || proj.current_branch === proj.base_branch}
+                        onClick={() => handleSwitchBranch(proj.base_branch)}
+                      >
+                        {proj.current_branch === proj.base_branch && <CheckIcon className="w-3 h-3 mr-1 text-green-400" />}
+                        BASE
+                      </Button>
+                      <Button
+                        variant={proj.current_branch === proj.test_branch ? 'default' : 'ghost'}
+                        size="sm"
+                        className="h-6 px-2 text-xs"
+                        disabled={isSwitching || proj.current_branch === proj.test_branch}
+                        onClick={() => handleSwitchBranch(proj.test_branch)}
+                      >
+                        {proj.current_branch === proj.test_branch && <CheckIcon className="w-3 h-3 mr-1 text-green-400" />}
+                        TEST
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-xs"
+                        disabled={isSwitching}
+                        onClick={() => handleSwitchBranch('HEAD')}
+                        title={t('detail.switchToHead')}
+                      >
+                        HEAD
+                      </Button>
                     </div>
+                  </div>
+                  {/* Status badges — hide 'not merged to test' for main workspace */}
+                  <div className="mt-2">
+                    <StatusBadges project={{
+                      name: proj.name,
+                      path: proj.path,
+                      current_branch: proj.current_branch,
+                      base_branch: proj.base_branch,
+                      test_branch: proj.test_branch,
+                      has_uncommitted: proj.has_uncommitted,
+                      uncommitted_count: proj.uncommitted_count,
+                      is_merged_to_test: true,
+                      is_merged_to_base: proj.is_merged_to_base,
+                      ahead_of_base: proj.ahead_of_base,
+                      behind_base: proj.behind_base,
+                      ahead_of_test: 0,
+                      unpushed_commits: proj.unpushed_commits,
+                    }} />
+                  </div>
+                  {/* Git operations */}
+                  <div className="mt-3 pt-3 border-t border-slate-700/50">
+                    <GitOperations
+                      projectPath={proj.path}
+                      baseBranch={proj.base_branch}
+                      testBranch={proj.test_branch}
+                      currentBranch={proj.current_branch}
+                      onRefresh={onRefresh}
+                      onOpenTerminal={onOpenTerminalPanel}
+                    />
                   </div>
                   {proj.linked_folders && proj.linked_folders.length > 0 && (
                     <div className="mt-2 pt-2 border-t border-slate-700/50">

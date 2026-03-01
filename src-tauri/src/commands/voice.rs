@@ -538,3 +538,77 @@ pub(crate) async fn voice_refine_text_inner(text: String) -> Result<String, Stri
 pub(crate) async fn voice_refine_text(text: String) -> Result<String, String> {
     voice_refine_text_inner(text).await
 }
+
+// ==================== AI Commit Message Generation ====================
+
+const COMMIT_MSG_SYSTEM_PROMPT: &str = "\
+你是一个 Git commit message 生成器。用户会给你 git diff 信息，你需要生成一个简洁的 commit message。\n\
+\n\
+规则：\n\
+- 使用 Conventional Commits 格式：type(scope): description\n\
+- type 可以是：feat, fix, refactor, style, docs, chore, perf, test\n\
+- scope 是可选的，表示影响的模块\n\
+- description 用中文，简洁描述变更内容\n\
+- 只输出一行 commit message，不要加任何解释或额外内容\n\
+- 如果变更涉及多个方面，选择最主要的变更来写\n\
+\n\
+示例：\n\
+feat(ui): 添加分支切换按钮\n\
+fix(git): 修复推送失败时的错误处理\n\
+refactor(backend): 重构工作区状态获取逻辑";
+
+#[tauri::command]
+pub(crate) async fn generate_commit_message(diff: String) -> Result<String, String> {
+    let trimmed = diff.trim();
+    if trimmed.is_empty() {
+        return Err("No diff provided".to_string());
+    }
+
+    let config = load_global_config();
+    let api_key = config
+        .dashscope_api_key
+        .filter(|k| !k.is_empty())
+        .ok_or_else(|| "Dashscope API Key 未配置，请在设置中配置".to_string())?;
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+
+    let body = serde_json::json!({
+        "model": "qwen-turbo-latest",
+        "messages": [
+            { "role": "system", "content": COMMIT_MSG_SYSTEM_PROMPT },
+            { "role": "user", "content": trimmed }
+        ],
+        "temperature": 0.3
+    });
+
+    let resp = client
+        .post("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("AI 请求失败: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("AI API 返回错误 {}: {}", status, text));
+    }
+
+    let json: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("解析 AI 响应失败: {}", e))?;
+
+    let message = json["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or("chore: update")
+        .trim()
+        .to_string();
+
+    Ok(message)
+}

@@ -29,8 +29,11 @@ export interface ProjectStatus {
   has_uncommitted: boolean;
   uncommitted_count: number;
   is_merged_to_test: boolean;
+  is_merged_to_base: boolean;
   ahead_of_base: number;
   behind_base: number;
+  ahead_of_test: number;
+  unpushed_commits: number;
 }
 
 export interface MainProjectStatus {
@@ -40,8 +43,11 @@ export interface MainProjectStatus {
   has_uncommitted: boolean;
   uncommitted_count: number;
   is_merged_to_test: boolean;
+  is_merged_to_base: boolean;
   ahead_of_base: number;
   behind_base: number;
+  ahead_of_test: number;
+  unpushed_commits: number;
   base_branch: string;
   test_branch: string;
   linked_folders: string[];

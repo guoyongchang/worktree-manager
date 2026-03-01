@@ -348,3 +348,84 @@ button {
   white-space: nowrap;
   display: inline-block;
 }
+
+/* ==================== Mobile-specific styles ==================== */
+
+/* Safe area padding utility */
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Mobile content area: leave room for bottom tab bar */
+.mobile-content {
+  padding-bottom: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+}
+
+/* Slide transitions for stack navigation */
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+  }
+
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes slide-out-right {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(100%);
+  }
+}
+
+.animate-slide-in {
+  animation: slide-in-right 0.25s ease-out;
+}
+
+/* Mobile overscroll & touch optimizations */
+@media (max-width: 639px) {
+  body.browser {
+    overscroll-behavior: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Swipeable card reveal action */
+  .swipe-action-container {
+    overflow: hidden;
+    position: relative;
+  }
+
+  .swipe-action-bg {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+  }
+
+  /* Terminal two-finger scroll hint */
+  .terminal-scroll-hint {
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+
+  .terminal-scroll-hint.visible {
+    opacity: 1;
+  }
+}
+
+/* Pull-to-refresh indicator */
+@keyframes ptr-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.ptr-spinner {
+  animation: ptr-spin 0.8s linear infinite;
+}
