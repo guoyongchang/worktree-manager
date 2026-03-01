@@ -18,8 +18,9 @@ import {
   kickClient,
   getWmsConfig,
   wmsBrowserLogin,
+  getWmsUser,
 } from '../lib/backend';
-import type { ConnectedClient } from '../lib/backend';
+import type { ConnectedClient, WmsUser } from '../lib/backend';
 
 export interface UseShareFeatureReturn {
   shareActive: boolean;
@@ -58,6 +59,7 @@ export interface UseShareFeatureReturn {
   generatePassword: () => string;
   hasNgrokToken: boolean;
   wmsLoggedIn: boolean;
+  wmsUser: WmsUser | null;
   showWmsLoginDialog: boolean;
   setShowWmsLoginDialog: (show: boolean) => void;
   wmsLoginLoading: boolean;
@@ -87,6 +89,7 @@ export function useShareFeature(
   const [connectedClients, setConnectedClients] = useState<ConnectedClient[]>([]);
   const [hasNgrokToken, setHasNgrokToken] = useState(false);
   const [wmsLoggedIn, setWmsLoggedIn] = useState(false);
+  const [wmsUser, setWmsUser] = useState<WmsUser | null>(null);
   const [showWmsLoginDialog, setShowWmsLoginDialog] = useState(false);
   const [wmsLoginLoading, setWmsLoginLoading] = useState(false);
   const [pendingShareAction, setPendingShareAction] = useState<'toggle' | 'quick' | null>(null);
@@ -302,6 +305,8 @@ export function useShareFeature(
       await wmsBrowserLogin();
       setWmsLoggedIn(true);
       setShowWmsLoginDialog(false);
+      // Fetch user info after login
+      getWmsUser().then(u => { if (u.username) setWmsUser(u); }).catch(() => { });
       // Auto-execute pending share action after login
       const action = pendingShareAction;
       setPendingShareAction(null);
@@ -372,7 +377,11 @@ export function useShareFeature(
       }).catch(() => { });
       // Check if WMS is logged in
       getWmsConfig().then(config => {
-        setWmsLoggedIn(!!config.jwt);
+        const loggedIn = !!config.jwt;
+        setWmsLoggedIn(loggedIn);
+        if (loggedIn) {
+          getWmsUser().then(u => { if (u.username) setWmsUser(u); }).catch(() => { });
+        }
       }).catch(() => { });
     }
   }, []);
@@ -443,6 +452,7 @@ export function useShareFeature(
     generatePassword,
     hasNgrokToken,
     wmsLoggedIn,
+    wmsUser,
     showWmsLoginDialog,
     setShowWmsLoginDialog,
     wmsLoginLoading,

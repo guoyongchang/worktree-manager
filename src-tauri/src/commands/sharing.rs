@@ -686,6 +686,61 @@ pub(crate) async fn wms_browser_login(app: tauri::AppHandle) -> Result<String, S
     Ok("Login successful".to_string())
 }
 
+/// Fetch the current WMS user info using the stored JWT.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WmsUser {
+    pub username: Option<String>,
+    pub email: Option<String>,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+}
+
+#[tauri::command]
+pub(crate) async fn get_wms_user() -> Result<WmsUser, String> {
+    let config = load_global_config();
+    let jwt = match config.wms_jwt.as_ref() {
+        Some(jwt) => jwt.clone(),
+        None => return Ok(WmsUser { username: None, email: None, display_name: None, avatar_url: None }),
+    };
+    let tunnel_url = config
+        .wms_server_url
+        .clone()
+        .unwrap_or_else(|| "https://tunnel.kirov-opensource.com".to_string());
+    let admin_url = tunnel_url.replace("://tunnel.", "://wms.");
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("HTTP client failed: {}", e))?;
+
+    let resp = client
+        .get(format!("{}/api/me", admin_url.trim_end_matches('/')))
+        .header("Authorization", format!("Bearer {}", jwt))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch user info: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Ok(WmsUser { username: None, email: None, display_name: None, avatar_url: None });
+    }
+
+    #[derive(Deserialize)]
+    struct MeResponse {
+        username: Option<String>,
+        email: Option<String>,
+        display_name: Option<String>,
+        avatar_url: Option<String>,
+    }
+
+    let me: MeResponse = resp.json().await.map_err(|e| format!("Parse error: {}", e))?;
+    Ok(WmsUser {
+        username: me.username,
+        email: me.email,
+        display_name: me.display_name,
+        avatar_url: me.avatar_url,
+    })
+}
+
 #[tauri::command]
 pub(crate) async fn start_wms_tunnel(window: tauri::Window) -> Result<String, String> {
     start_wms_tunnel_internal(Some(window)).await

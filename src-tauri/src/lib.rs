@@ -206,6 +206,7 @@ pub fn run() {
             auto_register_tunnel,
             wms_login,
             wms_browser_login,
+            get_wms_user,
             wms_logout,
             start_wms_tunnel,
             stop_wms_tunnel,

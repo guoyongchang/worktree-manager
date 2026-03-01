@@ -291,6 +291,18 @@ export async function wmsBrowserLogin(): Promise<string> {
   return callBackend<string>('wms_browser_login');
 }
 
+export interface WmsUser {
+  username: string | null;
+  email: string | null;
+  display_name: string | null;
+  avatar_url: string | null;
+}
+
+/** Fetch WMS user info using stored JWT. */
+export async function getWmsUser(): Promise<WmsUser> {
+  return callBackend<WmsUser>('get_wms_user');
+}
+
 /** Get the last used share port. */
 export async function getLastSharePort(): Promise<number | null> {
   return callBackend<number | null>('get_last_share_port');
