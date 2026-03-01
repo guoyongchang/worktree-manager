@@ -374,6 +374,7 @@ function App() {
                   currentWorkspace={workspace.currentWorkspace}
                   onRemoveWorkspace={workspace.removeWorkspace}
                   wmsUserName={share.wmsUser?.display_name || share.wmsUser?.username || share.wmsUser?.email || null}
+                  wmsLoggedIn={share.wmsLoggedIn}
                   onWmsLogout={share.handleWmsLogout}
                 />
               )}
