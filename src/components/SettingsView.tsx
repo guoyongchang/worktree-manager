@@ -21,7 +21,7 @@ import { RefreshCw, Search, Mic, Eye, EyeOff, Settings, Globe, Info, Trash2 } fr
 import { BackIcon, PlusIcon, TrashIcon } from './Icons';
 import { BranchCombobox } from './BranchCombobox';
 import type { WorkspaceRef, WorkspaceConfig, ProjectConfig, ScannedFolder } from '../types';
-import { getAppVersion, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, voiceStart, voiceStop, isTauri, getRemoteBranches, openLink, callBackend, loadWorkspaceConfigByPath, saveWorkspaceConfigByPath } from '../lib/backend';
+import { getAppVersion, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, voiceStart, voiceStop, isTauri, getRemoteBranches, openLink, callBackend, loadWorkspaceConfigByPath, saveWorkspaceConfigByPath, wmsLogout } from '../lib/backend';
 
 interface SettingsViewProps {
   workspaceConfig: WorkspaceConfig;
@@ -35,6 +35,8 @@ interface SettingsViewProps {
   workspaces?: WorkspaceRef[];
   currentWorkspace?: WorkspaceRef | null;
   onRemoveWorkspace?: (path: string) => void;
+  wmsUserName?: string | null;
+  onWmsLogout?: () => void;
 }
 
 type SettingsSection = 'workspaces' | 'share' | 'voice' | 'about';
@@ -51,6 +53,8 @@ export const SettingsView: FC<SettingsViewProps> = ({
   workspaces = [],
   currentWorkspace = null,
   onRemoveWorkspace,
+  wmsUserName,
+  onWmsLogout,
 }) => {
   const { t, i18n } = useTranslation();
 
@@ -373,8 +377,8 @@ export const SettingsView: FC<SettingsViewProps> = ({
                 key={item.id}
                 onClick={() => setActiveSection(item.id)}
                 className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors text-left ${activeSection === item.id
-                    ? 'bg-blue-500/15 text-blue-400'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                  ? 'bg-blue-500/15 text-blue-400'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
                   }`}
               >
                 {item.icon}
@@ -399,8 +403,8 @@ export const SettingsView: FC<SettingsViewProps> = ({
                         key={ws.path}
                         onClick={() => setSelectedWsPath(ws.path)}
                         className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${selectedWsPath === ws.path
-                            ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30'
-                            : 'text-slate-400 hover:text-slate-200 bg-slate-800/50 hover:bg-slate-700/50 border border-transparent'
+                          ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30'
+                          : 'text-slate-400 hover:text-slate-200 bg-slate-800/50 hover:bg-slate-700/50 border border-transparent'
                           }`}
                       >
                         <span>{ws.name}</span>
@@ -663,6 +667,38 @@ export const SettingsView: FC<SettingsViewProps> = ({
                       onClick={() => openLink('https://dashboard.ngrok.com/get-started/your-authtoken')}
                     >{t('settings.ngrokGetToken')}</button>
                   </p>
+                </div>
+
+                {/* WMS Account */}
+                <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 space-y-3 mt-4">
+                  <h3 className="text-sm font-medium text-slate-300">{t('settings.wmsAccount', 'WMS Account')}</h3>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <svg className="w-4 h-4 text-slate-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+                      </svg>
+                      <span className={`text-sm truncate ${wmsUserName ? 'text-slate-300' : 'text-slate-500'}`}>
+                        {wmsUserName || t('app.wmsNotLoggedIn', 'Not logged in')}
+                      </span>
+                    </div>
+                    {wmsUserName && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-400/70 hover:text-red-300 hover:bg-red-900/20 text-xs gap-1.5 shrink-0"
+                        onClick={async () => {
+                          try {
+                            await wmsLogout();
+                            if (onWmsLogout) onWmsLogout();
+                          } catch (e) {
+                            console.error('WMS logout failed:', e);
+                          }
+                        }}
+                      >
+                        {t('settings.wmsLogout', 'Logout')}
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </div>
             )}

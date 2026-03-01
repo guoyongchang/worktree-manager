@@ -19,6 +19,7 @@ import {
   getWmsConfig,
   wmsBrowserLogin,
   getWmsUser,
+  wmsLogout,
 } from '../lib/backend';
 import type { ConnectedClient, WmsUser } from '../lib/backend';
 
@@ -64,6 +65,7 @@ export interface UseShareFeatureReturn {
   setShowWmsLoginDialog: (show: boolean) => void;
   wmsLoginLoading: boolean;
   handleWmsBrowserLogin: () => Promise<void>;
+  handleWmsLogout: () => Promise<void>;
 }
 
 export function useShareFeature(
@@ -350,6 +352,17 @@ export function useShareFeature(
     }
   }, [setError, pendingShareAction]);
 
+  // Handle WMS logout: clear JWT and user info
+  const handleWmsLogout = useCallback(async () => {
+    try {
+      await wmsLogout();
+      setWmsLoggedIn(false);
+      setWmsUser(null);
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [setError]);
+
   // Restore share state and load last password on mount (Tauri only)
   useEffect(() => {
     if (isTauri()) {
@@ -457,5 +470,6 @@ export function useShareFeature(
     setShowWmsLoginDialog,
     wmsLoginLoading,
     handleWmsBrowserLogin,
+    handleWmsLogout,
   };
 }

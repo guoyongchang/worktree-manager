@@ -721,6 +721,7 @@ interface WorktreeSidebarProps {
   onQuickShare?: () => void;
   occupation?: MainWorkspaceOccupation | null;
   hasNgrokToken?: boolean;
+  wmsUserName?: string | null;
 }
 
 export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
@@ -770,6 +771,7 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
   onQuickShare,
   occupation,
   hasNgrokToken = false,
+  wmsUserName,
 }) => {
   const { t } = useTranslation();
   const _isTauri = isTauri();
@@ -1055,9 +1057,18 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
               </TooltipProvider>
             )}
           </div>
+          {/* WMS User status */}
+          {_isTauri && (
+            <div className="flex items-center gap-1.5 mt-2 px-0.5">
+              <svg className="w-3 h-3 text-slate-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+              </svg>
+              <span className={`text-[11px] truncate ${wmsUserName ? 'text-slate-400' : 'text-slate-600'}`} title={wmsUserName || undefined}>
+                {wmsUserName || t('app.wmsNotLoggedIn', 'Not logged in')}
+              </span>
+            </div>
+          )}
         </div>
-
-        {/* Header */}
         <div className="px-4 py-3 border-b border-slate-700/50">
           <div className="flex items-center justify-between">
             <h1 className="text-base font-semibold text-slate-100">Worktrees</h1>

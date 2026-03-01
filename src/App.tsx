@@ -373,6 +373,8 @@ function App() {
                   workspaces={workspace.workspaces}
                   currentWorkspace={workspace.currentWorkspace}
                   onRemoveWorkspace={workspace.removeWorkspace}
+                  wmsUserName={share.wmsUser?.display_name || share.wmsUser?.username || share.wmsUser?.email || null}
+                  onWmsLogout={share.handleWmsLogout}
                 />
               )}
             </div>
@@ -430,6 +432,7 @@ function App() {
                   onQuickShare={share.handleQuickShare}
                   hasNgrokToken={share.hasNgrokToken}
                   occupation={mainOccupation.occupation}
+                  wmsUserName={share.wmsUser?.display_name || share.wmsUser?.username || share.wmsUser?.email || null}
                 />
               )}
 
