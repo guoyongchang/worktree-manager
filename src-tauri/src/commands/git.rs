@@ -12,12 +12,16 @@ use crate::utils::{normalize_path, parse_repo_url};
 pub(crate) fn switch_branch(request: SwitchBranchRequest) -> Result<(), String> {
     log::info!(
         "[git] Switching branch: path='{}', target='{}'",
-        request.project_path, request.branch
+        request.project_path,
+        request.branch
     );
     let path = PathBuf::from(&request.project_path);
 
     if !path.exists() {
-        log::error!("[git] Project path does not exist: {}", request.project_path);
+        log::error!(
+            "[git] Project path does not exist: {}",
+            request.project_path
+        );
         return Err(format!(
             "Project path does not exist: {}",
             request.project_path
@@ -52,7 +56,11 @@ pub(crate) fn switch_branch(request: SwitchBranchRequest) -> Result<(), String> 
 
     if !checkout_output.status.success() {
         let stderr = String::from_utf8_lossy(&checkout_output.stderr);
-        log::error!("[git] Step 2/3 FAILED: git checkout {}: {}", request.branch, stderr);
+        log::error!(
+            "[git] Step 2/3 FAILED: git checkout {}: {}",
+            request.branch,
+            stderr
+        );
         return Err(format!("Failed to checkout {}: {}", request.branch, stderr));
     }
     log::info!("[git] Step 2/3: git checkout {} succeeded", request.branch);
@@ -69,12 +77,16 @@ pub(crate) fn switch_branch(request: SwitchBranchRequest) -> Result<(), String> 
         let stderr = String::from_utf8_lossy(&pull_output.stderr);
         log::warn!("[git] Step 3/3: git pull failed (non-critical): {}", stderr);
     } else {
-        log::info!("[git] Step 3/3: git pull origin {} succeeded", request.branch);
+        log::info!(
+            "[git] Step 3/3: git pull origin {} succeeded",
+            request.branch
+        );
     }
 
     log::info!(
         "[git] Successfully switched to branch '{}' at '{}'",
-        request.branch, request.project_path
+        request.branch,
+        request.project_path
     );
     Ok(())
 }
@@ -89,19 +101,31 @@ pub fn clone_project_impl(window_label: &str, request: CloneProjectRequest) -> R
     // Sanitize URL for logging (may contain tokens)
     let safe_url = if request.repo_url.contains('@') && request.repo_url.contains("://") {
         // URL with possible embedded credentials: scheme://user:token@host/...
-        request.repo_url.split('@').next_back().map(|h| format!("***@{}", h)).unwrap_or_else(|| "<redacted>".to_string())
+        request
+            .repo_url
+            .split('@')
+            .next_back()
+            .map(|h| format!("***@{}", h))
+            .unwrap_or_else(|| "<redacted>".to_string())
     } else {
         request.repo_url.clone()
     };
 
     log::info!(
         "[git] Cloning project: name='{}', url='{}', target='{}', base_branch='{}'",
-        request.name, safe_url, target_path.display(), request.base_branch
+        request.name,
+        safe_url,
+        target_path.display(),
+        request.base_branch
     );
 
     // Check if project already exists
     if target_path.exists() {
-        log::error!("[git] Project '{}' already exists at {}", request.name, target_path.display());
+        log::error!(
+            "[git] Project '{}' already exists at {}",
+            request.name,
+            target_path.display()
+        );
         return Err(format!("Project '{}' already exists", request.name));
     }
 
@@ -136,11 +160,17 @@ pub fn clone_project_impl(window_label: &str, request: CloneProjectRequest) -> R
             request.base_branch
         );
     } else {
-        log::info!("[git] Step 2/3: Checked out base branch '{}'", request.base_branch);
+        log::info!(
+            "[git] Step 2/3: Checked out base branch '{}'",
+            request.base_branch
+        );
     }
 
     // Step 3: Add project to config
-    log::info!("[git] Step 3/3: Adding project '{}' to workspace config", request.name);
+    log::info!(
+        "[git] Step 3/3: Adding project '{}' to workspace config",
+        request.name
+    );
     config.projects.push(ProjectConfig {
         name: request.name.clone(),
         base_branch: request.base_branch,
@@ -246,11 +276,15 @@ pub(crate) fn commit_all(path: String, message: String) -> Result<String, String
 pub fn switch_branch_internal(request: &SwitchBranchRequest) -> Result<(), String> {
     log::info!(
         "[git] switch_branch_internal: path='{}', target='{}'",
-        request.project_path, request.branch
+        request.project_path,
+        request.branch
     );
     let path = PathBuf::from(&request.project_path);
     if !path.exists() {
-        log::error!("[git] Project path does not exist: {}", request.project_path);
+        log::error!(
+            "[git] Project path does not exist: {}",
+            request.project_path
+        );
         return Err(format!(
             "Project path does not exist: {}",
             request.project_path
@@ -269,7 +303,11 @@ pub fn switch_branch_internal(request: &SwitchBranchRequest) -> Result<(), Strin
         .map_err(|e| format!("Failed to checkout: {}", e))?;
     if !checkout_output.status.success() {
         let stderr = String::from_utf8_lossy(&checkout_output.stderr);
-        log::error!("[git] Step 2/3 FAILED: git checkout {}: {}", request.branch, stderr);
+        log::error!(
+            "[git] Step 2/3 FAILED: git checkout {}: {}",
+            request.branch,
+            stderr
+        );
         return Err(format!("Failed to checkout {}: {}", request.branch, stderr));
     }
     log::info!("[git] Step 3/3: git pull origin {}", request.branch);

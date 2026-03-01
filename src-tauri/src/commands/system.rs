@@ -250,7 +250,9 @@ fn get_platform_log_dir() -> Result<PathBuf, String> {
         let appdata = std::env::var("APPDATA")
             .or_else(|_| std::env::var("LOCALAPPDATA"))
             .map_err(|_| "无法获取 APPDATA 目录".to_string())?;
-        Ok(PathBuf::from(appdata).join("com.guo.worktree-manager").join("logs"))
+        Ok(PathBuf::from(appdata)
+            .join("com.guo.worktree-manager")
+            .join("logs"))
     }
     #[cfg(target_os = "linux")]
     {
@@ -259,7 +261,9 @@ fn get_platform_log_dir() -> Result<PathBuf, String> {
             let home = std::env::var("HOME").unwrap_or_default();
             format!("{}/.local/share", home)
         });
-        Ok(PathBuf::from(data_home).join("com.guo.worktree-manager").join("logs"))
+        Ok(PathBuf::from(data_home)
+            .join("com.guo.worktree-manager")
+            .join("logs"))
     }
 }
 

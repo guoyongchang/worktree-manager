@@ -45,17 +45,18 @@ async fn discover_tunnel_config(server_url: &str) -> Option<TunnelDiscoveryRespo
         .ok()?;
 
     match client.get(&url).send().await {
-        Ok(resp) if resp.status().is_success() => match resp.json::<TunnelDiscoveryResponse>().await
-        {
-            Ok(config) => {
-                log::info!("[wms-tunnel] Discovery config: {:?}", config);
-                Some(config)
+        Ok(resp) if resp.status().is_success() => {
+            match resp.json::<TunnelDiscoveryResponse>().await {
+                Ok(config) => {
+                    log::info!("[wms-tunnel] Discovery config: {:?}", config);
+                    Some(config)
+                }
+                Err(e) => {
+                    log::warn!("[wms-tunnel] Failed to parse discovery response: {}", e);
+                    None
+                }
             }
-            Err(e) => {
-                log::warn!("[wms-tunnel] Failed to parse discovery response: {}", e);
-                None
-            }
-        },
+        }
         Ok(resp) => {
             log::warn!(
                 "[wms-tunnel] Discovery endpoint returned status {}",
@@ -137,10 +138,7 @@ fn resolve_tunnel_config(
             format!("{}://{}/t/{}/", protocol, host, subdomain)
         };
 
-    ResolvedTunnelConfig {
-        ws_url,
-        public_url,
-    }
+    ResolvedTunnelConfig { ws_url, public_url }
 }
 
 // ==================== Reconnection state shared with frontend ====================
@@ -359,10 +357,7 @@ async fn handle_ws_open(
 
     match tokio_tungstenite::connect_async(&url).await {
         Ok((ws_stream, _)) => {
-            log::info!(
-                "[wms-tunnel] WS bridge connected: stream_id={}",
-                stream_id
-            );
+            log::info!("[wms-tunnel] WS bridge connected: stream_id={}", stream_id);
             let _ = send_tx.send(ClientMessage::WsOpened {
                 stream_id: stream_id.clone(),
             });

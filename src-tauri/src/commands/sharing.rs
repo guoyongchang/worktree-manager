@@ -5,8 +5,7 @@ use ngrok::tunnel::{EndpointInfo, HttpTunnel}; // EndpointInfo trait import: pro
 use crate::config::{get_window_workspace_path, load_global_config, save_global_config_internal};
 use crate::http_server;
 use crate::state::{
-    AUTHENTICATED_SESSIONS, CLIENT_NOTIFICATION_BROADCAST, CONNECTED_CLIENTS, SHARE_STATE,
-    TOKIO_RT,
+    AUTHENTICATED_SESSIONS, CLIENT_NOTIFICATION_BROADCAST, CONNECTED_CLIENTS, SHARE_STATE, TOKIO_RT,
 };
 use crate::tls;
 use crate::types::{ConnectedClient, ShareStateInfo};
@@ -138,8 +137,7 @@ pub async fn start_sharing_internal(
 
     let rng = SystemRandom::new();
     let mut salt = vec![0u8; 16];
-    rng.fill(&mut salt)
-        .map_err(|_| "Failed to generate salt")?;
+    rng.fill(&mut salt).map_err(|_| "Failed to generate salt")?;
 
     let mut auth_key = vec![0u8; 32];
     pbkdf2::derive(
@@ -232,7 +230,10 @@ pub async fn start_ngrok_tunnel_internal() -> Result<String, String> {
                 .connect()
                 .await
                 .map_err(|e| format!("ngrok 连接失败: {}", e))?;
-            log::info!("[ngrok] Session established, creating HTTP tunnel to localhost:{}", port);
+            log::info!(
+                "[ngrok] Session established, creating HTTP tunnel to localhost:{}",
+                port
+            );
 
             let forwarder = session
                 .http_endpoint()
@@ -377,12 +378,22 @@ pub async fn auto_register_tunnel_internal() -> Result<WmsConfig, String> {
     };
 
     let jwt = config.wms_jwt.clone();
-    let server_url = config.wms_server_url.clone()
+    let server_url = config
+        .wms_server_url
+        .clone()
         .unwrap_or_else(|| "https://tunnel.kirov-opensource.com".to_string());
 
     let register_url = format!("{}/api/device/register", server_url.trim_end_matches('/'));
-    let mode = if jwt.is_some() { "authenticated" } else { "anonymous" };
-    log::info!("[wms-tunnel] Auto-registering device at {} (mode={})", register_url, mode);
+    let mode = if jwt.is_some() {
+        "authenticated"
+    } else {
+        "anonymous"
+    };
+    log::info!(
+        "[wms-tunnel] Auto-registering device at {} (mode={})",
+        register_url,
+        mode
+    );
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
@@ -442,7 +453,7 @@ pub async fn auto_register_tunnel_internal() -> Result<WmsConfig, String> {
 }
 
 /// Destroy current device registration: stop tunnel, clear wms config, regenerate device_id.
-async fn destroy_current_device_registration() -> Result<(), String> {
+pub(crate) async fn destroy_current_device_registration() -> Result<(), String> {
     log::info!("[wms-tunnel] Destroying current device registration");
 
     // Check if WMS tunnel is running (drop MutexGuard before async)
@@ -462,7 +473,10 @@ async fn destroy_current_device_registration() -> Result<(), String> {
     config.device_id = Some(uuid::Uuid::new_v4().to_string());
     save_global_config_internal(&config)?;
 
-    log::info!("[wms-tunnel] Device registration destroyed, new device_id: {:?}", config.device_id);
+    log::info!(
+        "[wms-tunnel] Device registration destroyed, new device_id: {:?}",
+        config.device_id
+    );
     Ok(())
 }
 
@@ -470,7 +484,9 @@ async fn destroy_current_device_registration() -> Result<(), String> {
 #[tauri::command]
 pub(crate) async fn wms_login(username: String, password: String) -> Result<WmsConfig, String> {
     let config = load_global_config();
-    let server_url = config.wms_server_url.clone()
+    let server_url = config
+        .wms_server_url
+        .clone()
         .unwrap_or_else(|| "https://tunnel.kirov-opensource.com".to_string());
 
     let login_url = format!("{}/api/login", server_url.trim_end_matches('/'));
@@ -504,7 +520,10 @@ pub(crate) async fn wms_login(username: String, password: String) -> Result<WmsC
         .await
         .map_err(|e| format!("解析登录响应失败: {}", e))?;
 
-    log::info!("[wms-tunnel] Login successful, jwt_len={}", login_result.token.len());
+    log::info!(
+        "[wms-tunnel] Login successful, jwt_len={}",
+        login_result.token.len()
+    );
 
     // 1. Destroy current device registration (stop tunnel, clear old wms config, new device_id)
     destroy_current_device_registration().await?;
@@ -537,6 +556,128 @@ pub(crate) async fn wms_logout() -> Result<WmsConfig, String> {
 
     // 3. Re-register as anonymous device
     auto_register_tunnel_internal().await
+}
+
+/// WMS Browser Login: open system browser to WMS admin page, listen for callback with JWT.
+#[tauri::command]
+pub(crate) async fn wms_browser_login(app: tauri::AppHandle) -> Result<String, String> {
+    let config = load_global_config();
+    let server_url = config
+        .wms_server_url
+        .clone()
+        .unwrap_or_else(|| "https://wms.kirov-opensource.com".to_string());
+
+    // 1. Bind a temporary one-shot TCP listener on a random port
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .map_err(|e| format!("Failed to bind listener: {}", e))?;
+    let port = listener
+        .local_addr()
+        .map_err(|e| format!("Failed to get port: {}", e))?
+        .port();
+
+    let callback_url = format!("http://localhost:{}/auth/wms-callback", port);
+    let browser_url = format!(
+        "{}/admin?callback={}",
+        server_url.trim_end_matches('/'),
+        urlencoding::encode(&callback_url)
+    );
+
+    log::info!(
+        "[wms-browser-login] Opening browser: {}, callback port: {}",
+        browser_url,
+        port
+    );
+
+    // 2. Open system browser
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_url(&browser_url, None::<&str>)
+        .map_err(|e| format!("Failed to open browser: {}", e))?;
+
+    // 3. Wait for callback (timeout 120s)
+    let token = tokio::time::timeout(std::time::Duration::from_secs(120), async {
+        loop {
+            let (stream, _) = listener
+                .accept()
+                .await
+                .map_err(|e| format!("Accept failed: {}", e))?;
+
+            let mut buf = vec![0u8; 8192];
+            stream
+                .readable()
+                .await
+                .map_err(|e| format!("Stream not readable: {}", e))?;
+            let n = stream
+                .try_read(&mut buf)
+                .map_err(|e| format!("Read failed: {}", e))?;
+            let request = String::from_utf8_lossy(&buf[..n]);
+
+            // Parse GET /auth/wms-callback?token=...
+            if let Some(line) = request.lines().next() {
+                if let Some(path) = line.split_whitespace().nth(1) {
+                    if path.starts_with("/auth/wms-callback") {
+                        // Extract token from query
+                        if let Some(query) = path.split('?').nth(1) {
+                            for param in query.split('&') {
+                                if let Some(val) = param.strip_prefix("token=") {
+                                    let token =
+                                        urlencoding::decode(val).unwrap_or_default().to_string();
+
+                                    // Send success response
+                                    let html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Login OK</title>\
+                                        <style>body{font-family:-apple-system,sans-serif;background:#0f172a;color:#e2e8f0;\
+                                        display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}\
+                                        .c{text-align:center;padding:3rem;border-radius:1rem;background:#1e293b;border:1px solid #334155}\
+                                        .i{font-size:3rem;margin-bottom:1rem}h1{font-size:1.25rem;margin:0 0 .5rem}\
+                                        p{color:#94a3b8;font-size:.875rem;margin:0}</style></head>\
+                                        <body><div class=\"c\"><div class=\"i\">✅</div><h1>Login Successful!</h1>\
+                                        <p>You may close this tab and return to Worktree Manager.</p></div></body></html>";
+                                    let response = format!(
+                                        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                                        html.len(),
+                                        html
+                                    );
+                                    let _ = stream.try_write(response.as_bytes());
+
+                                    return Ok::<String, String>(token);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // Not the right request, continue listening
+        }
+    })
+    .await
+    .map_err(|_| "Login timed out (120s). Please try again.".to_string())?
+    .map_err(|e| format!("Callback error: {}", e))?;
+
+    log::info!("[wms-browser-login] Got token, len={}", token.len());
+
+    // 4. Save JWT, re-register device
+    destroy_current_device_registration().await.ok();
+
+    {
+        let mut config = load_global_config();
+        config.wms_jwt = Some(token.clone());
+        save_global_config_internal(&config)?;
+    }
+
+    let wms_config = auto_register_tunnel_internal().await?;
+
+    // 5. Emit event
+    use tauri::Emitter;
+    let _ = app.emit(
+        "wms-login-success",
+        serde_json::json!({
+            "server_url": wms_config.server_url,
+            "subdomain": wms_config.subdomain,
+        }),
+    );
+
+    Ok("Login successful".to_string())
 }
 
 #[tauri::command]
@@ -588,8 +729,7 @@ pub async fn start_wms_tunnel_internal(window: Option<tauri::Window>) -> Result<
         // Since passwords are no longer persisted for security, WMS auto-start requires manual LAN sharing first
         log::warn!("[wms-tunnel] Cannot auto-start: LAN sharing requires manual password entry");
         return Err(
-            "WMS 隧道需要先手动启动 LAN 分享。出于安全考虑，密码不再自动保存。"
-                .to_string(),
+            "WMS 隧道需要先手动启动 LAN 分享。出于安全考虑，密码不再自动保存。".to_string(),
         );
     };
 
@@ -603,8 +743,12 @@ pub async fn start_wms_tunnel_internal(window: Option<tauri::Window>) -> Result<
             log::info!("[wms-tunnel] Token/subdomain missing, auto-registering...");
             let registered = auto_register_tunnel_internal().await?;
             (
-                registered.server_url.unwrap_or_else(|| "https://tunnel.kirov-opensource.com".to_string()),
-                registered.subdomain.ok_or("注册后未获得 subdomain".to_string())?,
+                registered
+                    .server_url
+                    .unwrap_or_else(|| "https://tunnel.kirov-opensource.com".to_string()),
+                registered
+                    .subdomain
+                    .ok_or("注册后未获得 subdomain".to_string())?,
                 registered.token.filter(|t| !t.is_empty()),
             )
         } else {
@@ -753,10 +897,7 @@ pub async fn stop_wms_tunnel_internal() -> Result<(), String> {
     if should_stop_lan {
         log::info!("[wms-tunnel] Auto-stopping LAN sharing (was auto-started by WMS)");
         if let Err(e) = stop_sharing_internal() {
-            log::warn!(
-                "[wms-tunnel] Failed to auto-stop LAN sharing: {}",
-                e
-            );
+            log::warn!("[wms-tunnel] Failed to auto-stop LAN sharing: {}", e);
         }
     }
 
@@ -865,10 +1006,7 @@ pub fn stop_sharing_internal() -> Result<(), String> {
     if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() {
         let count = sessions.len();
         sessions.clear();
-        log::info!(
-            "[sharing] Cleared {} authenticated sessions",
-            count
-        );
+        log::info!("[sharing] Cleared {} authenticated sessions", count);
     }
     if let Ok(mut clients) = CONNECTED_CLIENTS.lock() {
         let count = clients.len();
@@ -928,9 +1066,10 @@ pub(crate) async fn get_share_state() -> Result<ShareStateInfo, String> {
             (false, 0, 0)
         };
 
-    let current_workspace_name = state.workspace_path.as_ref().map(|path| {
-        crate::config::load_workspace_config(path).name
-    });
+    let current_workspace_name = state
+        .workspace_path
+        .as_ref()
+        .map(|path| crate::config::load_workspace_config(path).name);
 
     Ok(ShareStateInfo {
         active: state.active,
@@ -965,8 +1104,7 @@ pub(crate) async fn update_share_password(password: String) -> Result<(), String
 
     let rng = SystemRandom::new();
     let mut salt = vec![0u8; 16];
-    rng.fill(&mut salt)
-        .map_err(|_| "Failed to generate salt")?;
+    rng.fill(&mut salt).map_err(|_| "Failed to generate salt")?;
 
     let mut auth_key = vec![0u8; 32];
     pbkdf2::derive(
@@ -1033,7 +1171,10 @@ pub fn kick_client_internal(session_id: &str) -> Result<(), String> {
     })
     .to_string();
     let _ = CLIENT_NOTIFICATION_BROADCAST.send(notification);
-    log::info!("[sharing] Kick notification broadcast sent for session {}", session_id);
+    log::info!(
+        "[sharing] Kick notification broadcast sent for session {}",
+        session_id
+    );
 
     // Remove from authenticated sessions
     if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() {

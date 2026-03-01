@@ -249,11 +249,16 @@ pub fn create_worktree_impl(
     let project_count = request.projects.len();
     log::info!(
         "[worktree] Creating worktree '{}' in workspace '{}' with {} projects",
-        request.name, workspace_path, project_count
+        request.name,
+        workspace_path,
+        project_count
     );
 
     // Create worktree directory
-    log::info!("[worktree] Step 1: Creating directory structure at {}", worktree_path.display());
+    log::info!(
+        "[worktree] Step 1: Creating directory structure at {}",
+        worktree_path.display()
+    );
     std::fs::create_dir_all(worktree_path.join("projects"))
         .map_err(|e| format!("Failed to create worktree directory: {}", e))?;
 
@@ -268,7 +273,11 @@ pub fn create_worktree_impl(
         if src.exists() && !dst.exists() {
             #[allow(unused_variables)]
             let link_result = create_symlink(&src, &dst);
-            log::debug!("[worktree] Linked workspace item: {} (result: {:?})", name, link_result);
+            log::debug!(
+                "[worktree] Linked workspace item: {} (result: {:?})",
+                name,
+                link_result
+            );
         }
     }
 
@@ -291,10 +300,7 @@ pub fn create_worktree_impl(
         let wt_proj_path = worktree_path.join("projects").join(&proj_req.name);
 
         // Fetch origin first (with timeout)
-        log::info!(
-            "[worktree] Project '{}': git fetch origin",
-            proj_req.name
-        );
+        log::info!("[worktree] Project '{}': git fetch origin", proj_req.name);
         run_git_command_with_timeout(&["fetch", "origin"], main_proj_path.to_str().unwrap())?;
 
         // Check if branch already exists
@@ -357,19 +363,24 @@ pub fn create_worktree_impl(
             let stderr = String::from_utf8_lossy(&output.stderr);
             log::error!(
                 "[worktree] FAILED: git worktree add for project '{}': {}",
-                proj_req.name, stderr
+                proj_req.name,
+                stderr
             );
             return Err(format!(
                 "Failed to create worktree for {}: {}",
                 proj_req.name, stderr
             ));
         }
-        log::info!("[worktree] Project '{}': git worktree add succeeded", proj_req.name);
+        log::info!(
+            "[worktree] Project '{}': git worktree add succeeded",
+            proj_req.name
+        );
 
         // Link configured folders
         log::info!(
             "[worktree] Project '{}': Creating symlinks for {} linked folders",
-            proj_req.name, proj_config.linked_folders.len()
+            proj_req.name,
+            proj_config.linked_folders.len()
         );
         for folder_name in &proj_config.linked_folders {
             let main_folder = main_proj_path.join(folder_name);
@@ -396,7 +407,8 @@ pub fn create_worktree_impl(
 
     log::info!(
         "[worktree] Successfully created worktree '{}' with {} projects",
-        request.name, project_count
+        request.name,
+        project_count
     );
     Ok(normalize_path(&worktree_path.to_string_lossy()))
 }
@@ -423,10 +435,17 @@ pub fn archive_worktree_impl(window_label: &str, name: String) -> Result<(), Str
         return Err("Worktree does not exist".to_string());
     }
 
-    log::info!("[worktree] Archiving worktree '{}' in workspace '{}'", name, workspace_path);
+    log::info!(
+        "[worktree] Archiving worktree '{}' in workspace '{}'",
+        name,
+        workspace_path
+    );
 
     // Step 1: Close all PTY sessions associated with this worktree
-    log::info!("[worktree] Step 1/3: Closing PTY sessions for worktree '{}'", name);
+    log::info!(
+        "[worktree] Step 1/3: Closing PTY sessions for worktree '{}'",
+        name
+    );
     {
         let worktree_path_str = worktree_path.to_string_lossy().to_string();
         if let Ok(mut manager) = PTY_MANAGER.lock() {
@@ -444,7 +463,10 @@ pub fn archive_worktree_impl(window_label: &str, name: String) -> Result<(), Str
     }
 
     // Step 2: Remove git worktrees first
-    log::info!("[worktree] Step 2/3: Removing git worktree registrations for '{}'", name);
+    log::info!(
+        "[worktree] Step 2/3: Removing git worktree registrations for '{}'",
+        name
+    );
     let projects_path = worktree_path.join("projects");
     if projects_path.exists() {
         if let Ok(entries) = std::fs::read_dir(&projects_path) {
@@ -454,7 +476,10 @@ pub fn archive_worktree_impl(window_label: &str, name: String) -> Result<(), Str
 
                 let main_proj_path = root.join("projects").join(proj_name);
 
-                log::info!("[worktree] Removing git worktree for project '{}'", proj_name);
+                log::info!(
+                    "[worktree] Removing git worktree for project '{}'",
+                    proj_name
+                );
                 let output = Command::new("git")
                     .args([
                         "-C",
@@ -468,7 +493,10 @@ pub fn archive_worktree_impl(window_label: &str, name: String) -> Result<(), Str
 
                 match &output {
                     Ok(o) if o.status.success() => {
-                        log::info!("[worktree] Successfully removed git worktree for '{}'", proj_name);
+                        log::info!(
+                            "[worktree] Successfully removed git worktree for '{}'",
+                            proj_name
+                        );
                     }
                     Ok(o) => {
                         log::warn!(
@@ -478,7 +506,11 @@ pub fn archive_worktree_impl(window_label: &str, name: String) -> Result<(), Str
                         );
                     }
                     Err(e) => {
-                        log::warn!("[worktree] Failed to execute git worktree remove for '{}': {}", proj_name, e);
+                        log::warn!(
+                            "[worktree] Failed to execute git worktree remove for '{}': {}",
+                            proj_name,
+                            e
+                        );
                     }
                 }
             }
@@ -486,7 +518,10 @@ pub fn archive_worktree_impl(window_label: &str, name: String) -> Result<(), Str
     }
 
     // Step 3: Rename directory to .archive
-    log::info!("[worktree] Step 3/3: Renaming directory to '{}'", archive_name);
+    log::info!(
+        "[worktree] Step 3/3: Renaming directory to '{}'",
+        archive_name
+    );
     // If archive directory already exists (e.g. from a previous failed attempt), remove it first
     if archive_path.exists() {
         log::warn!(
@@ -610,11 +645,15 @@ pub fn restore_worktree_impl(window_label: &str, name: String) -> Result<(), Str
 
     log::info!(
         "[worktree] Restoring worktree '{}' from archive in workspace '{}'",
-        restored_name, workspace_path
+        restored_name,
+        workspace_path
     );
 
     // Step 1: Rename archive directory to restored path
-    log::info!("[worktree] Step 1/3: Renaming archive directory to '{}'", restored_name);
+    log::info!(
+        "[worktree] Step 1/3: Renaming archive directory to '{}'",
+        restored_name
+    );
     // If target directory already exists, remove it first
     if worktree_path.exists() {
         log::warn!(
@@ -630,7 +669,10 @@ pub fn restore_worktree_impl(window_label: &str, name: String) -> Result<(), Str
         .map_err(|e| format!("Failed to restore worktree: {}", e))?;
 
     // Step 2: Re-register git worktrees for each project
-    log::info!("[worktree] Step 2/3: Re-registering git worktrees for '{}'", restored_name);
+    log::info!(
+        "[worktree] Step 2/3: Re-registering git worktrees for '{}'",
+        restored_name
+    );
     let projects_path = worktree_path.join("projects");
     if projects_path.exists() {
         if let Ok(entries) = std::fs::read_dir(&projects_path) {
@@ -807,17 +849,25 @@ pub fn delete_archived_worktree_impl(window_label: &str, name: String) -> Result
     let branch_name = name.strip_suffix(".archive").unwrap_or(&name);
     log::info!(
         "[worktree] Deleting archived worktree '{}' (branch: {}) in workspace '{}'",
-        name, branch_name, workspace_path
+        name,
+        branch_name,
+        workspace_path
     );
 
     // Step 1: Close any related PTY sessions
-    log::info!("[worktree] Step 1/3: Closing PTY sessions for archived worktree '{}'", name);
+    log::info!(
+        "[worktree] Step 1/3: Closing PTY sessions for archived worktree '{}'",
+        name
+    );
     {
         let archive_path_str = archive_path.to_string_lossy().to_string();
         if let Ok(mut manager) = PTY_MANAGER.lock() {
             let closed = manager.close_sessions_by_path_prefix(&archive_path_str);
             if !closed.is_empty() {
-                log::info!("[worktree] Closed {} PTY sessions for deleted worktree", closed.len());
+                log::info!(
+                    "[worktree] Closed {} PTY sessions for deleted worktree",
+                    closed.len()
+                );
             } else {
                 log::info!("[worktree] No PTY sessions to close");
             }
@@ -825,7 +875,10 @@ pub fn delete_archived_worktree_impl(window_label: &str, name: String) -> Result
     }
 
     // Step 2: Delete associated local branches for each project
-    log::info!("[worktree] Step 2/3: Deleting local branch '{}' from projects", branch_name);
+    log::info!(
+        "[worktree] Step 2/3: Deleting local branch '{}' from projects",
+        branch_name
+    );
     let projects_path = root.join("projects");
     if projects_path.exists() {
         if let Ok(entries) = std::fs::read_dir(&projects_path) {
@@ -863,11 +916,17 @@ pub fn delete_archived_worktree_impl(window_label: &str, name: String) -> Result
     }
 
     // Step 3: Remove the directory
-    log::info!("[worktree] Step 3/3: Removing directory {}", archive_path.display());
+    log::info!(
+        "[worktree] Step 3/3: Removing directory {}",
+        archive_path.display()
+    );
     fs::remove_dir_all(&archive_path)
         .map_err(|e| format!("Failed to delete archived worktree: {}", e))?;
 
-    log::info!("[worktree] Successfully deleted archived worktree '{}'", name);
+    log::info!(
+        "[worktree] Successfully deleted archived worktree '{}'",
+        name
+    );
     Ok(())
 }
 
@@ -935,7 +994,9 @@ pub fn add_project_to_worktree_impl(
 
     log::info!(
         "[worktree] Adding project '{}' to worktree '{}' (base_branch: {})",
-        request.project_name, request.worktree_name, request.base_branch
+        request.project_name,
+        request.worktree_name,
+        request.base_branch
     );
 
     // Step 1: Fetch origin first
@@ -1009,7 +1070,8 @@ pub fn add_project_to_worktree_impl(
         let stderr = String::from_utf8_lossy(&output.stderr);
         log::error!(
             "[worktree] FAILED: git worktree add for project '{}': {}",
-            request.project_name, stderr
+            request.project_name,
+            stderr
         );
         return Err(format!(
             "Failed to add project {} to worktree: {}",
@@ -1305,8 +1367,8 @@ pub fn exit_main_occupation_impl(window_label: &str, force: bool) -> Result<(), 
     let (workspace_path, config) =
         get_window_workspace_config(window_label).ok_or("No workspace selected")?;
 
-    let occupation = load_occupation_state(&workspace_path)
-        .ok_or("Main workspace is not currently occupied")?;
+    let occupation =
+        load_occupation_state(&workspace_path).ok_or("Main workspace is not currently occupied")?;
 
     let root = PathBuf::from(&workspace_path);
     let main_projects_path = root.join("projects");

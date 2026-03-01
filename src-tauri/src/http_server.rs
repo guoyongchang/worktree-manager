@@ -41,12 +41,17 @@ use crate::{
     get_workspace_config_impl,
     git_ops,
     list_worktrees_impl,
+    // WMS config & tunnel
+    load_global_config,
     load_workspace_config,
     lock_worktree_impl,
     normalize_path,
     restore_worktree_impl,
+    save_global_config_internal,
     save_workspace_config_impl,
     set_window_workspace_impl,
+    start_wms_tunnel_internal,
+    stop_wms_tunnel_internal,
     switch_workspace_impl,
     unlock_worktree_impl,
     unregister_window_impl,
@@ -56,11 +61,6 @@ use crate::{
     CreateWorktreeRequest,
     OpenEditorRequest,
     SwitchBranchRequest,
-    // WMS config & tunnel
-    load_global_config,
-    save_global_config_internal,
-    start_wms_tunnel_internal,
-    stop_wms_tunnel_internal,
     WmsConfig,
     // Direct functions (no window context)
     WorkspaceConfig,
@@ -715,8 +715,8 @@ async fn h_auth_challenge(ConnectInfo(addr): ConnectInfo<SocketAddr>) -> Respons
 
 #[derive(serde::Deserialize)]
 struct VerifyRequest {
-    proof: String,  // hex-encoded HMAC
-    nonce: String,  // hex-encoded nonce
+    proof: String, // hex-encoded HMAC
+    nonce: String, // hex-encoded nonce
 }
 
 async fn h_auth_verify(
@@ -732,10 +732,7 @@ async fn h_auth_verify(
         Ok(mut cache) => match cache.consume(&req.nonce) {
             Some(n) => n,
             None => {
-                log::warn!(
-                    "[auth] Invalid or expired nonce from IP: {}",
-                    client_ip
-                );
+                log::warn!("[auth] Invalid or expired nonce from IP: {}", client_ip);
                 return (StatusCode::UNAUTHORIZED, "Invalid or expired nonce").into_response();
             }
         },
@@ -1062,8 +1059,7 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                             // Only forward notifications targeted at this session
                             if val["session_id"].as_str() == Some(&sid) {
                                 let msg_type = val["type"].as_str().unwrap_or("");
-                                let reason =
-                                    val["reason"].as_str().unwrap_or("").to_string();
+                                let reason = val["reason"].as_str().unwrap_or("").to_string();
                                 let msg = json!({
                                     "type": msg_type,
                                     "reason": reason,
@@ -1176,7 +1172,11 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                                             "data": text,
                                         });
                                         let mut sender = sender.lock().await;
-                                        if sender.send(Message::text(msg.to_string())).await.is_err() {
+                                        if sender
+                                            .send(Message::text(msg.to_string()))
+                                            .await
+                                            .is_err()
+                                        {
                                             break;
                                         }
                                     }
@@ -1599,6 +1599,80 @@ async fn h_cert_pem(Extension(cert_pem): Extension<Arc<String>>) -> Response {
         .into_response()
 }
 
+// -- WMS Browser Auth Callback --
+
+#[derive(Deserialize)]
+struct WmsCallbackQuery {
+    token: String,
+}
+
+/// Handle WMS browser-based login callback.
+/// The WMS admin page redirects here with ?token=JWT after successful login.
+async fn h_wms_auth_callback(Query(q): Query<WmsCallbackQuery>) -> Response {
+    log::info!(
+        "[wms-auth] Received browser auth callback, token_len={}",
+        q.token.len()
+    );
+
+    // 1. Destroy current device registration (stop tunnel, clear old config, new device_id)
+    if let Err(e) = crate::commands::sharing::destroy_current_device_registration().await {
+        log::warn!("[wms-auth] Failed to destroy old device: {}", e);
+    }
+
+    // 2. Save JWT to config
+    {
+        let mut config = crate::config::load_global_config();
+        config.wms_jwt = Some(q.token.clone());
+        if let Err(e) = crate::config::save_global_config_internal(&config) {
+            log::error!("[wms-auth] Failed to save JWT: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to save token").into_response();
+        }
+    }
+
+    // 3. Re-register device under the logged-in user
+    let wms_config = match crate::commands::sharing::auto_register_tunnel_internal().await {
+        Ok(config) => config,
+        Err(e) => {
+            log::error!("[wms-auth] Failed to register device: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Device registration failed: {}", e),
+            )
+                .into_response();
+        }
+    };
+
+    // 4. Emit Tauri event so the frontend knows login succeeded
+    if let Some(app_handle) = crate::APP_HANDLE
+        .lock()
+        .ok()
+        .and_then(|h| h.as_ref().cloned())
+    {
+        let _ = app_handle.emit(
+            "wms-login-success",
+            serde_json::json!({
+                "server_url": wms_config.server_url,
+                "subdomain": wms_config.subdomain,
+            }),
+        );
+    }
+
+    // 5. Return success HTML page
+    let html = r#"<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Login Successful</title>
+<style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
+.card{text-align:center;padding:3rem;border-radius:1rem;background:#1e293b;border:1px solid #334155;max-width:400px}
+.icon{font-size:3rem;margin-bottom:1rem}h1{font-size:1.25rem;margin:0 0 0.5rem}p{color:#94a3b8;font-size:0.875rem;margin:0}</style>
+</head><body><div class="card"><div class="icon">✅</div><h1>Login Successful!</h1><p>You may close this tab and return to Worktree Manager.</p></div></body></html>"#;
+
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        html,
+    )
+        .into_response()
+}
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -1815,7 +1889,9 @@ pub fn create_router(cert_pem: Option<String>) -> Router {
         // Misc
         .route("/api/get_app_version", post(h_get_app_version))
         // WebSocket (auth handled in upgrade handler via query param)
-        .route("/ws", get(h_ws_upgrade));
+        .route("/ws", get(h_ws_upgrade))
+        // WMS browser auth callback (no auth needed - token comes from WMS server)
+        .route("/auth/wms-callback", get(h_wms_auth_callback));
 
     // Add cert download route when TLS is enabled
     if let Some(pem) = cert_pem {
@@ -1863,7 +1939,10 @@ pub async fn start_server(
     match tls_certs {
         Some(certs) => {
             // Dual-protocol: HTTP for localhost, HTTPS for LAN — same port
-            log::info!("[http-server] Server on {} (localhost: HTTP, LAN: HTTPS)", addr);
+            log::info!(
+                "[http-server] Server on {} (localhost: HTTP, LAN: HTTPS)",
+                addr
+            );
 
             let app = create_router(Some(certs.cert_pem.clone()));
 

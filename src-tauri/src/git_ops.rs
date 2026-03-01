@@ -7,7 +7,10 @@ use std::process::Command;
 fn find_main_worktree(repo_path: &Path) -> Option<std::path::PathBuf> {
     let git_path = repo_path.join(".git");
     if git_path.is_dir() {
-        log::debug!("[merge] repo_path={} is the main worktree itself", repo_path.display());
+        log::debug!(
+            "[merge] repo_path={} is the main worktree itself",
+            repo_path.display()
+        );
         return Some(repo_path.to_path_buf());
     } else if git_path.is_file() {
         if let Ok(content) = std::fs::read_to_string(&git_path) {
@@ -15,13 +18,19 @@ fn find_main_worktree(repo_path: &Path) -> Option<std::path::PathBuf> {
                 let gitdir = gitdir.trim();
                 if let Some(worktrees_idx) = gitdir.find("/.git/worktrees/") {
                     let main_path = &gitdir[..worktrees_idx];
-                    log::debug!("[merge] Linked worktree detected. Main worktree: {}", main_path);
+                    log::debug!(
+                        "[merge] Linked worktree detected. Main worktree: {}",
+                        main_path
+                    );
                     return Some(std::path::PathBuf::from(main_path));
                 }
             }
         }
     }
-    log::debug!("[merge] Could not find main worktree for {}", repo_path.display());
+    log::debug!(
+        "[merge] Could not find main worktree for {}",
+        repo_path.display()
+    );
     None
 }
 
@@ -33,17 +42,24 @@ fn handle_branch_checkout_conflict(
 ) -> Result<(bool, Option<String>), String> {
     log::info!(
         "[merge] Checking branch conflict: target_branch={}, main_worktree={}",
-        target_branch, main_worktree_path.display()
+        target_branch,
+        main_worktree_path.display()
     );
 
-    let repo = Repository::open(main_worktree_path)
-        .map_err(|e| format!("无法打开主工作区仓库 ({}): {}", main_worktree_path.display(), e))?;
+    let repo = Repository::open(main_worktree_path).map_err(|e| {
+        format!(
+            "无法打开主工作区仓库 ({}): {}",
+            main_worktree_path.display(),
+            e
+        )
+    })?;
 
     if let Ok(head) = repo.head() {
         let current_branch = head.shorthand().unwrap_or("<detached>");
         log::info!(
             "[merge] Main worktree current branch: {}, target: {}",
-            current_branch, target_branch
+            current_branch,
+            target_branch
         );
 
         if current_branch == target_branch {
@@ -74,7 +90,8 @@ fn handle_branch_checkout_conflict(
                 ));
             }
 
-            let head_commit = head.peel_to_commit()
+            let head_commit = head
+                .peel_to_commit()
                 .map_err(|e| format!("获取 HEAD commit 失败: {}", e))?;
             let commit_sha = head_commit.id().to_string();
 
@@ -95,15 +112,17 @@ fn handle_branch_checkout_conflict(
             if !checkout_output.status.success() {
                 let stderr = String::from_utf8_lossy(&checkout_output.stderr);
                 log::error!("[merge] Failed to detach HEAD: {}", stderr);
-                return Err(format!(
-                    "无法将主工作区切换到 detached HEAD: {}", stderr
-                ));
+                return Err(format!("无法将主工作区切换到 detached HEAD: {}", stderr));
             }
 
             log::info!("[merge] Successfully switched main worktree to detached HEAD");
             return Ok((true, Some(target_branch.to_string())));
         } else {
-            log::info!("[merge] No branch conflict (main={}, target={})", current_branch, target_branch);
+            log::info!(
+                "[merge] No branch conflict (main={}, target={})",
+                current_branch,
+                target_branch
+            );
         }
     } else {
         log::warn!("[merge] Cannot read HEAD of main worktree, skipping conflict check");
@@ -377,7 +396,8 @@ pub struct BranchDiffStats {
 pub fn sync_with_base_branch(path: &Path, base_branch: &str) -> Result<String, String> {
     log::info!(
         "[git] Syncing with base branch: path={}, base_branch={}",
-        path.display(), base_branch
+        path.display(),
+        base_branch
     );
 
     // Step 1: Fetch from remote
@@ -393,7 +413,11 @@ pub fn sync_with_base_branch(path: &Path, base_branch: &str) -> Result<String, S
 
     if !fetch_output.status.success() {
         let stderr = String::from_utf8_lossy(&fetch_output.stderr);
-        log::error!("[git] Step 1/2 FAILED: git fetch origin {}: {}", base_branch, stderr);
+        log::error!(
+            "[git] Step 1/2 FAILED: git fetch origin {}: {}",
+            base_branch,
+            stderr
+        );
         return Err(format!("Git fetch failed: {}", stderr));
     }
     log::info!("[git] Step 1/2: git fetch succeeded");
@@ -410,11 +434,18 @@ pub fn sync_with_base_branch(path: &Path, base_branch: &str) -> Result<String, S
 
     if !merge_output.status.success() {
         let stderr = String::from_utf8_lossy(&merge_output.stderr);
-        log::error!("[git] Step 2/2 FAILED: git merge origin/{}: {}", base_branch, stderr);
+        log::error!(
+            "[git] Step 2/2 FAILED: git merge origin/{}: {}",
+            base_branch,
+            stderr
+        );
         return Err(format!("Git merge failed: {}", stderr));
     }
 
-    log::info!("[git] Successfully synced with base branch '{}'", base_branch);
+    log::info!(
+        "[git] Successfully synced with base branch '{}'",
+        base_branch
+    );
     Ok(format!("Successfully synced with {}", base_branch))
 }
 
@@ -455,7 +486,11 @@ pub fn push_to_remote(path: &Path) -> Result<String, String> {
 
     if !push_output.status.success() {
         let stderr = String::from_utf8_lossy(&push_output.stderr);
-        log::error!("[git] Push failed for branch '{}': {}", current_branch, stderr);
+        log::error!(
+            "[git] Push failed for branch '{}': {}",
+            current_branch,
+            stderr
+        );
         return Err(format!("Git push failed: {}", stderr));
     }
 
@@ -517,7 +552,10 @@ fn restore_merge_state(
                     );
                 }
                 Err(e) => {
-                    log::error!("[merge] Failed to execute git checkout for main restore: {}", e);
+                    log::error!(
+                        "[merge] Failed to execute git checkout for main restore: {}",
+                        e
+                    );
                 }
             }
         }
@@ -527,10 +565,14 @@ fn restore_merge_state(
 /// Merge current branch to test branch
 pub fn merge_to_test_branch(path: &Path, test_branch: &str) -> Result<String, String> {
     log::info!("[merge-test] ===== START merge_to_test_branch =====");
-    log::info!("[merge-test] path={}, test_branch={}", path.display(), test_branch);
+    log::info!(
+        "[merge-test] path={}, test_branch={}",
+        path.display(),
+        test_branch
+    );
 
-    let repo = Repository::open(path)
-        .map_err(|e| format!("无法打开仓库 ({}): {}", path.display(), e))?;
+    let repo =
+        Repository::open(path).map_err(|e| format!("无法打开仓库 ({}): {}", path.display(), e))?;
 
     let head = repo
         .head()
@@ -569,13 +611,21 @@ pub fn merge_to_test_branch(path: &Path, test_branch: &str) -> Result<String, St
 
     if !checkout_output.status.success() {
         let stderr = String::from_utf8_lossy(&checkout_output.stderr);
-        log::error!("[merge-test] Step 2 FAILED: checkout {} => {}", test_branch, stderr);
+        log::error!(
+            "[merge-test] Step 2 FAILED: checkout {} => {}",
+            test_branch,
+            stderr
+        );
         if switched_main {
-            restore_merge_state(path, current_branch, switched_main, &main_worktree_path, &original_main_branch);
+            restore_merge_state(
+                path,
+                current_branch,
+                switched_main,
+                &main_worktree_path,
+                &original_main_branch,
+            );
         }
-        return Err(format!(
-            "切换到 {} 分支失败: {}", test_branch, stderr
-        ));
+        return Err(format!("切换到 {} 分支失败: {}", test_branch, stderr));
     }
     log::info!("[merge-test] Step 2 OK: checked out {}", test_branch);
 
@@ -593,10 +643,14 @@ pub fn merge_to_test_branch(path: &Path, test_branch: &str) -> Result<String, St
     if !pull_output.status.success() {
         let stderr = String::from_utf8_lossy(&pull_output.stderr);
         log::error!("[merge-test] Step 3 FAILED: pull => {}", stderr);
-        restore_merge_state(path, current_branch, switched_main, &main_worktree_path, &original_main_branch);
-        return Err(format!(
-            "拉取 {} 最新代码失败: {}", test_branch, stderr
-        ));
+        restore_merge_state(
+            path,
+            current_branch,
+            switched_main,
+            &main_worktree_path,
+            &original_main_branch,
+        );
+        return Err(format!("拉取 {} 最新代码失败: {}", test_branch, stderr));
     }
     log::info!("[merge-test] Step 3 OK: pulled latest {}", test_branch);
 
@@ -613,16 +667,42 @@ pub fn merge_to_test_branch(path: &Path, test_branch: &str) -> Result<String, St
     if !merge_output.status.success() {
         let stderr = String::from_utf8_lossy(&merge_output.stderr);
         let stdout = String::from_utf8_lossy(&merge_output.stdout);
-        log::error!("[merge-test] Step 4 FAILED: merge => stderr={}, stdout={}", stderr, stdout);
+        log::error!(
+            "[merge-test] Step 4 FAILED: merge => stderr={}, stdout={}",
+            stderr,
+            stdout
+        );
         // Abort merge if in conflict state
-        let _ = Command::new("git").arg("-C").arg(path).arg("merge").arg("--abort").output();
-        restore_merge_state(path, current_branch, switched_main, &main_worktree_path, &original_main_branch);
+        let _ = Command::new("git")
+            .arg("-C")
+            .arg(path)
+            .arg("merge")
+            .arg("--abort")
+            .output();
+        restore_merge_state(
+            path,
+            current_branch,
+            switched_main,
+            &main_worktree_path,
+            &original_main_branch,
+        );
         return Err(format!(
-            "合并 {} 到 {} 失败: {}{}", current_branch, test_branch, stderr,
-            if !stdout.is_empty() { format!("\n{}", stdout) } else { String::new() }
+            "合并 {} 到 {} 失败: {}{}",
+            current_branch,
+            test_branch,
+            stderr,
+            if !stdout.is_empty() {
+                format!("\n{}", stdout)
+            } else {
+                String::new()
+            }
         ));
     }
-    log::info!("[merge-test] Step 4 OK: merged {} into {}", current_branch, test_branch);
+    log::info!(
+        "[merge-test] Step 4 OK: merged {} into {}",
+        current_branch,
+        test_branch
+    );
 
     // Step 5: Push
     log::info!("[merge-test] Step 5: git push origin {}", test_branch);
@@ -647,7 +727,13 @@ pub fn merge_to_test_branch(path: &Path, test_branch: &str) -> Result<String, St
 
     // Step 6: Restore
     log::info!("[merge-test] Step 6: Restoring original state...");
-    restore_merge_state(path, current_branch, switched_main, &main_worktree_path, &original_main_branch);
+    restore_merge_state(
+        path,
+        current_branch,
+        switched_main,
+        &main_worktree_path,
+        &original_main_branch,
+    );
     log::info!("[merge-test] Step 6 OK: Restored");
 
     if push_failed {
@@ -658,9 +744,7 @@ pub fn merge_to_test_branch(path: &Path, test_branch: &str) -> Result<String, St
         ));
     }
 
-    let mut result = format!(
-        "成功将 {} 合并到 {}", current_branch, test_branch
-    );
+    let mut result = format!("成功将 {} 合并到 {}", current_branch, test_branch);
     if switched_main {
         result.push_str("\n\n✓ 主工作区已临时切换并已恢复");
     }
@@ -672,10 +756,14 @@ pub fn merge_to_test_branch(path: &Path, test_branch: &str) -> Result<String, St
 /// Merge current branch to base branch
 pub fn merge_to_base_branch(path: &Path, base_branch: &str) -> Result<String, String> {
     log::info!("[merge-base] ===== START merge_to_base_branch =====");
-    log::info!("[merge-base] path={}, base_branch={}", path.display(), base_branch);
+    log::info!(
+        "[merge-base] path={}, base_branch={}",
+        path.display(),
+        base_branch
+    );
 
-    let repo = Repository::open(path)
-        .map_err(|e| format!("无法打开仓库 ({}): {}", path.display(), e))?;
+    let repo =
+        Repository::open(path).map_err(|e| format!("无法打开仓库 ({}): {}", path.display(), e))?;
 
     let head = repo
         .head()
@@ -714,13 +802,21 @@ pub fn merge_to_base_branch(path: &Path, base_branch: &str) -> Result<String, St
 
     if !checkout_output.status.success() {
         let stderr = String::from_utf8_lossy(&checkout_output.stderr);
-        log::error!("[merge-base] Step 2 FAILED: checkout {} => {}", base_branch, stderr);
+        log::error!(
+            "[merge-base] Step 2 FAILED: checkout {} => {}",
+            base_branch,
+            stderr
+        );
         if switched_main {
-            restore_merge_state(path, current_branch, switched_main, &main_worktree_path, &original_main_branch);
+            restore_merge_state(
+                path,
+                current_branch,
+                switched_main,
+                &main_worktree_path,
+                &original_main_branch,
+            );
         }
-        return Err(format!(
-            "切换到 {} 分支失败: {}", base_branch, stderr
-        ));
+        return Err(format!("切换到 {} 分支失败: {}", base_branch, stderr));
     }
     log::info!("[merge-base] Step 2 OK: checked out {}", base_branch);
 
@@ -738,10 +834,14 @@ pub fn merge_to_base_branch(path: &Path, base_branch: &str) -> Result<String, St
     if !pull_output.status.success() {
         let stderr = String::from_utf8_lossy(&pull_output.stderr);
         log::error!("[merge-base] Step 3 FAILED: pull => {}", stderr);
-        restore_merge_state(path, current_branch, switched_main, &main_worktree_path, &original_main_branch);
-        return Err(format!(
-            "拉取 {} 最新代码失败: {}", base_branch, stderr
-        ));
+        restore_merge_state(
+            path,
+            current_branch,
+            switched_main,
+            &main_worktree_path,
+            &original_main_branch,
+        );
+        return Err(format!("拉取 {} 最新代码失败: {}", base_branch, stderr));
     }
     log::info!("[merge-base] Step 3 OK: pulled latest {}", base_branch);
 
@@ -758,16 +858,42 @@ pub fn merge_to_base_branch(path: &Path, base_branch: &str) -> Result<String, St
     if !merge_output.status.success() {
         let stderr = String::from_utf8_lossy(&merge_output.stderr);
         let stdout = String::from_utf8_lossy(&merge_output.stdout);
-        log::error!("[merge-base] Step 4 FAILED: merge => stderr={}, stdout={}", stderr, stdout);
+        log::error!(
+            "[merge-base] Step 4 FAILED: merge => stderr={}, stdout={}",
+            stderr,
+            stdout
+        );
         // Abort merge if in conflict state
-        let _ = Command::new("git").arg("-C").arg(path).arg("merge").arg("--abort").output();
-        restore_merge_state(path, current_branch, switched_main, &main_worktree_path, &original_main_branch);
+        let _ = Command::new("git")
+            .arg("-C")
+            .arg(path)
+            .arg("merge")
+            .arg("--abort")
+            .output();
+        restore_merge_state(
+            path,
+            current_branch,
+            switched_main,
+            &main_worktree_path,
+            &original_main_branch,
+        );
         return Err(format!(
-            "合并 {} 到 {} 失败: {}{}", current_branch, base_branch, stderr,
-            if !stdout.is_empty() { format!("\n{}", stdout) } else { String::new() }
+            "合并 {} 到 {} 失败: {}{}",
+            current_branch,
+            base_branch,
+            stderr,
+            if !stdout.is_empty() {
+                format!("\n{}", stdout)
+            } else {
+                String::new()
+            }
         ));
     }
-    log::info!("[merge-base] Step 4 OK: merged {} into {}", current_branch, base_branch);
+    log::info!(
+        "[merge-base] Step 4 OK: merged {} into {}",
+        current_branch,
+        base_branch
+    );
 
     // Step 5: Push
     log::info!("[merge-base] Step 5: git push origin {}", base_branch);
@@ -792,7 +918,13 @@ pub fn merge_to_base_branch(path: &Path, base_branch: &str) -> Result<String, St
 
     // Step 6: Restore
     log::info!("[merge-base] Step 6: Restoring original state...");
-    restore_merge_state(path, current_branch, switched_main, &main_worktree_path, &original_main_branch);
+    restore_merge_state(
+        path,
+        current_branch,
+        switched_main,
+        &main_worktree_path,
+        &original_main_branch,
+    );
     log::info!("[merge-base] Step 6 OK: Restored");
 
     if push_failed {
@@ -803,9 +935,7 @@ pub fn merge_to_base_branch(path: &Path, base_branch: &str) -> Result<String, St
         ));
     }
 
-    let mut result = format!(
-        "成功将 {} 合并到 {}", current_branch, base_branch
-    );
+    let mut result = format!("成功将 {} 合并到 {}", current_branch, base_branch);
     if switched_main {
         result.push_str("\n\n✓ 主工作区已临时切换并已恢复");
     }
@@ -906,7 +1036,9 @@ pub fn create_pull_request(
 ) -> Result<String, String> {
     log::info!(
         "[git] Creating pull request: path={}, base_branch={}, title='{}'",
-        path.display(), base_branch, title
+        path.display(),
+        base_branch,
+        title
     );
 
     // Detect platform
@@ -928,7 +1060,11 @@ pub fn create_pull_request(
             }
 
             // Create PR using gh CLI
-            log::info!("[git] Running: gh pr create --base {} --title '{}'", base_branch, title);
+            log::info!(
+                "[git] Running: gh pr create --base {} --title '{}'",
+                base_branch,
+                title
+            );
             let pr_output = Command::new("gh")
                 .arg("pr")
                 .arg("create")
@@ -979,7 +1115,8 @@ pub fn create_pull_request(
             // GitLab supports creating MR via git push options
             log::info!(
                 "[git] Running: git push -u origin {} with MR options (target={})",
-                current_branch, base_branch
+                current_branch,
+                base_branch
             );
             let push_output = Command::new("git")
                 .arg("-C")
@@ -1026,7 +1163,8 @@ pub fn create_pull_request(
             // If we can't find the URL, return a success message
             log::info!(
                 "[git] GitLab MR created for branch {} -> {} (URL not extracted from output)",
-                current_branch, base_branch
+                current_branch,
+                base_branch
             );
             Ok(format!(
                 "MR created successfully for branch {} -> {}",
@@ -1065,7 +1203,8 @@ pub fn fetch_remote(path: &Path) -> Result<(), String> {
 pub fn check_remote_branch_exists(path: &Path, branch_name: &str) -> Result<bool, String> {
     log::debug!(
         "[git] Checking remote branch exists: path={}, branch=origin/{}",
-        path.display(), branch_name
+        path.display(),
+        branch_name
     );
     // Check locally if the remote-tracking branch exists (no network call).
     // Remote-tracking branches are updated by git fetch/pull/push operations,
@@ -1082,13 +1221,21 @@ pub fn check_remote_branch_exists(path: &Path, branch_name: &str) -> Result<bool
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        log::error!("[git] Branch check failed for origin/{}: {}", branch_name, stderr);
+        log::error!(
+            "[git] Branch check failed for origin/{}: {}",
+            branch_name,
+            stderr
+        );
         return Err(format!("Git branch check failed: {}", stderr));
     }
 
     let output_str = String::from_utf8_lossy(&output.stdout);
     let exists = !output_str.trim().is_empty();
-    log::debug!("[git] Remote branch origin/{} exists: {}", branch_name, exists);
+    log::debug!(
+        "[git] Remote branch origin/{} exists: {}",
+        branch_name,
+        exists
+    );
     Ok(exists)
 }
 
@@ -1153,28 +1300,32 @@ pub fn get_git_diff(path: &Path) -> Result<String, String> {
 
     // Get staged diff
     let staged = Command::new("git")
-        .arg("-C").arg(path)
+        .arg("-C")
+        .arg(path)
         .args(["diff", "--cached", "--stat"])
         .output()
         .map_err(|e| format!("Failed to get staged diff: {}", e))?;
 
     // Get unstaged diff (tracked files)
     let unstaged = Command::new("git")
-        .arg("-C").arg(path)
+        .arg("-C")
+        .arg(path)
         .args(["diff", "--stat"])
         .output()
         .map_err(|e| format!("Failed to get unstaged diff: {}", e))?;
 
     // Get untracked files
     let untracked = Command::new("git")
-        .arg("-C").arg(path)
+        .arg("-C")
+        .arg(path)
         .args(["ls-files", "--others", "--exclude-standard"])
         .output()
         .map_err(|e| format!("Failed to get untracked files: {}", e))?;
 
     // Also get a compact diff of actual content changes (limited size for AI)
     let content_diff = Command::new("git")
-        .arg("-C").arg(path)
+        .arg("-C")
+        .arg(path)
         .args(["diff", "HEAD", "--no-color", "-U2"])
         .output()
         .map_err(|e| format!("Failed to get content diff: {}", e))?;
@@ -1226,7 +1377,8 @@ pub fn commit_all(path: &Path, message: &str) -> Result<String, String> {
 
     // git add -A
     let add_output = Command::new("git")
-        .arg("-C").arg(path)
+        .arg("-C")
+        .arg(path)
         .args(["add", "-A"])
         .output()
         .map_err(|e| format!("Failed to stage changes: {}", e))?;
@@ -1238,7 +1390,8 @@ pub fn commit_all(path: &Path, message: &str) -> Result<String, String> {
 
     // git commit -m
     let commit_output = Command::new("git")
-        .arg("-C").arg(path)
+        .arg("-C")
+        .arg(path)
         .args(["commit", "-m", message])
         .output()
         .map_err(|e| format!("Failed to commit: {}", e))?;
@@ -1248,7 +1401,9 @@ pub fn commit_all(path: &Path, message: &str) -> Result<String, String> {
         return Err(format!("git commit failed: {}", stderr));
     }
 
-    let stdout = String::from_utf8_lossy(&commit_output.stdout).trim().to_string();
+    let stdout = String::from_utf8_lossy(&commit_output.stdout)
+        .trim()
+        .to_string();
     log::info!("[git] Commit successful: {}", stdout);
     Ok(format!("Committed: {}", message))
 }

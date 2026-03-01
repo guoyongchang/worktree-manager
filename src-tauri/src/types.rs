@@ -10,8 +10,8 @@ pub struct ShareState {
     pub active: bool,
     pub workspace_path: Option<String>,
     pub port: u16,
-    pub auth_key: Option<Vec<u8>>,   // PBKDF2 derived key (32 bytes)
-    pub auth_salt: Option<Vec<u8>>,  // PBKDF2 salt (16 bytes)
+    pub auth_key: Option<Vec<u8>>,  // PBKDF2 derived key (32 bytes)
+    pub auth_salt: Option<Vec<u8>>, // PBKDF2 salt (16 bytes)
     pub shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
     pub ngrok_url: Option<String>,
     pub ngrok_task: Option<tokio::task::JoinHandle<()>>,
@@ -158,9 +158,8 @@ impl NonceCache {
     /// Clean up expired nonces (TTL: 60 seconds)
     pub fn cleanup(&mut self) {
         let now = Instant::now();
-        self.entries.retain(|_, (created, _)| {
-            now.duration_since(*created) < Duration::from_secs(60)
-        });
+        self.entries
+            .retain(|_, (created, _)| now.duration_since(*created) < Duration::from_secs(60));
     }
 }
 
@@ -391,7 +390,7 @@ pub struct OpenEditorRequest {
 pub struct MainWorkspaceOccupation {
     pub worktree_name: String,
     pub original_branches: HashMap<String, String>, // project_name → original_branch
-    pub deployed_at: String, // ISO8601
+    pub deployed_at: String,                        // ISO8601
 }
 
 #[derive(Debug, Serialize, Deserialize)]

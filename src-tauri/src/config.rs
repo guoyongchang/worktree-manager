@@ -201,12 +201,14 @@ pub fn load_occupation_state(workspace_path: &str) -> Option<MainWorkspaceOccupa
         .and_then(|content| serde_json::from_str(&content).ok())
 }
 
-pub fn save_occupation_state(workspace_path: &str, state: &MainWorkspaceOccupation) -> Result<(), String> {
+pub fn save_occupation_state(
+    workspace_path: &str,
+    state: &MainWorkspaceOccupation,
+) -> Result<(), String> {
     let path = std::path::PathBuf::from(workspace_path).join(".worktree-manager-occupation.json");
     let content = serde_json::to_string_pretty(state)
         .map_err(|e| format!("Failed to serialize occupation state: {}", e))?;
-    std::fs::write(&path, content)
-        .map_err(|e| format!("Failed to write occupation state: {}", e))
+    std::fs::write(&path, content).map_err(|e| format!("Failed to write occupation state: {}", e))
 }
 
 pub fn clear_occupation_state(workspace_path: &str) -> Result<(), String> {

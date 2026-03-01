@@ -285,6 +285,11 @@ export async function wmsLogout(): Promise<WmsConfig> {
   return callBackend<WmsConfig>('wms_logout');
 }
 
+/** WMS Browser Login: open browser to WMS admin page, wait for OAuth callback. */
+export async function wmsBrowserLogin(): Promise<string> {
+  return callBackend<string>('wms_browser_login');
+}
+
 /** Get the last used share port. */
 export async function getLastSharePort(): Promise<number | null> {
   return callBackend<number | null>('get_last_share_port');
