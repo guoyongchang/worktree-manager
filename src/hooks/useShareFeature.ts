@@ -16,6 +16,8 @@ import {
   wmsManualReconnect,
   getConnectedClients,
   kickClient,
+  getWmsConfig,
+  wmsBrowserLogin,
 } from '../lib/backend';
 import type { ConnectedClient } from '../lib/backend';
 
@@ -55,6 +57,7 @@ export interface UseShareFeatureReturn {
   handleQuickShare: () => Promise<void>;
   generatePassword: () => string;
   hasNgrokToken: boolean;
+  wmsLoggedIn: boolean;
 }
 
 export function useShareFeature(
@@ -79,6 +82,7 @@ export function useShareFeature(
   const [wmsNextRetrySecs, setWmsNextRetrySecs] = useState(0);
   const [connectedClients, setConnectedClients] = useState<ConnectedClient[]>([]);
   const [hasNgrokToken, setHasNgrokToken] = useState(false);
+  const [wmsLoggedIn, setWmsLoggedIn] = useState(false);
 
   const generatePassword = useCallback(() => {
     const chars = 'abcdefghijkmnpqrstuvwxyz23456789';
@@ -197,7 +201,13 @@ export function useShareFeature(
         setWmsReconnectAttempt(0);
         setWmsNextRetrySecs(0);
       } else {
-        // Backend auto-registers if token/subdomain not configured
+        // Check if logged in first
+        const config = await getWmsConfig();
+        if (!config.token) {
+          // Need to login first
+          await wmsBrowserLogin();
+          setWmsLoggedIn(true);
+        }
         const wmsUrl = await startWmsTunnel();
         setShareWmsUrl(wmsUrl);
         // Sync LAN state (backend may have auto-started it)
@@ -251,8 +261,14 @@ export function useShareFeature(
   // Quick share: restart sharing with WMS tunnel (auto-registers if needed)
   const handleQuickShare = useCallback(async () => {
     try {
-      // Try to start WMS tunnel (which auto-registers and auto-starts LAN)
       setWmsLoading(true);
+      // Check if logged in first
+      const config = await getWmsConfig();
+      if (!config.token) {
+        // Need to login first
+        await wmsBrowserLogin();
+        setWmsLoggedIn(true);
+      }
       const wmsUrl = await startWmsTunnel();
       setShareWmsUrl(wmsUrl);
       // Sync LAN state
@@ -292,6 +308,10 @@ export function useShareFeature(
       // Check if ngrok token is configured
       getNgrokToken().then(token => {
         setHasNgrokToken(!!token);
+      }).catch(() => { });
+      // Check if WMS is logged in
+      getWmsConfig().then(config => {
+        setWmsLoggedIn(!!config.token);
       }).catch(() => { });
     }
   }, []);
@@ -361,5 +381,6 @@ export function useShareFeature(
     handleQuickShare,
     generatePassword,
     hasNgrokToken,
+    wmsLoggedIn,
   };
 }
