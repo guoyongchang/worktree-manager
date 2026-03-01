@@ -58,6 +58,10 @@ export interface UseShareFeatureReturn {
   generatePassword: () => string;
   hasNgrokToken: boolean;
   wmsLoggedIn: boolean;
+  showWmsLoginDialog: boolean;
+  setShowWmsLoginDialog: (show: boolean) => void;
+  wmsLoginLoading: boolean;
+  handleWmsBrowserLogin: () => Promise<void>;
 }
 
 export function useShareFeature(
@@ -83,6 +87,9 @@ export function useShareFeature(
   const [connectedClients, setConnectedClients] = useState<ConnectedClient[]>([]);
   const [hasNgrokToken, setHasNgrokToken] = useState(false);
   const [wmsLoggedIn, setWmsLoggedIn] = useState(false);
+  const [showWmsLoginDialog, setShowWmsLoginDialog] = useState(false);
+  const [wmsLoginLoading, setWmsLoginLoading] = useState(false);
+  const [pendingShareAction, setPendingShareAction] = useState<'toggle' | 'quick' | null>(null);
 
   const generatePassword = useCallback(() => {
     const chars = 'abcdefghijkmnpqrstuvwxyz23456789';
@@ -204,9 +211,11 @@ export function useShareFeature(
         // Check if logged in first
         const config = await getWmsConfig();
         if (!config.jwt) {
-          // Need to login first
-          await wmsBrowserLogin();
-          setWmsLoggedIn(true);
+          // Show login dialog instead of directly opening browser
+          setWmsLoading(false);
+          setPendingShareAction('toggle');
+          setShowWmsLoginDialog(true);
+          return;
         }
         const wmsUrl = await startWmsTunnel();
         setShareWmsUrl(wmsUrl);
@@ -265,9 +274,11 @@ export function useShareFeature(
       // Check if logged in first
       const config = await getWmsConfig();
       if (!config.jwt) {
-        // Need to login first
-        await wmsBrowserLogin();
-        setWmsLoggedIn(true);
+        // Show login dialog instead of directly opening browser
+        setWmsLoading(false);
+        setPendingShareAction('quick');
+        setShowWmsLoginDialog(true);
+        return;
       }
       const wmsUrl = await startWmsTunnel();
       setShareWmsUrl(wmsUrl);
@@ -283,6 +294,56 @@ export function useShareFeature(
       setWmsLoading(false);
     }
   }, [setError]);
+
+  // Handle WMS browser login: called from login dialog
+  const handleWmsBrowserLogin = useCallback(async () => {
+    setWmsLoginLoading(true);
+    try {
+      await wmsBrowserLogin();
+      setWmsLoggedIn(true);
+      setShowWmsLoginDialog(false);
+      // Auto-execute pending share action after login
+      const action = pendingShareAction;
+      setPendingShareAction(null);
+      if (action === 'toggle') {
+        // Retry handleToggleWms
+        setWmsLoading(true);
+        try {
+          const wmsUrl = await startWmsTunnel();
+          setShareWmsUrl(wmsUrl);
+          const state = await getShareState();
+          if (state.active) {
+            setShareActive(true);
+            setShareUrls(state.urls);
+          }
+        } catch (e) {
+          setError(String(e));
+        } finally {
+          setWmsLoading(false);
+        }
+      } else if (action === 'quick') {
+        // Retry handleQuickShare
+        setWmsLoading(true);
+        try {
+          const wmsUrl = await startWmsTunnel();
+          setShareWmsUrl(wmsUrl);
+          const state = await getShareState();
+          if (state.active) {
+            setShareActive(true);
+            setShareUrls(state.urls);
+          }
+        } catch (e) {
+          setError(String(e));
+        } finally {
+          setWmsLoading(false);
+        }
+      }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setWmsLoginLoading(false);
+    }
+  }, [setError, pendingShareAction]);
 
   // Restore share state and load last password on mount (Tauri only)
   useEffect(() => {
@@ -382,5 +443,9 @@ export function useShareFeature(
     generatePassword,
     hasNgrokToken,
     wmsLoggedIn,
+    showWmsLoginDialog,
+    setShowWmsLoginDialog,
+    wmsLoginLoading,
+    handleWmsBrowserLogin,
   };
 }

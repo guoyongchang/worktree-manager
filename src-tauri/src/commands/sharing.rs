@@ -565,10 +565,13 @@ pub(crate) async fn wms_logout() -> Result<WmsConfig, String> {
 #[tauri::command]
 pub(crate) async fn wms_browser_login(app: tauri::AppHandle) -> Result<String, String> {
     let config = load_global_config();
-    let server_url = config
+    let tunnel_url = config
         .wms_server_url
         .clone()
-        .unwrap_or_else(|| "https://wms.kirov-opensource.com".to_string());
+        .unwrap_or_else(|| "https://tunnel.kirov-opensource.com".to_string());
+
+    // Derive admin URL: tunnel.xxx.com → wms.xxx.com
+    let admin_url = tunnel_url.replace("://tunnel.", "://wms.");
 
     // 1. Bind a temporary one-shot TCP listener on a random port
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -582,7 +585,7 @@ pub(crate) async fn wms_browser_login(app: tauri::AppHandle) -> Result<String, S
     let callback_url = format!("http://localhost:{}/auth/wms-callback", port);
     let browser_url = format!(
         "{}/admin?callback={}",
-        server_url.trim_end_matches('/'),
+        admin_url.trim_end_matches('/'),
         urlencoding::encode(&callback_url)
     );
 
