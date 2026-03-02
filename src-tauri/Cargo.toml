@@ -56,4 +56,5 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 rustls-pemfile = "2"
 tower = "0.5"
 time = "0.3"
+gethostname = "1.1.0"
 

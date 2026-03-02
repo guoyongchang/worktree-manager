@@ -408,9 +408,13 @@ pub async fn auto_register_tunnel_internal() -> Result<WmsConfig, String> {
         subdomain: String,
     }
 
+    let hostname = gethostname::gethostname()
+        .into_string()
+        .unwrap_or_else(|_| "Desktop".to_string());
+
     let mut request = client
         .post(&register_url)
-        .json(&serde_json::json!({ "device_id": device_id }));
+        .json(&serde_json::json!({ "device_id": device_id, "device_name": hostname }));
 
     // If user is logged in, send JWT for authenticated device registration
     if let Some(ref token) = jwt {
