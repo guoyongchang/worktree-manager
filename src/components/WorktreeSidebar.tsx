@@ -327,7 +327,13 @@ const ShareBar: FC<{
         )}
         {/* Remote row */}
         <div className="flex items-center gap-2 min-h-[24px]">
-          <span className="shrink-0 w-[52px]" />
+          {hasNgrokToken ? (
+            <span className="shrink-0 w-[52px]" />
+          ) : (
+            <span className="text-[11px] font-bold px-1.5 py-0.5 rounded shrink-0 bg-slate-600/30 text-slate-500 w-[52px] text-center">
+              {t('share.wan')}
+            </span>
+          )}
           <span className="text-[11px] font-medium text-slate-500 shrink-0">{t('share.remoteLabel')}</span>
           {wmsUrl ? (
             <>
