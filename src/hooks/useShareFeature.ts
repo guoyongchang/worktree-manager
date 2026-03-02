@@ -66,6 +66,9 @@ export interface UseShareFeatureReturn {
   wmsLoginLoading: boolean;
   handleWmsBrowserLogin: () => Promise<void>;
   handleWmsLogout: () => Promise<void>;
+  showShareDisclaimer: boolean;
+  setShowShareDisclaimer: (show: boolean) => void;
+  acceptShareDisclaimer: () => void;
 }
 
 export function useShareFeature(
@@ -96,12 +99,36 @@ export function useShareFeature(
   const [wmsLoginLoading, setWmsLoginLoading] = useState(false);
   const [pendingShareAction, setPendingShareAction] = useState<'toggle' | 'quick' | null>(null);
 
+  // Sharing disclaimer (one-time per install)
+  const [shareDisclaimerAccepted, setShareDisclaimerAccepted] = useState(() => localStorage.getItem('share_disclaimer_accepted') === 'true');
+  const [showShareDisclaimer, setShowShareDisclaimer] = useState(false);
+  const [pendingDisclaimerAction, setPendingDisclaimerAction] = useState<(() => void) | null>(null);
+
+  const acceptShareDisclaimer = useCallback(() => {
+    localStorage.setItem('share_disclaimer_accepted', 'true');
+    setShareDisclaimerAccepted(true);
+    setShowShareDisclaimer(false);
+    if (pendingDisclaimerAction) {
+      pendingDisclaimerAction();
+      setPendingDisclaimerAction(null);
+    }
+  }, [pendingDisclaimerAction]);
+
+  const requireDisclaimer = useCallback((action: () => void) => {
+    if (shareDisclaimerAccepted) {
+      action();
+    } else {
+      setPendingDisclaimerAction(() => action);
+      setShowShareDisclaimer(true);
+    }
+  }, [shareDisclaimerAccepted]);
+
   const generatePassword = useCallback(() => {
     const chars = 'abcdefghijkmnpqrstuvwxyz23456789';
     return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
   }, []);
 
-  const handleStartShare = useCallback(async (port: number) => {
+  const _doStartShare = useCallback(async (port: number) => {
     try {
       const pwd = sharePassword || generatePassword();
       await startSharing(port, pwd);
@@ -114,6 +141,10 @@ export function useShareFeature(
       setError(String(e));
     }
   }, [setError, generatePassword, sharePassword]);
+
+  const handleStartShare = useCallback(async (port: number) => {
+    requireDisclaimer(() => { _doStartShare(port); });
+  }, [requireDisclaimer, _doStartShare]);
 
   const handleStopShare = useCallback(async () => {
     try {
@@ -471,5 +502,8 @@ export function useShareFeature(
     wmsLoginLoading,
     handleWmsBrowserLogin,
     handleWmsLogout,
+    showShareDisclaimer,
+    setShowShareDisclaimer,
+    acceptShareDisclaimer,
   };
 }

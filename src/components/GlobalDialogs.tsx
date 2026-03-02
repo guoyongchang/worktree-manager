@@ -254,6 +254,32 @@ export const GlobalDialogs: FC<GlobalDialogsProps> = ({
         </DialogContent>
       </Dialog>
 
+      {/* Share Disclaimer */}
+      <Dialog open={share.showShareDisclaimer} onOpenChange={(open) => {
+        if (!open) {
+          share.setShowShareDisclaimer(false);
+        }
+      }}>
+        <DialogContent className="max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle>{t('share.disclaimerTitle', '分享须知')}</DialogTitle>
+            <DialogDescription className="space-y-3 pt-2 text-left">
+              <p>{t('share.disclaimerPolicy', '开启分享功能后，您的 Workspace 将可通过网络被其他设备访问。请确保您已了解并遵守所在公司/组织的安全政策和数据共享规定。')}</p>
+              <p className="font-medium text-slate-300">🔒 {t('share.disclaimerEncryption', '所有分享连接均通过加密通道传输（HTTPS/WSS），隧道服务不会存储或截取任何数据，您的代码和工作内容始终受到端到端加密保护。')}</p>
+              <p className="text-slate-500 text-xs">{t('share.disclaimerResponsibility', '使用分享功能即代表您已知悉上述信息并自行承担相关合规责任。')}</p>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex gap-2">
+            <Button variant="secondary" onClick={() => share.setShowShareDisclaimer(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button onClick={share.acceptShareDisclaimer}>
+              {t('share.disclaimerAccept', '我已了解，开始分享')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Delete Archived Worktree Confirmation */}
       <Dialog open={!!deleteConfirmWorktree} onOpenChange={(open) => !open && onSetDeleteConfirmWorktree(null)}>
         <DialogContent className="max-w-[400px]">
