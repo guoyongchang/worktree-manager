@@ -635,9 +635,9 @@ pub(crate) async fn wms_browser_login(app: tauri::AppHandle) -> Result<String, S
                                         <style>body{font-family:-apple-system,sans-serif;background:#0f172a;color:#e2e8f0;\
                                         display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}\
                                         .c{text-align:center;padding:3rem;border-radius:1rem;background:#1e293b;border:1px solid #334155}\
-                                        .i{font-size:3rem;margin-bottom:1rem}h1{font-size:1.25rem;margin:0 0 .5rem}\
+                                        .i{margin-bottom:1rem}h1{font-size:1.25rem;margin:0 0 .5rem}\
                                         p{color:#94a3b8;font-size:.875rem;margin:0}</style></head>\
-                                        <body><div class=\"c\"><div class=\"i\">✅</div><h1>Login Successful!</h1>\
+                                        <body><div class=\"c\"><div class=\"i\"><svg width=\"48\" height=\"48\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#4ade80\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M22 11.08V12a10 10 0 1 1-5.93-9.14\"/><polyline points=\"22 4 12 14.01 9 11.01\"/></svg></div><h1>Login Successful!</h1>\
                                         <p>You may close this tab and return to Worktree Manager.</p></div></body></html>";
                                     let response = format!(
                                         "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
