@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { RefreshCw, Search, Mic, Eye, EyeOff, Settings, Globe, Info, Trash2 } from 'lucide-react';
+import { RefreshCw, Search, Mic, Eye, EyeOff, Settings, Globe, Info, Trash2, User } from 'lucide-react';
 import { BackIcon, PlusIcon, TrashIcon } from './Icons';
 import { BranchCombobox } from './BranchCombobox';
 import type { WorkspaceRef, WorkspaceConfig, ProjectConfig, ScannedFolder } from '../types';
@@ -40,7 +40,7 @@ interface SettingsViewProps {
   onWmsLogout?: () => void;
 }
 
-type SettingsSection = 'workspaces' | 'share' | 'voice' | 'about';
+type SettingsSection = 'workspaces' | 'share' | 'account' | 'voice' | 'about';
 
 export const SettingsView: FC<SettingsViewProps> = ({
   workspaceConfig,
@@ -339,6 +339,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
   const menuItems = [
     { id: 'workspaces' as SettingsSection, label: t('settings.workspaceConfig'), icon: <Settings className="w-3.5 h-3.5" /> },
     ...(isTauri() ? [{ id: 'share' as SettingsSection, label: t('settings.externalShareNav', '外网分享'), icon: <Globe className="w-3.5 h-3.5" /> }] : []),
+    ...(isTauri() ? [{ id: 'account' as SettingsSection, label: t('settings.accountNav', '账户'), icon: <User className="w-3.5 h-3.5" /> }] : []),
     { id: 'voice' as SettingsSection, label: t('settings.voiceNav'), icon: <Mic className="w-3.5 h-3.5" /> },
     { id: 'about' as SettingsSection, label: t('settings.about'), icon: <Info className="w-3.5 h-3.5" /> },
   ];
@@ -671,14 +672,21 @@ export const SettingsView: FC<SettingsViewProps> = ({
                   </p>
                 </div>
 
+
+              </div>
+            )}
+
+            {/* ==================== Account ==================== */}
+            {activeSection === 'account' && isTauri() && (
+              <div>
+                <h2 className="text-base font-semibold text-slate-100 mb-4">{t('settings.accountTitle', '账户')}</h2>
+
                 {/* WMS Account */}
-                <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 space-y-3 mt-4">
+                <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 space-y-3">
                   <h3 className="text-sm font-medium text-slate-300">{t('settings.wmsAccount', 'WMS Account')}</h3>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 min-w-0">
-                      <svg className="w-4 h-4 text-slate-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
-                      </svg>
+                      <User className="w-4 h-4 text-slate-400 shrink-0" />
                       <span className={`text-sm truncate ${wmsUserName || wmsLoggedIn ? 'text-slate-300' : 'text-slate-500'}`}>
                         {wmsUserName || (wmsLoggedIn ? t('app.wmsLoggedIn', 'Logged in') : t('app.wmsNotLoggedIn', 'Not logged in'))}
                       </span>
@@ -701,6 +709,9 @@ export const SettingsView: FC<SettingsViewProps> = ({
                       </Button>
                     )}
                   </div>
+                  <p className="text-xs text-slate-500">
+                    {t('settings.wmsAccountHint', '此账户用于外网分享功能，通过 WMS 平台进行公网隧道共享。')}
+                  </p>
                 </div>
               </div>
             )}
