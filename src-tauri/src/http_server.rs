@@ -644,6 +644,14 @@ async fn auth_middleware(headers: HeaderMap, request: Request, next: Next) -> Re
         .unwrap_or("web-default")
         .to_string();
 
+    // Auto-authenticate mobile sessions from WMS tunnel (they arrive from localhost).
+    if sid.starts_with("mobile-") {
+        if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() {
+            sessions.insert(sid);
+        }
+        return next.run(request).await;
+    }
+
     let is_authenticated = AUTHENTICATED_SESSIONS
         .lock()
         .map(|sessions| sessions.contains(&sid))
@@ -1005,12 +1013,23 @@ async fn h_ws_upgrade(
         .unwrap_or(false);
 
     if needs_auth {
-        let is_authenticated = AUTHENTICATED_SESSIONS
-            .lock()
-            .map(|sessions| sessions.contains(&sid))
-            .unwrap_or(false);
-        if !is_authenticated {
-            return (StatusCode::UNAUTHORIZED, "Not authenticated").into_response();
+        // Auto-authenticate mobile sessions from WMS tunnel.
+        // The tunnel connects from localhost with session_id="mobile-xxx".
+        // These are already authenticated via WMS JWT, so skip password check.
+        let is_tunnel_mobile = addr.ip().is_loopback() && sid.starts_with("mobile-");
+        if is_tunnel_mobile {
+            if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() {
+                sessions.insert(sid.clone());
+            }
+            log::info!("[ws] Auto-authenticated WMS tunnel session: {}", sid);
+        } else {
+            let is_authenticated = AUTHENTICATED_SESSIONS
+                .lock()
+                .map(|sessions| sessions.contains(&sid))
+                .unwrap_or(false);
+            if !is_authenticated {
+                return (StatusCode::UNAUTHORIZED, "Not authenticated").into_response();
+            }
         }
     }
 
@@ -1229,6 +1248,52 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                         .and_then(|m| m.write_to_session(&pty_session_id, &data))
                 })
                 .await;
+            }
+
+            // "Last active client wins resize" — only the most recently active
+            // client's resize is applied to the PTY. This prevents a mobile
+            // client (40 cols) from breaking output formatting on the PC (120 cols).
+            "pty_resize" => {
+                let pty_session_id = match parsed["sessionId"].as_str() {
+                    Some(s) => s.to_string(),
+                    None => continue,
+                };
+                let cols = parsed["cols"].as_u64().unwrap_or(80) as u16;
+                let rows = parsed["rows"].as_u64().unwrap_or(24) as u16;
+                let request_client_id = parsed["clientId"].as_str().map(|s| s.to_string());
+
+                // Check if this client is the last-active one
+                let is_active = if let Some(ref req_cid) = request_client_id {
+                    crate::TERMINAL_STATES
+                        .lock()
+                        .ok()
+                        .map(|states| {
+                            // Find any terminal state whose client_id matches
+                            states.values().any(|ts| {
+                                ts.client_id.as_deref() == Some(req_cid)
+                            })
+                        })
+                        .unwrap_or(false)
+                } else {
+                    // No clientId provided (legacy/local) — always allow
+                    true
+                };
+
+                if is_active {
+                    let _ = tokio::task::spawn_blocking(move || {
+                        PTY_MANAGER
+                            .lock()
+                            .map_err(|e| format!("Lock error: {}", e))
+                            .and_then(|m| m.resize_session(&pty_session_id, cols, rows))
+                    })
+                    .await;
+                } else {
+                    log::debug!(
+                        "[ws] Ignoring pty_resize from inactive client {:?} (session={})",
+                        request_client_id,
+                        pty_session_id
+                    );
+                }
             }
 
             "subscribe_locks" => {
