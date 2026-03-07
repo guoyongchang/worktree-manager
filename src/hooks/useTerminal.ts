@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import i18next from 'i18next';
 import type { TerminalTab, MainWorkspaceStatus, WorktreeListItem } from '../types';
 import { TERMINAL } from '../constants';
-import { callBackend, isTauri, broadcastTerminalState as broadcastTerminalStateBackend, getTerminalState } from '../lib/backend';
+import { callBackend, closePtySessionsByPath, isTauri, broadcastTerminalState as broadcastTerminalStateBackend, getTerminalState } from '../lib/backend';
 import { getWebSocketManager } from '../lib/websocket';
 import { listen } from '@tauri-apps/api/event';
 
@@ -23,7 +23,7 @@ export interface UseTerminalReturn {
   handleCloseAllTerminalTabs: () => void;
   handleDuplicateTerminal: (path: string) => void;
   handleToggleTerminal: () => void;
-  cleanupTerminalsForPath: (pathPrefix: string) => void;
+  cleanupTerminalsForPath: (pathPrefix: string) => Promise<void>;
   clientId: string;
 }
 
@@ -450,18 +450,41 @@ export function useTerminal(
   }, [currentWorkspaceRoot, scheduleBroadcast]);
 
   // Remove all terminals matching a path prefix (e.g. worktree archive)
-  const cleanupTerminalsForPath = useCallback((pathPrefix: string) => {
+  const cleanupTerminalsForPath = useCallback(async (pathPrefix: string) => {
     const matches = (p: string) => p.startsWith(pathPrefix) || p.split('#')[0].startsWith(pathPrefix);
+
+    try {
+      await closePtySessionsByPath(pathPrefix);
+    } catch {
+      // Ignore PTY cleanup failures and still clear local UI state.
+    }
+
     setMountedTerminals(prev => {
       const next = new Set(prev);
       for (const p of prev) if (matches(p)) next.delete(p);
       return next.size === prev.size ? prev : next;
     });
-    setActivatedTerminals(prev => {
-      const next = new Set(prev);
-      for (const p of prev) if (matches(p)) next.delete(p);
-      return next.size === prev.size ? prev : next;
-    });
+
+    const newActivated = new Set(activatedTerminalsRef.current);
+    for (const p of activatedTerminalsRef.current) {
+      if (matches(p)) newActivated.delete(p);
+    }
+    setActivatedTerminals(newActivated);
+    activatedTerminalsRef.current = newActivated;
+
+    const nextActive =
+      activeTerminalTabRef.current && matches(activeTerminalTabRef.current)
+        ? Array.from(newActivated)[0] ?? null
+        : activeTerminalTabRef.current;
+    if (nextActive !== activeTerminalTabRef.current) {
+      setActiveTerminalTab(nextActive);
+      activeTerminalTabRef.current = nextActive;
+    }
+
+    if (newActivated.size === 0 && terminalVisibleRef.current) {
+      setTerminalVisible(false);
+      terminalVisibleRef.current = false;
+    }
 
     for (const [key, set] of activatedPerWorkspace.current) {
       if (matches(key)) {
@@ -471,7 +494,8 @@ export function useTerminal(
         for (const p of set) if (matches(p)) set.delete(p);
       }
     }
-  }, []);
+    scheduleBroadcast();
+  }, [scheduleBroadcast]);
 
   return {
     terminalVisible,

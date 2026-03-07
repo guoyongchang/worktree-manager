@@ -110,7 +110,7 @@ export const GitOperations: FC<GitOperationsProps> = ({
     setErrorPersistent(false);
   }, []);
 
-  const loadStats = async () => {
+  const loadStats = useCallback(async () => {
     setLoading(true);
     setError(null);
     setErrorPersistent(false);
@@ -121,9 +121,9 @@ export const GitOperations: FC<GitOperationsProps> = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, [projectPath, baseBranch]);
 
-  const checkBranches = async () => {
+  const checkBranches = useCallback(async () => {
     try {
       const [testExists, baseExists] = await Promise.all([
         checkRemoteBranchExists(projectPath, testBranch),
@@ -134,37 +134,32 @@ export const GitOperations: FC<GitOperationsProps> = ({
     } catch (err) {
       console.error('Failed to check branches:', err);
     }
-  };
+  }, [projectPath, testBranch, baseBranch]);
+
+  const loadLocalState = useCallback(async () => {
+    await Promise.all([loadStats(), checkBranches()]);
+  }, [loadStats, checkBranches]);
+
+  const syncRemoteState = useCallback(async () => {
+    setFetchingSyncing(true);
+    try {
+      await fetchProjectRemote(projectPath);
+      await loadLocalState();
+    } catch (err) {
+      console.error('Remote sync failed:', err);
+    } finally {
+      setFetchingSyncing(false);
+    }
+  }, [projectPath, loadLocalState]);
 
   useEffect(() => {
-    let cancelled = false;
-
-    // Phase 1: Instant local data (milliseconds)
-    const rafId = requestAnimationFrame(() => {
-      loadStats();
-      checkBranches();
-
-      // Phase 2: Background fetch from remote (3-6s), then refresh branch state
-      setFetchingSyncing(true);
-      fetchProjectRemote(projectPath)
-        .then(() => {
-          if (!cancelled) return Promise.all([checkBranches(), loadStats()]);
-        })
-        .catch((err) => {
-          console.error('Background fetch failed:', err);
-        })
-        .finally(() => {
-          if (!cancelled) setFetchingSyncing(false);
-        });
-    });
+    loadLocalState();
 
     return () => {
-      cancelled = true;
-      cancelAnimationFrame(rafId);
       clearTimeout(errorTimerRef.current);
       clearTimeout(successTimerRef.current);
     };
-  }, [projectPath, baseBranch, testBranch]);
+  }, [loadLocalState]);
 
   const runGitAction = async (
     action: typeof activeAction,
@@ -187,8 +182,7 @@ export const GitOperations: FC<GitOperationsProps> = ({
   };
 
   const handleRefresh = async () => {
-    await loadStats();
-    await checkBranches();
+    await syncRemoteState();
     onRefresh?.();
   };
 
@@ -337,10 +331,10 @@ export const GitOperations: FC<GitOperationsProps> = ({
           variant="ghost"
           size="sm"
           onClick={handleRefresh}
-          disabled={loading}
+          disabled={loading || fetchingSyncing}
           className="h-6 px-2"
         >
-          <RefreshIcon className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
+          <RefreshIcon className={`w-3 h-3 ${(loading || fetchingSyncing) ? 'animate-spin' : ''}`} />
         </Button>
       </div>
 

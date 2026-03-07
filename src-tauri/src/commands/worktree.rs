@@ -7,7 +7,7 @@ use crate::config::{
     clear_occupation_state, get_window_workspace_config, load_occupation_state,
     save_occupation_state,
 };
-use crate::git_ops::{get_branch_status, get_worktree_info};
+use crate::git_ops::{get_branch_status, get_worktree_info_for_branches};
 use crate::state::PTY_MANAGER;
 use crate::types::{
     AddProjectToWorktreeRequest, CreateWorktreeRequest, DeployProjectError, DeployToMainResult,
@@ -155,7 +155,11 @@ fn scan_worktrees_dir(
                         linked_folders: vec![],
                     });
 
-                let info = get_worktree_info(&proj_path);
+                let info = get_worktree_info_for_branches(
+                    &proj_path,
+                    &proj_config.base_branch,
+                    &proj_config.test_branch,
+                );
 
                 projects.push(ProjectStatus {
                     name: proj_name,
@@ -202,7 +206,11 @@ pub fn get_main_workspace_status_impl(window_label: &str) -> Result<MainWorkspac
             continue;
         }
 
-        let info = get_worktree_info(&proj_path);
+        let info = get_worktree_info_for_branches(
+            &proj_path,
+            &proj_config.base_branch,
+            &proj_config.test_branch,
+        );
 
         projects.push(MainProjectStatus {
             name: proj_config.name.clone(),
@@ -595,7 +603,14 @@ pub fn check_worktree_status_impl(
                 .unwrap_or("")
                 .to_string();
 
-            let branch_status = get_branch_status(&proj_path, &proj_name);
+            let base_branch = config
+                .projects
+                .iter()
+                .find(|p| p.name == proj_name)
+                .map(|p| p.base_branch.as_str())
+                .unwrap_or("uat");
+
+            let branch_status = get_branch_status(&proj_path, &proj_name, base_branch);
 
             if branch_status.has_uncommitted {
                 status.errors.push(format!(

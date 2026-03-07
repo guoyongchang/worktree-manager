@@ -172,6 +172,18 @@ impl Default for WorktreeInfo {
 }
 
 pub fn get_worktree_info(path: &Path) -> WorktreeInfo {
+    get_worktree_info_for_branches(
+        path,
+        get_base_branch_for_path(path),
+        get_test_branch_for_path(path),
+    )
+}
+
+pub fn get_worktree_info_for_branches(
+    path: &Path,
+    base_branch: &str,
+    test_branch: &str,
+) -> WorktreeInfo {
     let repo = match Repository::open(path) {
         Ok(r) => r,
         Err(_) => return WorktreeInfo::default(),
@@ -196,7 +208,6 @@ pub fn get_worktree_info(path: &Path) -> WorktreeInfo {
 
     // Check if merged to test branch
     // This is a simplified check - just see if test branch ref exists and compare
-    let test_branch = get_test_branch_for_path(path);
     if let Ok(test_ref) = repo.find_reference(&format!("refs/remotes/origin/{}", test_branch)) {
         if let Ok(head) = repo.head() {
             if let (Ok(test_commit), Ok(head_commit)) =
@@ -219,7 +230,6 @@ pub fn get_worktree_info(path: &Path) -> WorktreeInfo {
     }
 
     // Get ahead/behind count relative to base branch
-    let base_branch = get_base_branch_for_path(path);
     if let Ok(base_ref) = repo.find_reference(&format!("refs/remotes/origin/{}", base_branch)) {
         if let Ok(head) = repo.head() {
             if let (Ok(base_oid), Ok(head_oid)) =
@@ -271,7 +281,7 @@ fn get_test_branch_for_path(_path: &Path) -> &str {
     "test"
 }
 
-pub fn get_branch_status(path: &Path, project_name: &str) -> BranchStatus {
+pub fn get_branch_status(path: &Path, project_name: &str, base_branch: &str) -> BranchStatus {
     let mut status = BranchStatus {
         project_name: project_name.to_string(),
         branch_name: "unknown".to_string(),
@@ -326,7 +336,6 @@ pub fn get_branch_status(path: &Path, project_name: &str) -> BranchStatus {
                 // Remote branch doesn't exist, not pushed
                 status.is_pushed = false;
                 // Count commits from merge-base with origin/uat or origin/master
-                let base_branch = get_base_branch_for_path(path);
                 let base_ref = format!("refs/remotes/origin/{}", base_branch);
                 if let Ok(base_ref) = repo.find_reference(&base_ref) {
                     if let Some(base_oid) = base_ref.target() {

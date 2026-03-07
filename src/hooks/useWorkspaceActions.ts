@@ -105,7 +105,7 @@ export interface UseWorkspaceActionsReturn {
 export function useWorkspaceActions(
   workspace: UseWorkspaceReturn,
   modals: UseModalsReturn,
-  cleanupTerminalsForPath: (pathPrefix: string) => void,
+  cleanupTerminalsForPath: (pathPrefix: string) => Promise<void>,
   locks: UseWorktreeLocksReturn,
   isMobileWeb: boolean,
   selectedWorktree: WorktreeListItem | null,
@@ -365,7 +365,7 @@ export function useWorkspaceActions(
     setArchiving(true);
     try {
       const wtPath = archiveModal.worktree.path;
-      if (wtPath) cleanupTerminalsForPath(wtPath);
+      if (wtPath) await cleanupTerminalsForPath(wtPath);
       await workspace.archiveWorktree(archiveModal.worktree.name);
       if (selectedWorktree?.name === archiveModal.worktree.name) {
         setSelectedWorktree(null);
@@ -382,6 +382,9 @@ export function useWorkspaceActions(
     if (!deleteConfirmWorktree) return;
     setDeletingArchived(true);
     try {
+      if (deleteConfirmWorktree.path) {
+        await cleanupTerminalsForPath(deleteConfirmWorktree.path);
+      }
       await workspace.deleteArchivedWorktree(deleteConfirmWorktree.name);
       if (selectedWorktree?.name === deleteConfirmWorktree.name) {
         setSelectedWorktree(null);

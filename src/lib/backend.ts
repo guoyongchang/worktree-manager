@@ -506,6 +506,11 @@ export async function fetchProjectRemote(path: string): Promise<void> {
   return callBackend<void>('fetch_project_remote', { path });
 }
 
+/** Close all PTY sessions whose working directory matches the given path prefix. */
+export async function closePtySessionsByPath(pathPrefix: string): Promise<string[]> {
+  return callBackend<string[]>('pty_close_by_path', { pathPrefix });
+}
+
 /** Check if a remote branch exists */
 export async function checkRemoteBranchExists(
   path: string,

@@ -56,6 +56,12 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
   const wsSubscribedRef = useRef(false);
   const initializedRef = useRef(false);
   const cwdRef = useRef(actualCwd);
+  const mouseSelectionRef = useRef({
+    pressed: false,
+    moved: false,
+    startX: 0,
+    startY: 0,
+  });
   const [wsConnected, setWsConnected] = useState(!isTauri() ? getWebSocketManager().isConnected() : true);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
 
@@ -142,6 +148,51 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
 
+    const resetStuckSelection = (forceClear = false) => {
+      const selectionState = mouseSelectionRef.current;
+      const shouldClear = forceClear || !selectionState.moved;
+      selectionState.pressed = false;
+      selectionState.moved = false;
+      if (shouldClear) {
+        term.clearSelection();
+        term.focus();
+      }
+    };
+
+    const handleMouseDown = (event: MouseEvent) => {
+      if (event.button !== 0) return;
+      mouseSelectionRef.current = {
+        pressed: true,
+        moved: false,
+        startX: event.clientX,
+        startY: event.clientY,
+      };
+    };
+
+    const handleMouseMove = (event: MouseEvent) => {
+      if (!mouseSelectionRef.current.pressed || mouseSelectionRef.current.moved) return;
+      const dx = Math.abs(event.clientX - mouseSelectionRef.current.startX);
+      const dy = Math.abs(event.clientY - mouseSelectionRef.current.startY);
+      if (dx > 3 || dy > 3) {
+        mouseSelectionRef.current.moved = true;
+      }
+    };
+
+    const handleMouseUp = () => {
+      if (!mouseSelectionRef.current.pressed) return;
+      resetStuckSelection(false);
+    };
+
+    const handleWindowBlur = () => {
+      if (!mouseSelectionRef.current.pressed) return;
+      resetStuckSelection(true);
+    };
+
+    terminalRef.current.addEventListener('mousedown', handleMouseDown, true);
+    window.addEventListener('mousemove', handleMouseMove, true);
+    window.addEventListener('mouseup', handleMouseUp, true);
+    window.addEventListener('blur', handleWindowBlur);
+
     // Mobile: single-finger touch scroll
     if (IS_MOBILE && terminalRef.current) {
       let touchStartY = 0;
@@ -201,6 +252,10 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
     });
 
     return () => {
+      terminalRef.current?.removeEventListener('mousedown', handleMouseDown, true);
+      window.removeEventListener('mousemove', handleMouseMove, true);
+      window.removeEventListener('mouseup', handleMouseUp, true);
+      window.removeEventListener('blur', handleWindowBlur);
       term.dispose();
       xtermRef.current = null;
     };
