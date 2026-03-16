@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
-import { callBackend, isTauri, openLink } from '../lib/backend';
+import { callBackend, isTauri, openLink, getPlatform } from '../lib/backend';
 import { getWebSocketManager } from '../lib/websocket';
 import { TERMINAL } from '../constants';
 import '@xterm/xterm/css/xterm.css';
@@ -33,6 +33,50 @@ const TERMINAL_THEME = {
   brightCyan: '#67e8f9',
   brightWhite: '#ffffff',
 } as const;
+
+function writeToPty(sessionId: string, data: string) {
+  if (!isTauri()) {
+    getWebSocketManager().writePty(sessionId, data);
+  } else {
+    callBackend('pty_write', { sessionId, data }).catch(() => {});
+  }
+}
+
+const TOOLBAR_BUTTONS = (() => {
+  const isMac = getPlatform() === 'mac';
+  return [
+    { label: isMac ? '⌃C' : 'Ctrl+C', data: '\x03' },
+    { label: isMac ? '⌃D' : 'Ctrl+D', data: '\x04' },
+    { label: isMac ? '⌃Z' : 'Ctrl+Z', data: '\x1a' },
+    { label: 'Tab', data: '\t' },
+    { label: 'Esc', data: '\x1b' },
+    { label: '←', data: '\x1b[D' },
+    { label: '→', data: '\x1b[C' },
+    { label: '↑', data: '\x1b[A' },
+    { label: '↓', data: '\x1b[B' },
+    { label: isMac ? '⌘←' : 'Home', data: '\x1b[H' },
+    { label: isMac ? '⌘→' : 'End', data: '\x1b[F' },
+  ];
+})();
+
+function MobileTerminalToolbar({ sessionId }: { sessionId: string }) {
+  return (
+    <div className="flex items-center gap-1.5 px-2 py-1.5 bg-slate-800/95 border-t border-slate-700/50 overflow-x-auto shrink-0 scrollbar-none">
+      {TOOLBAR_BUTTONS.map((btn) => (
+        <button
+          key={btn.label}
+          onPointerDown={(e) => {
+            e.preventDefault();
+            writeToPty(sessionId, btn.data);
+          }}
+          className="shrink-0 px-2.5 py-1 rounded-full bg-slate-700/80 text-slate-300 text-xs font-medium active:bg-slate-600 select-none touch-manipulation"
+        >
+          {btn.label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 interface TerminalProps {
   cwd: string;
@@ -85,16 +129,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
     setContextMenu(null);
     try {
       const text = await navigator.clipboard.readText();
-      if (text) {
-        if (!isTauri()) {
-          getWebSocketManager().writePty(sessionIdRef.current, text);
-        } else {
-          await callBackend('pty_write', {
-            sessionId: sessionIdRef.current,
-            data: text,
-          });
-        }
-      }
+      if (text) writeToPty(sessionIdRef.current, text);
     } catch { /* noop */ }
   }, []);
 
@@ -238,17 +273,8 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
     }
 
 
-    term.onData(async (data) => {
-      try {
-        if (!isTauri()) {
-          getWebSocketManager().writePty(sessionIdRef.current, data);
-        } else {
-          await callBackend('pty_write', {
-            sessionId: sessionIdRef.current,
-            data,
-          });
-        }
-      } catch { /* noop */ }
+    term.onData((data) => {
+      writeToPty(sessionIdRef.current, data);
     });
 
     return () => {
@@ -473,65 +499,68 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
   }, []);
 
   return (
-    <div className="h-full w-full relative overflow-hidden" onContextMenu={handleContextMenu}>
-      <div
-        ref={terminalRef}
-        className="h-full w-full overflow-hidden"
-        style={{ padding: '4px 8px', background: '#0f172a' }}
-      />
-      {/* WS connection status overlay (browser mode only) */}
-      {!isTauri() && !wsConnected && (
-        <div className="absolute inset-0 flex items-end justify-center pointer-events-none z-10 pb-3">
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-900/80 backdrop-blur-sm border border-amber-700/50 text-amber-300 text-xs font-medium shadow-lg pointer-events-auto">
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-            Reconnecting...
-          </div>
-        </div>
-      )}
-
-      {/* Context Menu */}
-      {contextMenu && (
+    <div className="h-full w-full flex flex-col overflow-hidden">
+      <div className="flex-1 min-h-0 relative" onContextMenu={handleContextMenu}>
         <div
-          className="fixed inset-0 z-50"
-          onClick={() => setContextMenu(null)}
-          onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }}
-        >
-          <div
-            className="absolute bg-slate-800 border border-slate-600 rounded-lg shadow-xl py-1 min-w-[140px]"
-            style={{ left: Math.min(contextMenu.x, window.innerWidth - 140), top: Math.min(contextMenu.y, window.innerHeight - 150) }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              onClick={handleCopy}
-              className="w-full px-4 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 flex items-center gap-2"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
-              </svg>
-              {t('terminal.copyContent')}
-            </button>
-            <button
-              onClick={handlePaste}
-              className="w-full px-4 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 flex items-center gap-2"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-              </svg>
-              {t('terminal.paste')}
-            </button>
-            <div className="border-t border-slate-700 my-1" />
-            <button
-              onClick={handleClear}
-              className="w-full px-4 py-2 text-left text-sm text-red-400 hover:bg-slate-700 hover:text-red-300 flex items-center gap-2"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
-              {t('terminal.clear')}
-            </button>
+          ref={terminalRef}
+          className="h-full w-full overflow-hidden"
+          style={{ padding: '4px 8px', background: '#0f172a' }}
+        />
+        {/* WS connection status overlay (browser mode only) */}
+        {!isTauri() && !wsConnected && (
+          <div className="absolute inset-0 flex items-end justify-center pointer-events-none z-10 pb-3">
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-900/80 backdrop-blur-sm border border-amber-700/50 text-amber-300 text-xs font-medium shadow-lg pointer-events-auto">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+              Reconnecting...
+            </div>
           </div>
-        </div>
-      )}
+        )}
+
+        {/* Context Menu */}
+        {contextMenu && (
+          <div
+            className="fixed inset-0 z-50"
+            onClick={() => setContextMenu(null)}
+            onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }}
+          >
+            <div
+              className="absolute bg-slate-800 border border-slate-600 rounded-lg shadow-xl py-1 min-w-[140px]"
+              style={{ left: Math.min(contextMenu.x, window.innerWidth - 140), top: Math.min(contextMenu.y, window.innerHeight - 150) }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                onClick={handleCopy}
+                className="w-full px-4 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
+                </svg>
+                {t('terminal.copyContent')}
+              </button>
+              <button
+                onClick={handlePaste}
+                className="w-full px-4 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+                {t('terminal.paste')}
+              </button>
+              <div className="border-t border-slate-700 my-1" />
+              <button
+                onClick={handleClear}
+                className="w-full px-4 py-2 text-left text-sm text-red-400 hover:bg-slate-700 hover:text-red-300 flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                {t('terminal.clear')}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+      {IS_MOBILE && <MobileTerminalToolbar sessionId={sessionIdRef.current} />}
     </div>
   );
 });

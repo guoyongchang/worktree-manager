@@ -1,4 +1,11 @@
 // Environment detection
+export function getPlatform(): 'mac' | 'windows' | 'linux' {
+  const ua = navigator.userAgent;
+  if (/Mac|iPhone|iPad|iPod/i.test(ua)) return 'mac';
+  if (/Win/i.test(ua)) return 'windows';
+  return 'linux';
+}
+
 export const isTauri = (): boolean => {
   if (!('__TAURI_INTERNALS__' in window)) return false;
   // On iOS Tauri, the backend is an empty shell — force HTTP mode
