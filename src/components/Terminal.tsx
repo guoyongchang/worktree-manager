@@ -8,8 +8,6 @@ import { getWebSocketManager } from '../lib/websocket';
 import { TERMINAL } from '../constants';
 import '@xterm/xterm/css/xterm.css';
 
-const IS_MOBILE = typeof window !== 'undefined' && 'ontouchstart' in window;
-
 const TERMINAL_THEME = {
   background: '#0f172a',
   foreground: '#cbd5e1',
@@ -108,6 +106,20 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
   });
   const [wsConnected, setWsConnected] = useState(!isTauri() ? getWebSocketManager().isConnected() : true);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Detect mobile device on mount
+  useEffect(() => {
+    const checkMobile = () => {
+      // Check for touch support and small screen
+      const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+      const isSmallScreen = window.innerWidth < 768;
+      setIsMobile(hasTouch && isSmallScreen);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -156,9 +168,14 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
   useEffect(() => {
     if (!terminalRef.current || xtermRef.current) return;
 
+    // Sync mobile detection for initial fontSize
+    const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    const isSmallScreen = window.innerWidth < 768;
+    const isMobileDevice = hasTouch && isSmallScreen;
+
     const term = new XTerm({
       theme: TERMINAL_THEME,
-      fontSize: IS_MOBILE ? 12 : 13,
+      fontSize: isMobileDevice ? 12 : 13,
       fontFamily: '"Maple Mono NF CN", Menlo, Monaco, "Courier New", monospace',
       cursorBlink: true,
       cursorStyle: 'bar',
@@ -229,7 +246,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
     window.addEventListener('blur', handleWindowBlur);
 
     // Mobile: single-finger touch scroll
-    if (IS_MOBILE && terminalRef.current) {
+    if (isMobile && terminalRef.current) {
       let touchStartY = 0;
       let scrollAccum = 0;
       let isDragging = false;
@@ -560,7 +577,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
           </div>
         )}
       </div>
-      {IS_MOBILE && <MobileTerminalToolbar sessionId={sessionIdRef.current} />}
+      {isMobile && <MobileTerminalToolbar sessionId={sessionIdRef.current} />}
     </div>
   );
 });
