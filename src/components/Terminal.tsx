@@ -43,17 +43,17 @@ function writeToPty(sessionId: string, data: string) {
 const TOOLBAR_BUTTONS = (() => {
   const isMac = getPlatform() === 'mac';
   return [
+    { label: 'Esc', data: '\x1b' },
     { label: isMac ? '⌃C' : 'Ctrl+C', data: '\x03' },
     { label: isMac ? '⌃D' : 'Ctrl+D', data: '\x04' },
     { label: isMac ? '⌃Z' : 'Ctrl+Z', data: '\x1a' },
     { label: 'Tab', data: '\t' },
-    { label: 'Esc', data: '\x1b' },
     { label: '←', data: '\x1b[D' },
     { label: '→', data: '\x1b[C' },
     { label: '↑', data: '\x1b[A' },
     { label: '↓', data: '\x1b[B' },
-    { label: isMac ? '⌘←' : 'Home', data: '\x1b[H' },
-    { label: isMac ? '⌘→' : 'End', data: '\x1b[F' },
+    { label: 'Home', data: '\x1b[H' },
+    { label: 'End', data: '\x1b[F' },
   ];
 })();
 
