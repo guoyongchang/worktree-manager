@@ -109,6 +109,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
   const [isMobile, setIsMobile] = useState(false);
   const [initStatus, setInitStatus] = useState<string | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
+  const gotFirstDataRef = useRef(false);
 
   // Detect mobile device on mount
   useEffect(() => {
@@ -313,6 +314,10 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
       wsSubscribedRef.current = true;
       getWebSocketManager().subscribePty(sessionIdRef.current, (data) => {
         if (data && xtermRef.current) {
+          if (!gotFirstDataRef.current) {
+            gotFirstDataRef.current = true;
+            setInitStatus(null);
+          }
           xtermRef.current.write(data);
 
           // Force a few frame refreshes to defeat iOS Safari canvas bugs
@@ -342,6 +347,10 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
             sessionId: sessionIdRef.current,
           });
           if (data && xtermRef.current) {
+            if (!gotFirstDataRef.current) {
+              gotFirstDataRef.current = true;
+              setInitStatus(null);
+            }
             xtermRef.current.write(data);
           }
         } catch { /* noop */ }
@@ -363,6 +372,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
 
     setInitStatus('Preparing terminal...');
     setInitError(null);
+    gotFirstDataRef.current = false;
 
     try {
       try {
@@ -424,7 +434,14 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
         }, 100);
       });
 
-      setInitStatus(null);
+      setInitStatus('Waiting for output...');
+
+      // If existing session, data may already be available — give 2s grace period
+      if (exists) {
+        setTimeout(() => {
+          if (!gotFirstDataRef.current) setInitStatus(null);
+        }, 2000);
+      }
 
     } catch (e) {
       setInitStatus(null);
