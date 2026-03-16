@@ -361,6 +361,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
     const fitAddon = fitAddonRef.current;
     if (!term || !fitAddon) return;
 
+    console.log('[terminal] initPty: Setting isInitializing to true');
     setIsInitializing(true);
     setInitError(null);
 
@@ -387,7 +388,10 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
         sessionId: sessionIdRef.current,
       });
 
+      console.log('[terminal] PTY exists:', exists);
+
       if (!exists) {
+        console.log('[terminal] Creating new PTY session');
         const shell = localStorage.getItem('preferred_terminal') || undefined;
         await callBackend('pty_create', {
           sessionId: sessionIdRef.current,
@@ -400,6 +404,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
 
       initializedRef.current = true;
 
+      console.log('[terminal] Starting to read PTY output');
       startReading();
 
       // Deferred resize: fitAddon.fit() during init may run before CSS layout
@@ -422,9 +427,11 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
         }, 100);
       });
 
+      console.log('[terminal] PTY initialization complete, setting isInitializing to false');
       setIsInitializing(false);
 
     } catch (e) {
+      console.error('[terminal] PTY initialization failed:', e);
       setIsInitializing(false);
       setInitError(String(e));
       console.error('[terminal] Failed to initialize PTY:', e);
@@ -434,6 +441,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
   // Create PTY session on first visibility
   useEffect(() => {
     if (!xtermRef.current || !visible || initializedRef.current) return;
+    console.log('[terminal] Starting PTY initialization, visible:', visible);
     initPty();
   }, [visible, initPty]);
 
