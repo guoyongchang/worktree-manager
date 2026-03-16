@@ -315,8 +315,8 @@ pub(crate) fn parse_repo_url(url: &str) -> Result<String, String> {
         return Ok(format!("https://github.com/{}.git", repo));
     }
 
-    // SSH format: git@github.com:owner/repo.git
-    if url.starts_with("git@") {
+    // SSH format: git@github.com:owner/repo.git or ssh://git@host:port/path
+    if url.starts_with("git@") || url.starts_with("ssh://") {
         return Ok(url.to_string());
     }
 

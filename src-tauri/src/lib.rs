@@ -64,9 +64,12 @@ pub fn run() {
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Info)
-                .targets([tauri_plugin_log::Target::new(
-                    tauri_plugin_log::TargetKind::Stdout,
-                )])
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("worktree-manager".into()),
+                    }),
+                ])
                 .build(),
         )
         .on_window_event(|window, event| {

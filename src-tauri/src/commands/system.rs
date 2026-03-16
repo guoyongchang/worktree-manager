@@ -275,8 +275,9 @@ pub(crate) fn open_log_dir() -> Result<(), String> {
     log::info!("[system] Opening log directory: {:?}", log_dir);
 
     if !log_dir.exists() {
-        log::warn!("[system] Log directory does not exist: {:?}", log_dir);
-        return Err("日志目录不存在".to_string());
+        log::info!("[system] Log directory does not exist, creating: {:?}", log_dir);
+        std::fs::create_dir_all(&log_dir)
+            .map_err(|e| format!("无法创建日志目录: {}", e))?;
     }
 
     let dir_str = log_dir.to_str().unwrap_or("");
@@ -326,10 +327,10 @@ fn get_platform_log_dir() -> Result<PathBuf, String> {
     }
     #[cfg(target_os = "windows")]
     {
-        // Tauri on Windows logs to %APPDATA%/{identifier}/logs
-        let appdata = std::env::var("APPDATA")
-            .or_else(|_| std::env::var("LOCALAPPDATA"))
-            .map_err(|_| "无法获取 APPDATA 目录".to_string())?;
+        // Tauri on Windows logs to %LOCALAPPDATA%/{identifier}/logs
+        let appdata = std::env::var("LOCALAPPDATA")
+            .or_else(|_| std::env::var("APPDATA"))
+            .map_err(|_| "无法获取 LOCALAPPDATA 目录".to_string())?;
         Ok(PathBuf::from(appdata)
             .join("com.guo.worktree-manager")
             .join("logs"))
