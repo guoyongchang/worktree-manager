@@ -67,13 +67,20 @@
 
 ## 快速开始
 
-### 环境要求
+### 直接下载（推荐）
 
-- **Node.js** 20+
-- **Rust** 1.70+（[安装指南](https://rustup.rs)）
-- **Git** 2.0+
+前往 [Releases](https://github.com/guoyongchang/worktree-manager/releases) 下载最新版本：
 
-### 安装与运行
+- **macOS**：`.dmg` 安装包
+- **Windows**：`-setup.exe` 安装包
+- **Linux**：`.AppImage` 或 `.deb`
+
+运行仅需 **Git 2.0+**，无需安装 Node.js 或 Rust。
+
+<details>
+<summary>🛠️ 从源码构建（面向开发者）</summary>
+
+**环境要求：** Node.js 20+、Rust 1.70+（[安装指南](https://rustup.rs)）、Git 2.0+
 
 ```bash
 # 克隆项目
@@ -89,6 +96,8 @@ npm run tauri dev
 # 构建生产版本
 npm run tauri build
 ```
+
+</details>
 
 ### 三步上手
 
@@ -106,6 +115,7 @@ npm run tauri build
 |------|------|------|
 | GitHub 简写 | `owner/repo` | `facebook/react` |
 | SSH | `git@host:owner/repo.git` | `git@github.com:facebook/react.git` |
+| SSH (带端口) | `ssh://git@host:port/path.git` | `ssh://git@gitlab.com:1022/org/repo.git` |
 | HTTPS | `https://host/owner/repo.git` | `https://github.com/facebook/react.git` |
 
 添加时可以选择要链接的文件夹（如 `node_modules`、`.next`），也可以添加自定义路径。

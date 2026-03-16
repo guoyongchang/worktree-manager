@@ -1,6 +1,13 @@
 name: Release Build
 
 on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - '.github/workflows/deploy-*'
   workflow_dispatch:
     inputs:
       major_version:
