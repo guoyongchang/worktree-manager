@@ -108,6 +108,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [isMobile, setIsMobile] = useState(false);
   const [isInitializing, setIsInitializing] = useState(false);
+  const [initError, setInitError] = useState<string | null>(null);
 
   // Detect mobile device on mount
   useEffect(() => {
@@ -305,87 +306,6 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
     };
   }, []);
 
-  // Create PTY session on first visibility
-  useEffect(() => {
-    if (!xtermRef.current || !visible || initializedRef.current) return;
-
-    const initPty = async () => {
-      const term = xtermRef.current;
-      const fitAddon = fitAddonRef.current;
-      if (!term || !fitAddon) return;
-
-      setIsInitializing(true);
-
-      try {
-        try {
-          // Promise.race so Safari doesn't hang forever on document.fonts.ready
-          await Promise.race([
-            document.fonts.ready,
-            new Promise(r => setTimeout(r, 100))
-          ]);
-        } catch (e) { /* ignore */ }
-
-        try {
-          fitAddon.fit();
-        } catch (e) {
-          console.warn('[terminal] fitAddon.fit() failed during init', e);
-        }
-
-        const cols = Math.max(term.cols || 80, 2);
-        const rows = Math.max(term.rows || 24, 2);
-
-
-        const exists = await callBackend<boolean>('pty_exists', {
-          sessionId: sessionIdRef.current,
-        });
-
-        if (!exists) {
-          const shell = localStorage.getItem('preferred_terminal') || undefined;
-          await callBackend('pty_create', {
-            sessionId: sessionIdRef.current,
-            cwd: cwdRef.current,
-            cols,
-            rows,
-            shell: shell && shell !== 'auto' ? shell : undefined,
-          });
-        }
-
-        initializedRef.current = true;
-
-        startReading();
-
-        // Deferred resize: fitAddon.fit() during init may run before CSS layout
-        // is complete, giving default 80×24. RAF + timeout ensures final dimensions.
-        requestAnimationFrame(() => {
-          setTimeout(() => {
-            if (fitAddonRef.current && xtermRef.current) {
-              try { fitAddonRef.current.fit(); } catch (e) { /* ignore */ }
-              const newCols = Math.max(xtermRef.current.cols || 80, 2);
-              const newRows = Math.max(xtermRef.current.rows || 24, 2);
-              if (newCols !== cols || newRows !== rows || exists) {
-                callBackend('pty_resize', {
-                  sessionId: sessionIdRef.current,
-                  cols: newCols,
-                  rows: newRows,
-                  ...(clientId ? { clientId } : {}),
-                }).catch(() => { });
-              }
-            }
-          }, 100);
-        });
-
-        setIsInitializing(false);
-
-      } catch (e) {
-        setIsInitializing(false);
-        term.write(`\r\n\x1b[31mFailed to create terminal: ${e}\x1b[0m\r\n`);
-      }
-    };
-
-    initPty();
-  }, [visible]);
-
-
   const startReading = useCallback(() => {
     if (!isTauri()) {
       // Browser mode: WS subscribe is idempotent
@@ -434,6 +354,89 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
       scheduleNext();
     }
   }, []);
+
+  // Initialize PTY session
+  const initPty = useCallback(async () => {
+    const term = xtermRef.current;
+    const fitAddon = fitAddonRef.current;
+    if (!term || !fitAddon) return;
+
+    setIsInitializing(true);
+    setInitError(null);
+
+    try {
+      try {
+        // Promise.race so Safari doesn't hang forever on document.fonts.ready
+        await Promise.race([
+          document.fonts.ready,
+          new Promise(r => setTimeout(r, 100))
+        ]);
+      } catch (e) { /* ignore */ }
+
+      try {
+        fitAddon.fit();
+      } catch (e) {
+        console.warn('[terminal] fitAddon.fit() failed during init', e);
+      }
+
+      const cols = Math.max(term.cols || 80, 2);
+      const rows = Math.max(term.rows || 24, 2);
+
+
+      const exists = await callBackend<boolean>('pty_exists', {
+        sessionId: sessionIdRef.current,
+      });
+
+      if (!exists) {
+        const shell = localStorage.getItem('preferred_terminal') || undefined;
+        await callBackend('pty_create', {
+          sessionId: sessionIdRef.current,
+          cwd: cwdRef.current,
+          cols,
+          rows,
+          shell: shell && shell !== 'auto' ? shell : undefined,
+        });
+      }
+
+      initializedRef.current = true;
+
+      startReading();
+
+      // Deferred resize: fitAddon.fit() during init may run before CSS layout
+      // is complete, giving default 80×24. RAF + timeout ensures final dimensions.
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          if (fitAddonRef.current && xtermRef.current) {
+            try { fitAddonRef.current.fit(); } catch (e) { /* ignore */ }
+            const newCols = Math.max(xtermRef.current.cols || 80, 2);
+            const newRows = Math.max(xtermRef.current.rows || 24, 2);
+            if (newCols !== cols || newRows !== rows || exists) {
+              callBackend('pty_resize', {
+                sessionId: sessionIdRef.current,
+                cols: newCols,
+                rows: newRows,
+                ...(clientId ? { clientId } : {}),
+              }).catch(() => { });
+            }
+          }
+        }, 100);
+      });
+
+      setIsInitializing(false);
+
+    } catch (e) {
+      setIsInitializing(false);
+      setInitError(String(e));
+      console.error('[terminal] Failed to initialize PTY:', e);
+    }
+  }, [clientId, startReading]);
+
+  // Create PTY session on first visibility
+  useEffect(() => {
+    if (!xtermRef.current || !visible || initializedRef.current) return;
+    initPty();
+  }, [visible, initPty]);
+
 
   const stopReading = useCallback(() => {
     if (!isTauri() && wsSubscribedRef.current) {
@@ -531,16 +534,37 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
         />
 
         {/* Initializing overlay */}
-        {isInitializing && (
+        {(isInitializing || initError) && (
           <div className="absolute inset-0 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm z-20">
             <div className="flex flex-col items-center gap-3">
-              <div className="flex items-center gap-2">
-                <svg className="w-5 h-5 text-blue-400 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                <span className="text-slate-300 text-sm font-medium">Connecting to terminal...</span>
-              </div>
+              {isInitializing ? (
+                <div className="flex items-center gap-2">
+                  <svg className="w-5 h-5 text-blue-400 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  <span className="text-slate-300 text-sm font-medium">Connecting to terminal...</span>
+                </div>
+              ) : initError ? (
+                <>
+                  <div className="flex items-center gap-2 text-red-400">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span className="text-sm font-medium">Connection failed</span>
+                  </div>
+                  <p className="text-slate-400 text-xs max-w-xs text-center">{initError}</p>
+                  <button
+                    onClick={() => {
+                      initializedRef.current = false;
+                      initPty();
+                    }}
+                    className="mt-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+                  >
+                    Retry Connection
+                  </button>
+                </>
+              ) : null}
             </div>
           </div>
         )}
