@@ -501,6 +501,7 @@
   "updater.retryUpdate": "重试更新",
   "updater.upToDate": "已是最新版本",
   "updater.usingLatest": "您正在使用最新版本的 Worktree Manager",
+  "updater.chinaMirrorDownload": "国内源下载（网络不畅时使用）",
   "voice.micNeedsHttps": "麦克风需要 HTTPS 或 localhost 环境，当前 HTTP 连接不支持",
   "voice.permissionDenied": "麦克风权限被拒绝，请在系统设置中允许",
   "voice.noMicDetected": "未检测到麦克风设备",

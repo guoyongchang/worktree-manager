@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { isTauri } from '../lib/backend';
+import { isTauri, callBackend } from '../lib/backend';
 
 export type UpdaterState =
   | 'idle'
@@ -31,6 +31,7 @@ export interface UseUpdaterReturn {
   showUpToDateToast: boolean;
   checkForUpdates: (silent?: boolean) => Promise<void>;
   startDownload: () => Promise<void>;
+  downloadViaMirror: () => Promise<void>;
   restartApp: () => Promise<void>;
   dismiss: () => void;
   retry: () => Promise<void>;
@@ -179,6 +180,68 @@ export function useUpdater(): UseUpdaterReturn {
     }
   }, []);
 
+  const downloadViaMirror = useCallback(async () => {
+    if (!updateInfo) return;
+
+    setState('downloading');
+    let totalBytes = 0;
+    let downloadedBytes = 0;
+
+    // Listen for progress events from the Rust backend
+    const { listen } = await import('@tauri-apps/api/event');
+    const unlisten = await listen<{ event: string; data: Record<string, number> }>(
+      'mirror-update-progress',
+      (event) => {
+        const { event: eventType, data } = event.payload;
+        switch (eventType) {
+          case 'Started':
+            totalBytes = data.contentLength ?? 0;
+            downloadedBytes = 0;
+            setDownloadProgress({
+              version: updateInfo.version,
+              downloadedBytes: 0,
+              totalBytes,
+              percentage: 0,
+            });
+            break;
+          case 'Progress':
+            downloadedBytes += data.chunkLength;
+            {
+              const percentage = totalBytes > 0
+                ? Math.min(Math.round((downloadedBytes / totalBytes) * 100), 100)
+                : 0;
+              setDownloadProgress({
+                version: updateInfo.version,
+                downloadedBytes,
+                totalBytes,
+                percentage,
+              });
+            }
+            break;
+          case 'Finished':
+            setDownloadProgress({
+              version: updateInfo.version,
+              downloadedBytes: totalBytes,
+              totalBytes,
+              percentage: 100,
+            });
+            break;
+        }
+      },
+    );
+
+    try {
+      await callBackend('download_update_via_mirror');
+      setState('success');
+    } catch (err) {
+      console.error('Failed to download mirror update:', err);
+      setErrorMessage(String(err));
+      setState('error');
+    } finally {
+      unlisten();
+    }
+  }, [updateInfo]);
+
   const restartApp = useCallback(async () => {
     if (!isTauri()) return;
     try {
@@ -211,6 +274,7 @@ export function useUpdater(): UseUpdaterReturn {
     showUpToDateToast,
     checkForUpdates,
     startDownload,
+    downloadViaMirror,
     restartApp,
     dismiss,
     retry,

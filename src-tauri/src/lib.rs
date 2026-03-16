@@ -230,6 +230,8 @@ pub fn run() {
             voice_stop,
             voice_is_active,
             voice_refine_text,
+            // 更新镜像
+            download_update_via_mirror,
             // DevTools
             open_devtools,
         ])

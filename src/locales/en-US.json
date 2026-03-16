@@ -512,6 +512,7 @@
   "updater.retryUpdate": "Retry update",
   "updater.upToDate": "Up to Date",
   "updater.usingLatest": "You are using the latest version of Worktree Manager",
+  "updater.chinaMirrorDownload": "China mirror download (use when network is slow)",
   "voice.micNeedsHttps": "Microphone requires HTTPS or localhost, current HTTP connection is not supported",
   "voice.permissionDenied": "Microphone permission denied, please allow in system settings",
   "voice.noMicDetected": "No microphone device detected",

@@ -56,6 +56,7 @@ export const GlobalDialogs: FC<GlobalDialogsProps> = ({
           onOpenChange={(open) => !open && updater.dismiss()}
           updateInfo={updater.updateInfo}
           onUpdate={updater.startDownload}
+          onMirrorDownload={updater.downloadViaMirror}
           onLater={updater.dismiss}
         />
       )}
