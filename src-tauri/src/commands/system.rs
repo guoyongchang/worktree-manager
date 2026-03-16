@@ -576,6 +576,150 @@ pub fn set_git_path_internal(path: &str) {
     crate::utils::set_custom_git_path(path);
 }
 
+// ==================== 更新镜像下载 ====================
+
+/// 通过 gh-proxy.org 镜像下载更新（内置更新流程，非浏览器跳转）
+/// 原理：获取 latest.json → 将下载 URL 替换为 gh-proxy 代理 → 用本地临时服务提供修改后的 manifest → 走 Tauri 内置更新器
+#[tauri::command]
+pub(crate) async fn download_update_via_mirror(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::Emitter;
+    use tauri_plugin_updater::UpdaterExt;
+
+    log::info!("[system] Starting mirror update download...");
+
+    // 1. Fetch latest.json from GitHub
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("HTTP client error: {}", e))?;
+
+    let endpoint =
+        "https://github.com/guoyongchang/worktree-manager/releases/latest/download/latest.json";
+    let resp = client
+        .get(endpoint)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch update manifest: {}", e))?;
+    let mut manifest: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse update manifest: {}", e))?;
+
+    // 2. Modify all platform download URLs to use gh-proxy.org
+    if let Some(platforms) = manifest.get_mut("platforms") {
+        if let Some(obj) = platforms.as_object_mut() {
+            for (platform, info) in obj.iter_mut() {
+                if let Some(url_val) = info.get_mut("url") {
+                    if let Some(url_str) = url_val.as_str() {
+                        let proxied = format!("https://gh-proxy.org/{}", url_str);
+                        log::info!("[system] Proxied URL for {}: {}", platform, proxied);
+                        *url_val = serde_json::Value::String(proxied);
+                    }
+                }
+            }
+        }
+    }
+
+    let manifest_body = serde_json::to_string(&manifest).map_err(|e| e.to_string())?;
+
+    // 3. Start a temporary local HTTP server to serve the modified manifest
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .map_err(|e| format!("Failed to bind local server: {}", e))?;
+    let port = listener
+        .local_addr()
+        .map_err(|e| e.to_string())?
+        .port();
+
+    let router = axum::Router::new().route(
+        "/latest.json",
+        axum::routing::get(move || {
+            let body = manifest_body.clone();
+            async move { body }
+        }),
+    );
+
+    let server_handle = tokio::spawn(async move {
+        axum::serve(listener, router).await.ok();
+    });
+
+    // 4. Create a new updater instance pointing to the local endpoint
+    let local_endpoint: url::Url = format!("http://127.0.0.1:{}/latest.json", port)
+        .parse()
+        .map_err(|e: url::ParseError| e.to_string())?;
+
+    log::info!(
+        "[system] Local manifest server at: {}",
+        local_endpoint
+    );
+
+    let updater = app
+        .updater_builder()
+        .endpoints(vec![local_endpoint])
+        .map_err(|e| format!("Failed to set endpoints: {}", e))?
+        .build()
+        .map_err(|e| format!("Failed to build updater: {}", e))?;
+
+    // 5. Check for update (reads from local server → gets proxied download URLs)
+    let update: Option<tauri_plugin_updater::Update> = updater
+        .check()
+        .await
+        .map_err(|e| format!("Mirror update check failed: {}", e))?;
+
+    let update = update.ok_or_else(|| "No update available".to_string())?;
+    log::info!("[system] Mirror update found: v{}", update.version);
+
+    // 6. Download and install with progress events emitted to the frontend
+    //    on_chunk callback: FnMut(chunk_length: usize, content_length: Option<u64>)
+    //    on_download_finish callback: FnOnce()
+    let app_for_chunk = app.clone();
+    let app_for_finish = app.clone();
+    let mut first_chunk = true;
+
+    update
+        .download_and_install(
+            move |chunk_len: usize, content_length: Option<u64>| {
+                // Emit "Started" on the first chunk
+                if first_chunk {
+                    first_chunk = false;
+                    let _ = app_for_chunk.emit(
+                        "mirror-update-progress",
+                        serde_json::json!({
+                            "event": "Started",
+                            "data": { "contentLength": content_length.unwrap_or(0) }
+                        }),
+                    );
+                }
+                // Emit "Progress" for every chunk
+                let _ = app_for_chunk.emit(
+                    "mirror-update-progress",
+                    serde_json::json!({
+                        "event": "Progress",
+                        "data": { "chunkLength": chunk_len }
+                    }),
+                );
+            },
+            move || {
+                // Emit "Finished" when download completes
+                let _ = app_for_finish.emit(
+                    "mirror-update-progress",
+                    serde_json::json!({
+                        "event": "Finished",
+                        "data": {}
+                    }),
+                );
+            },
+        )
+        .await
+        .map_err(|e| format!("Mirror download failed: {}", e))?;
+
+    // 7. Clean up local server
+    server_handle.abort();
+    log::info!("[system] Mirror update download complete");
+
+    Ok(())
+}
+
 // ==================== HTTP Server 共享接口 ====================
 
 pub fn open_in_terminal_internal(path: &str, terminal: Option<&str>) -> Result<(), String> {

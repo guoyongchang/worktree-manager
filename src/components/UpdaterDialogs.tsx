@@ -16,6 +16,7 @@ import {
   AlertTriangle,
   ArrowRight,
   RotateCw,
+  Globe,
 } from 'lucide-react';
 import type { UpdateInfo, DownloadProgress } from '@/hooks/useUpdater';
 
@@ -139,6 +140,7 @@ interface UpdateNotificationDialogProps {
   onOpenChange: (open: boolean) => void;
   updateInfo: UpdateInfo;
   onUpdate: () => void;
+  onMirrorDownload: () => void;
   onLater: () => void;
 }
 
@@ -147,6 +149,7 @@ export const UpdateNotificationDialog: FC<UpdateNotificationDialogProps> = ({
   onOpenChange,
   updateInfo,
   onUpdate,
+  onMirrorDownload,
   onLater,
 }) => {
   const { t } = useTranslation();
@@ -189,20 +192,30 @@ export const UpdateNotificationDialog: FC<UpdateNotificationDialogProps> = ({
           </DialogDescription>
         </div>
 
-        <DialogFooter className="p-5 pt-0 flex-row gap-3 sm:flex-row">
+        <DialogFooter className="p-5 pt-0 flex-col gap-2 sm:flex-col">
+          <div className="flex gap-3 w-full">
+            <Button
+              variant="secondary"
+              className="flex-1"
+              onClick={onLater}
+            >
+              {t('updater.remindLater')}
+            </Button>
+            <Button
+              className="flex-1 group"
+              onClick={onUpdate}
+            >
+              {t('updater.updateNow')}
+              <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+            </Button>
+          </div>
           <Button
-            variant="secondary"
-            className="flex-1"
-            onClick={onLater}
+            variant="outline"
+            className="w-full text-slate-400 hover:text-slate-200"
+            onClick={onMirrorDownload}
           >
-            {t('updater.remindLater')}
-          </Button>
-          <Button
-            className="flex-1 group"
-            onClick={onUpdate}
-          >
-            {t('updater.updateNow')}
-            <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+            <Globe className="w-4 h-4" />
+            {t('updater.chinaMirrorDownload')}
           </Button>
         </DialogFooter>
       </DialogContent>
