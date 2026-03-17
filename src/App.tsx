@@ -1,4 +1,3 @@
-import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,15 +20,9 @@ import {
   MobileWorktreeList,
   MobileWorktreeDetail,
 } from "./components";
-import { useWorkspace, useTerminal, useUpdater, useShareFeature, useBrowserAuth, useWorktreeLocks, useModals, useWorkspaceActions, useMainOccupation } from "./hooks";
-import { useVoiceInput } from "./hooks/useVoiceInput";
+import { useAppShellState } from "./hooks/useAppShellState";
 import { Input } from "@/components/ui/input";
-import { callBackend, isTauri, setWindowTitle, getShareInfo, clearSessionId } from "./lib/backend";
-import { getWebSocketManager } from "./lib/websocket";
-import type {
-  ViewMode,
-  TerminalTabMenuState,
-} from "./types";
+import { isTauri } from "./lib/backend";
 import "./index.css";
 
 // Disable browser-like behaviors (only in Tauri desktop mode)
@@ -50,192 +43,39 @@ if (typeof window !== 'undefined' && isTauri()) {
 
 function App() {
   const { t } = useTranslation();
-  const browserAuth = useBrowserAuth();
-  const workspace = useWorkspace(browserAuth.browserAuthenticated);
-
-  const [shareWorkspaceName, setShareWorkspaceName] = useState<string | null>(null);
-  const [pendingAutoSelectWorktree, setPendingAutoSelectWorktree] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (isTauri()) return;
-    getShareInfo()
-      .then((info) => {
-        if (info.workspace_name) setShareWorkspaceName(info.workspace_name);
-        if (info.current_worktree) setPendingAutoSelectWorktree(info.current_worktree);
-      })
-      .catch(() => { });
-  }, []);
-
-  useEffect(() => {
-    if (!isTauri() && browserAuth.browserAuthenticated) {
-      getShareInfo().then(async (info) => {
-        if (info.current_worktree) setPendingAutoSelectWorktree(info.current_worktree);
-        await callBackend('set_window_workspace', { workspacePath: info.workspace_path });
-        await workspace.loadWorkspaces();
-        await workspace.loadData();
-      }).catch(() => { });
-    }
-  }, [browserAuth.browserAuthenticated]);
-
-  const [viewMode, setViewMode] = useState<ViewMode>('main');
-  const [isMobileWeb, setIsMobileWeb] = useState(() => !isTauri() && window.matchMedia('(max-width: 639px)').matches);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(isMobileWeb);
-  const [mobileView, setMobileView] = useState<'list' | 'detail'>('list');
-  const [terminalFullscreen, setTerminalFullscreen] = useState(false);
-  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
-  const [terminalTabMenu, setTerminalTabMenu] = useState<TerminalTabMenuState | null>(null);
-  const modals = useModals();
-  const share = useShareFeature(workspace.setError);
-  const locks = useWorktreeLocks(workspace.currentWorkspace?.path, workspace.getLockedWorktrees);
-  const mainOccupation = useMainOccupation(workspace.currentWorkspace?.path);
-  const [selectedWorktree, setSelectedWorktree] = useState<import('./types').WorktreeListItem | null>(null);
-  const terminalHook = useTerminal(selectedWorktree, workspace.mainWorkspace, workspace.currentWorkspace?.path);
-  const actions = useWorkspaceActions(workspace, modals, terminalHook.cleanupTerminalsForPath, locks, isMobileWeb, selectedWorktree, setSelectedWorktree);
-  const updater = useUpdater();
-  const [wsConnected, setWsConnected] = useState(true);
-  const [wasKicked, setWasKicked] = useState(false);
-
-  useEffect(() => {
-    if (isTauri() || !browserAuth.browserAuthenticated) return;
-    const wsManager = getWebSocketManager();
-    const unsubConn = wsManager.onConnectionStateChange(setWsConnected);
-    const unsubKicked = wsManager.onKicked(() => {
-      setWasKicked(true);
-      clearSessionId();
-      wsManager.disconnect();
-    });
-    return () => { unsubConn(); unsubKicked(); };
-  }, [browserAuth.browserAuthenticated]);
-
-  const voice = useVoiceInput(useCallback((text: string) => {
-    const activeTab = terminalHook.activeTerminalTab;
-    if (activeTab) {
-      const sessionId = `pty-${activeTab.replace(/\//g, '-')}`;
-      callBackend('pty_write', { sessionId, data: text });
-    }
-  }, [terminalHook.activeTerminalTab]));
-
-  const voiceMountedRef = useRef(false);
-  useEffect(() => {
-    if (voiceMountedRef.current) {
-      voice.stopVoice();
-    } else {
-      voiceMountedRef.current = true;
-    }
-  }, [actions.selectedWorktree, terminalHook.activeTerminalTab]);
-
-  useEffect(() => { // Responsive detection
-    if (isTauri()) return;
-    const mql = window.matchMedia('(max-width: 639px)');
-    const handler = (e: MediaQueryListEvent) => {
-      setIsMobileWeb(e.matches);
-      if (e.matches) setSidebarCollapsed(true);
-    };
-    mql.addEventListener('change', handler);
-    return () => mql.removeEventListener('change', handler);
-  }, []);
-
-  useEffect(() => { // Auto-select worktree on first load
-    if (!actions.hasUserSelected && !actions.selectedWorktree && workspace.worktrees.length > 0 && workspace.currentWorkspace) {
-      actions.tryAutoSelect(
-        workspace.worktrees,
-        workspace.currentWorkspace.path,
-        pendingAutoSelectWorktree,
-        setPendingAutoSelectWorktree,
-        isMobileWeb,
-      );
-    }
-    if (actions.selectedWorktree) {
-      const updated = workspace.worktrees.find(w => w.name === actions.selectedWorktree!.name);
-      if (updated && JSON.stringify(updated) !== JSON.stringify(actions.selectedWorktree)) {
-        actions.setSelectedWorktree(updated);
-      }
-    }
-  }, [workspace.worktrees, actions.selectedWorktree, actions.hasUserSelected, workspace.currentWorkspace]);
-
-  useEffect(() => { // Update window title
-    const wsName = workspace.currentWorkspace?.name;
-    let title: string;
-    if (!wsName) {
-      title = 'Worktree Manager';
-    } else {
-      const wtName = actions.selectedWorktree ? actions.selectedWorktree.name : t('app.mainWorkspace');
-      title = `${wsName} - ${wtName}`;
-    }
-    setWindowTitle(title);
-  }, [workspace.currentWorkspace?.name, actions.selectedWorktree]);
-
-  const handleTerminalTabContextMenu = useCallback((e: React.MouseEvent, path: string, name: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setTerminalTabMenu({ x: e.clientX, y: e.clientY, path, name });
-  }, []);
-
-  const openSettings = useCallback(() => {
-    setViewMode('settings');
-  }, []);
-
-  const handleSaveConfig = useCallback(async (config: import('./types').WorkspaceConfig) => {
-    try {
-      await workspace.saveConfig(config);
-      setViewMode('main');
-    } catch (e) {
-      workspace.setError(String(e));
-    }
-  }, [workspace]);
-
-  useEffect(() => { // Global keyboard shortcuts
-    function handleKeyDown(e: KeyboardEvent): void {
-      const hasOpenDialog = document.querySelector('[role="dialog"][data-state="open"]');
-      if (e.key === 'Escape') {
-        if (hasOpenDialog) return;
-        if (viewMode === 'settings') {
-          setViewMode('main');
-          return;
-        }
-        if (terminalFullscreen) {
-          setTerminalFullscreen(false);
-          return;
-        }
-        actions.setContextMenu(null);
-        actions.setArchiveModal(null);
-        modals.setModal('showEditorMenu', false);
-        modals.setModal('showWorkspaceMenu', false);
-        setTerminalTabMenu(null);
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key === 'n' && isTauri()) {
-        e.preventDefault();
-        if (viewMode === 'main' && workspace.config) {
-          actions.openCreateModal();
-        }
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key === ',' && isTauri()) {
-        e.preventDefault();
-        if (viewMode === 'main') openSettings();
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key === '[') {
-        e.preventDefault();
-        if (viewMode === 'settings') setViewMode('main');
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
-        e.preventDefault();
-        if (viewMode === 'main') setSidebarCollapsed(prev => !prev);
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key === '/') {
-        e.preventDefault();
-        setShowShortcutHelp(prev => !prev);
-      }
-    }
-    function handleClick(): void {
-      setTerminalTabMenu(null);
-    }
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('click', handleClick);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('click', handleClick);
-    };
-  }, [viewMode, workspace.config, actions, openSettings, terminalFullscreen, modals]);
+  const {
+    browserAuth,
+    workspace,
+    shareWorkspaceName,
+    viewMode,
+    setViewMode,
+    isMobileWeb,
+    sidebarCollapsed,
+    setSidebarCollapsed,
+    mobileView,
+    setMobileView,
+    terminalFullscreen,
+    setTerminalFullscreen,
+    showShortcutHelp,
+    setShowShortcutHelp,
+    terminalTabMenu,
+    setTerminalTabMenu,
+    modals,
+    share,
+    locks,
+    mainOccupation,
+    setSelectedWorktree,
+    terminalHook,
+    actions,
+    updater,
+    wsConnected,
+    wasKicked,
+    setWasKicked,
+    voice,
+    openSettings,
+    handleSaveConfig,
+    handleTerminalTabContextMenu,
+  } = useAppShellState(t);
 
   // Browser mode: kicked screen
   if (!isTauri() && wasKicked) {
@@ -457,6 +297,7 @@ function App() {
                       switching={actions.switchingWorktree}
                       onDelete={actions.selectedWorktree?.is_archived ? () => actions.setDeleteConfirmWorktree(actions.selectedWorktree) : undefined}
                       onAddProject={() => modals.setModal('showAddProjectModal', true)}
+                      onRemoveProject={!actions.selectedWorktree ? actions.handleRemoveProject : undefined}
                       onAddProjectToWorktree={() => modals.setModal('showAddProjectToWorktreeModal', true)}
                       error={workspace.error}
                       onClearError={() => workspace.setError(null)}
@@ -617,6 +458,7 @@ function App() {
           scanLinkedFolders={workspace.scanLinkedFolders}
           workspacePath={workspace.currentWorkspace?.path}
           onUpdateLinkedFolders={actions.handleUpdateLinkedFolders}
+          onSuccess={workspace.loadData}
         />
 
         <AddProjectToWorktreeModal

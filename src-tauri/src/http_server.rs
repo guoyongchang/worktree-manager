@@ -1,28 +1,31 @@
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        ConnectInfo, Json, Query, Request,
+        ConnectInfo, Json, Query,
     },
-    http::{header, HeaderMap, HeaderValue, Method, StatusCode},
-    middleware::Next,
+    http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::{get, post},
     Extension, Router,
 };
 use futures_util::{SinkExt, StreamExt};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 use tokio::sync::Mutex as TokioMutex;
-use tower_http::cors::CorsLayer;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
 use crate::pty_manager::bytes_to_utf8_with_pending;
+
 use crate::tls::TlsCerts;
+
+#[path = "http_server/middleware.rs"]
+mod middleware;
+#[path = "http_server/routing.rs"]
+mod routing;
 
 use crate::{
     add_project_to_worktree_impl,
@@ -41,6 +44,10 @@ use crate::{
     get_workspace_config_impl,
     git_ops,
     list_worktrees_impl,
+    // Project management
+    add_existing_project_impl,
+    scan_existing_projects_impl,
+    remove_project_from_config_impl,
     // WMS config & tunnel
     load_global_config,
     load_workspace_config,
@@ -73,31 +80,15 @@ use crate::{
     SHARE_STATE,
     TERMINAL_STATE_BROADCAST,
 };
+use middleware::{
+    auth_middleware, is_loopback_request, localhost_only_middleware, no_cache_html_middleware,
+    security_headers_middleware, session_id,
+};
+use routing::{build_api_router, build_cors_layer, resolve_dist_path};
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/// Extract the session ID from headers, falling back to "web-default".
-/// Auto-binds the session to the shared workspace if one is active.
-fn session_id(headers: &HeaderMap) -> String {
-    let sid = headers
-        .get("x-session-id")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("web-default")
-        .to_string();
-
-    // Auto-bind: if SHARE_STATE has an active workspace, bind this session to it
-    if let Ok(share_state) = SHARE_STATE.lock() {
-        if let Some(ref ws_path) = share_state.workspace_path {
-            if share_state.active {
-                let _ = set_window_workspace_impl(&sid, ws_path.clone());
-            }
-        }
-    }
-
-    sid
-}
 
 /// Convert a Result<T, String> to an Axum response (200 with JSON or 400 with error text).
 fn result_json<T: serde::Serialize>(r: Result<T, String>) -> Response {
@@ -116,6 +107,43 @@ fn result_ok(r: Result<(), String>) -> Response {
 
 fn result_void_ok() -> Response {
     StatusCode::NO_CONTENT.into_response()
+}
+
+fn current_app_handle() -> Result<tauri::AppHandle, String> {
+    crate::APP_HANDLE
+        .lock()
+        .map_err(|_| "Internal app state error".to_string())?
+        .clone()
+        .ok_or("App handle unavailable".to_string())
+}
+
+fn parse_origin_url(origin: &str) -> Option<url::Url> {
+    let parsed = url::Url::parse(origin).ok()?;
+    matches!(parsed.scheme(), "http" | "https").then_some(parsed)
+}
+
+fn is_loopback_origin(origin: &url::Url) -> bool {
+    match origin.host() {
+        Some(url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(ipv4)) => ipv4.is_loopback(),
+        Some(url::Host::Ipv6(ipv6)) => ipv6.is_loopback(),
+        None => false,
+    }
+}
+
+fn is_private_lan_origin(origin: &url::Url) -> bool {
+    matches!(origin.host(), Some(url::Host::Ipv4(ipv4)) if ipv4.is_private())
+}
+
+fn same_origin(left: &url::Url, right: &url::Url) -> bool {
+    left.scheme() == right.scheme()
+        && match (left.host(), right.host()) {
+            (Some(url::Host::Domain(a)), Some(url::Host::Domain(b))) => a.eq_ignore_ascii_case(b),
+            (Some(url::Host::Ipv4(a)), Some(url::Host::Ipv4(b))) => a == b,
+            (Some(url::Host::Ipv6(a)), Some(url::Host::Ipv6(b))) => a == b,
+            _ => false,
+        }
+        && left.port_or_known_default() == right.port_or_known_default()
 }
 
 // ---------------------------------------------------------------------------
@@ -185,6 +213,26 @@ async fn h_save_workspace_config(headers: HeaderMap, Json(args): Json<Value>) ->
         }
     };
     result_ok(save_workspace_config_impl(&sid, config))
+}
+
+async fn h_load_workspace_config_by_path(Json(args): Json<Value>) -> Response {
+    let path = args["path"].as_str().unwrap_or("").to_string();
+    result_json(crate::commands::workspace::load_workspace_config_by_path(
+        path,
+    ))
+}
+
+async fn h_save_workspace_config_by_path(Json(args): Json<Value>) -> Response {
+    let path = args["path"].as_str().unwrap_or("").to_string();
+    let config: WorkspaceConfig = match serde_json::from_value(args["config"].clone()) {
+        Ok(c) => c,
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, format!("Invalid config: {}", e)).into_response()
+        }
+    };
+    result_ok(crate::commands::workspace::save_workspace_config_by_path(
+        path, config,
+    ))
 }
 
 async fn h_get_config_path_info(headers: HeaderMap) -> Response {
@@ -280,6 +328,26 @@ async fn h_clone_project(headers: HeaderMap, Json(args): Json<Value>) -> Respons
     result_ok(clone_project_impl(&sid, request))
 }
 
+async fn h_scan_existing_projects(headers: HeaderMap) -> Response {
+    let sid = session_id(&headers);
+    result_json(scan_existing_projects_impl(&sid))
+}
+
+async fn h_add_existing_project(headers: HeaderMap, Json(args): Json<Value>) -> Response {
+    let sid = session_id(&headers);
+    let name = args["name"].as_str().unwrap_or("").to_string();
+    let base_branch = args["base_branch"].as_str().unwrap_or("").to_string();
+    let test_branch = args["test_branch"].as_str().unwrap_or("").to_string();
+    let merge_strategy = args["merge_strategy"].as_str().unwrap_or("merge").to_string();
+    result_ok(add_existing_project_impl(&sid, name, base_branch, test_branch, merge_strategy))
+}
+
+async fn h_remove_project_from_config(headers: HeaderMap, Json(args): Json<Value>) -> Response {
+    let sid = session_id(&headers);
+    let name = args["name"].as_str().unwrap_or("").to_string();
+    result_ok(remove_project_from_config_impl(&sid, name))
+}
+
 // -- Git operations --
 
 async fn h_switch_branch(Json(args): Json<Value>) -> Response {
@@ -303,14 +371,19 @@ async fn h_get_branch_diff_stats(Json(args): Json<Value>) -> Response {
 async fn h_get_changed_files(Json(args): Json<Value>) -> Response {
     let path = args["path"].as_str().unwrap_or("").to_string();
     let normalized = normalize_path(&path);
-    result_json(git_ops::get_changed_files(std::path::Path::new(&normalized)))
+    result_json(git_ops::get_changed_files(std::path::Path::new(
+        &normalized,
+    )))
 }
 
 async fn h_get_file_diff(Json(args): Json<Value>) -> Response {
     let path = args["path"].as_str().unwrap_or("").to_string();
     let file_path = args["filePath"].as_str().unwrap_or("").to_string();
     let normalized = normalize_path(&path);
-    result_json(git_ops::get_file_diff(std::path::Path::new(&normalized), &file_path))
+    result_json(git_ops::get_file_diff(
+        std::path::Path::new(&normalized),
+        &file_path,
+    ))
 }
 
 async fn h_check_remote_branch_exists(Json(args): Json<Value>) -> Response {
@@ -418,6 +491,22 @@ async fn h_get_remote_branches(Json(args): Json<Value>) -> Response {
     result_json(result)
 }
 
+async fn h_get_git_diff(Json(args): Json<Value>) -> Response {
+    let path = args["path"].as_str().unwrap_or("").to_string();
+    result_json(crate::commands::git::get_git_diff(path).await)
+}
+
+async fn h_commit_all(Json(args): Json<Value>) -> Response {
+    let path = args["path"].as_str().unwrap_or("").to_string();
+    let message = args["message"].as_str().unwrap_or("").to_string();
+    result_json(crate::commands::git::commit_all(path, message).await)
+}
+
+async fn h_generate_commit_message(Json(args): Json<Value>) -> Response {
+    let diff = args["diff"].as_str().unwrap_or("").to_string();
+    result_json(crate::commands::voice::generate_commit_message(diff).await)
+}
+
 // -- Scan --
 
 async fn h_scan_linked_folders(Json(args): Json<Value>) -> Response {
@@ -441,7 +530,10 @@ async fn h_open_in_editor(Json(args): Json<Value>) -> Response {
         }
     };
     let custom_path = args["customPath"].as_str().map(|s| s.to_string());
-    result_ok(crate::open_in_editor_internal(&request, custom_path.as_deref()))
+    result_ok(crate::open_in_editor_internal(
+        &request,
+        custom_path.as_deref(),
+    ))
 }
 
 async fn h_detect_tools() -> Response {
@@ -511,6 +603,37 @@ async fn h_get_locked_worktrees(Json(args): Json<Value>) -> Response {
     }
 }
 
+async fn h_broadcast_terminal_state(Json(args): Json<Value>) -> Response {
+    let app = match current_app_handle() {
+        Ok(app) => app,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    };
+
+    let workspace_path = args["workspacePath"].as_str().unwrap_or("").to_string();
+    let worktree_name = args["worktreeName"].as_str().unwrap_or("").to_string();
+    let activated_terminals = args["activatedTerminals"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|value| value.as_str().map(ToOwned::to_owned))
+        .collect();
+    let active_terminal_tab = args["activeTerminalTab"].as_str().map(|s| s.to_string());
+    let terminal_visible = args["terminalVisible"].as_bool().unwrap_or(false);
+    let client_id = args["clientId"].as_str().map(|s| s.to_string());
+
+    crate::commands::window::broadcast_terminal_state(
+        app,
+        workspace_path,
+        worktree_name,
+        activated_terminals,
+        active_terminal_tab,
+        terminal_visible,
+        client_id,
+    );
+    result_void_ok()
+}
+
 // -- PTY --
 
 /// Run a closure that requires the PTY_MANAGER lock on a blocking thread.
@@ -540,8 +663,14 @@ async fn h_pty_create(Json(args): Json<Value>) -> Response {
     {
         let session_id_clone = session_id.clone();
         let already_exists = tokio::task::spawn_blocking(move || {
-            PTY_MANAGER.lock().ok().map(|m| m.has_session(&session_id_clone)).unwrap_or(false)
-        }).await.unwrap_or(false);
+            PTY_MANAGER
+                .lock()
+                .ok()
+                .map(|m| m.has_session(&session_id_clone))
+                .unwrap_or(false)
+        })
+        .await
+        .unwrap_or(false);
         if already_exists {
             log::info!(
                 "[pty] Session already exists (HTTP), skipping create: id={}, requested cols={}, rows={}",
@@ -551,7 +680,12 @@ async fn h_pty_create(Json(args): Json<Value>) -> Response {
         }
     }
 
-    result_ok(with_pty_manager(move |m| m.create_session(&session_id, &cwd, cols, rows, shell.as_deref())).await)
+    result_ok(
+        with_pty_manager(move |m| {
+            m.create_session(&session_id, &cwd, cols, rows, shell.as_deref())
+        })
+        .await,
+    )
 }
 
 async fn h_pty_write(Json(args): Json<Value>) -> Response {
@@ -562,7 +696,10 @@ async fn h_pty_write(Json(args): Json<Value>) -> Response {
 
 async fn h_pty_read(Json(args): Json<Value>) -> Response {
     let session_id = args["sessionId"].as_str().unwrap_or("").to_string();
-    result_json(with_pty_manager(move |m| m.read_from_session(&session_id)).await)
+    let client_id = args["clientId"].as_str().map(|s| s.to_string());
+    result_json(
+        with_pty_manager(move |m| m.read_from_session(&session_id, client_id.as_deref())).await,
+    )
 }
 
 async fn h_pty_resize(Json(args): Json<Value>) -> Response {
@@ -577,9 +714,7 @@ async fn h_pty_resize(Json(args): Json<Value>) -> Response {
     let active_client_id = crate::TERMINAL_STATES
         .lock()
         .ok()
-        .and_then(|states| {
-            states.values().find_map(|ts| ts.client_id.clone())
-        });
+        .and_then(|states| states.values().find_map(|ts| ts.client_id.clone()));
 
     let is_active = if let Some(ref req_cid) = request_client_id {
         active_client_id.as_deref() == Some(req_cid)
@@ -626,129 +761,6 @@ async fn h_pty_close_by_path(Json(args): Json<Value>) -> Response {
 }
 
 // -- Auth --
-
-/// Middleware: block dangerous host-only operations from remote (non-localhost) clients.
-/// Operations like open_in_terminal, open_in_editor, reveal_in_finder, open_log_dir
-/// should only be available from localhost, not from remote browser sessions.
-async fn localhost_only_middleware(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    request: Request,
-    next: Next,
-) -> Response {
-    let path = request.uri().path().to_string();
-    let restricted_paths = [
-        "/api/open_in_terminal",
-        "/api/open_in_editor",
-        "/api/reveal_in_finder",
-        "/api/open_log_dir",
-        // ngrok management should only be accessible from localhost
-        "/api/get_ngrok_token",
-        "/api/set_ngrok_token",
-        "/api/start_ngrok_tunnel",
-        "/api/stop_ngrok_tunnel",
-        // Dashscope config should only be accessible from localhost
-        "/api/get_dashscope_api_key",
-        "/api/set_dashscope_api_key",
-        "/api/get_dashscope_base_url",
-        "/api/set_dashscope_base_url",
-    ];
-
-    if restricted_paths.contains(&path.as_str()) {
-        let ip = addr.ip();
-        if !ip.is_loopback() {
-            return (
-                StatusCode::FORBIDDEN,
-                "This operation is only available from localhost",
-            )
-                .into_response();
-        }
-    }
-
-    next.run(request).await
-}
-
-/// Middleware: add security headers to all responses.
-async fn security_headers_middleware(request: Request, next: Next) -> Response {
-    let mut response = next.run(request).await;
-    let headers = response.headers_mut();
-    headers.insert(
-        "x-content-type-options",
-        HeaderValue::from_static("nosniff"),
-    );
-    headers.insert("x-frame-options", HeaderValue::from_static("DENY"));
-    headers.insert(
-        "x-xss-protection",
-        HeaderValue::from_static("1; mode=block"),
-    );
-    headers.insert(
-        "referrer-policy",
-        HeaderValue::from_static("strict-origin-when-cross-origin"),
-    );
-    headers.insert(
-        "permissions-policy",
-        HeaderValue::from_static("camera=(), geolocation=()"),
-    );
-    response
-}
-
-/// Middleware: check if the request is authenticated when password is set.
-/// Exempt: /api/auth, /api/get_share_info, and non-API paths (static files).
-async fn auth_middleware(headers: HeaderMap, request: Request, next: Next) -> Response {
-    let path = request.uri().path().to_string();
-
-    // Allow non-API paths (static files), exempt endpoints, and WebSocket
-    if !path.starts_with("/api/")
-        || path == "/api/auth/challenge"
-        || path == "/api/auth/verify"
-        || path == "/api/get_share_info"
-        || path == "/api/cert.pem"
-        || path == "/ws"
-    {
-        return next.run(request).await;
-    }
-
-    // Check if sharing is active and has a password
-    let needs_auth = SHARE_STATE
-        .lock()
-        .map(|state| state.active && state.auth_key.is_some())
-        .unwrap_or(false);
-
-    if !needs_auth {
-        return next.run(request).await;
-    }
-
-    // Check session authentication
-    let sid = headers
-        .get("x-session-id")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("web-default")
-        .to_string();
-
-    // Auto-authenticate mobile sessions from WMS tunnel (they arrive from localhost).
-    if sid.starts_with("mobile-") {
-        if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() {
-            sessions.insert(sid);
-        }
-        return next.run(request).await;
-    }
-
-    let is_authenticated = AUTHENTICATED_SESSIONS
-        .lock()
-        .map(|sessions| sessions.contains(&sid))
-        .unwrap_or(false);
-
-    if is_authenticated {
-        // Update last_active timestamp
-        if let Ok(mut clients) = CONNECTED_CLIENTS.lock() {
-            if let Some(client) = clients.get_mut(&sid) {
-                client.last_active = chrono::Utc::now().to_rfc3339();
-            }
-        }
-        return next.run(request).await;
-    }
-
-    (StatusCode::UNAUTHORIZED, "Authentication required").into_response()
-}
 
 async fn h_auth_challenge(ConnectInfo(addr): ConnectInfo<SocketAddr>) -> Response {
     let client_ip = addr.ip().to_string();
@@ -951,27 +963,52 @@ async fn h_stop_ngrok_tunnel() -> Response {
 
 async fn h_get_wms_config() -> Response {
     let config = load_global_config();
-    let wms = WmsConfig {
+    Json(json!(WmsConfig {
         server_url: config.wms_server_url,
         token: config.wms_token,
         subdomain: config.wms_subdomain,
         jwt: config.wms_jwt,
-    };
-    Json(json!(wms)).into_response()
+    }))
+    .into_response()
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct SetWmsConfigReq {
-    server_url: Option<String>,
-    token: Option<String>,
-    subdomain: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_patch_string_field")]
+    server_url: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_patch_string_field")]
+    token: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_patch_string_field")]
+    subdomain: Option<Option<String>>,
+}
+
+fn deserialize_patch_string_field<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(Some)
 }
 
 async fn h_set_wms_config(Json(body): Json<SetWmsConfigReq>) -> Response {
     let mut config = load_global_config();
-    config.wms_server_url = body.server_url.filter(|s| !s.is_empty());
-    config.wms_token = body.token.filter(|s| !s.is_empty());
-    config.wms_subdomain = body.subdomain.filter(|s| !s.is_empty());
+    if let Some(server_url) = body.server_url {
+        config.wms_server_url = server_url
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+    }
+    if let Some(subdomain) = body.subdomain {
+        config.wms_subdomain = subdomain
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+    }
+    if let Some(token) = body.token {
+        config.wms_token = token
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+    }
     result_ok(save_global_config_internal(&config))
 }
 
@@ -1046,6 +1083,71 @@ async fn h_get_share_info() -> Response {
     .into_response()
 }
 
+async fn h_start_sharing(headers: HeaderMap, Json(args): Json<Value>) -> Response {
+    let sid = session_id(&headers);
+    let workspace_path = match crate::config::get_window_workspace_path(&sid) {
+        Some(path) => path,
+        None => return (StatusCode::BAD_REQUEST, "No workspace selected").into_response(),
+    };
+    let port = args["port"].as_u64().unwrap_or(0) as u16;
+    let password = args["password"].as_str().unwrap_or("").to_string();
+    match crate::commands::sharing::start_sharing_internal(workspace_path, port, password).await {
+        Ok(url) => Json(json!(url)).into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+async fn h_stop_sharing() -> Response {
+    result_ok(crate::commands::sharing::stop_sharing_internal())
+}
+
+async fn h_get_share_state() -> Response {
+    result_json(crate::commands::sharing::get_share_state().await)
+}
+
+async fn h_update_share_password(Json(args): Json<Value>) -> Response {
+    let password = args["password"].as_str().unwrap_or("").to_string();
+    result_ok(crate::commands::sharing::update_share_password(password).await)
+}
+
+async fn h_get_last_share_port() -> Response {
+    result_json(crate::commands::sharing::get_last_share_port().await)
+}
+
+async fn h_get_last_share_password() -> Response {
+    result_json(crate::commands::sharing::get_last_share_password().await)
+}
+
+async fn h_auto_register_tunnel() -> Response {
+    result_json(crate::commands::sharing::auto_register_tunnel().await)
+}
+
+async fn h_wms_login(Json(args): Json<Value>) -> Response {
+    let username = args["username"].as_str().unwrap_or("").to_string();
+    let password = args["password"].as_str().unwrap_or("").to_string();
+    result_json(crate::commands::sharing::wms_login(username, password).await)
+}
+
+async fn h_wms_browser_login() -> Response {
+    let app = match current_app_handle() {
+        Ok(app) => app,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    };
+    result_json(crate::commands::sharing::wms_browser_login(app).await)
+}
+
+async fn h_cancel_wms_browser_login() -> Response {
+    result_ok(crate::commands::sharing::cancel_wms_browser_login().await)
+}
+
+async fn h_get_wms_user() -> Response {
+    result_json(crate::commands::sharing::get_wms_user().await)
+}
+
+async fn h_wms_logout() -> Response {
+    result_json(crate::commands::sharing::wms_logout().await)
+}
+
 // -- Misc --
 
 async fn h_get_terminal_state(Json(args): Json<Value>) -> Response {
@@ -1065,6 +1167,27 @@ async fn h_open_workspace_window(Json(args): Json<Value>) -> Response {
 
 async fn h_get_app_version() -> Response {
     Json(json!(env!("CARGO_PKG_VERSION"))).into_response()
+}
+
+async fn h_download_update_via_mirror() -> Response {
+    let app = match current_app_handle() {
+        Ok(app) => app,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    };
+    result_ok(crate::commands::system::download_update_via_mirror(app).await)
+}
+
+async fn h_open_devtools() -> Response {
+    let app = match current_app_handle() {
+        Ok(app) => app,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+    };
+    let window = match app.get_webview_window("main") {
+        Some(window) => window,
+        None => return (StatusCode::BAD_REQUEST, "Main window not found").into_response(),
+    };
+    crate::commands::window::open_devtools(window);
+    result_void_ok()
 }
 
 // ---------------------------------------------------------------------------
@@ -1093,23 +1216,12 @@ async fn h_ws_upgrade(
         .unwrap_or(false);
 
     if needs_auth {
-        // Auto-authenticate mobile sessions from WMS tunnel.
-        // The tunnel connects from localhost with session_id="mobile-xxx".
-        // These are already authenticated via WMS JWT, so skip password check.
-        let is_tunnel_mobile = addr.ip().is_loopback() && sid.starts_with("mobile-");
-        if is_tunnel_mobile {
-            if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() {
-                sessions.insert(sid.clone());
-            }
-            log::info!("[ws] Auto-authenticated WMS tunnel session: {}", sid);
-        } else {
-            let is_authenticated = AUTHENTICATED_SESSIONS
-                .lock()
-                .map(|sessions| sessions.contains(&sid))
-                .unwrap_or(false);
-            if !is_authenticated {
-                return (StatusCode::UNAUTHORIZED, "Not authenticated").into_response();
-            }
+        let is_authenticated = AUTHENTICATED_SESSIONS
+            .lock()
+            .map(|sessions| sessions.contains(&sid))
+            .unwrap_or(false);
+        if !is_authenticated {
+            return (StatusCode::UNAUTHORIZED, "Not authenticated").into_response();
         }
     }
 
@@ -1346,9 +1458,7 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                 let active_client_id = crate::TERMINAL_STATES
                     .lock()
                     .ok()
-                    .and_then(|states| {
-                        states.values().find_map(|ts| ts.client_id.clone())
-                    });
+                    .and_then(|states| states.values().find_map(|ts| ts.client_id.clone()));
 
                 let is_active = if let Some(ref req_cid) = request_client_id {
                     active_client_id.as_deref() == Some(req_cid)
@@ -1758,60 +1868,54 @@ async fn h_cert_pem(Extension(cert_pem): Extension<Arc<String>>) -> Response {
 #[derive(Deserialize)]
 struct WmsCallbackQuery {
     token: String,
+    state: String,
 }
 
 /// Handle WMS browser-based login callback.
-/// The WMS admin page redirects here with ?token=JWT after successful login.
-async fn h_wms_auth_callback(Query(q): Query<WmsCallbackQuery>) -> Response {
+/// The WMS admin page redirects here with ?state=...&token=JWT after successful login.
+async fn h_wms_auth_callback(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    Query(q): Query<WmsCallbackQuery>,
+) -> Response {
+    if !is_loopback_request(&addr) {
+        log::warn!(
+            "[wms-auth] Rejected non-loopback callback attempt from {}",
+            addr.ip()
+        );
+        return (
+            StatusCode::FORBIDDEN,
+            "This callback is only available from localhost",
+        )
+            .into_response();
+    }
+
+    if let Err(e) = crate::commands::sharing::validate_pending_wms_browser_login_state(&q.state) {
+        log::warn!("[wms-auth] Rejected callback with invalid state: {}", e);
+        return (
+            StatusCode::UNAUTHORIZED,
+            "Invalid or expired browser login state",
+        )
+            .into_response();
+    }
+
     log::info!(
         "[wms-auth] Received browser auth callback, token_len={}",
         q.token.len()
     );
 
-    // 1. Destroy current device registration (stop tunnel, clear old config, new device_id)
-    if let Err(e) = crate::commands::sharing::destroy_current_device_registration().await {
-        log::warn!("[wms-auth] Failed to destroy old device: {}", e);
-    }
-
-    // 2. Save JWT to config
+    if let Err(e) =
+        crate::commands::sharing::complete_wms_browser_login(current_app_handle().ok(), q.token)
+            .await
     {
-        let mut config = crate::config::load_global_config();
-        config.wms_jwt = Some(q.token.clone());
-        if let Err(e) = crate::config::save_global_config_internal(&config) {
-            log::error!("[wms-auth] Failed to save JWT: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to save token").into_response();
-        }
+        log::error!("[wms-auth] Failed to complete browser login: {}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Browser login failed: {}", e),
+        )
+            .into_response();
     }
 
-    // 3. Re-register device under the logged-in user
-    let wms_config = match crate::commands::sharing::auto_register_tunnel_internal().await {
-        Ok(config) => config,
-        Err(e) => {
-            log::error!("[wms-auth] Failed to register device: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Device registration failed: {}", e),
-            )
-                .into_response();
-        }
-    };
-
-    // 4. Emit Tauri event so the frontend knows login succeeded
-    if let Some(app_handle) = crate::APP_HANDLE
-        .lock()
-        .ok()
-        .and_then(|h| h.as_ref().cloned())
-    {
-        let _ = app_handle.emit(
-            "wms-login-success",
-            serde_json::json!({
-                "server_url": wms_config.server_url,
-                "subdomain": wms_config.subdomain,
-            }),
-        );
-    }
-
-    // 5. Return success HTML page
+    // Return success HTML page
     let html = r#"<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Login Successful</title>
 <style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
@@ -1833,265 +1937,83 @@ async fn h_wms_auth_callback(Query(q): Query<WmsCallbackQuery>) -> Response {
 
 /// Check if an origin is allowed (localhost, LAN, or active ngrok URL).
 fn is_allowed_origin(origin: &str) -> bool {
-    // Always allow localhost / loopback
-    if origin.starts_with("http://localhost")
-        || origin.starts_with("https://localhost")
-        || origin.starts_with("http://127.0.0.1")
-        || origin.starts_with("https://127.0.0.1")
-        || origin.starts_with("http://[::1]")
-        || origin.starts_with("https://[::1]")
-    {
+    let Some(parsed_origin) = parse_origin_url(origin) else {
+        return false;
+    };
+
+    if is_loopback_origin(&parsed_origin) || is_private_lan_origin(&parsed_origin) {
         return true;
     }
-    // Allow LAN IPs (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
-    if let Some(host) = origin
-        .split("//")
-        .nth(1)
-        .map(|s| s.split(':').next().unwrap_or(s))
-    {
-        if host.starts_with("192.168.")
-            || host.starts_with("10.")
-            || (host.starts_with("172.") && {
-                host.split('.')
-                    .nth(1)
-                    .and_then(|s| s.parse::<u8>().ok())
-                    .map_or(false, |n| (16..=31).contains(&n))
-            })
-        {
-            return true;
-        }
-    }
-    // Allow the active ngrok URL if one exists
+
     if let Ok(state) = SHARE_STATE.lock() {
         if let Some(ref ngrok_url) = state.ngrok_url {
-            if origin.starts_with(ngrok_url) {
-                return true;
+            if let Some(parsed_ngrok) = parse_origin_url(ngrok_url) {
+                if same_origin(&parsed_origin, &parsed_ngrok) {
+                    return true;
+                }
             }
         }
     }
+
     false
 }
 
+#[cfg(test)]
+mod tests {
+    use super::is_allowed_origin;
+    use crate::SHARE_STATE;
+
+    #[test]
+    fn allows_exact_loopback_and_private_lan_origins_only() {
+        assert!(is_allowed_origin("http://localhost:1420"));
+        assert!(is_allowed_origin("https://127.0.0.1"));
+        assert!(is_allowed_origin("http://[::1]:8080"));
+        assert!(is_allowed_origin("http://192.168.1.8:3000"));
+        assert!(is_allowed_origin("http://10.0.0.8"));
+        assert!(is_allowed_origin("http://172.16.5.4"));
+
+        assert!(!is_allowed_origin("https://localhost.evil.example"));
+        assert!(!is_allowed_origin("https://127.0.0.1.evil.example"));
+        assert!(!is_allowed_origin("https://192.168.1.8.evil.example"));
+        assert!(!is_allowed_origin("not-a-url"));
+    }
+
+    #[test]
+    fn only_allows_exact_active_ngrok_origin() {
+        let previous = {
+            let mut state = SHARE_STATE.lock().unwrap();
+            let previous = state.ngrok_url.clone();
+            state.ngrok_url = Some("https://demo.ngrok-free.app/".to_string());
+            previous
+        };
+
+        assert!(is_allowed_origin("https://demo.ngrok-free.app"));
+        assert!(is_allowed_origin("https://demo.ngrok-free.app:443"));
+        assert!(!is_allowed_origin(
+            "https://demo.ngrok-free.app.evil.example"
+        ));
+        assert!(!is_allowed_origin("https://other.ngrok-free.app"));
+
+        let mut state = SHARE_STATE.lock().unwrap();
+        state.ngrok_url = previous;
+    }
+}
+
 pub fn create_router(cert_pem: Option<String>) -> Router {
-    let cors = CorsLayer::new()
-        .allow_origin(tower_http::cors::AllowOrigin::predicate(
-            |origin: &HeaderValue, _| origin.to_str().map_or(false, is_allowed_origin),
-        ))
-        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
-        .allow_headers([
-            header::CONTENT_TYPE,
-            header::HeaderName::from_static("x-session-id"),
-        ]);
-
-    // Resolve the dist/ folder relative to the current executable
-    // In debug builds, always use CARGO_MANIFEST_DIR/../dist (= project root's dist/)
-    // so that `npm run build` output is served directly without stale copies.
-    let dist_path = if cfg!(debug_assertions) {
-        let dev_dist = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../dist");
-        log::info!("Using dev dist path: {:?}", dev_dist);
-        dev_dist
-    } else {
-        std::env::current_exe()
-            .ok()
-            .and_then(|exe| {
-                let exe_dir = exe.parent()?;
-                // On macOS, check if we're in an app bundle (Contents/MacOS/)
-                if cfg!(target_os = "macos") {
-                    if let Some(contents_dir) = exe_dir.parent() {
-                        if contents_dir.file_name().and_then(|n| n.to_str()) == Some("Contents") {
-                            let resources_dist = contents_dir.join("Resources").join("dist");
-                            if resources_dist.exists() {
-                                log::info!("Using dist path from app bundle: {:?}", resources_dist);
-                                return Some(resources_dist);
-                            }
-                        }
-                    }
-                }
-                let exe_dist = exe_dir.join("dist");
-                if exe_dist.exists() {
-                    log::info!("Using dist path next to executable: {:?}", exe_dist);
-                    return Some(exe_dist);
-                }
-                None
-            })
-            .unwrap_or_else(|| {
-                let fallback = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../dist");
-                log::info!("Using fallback dist path: {:?}", fallback);
-                fallback
-            })
-    };
-
+    let cors = build_cors_layer();
+    let dist_path = resolve_dist_path();
     let serve_dir = ServeDir::new(&dist_path)
         .append_index_html_on_directories(true)
         .fallback(ServeFile::new(dist_path.join("index.html")));
 
-    let mut router = Router::new()
-        // Workspace management
-        .route("/api/list_workspaces", post(h_list_workspaces))
-        .route("/api/add_workspace", post(h_add_workspace))
-        .route("/api/remove_workspace", post(h_remove_workspace))
-        .route("/api/create_workspace", post(h_create_workspace))
-        .route("/api/set_window_workspace", post(h_set_window_workspace))
-        .route("/api/get_current_workspace", post(h_get_current_workspace))
-        .route("/api/switch_workspace", post(h_switch_workspace))
-        // Workspace config
-        .route("/api/get_workspace_config", post(h_get_workspace_config))
-        .route("/api/save_workspace_config", post(h_save_workspace_config))
-        .route("/api/get_config_path_info", post(h_get_config_path_info))
-        // Worktree operations
-        .route("/api/list_worktrees", post(h_list_worktrees))
-        .route(
-            "/api/get_main_workspace_status",
-            post(h_get_main_workspace_status),
-        )
-        .route("/api/create_worktree", post(h_create_worktree))
-        .route("/api/archive_worktree", post(h_archive_worktree))
-        .route("/api/check_worktree_status", post(h_check_worktree_status))
-        .route("/api/restore_worktree", post(h_restore_worktree))
-        .route(
-            "/api/delete_archived_worktree",
-            post(h_delete_archived_worktree),
-        )
-        .route(
-            "/api/add_project_to_worktree",
-            post(h_add_project_to_worktree),
-        )
-        .route("/api/deploy_to_main", post(h_deploy_to_main))
-        .route("/api/exit_main_occupation", post(h_exit_main_occupation))
-        .route("/api/get_main_occupation", post(h_get_main_occupation))
-        // Git operations
-        .route("/api/switch_branch", post(h_switch_branch))
-        .route("/api/clone_project", post(h_clone_project))
-        .route("/api/get_branch_diff_stats", post(h_get_branch_diff_stats))
-        .route(
-            "/api/check_remote_branch_exists",
-            post(h_check_remote_branch_exists),
-        )
-        .route("/api/fetch_project_remote", post(h_fetch_project_remote))
-        .route("/api/sync_with_base_branch", post(h_sync_with_base_branch))
-        .route("/api/push_to_remote", post(h_push_to_remote))
-        .route("/api/merge_to_test_branch", post(h_merge_to_test_branch))
-        .route("/api/merge_to_base_branch", post(h_merge_to_base_branch))
-        .route("/api/create_pull_request", post(h_create_pull_request))
-        .route("/api/get_remote_branches", post(h_get_remote_branches))
-        .route("/api/get_changed_files", post(h_get_changed_files))
-        .route("/api/get_file_diff", post(h_get_file_diff))
-        // Scan
-        .route("/api/scan_linked_folders", post(h_scan_linked_folders))
-        // System utilities
-        .route("/api/open_in_terminal", post(h_open_in_terminal))
-        .route("/api/open_in_editor", post(h_open_in_editor))
-        .route("/api/reveal_in_finder", post(h_reveal_in_finder))
-        .route("/api/open_log_dir", post(h_open_log_dir))
-        .route("/api/detect_tools", post(h_detect_tools))
-        .route("/api/set_git_path", post(h_set_git_path))
-        // Multi-window management
-        .route("/api/get_opened_workspaces", post(h_get_opened_workspaces))
-        .route("/api/unregister_window", post(h_unregister_window))
-        .route("/api/lock_worktree", post(h_lock_worktree))
-        .route("/api/unlock_worktree", post(h_unlock_worktree))
-        .route("/api/get_locked_worktrees", post(h_get_locked_worktrees))
-        .route("/api/get_terminal_state", post(h_get_terminal_state))
-        .route("/api/open_workspace_window", post(h_open_workspace_window))
-        // PTY
-        .route("/api/pty_create", post(h_pty_create))
-        .route("/api/pty_write", post(h_pty_write))
-        .route("/api/pty_read", post(h_pty_read))
-        .route("/api/pty_resize", post(h_pty_resize))
-        .route("/api/pty_close", post(h_pty_close))
-        .route("/api/pty_exists", post(h_pty_exists))
-        .route("/api/pty_close_by_path", post(h_pty_close_by_path))
-        // Auth
-        .route("/api/auth/challenge", post(h_auth_challenge))
-        .route("/api/auth/verify", post(h_auth_verify))
-        // Share info
-        .route("/api/get_share_info", get(h_get_share_info))
-        // Connected clients
-        .route("/api/get_connected_clients", post(h_get_connected_clients))
-        .route("/api/kick_client", post(h_kick_client))
-        // ngrok
-        .route("/api/get_ngrok_token", post(h_get_ngrok_token))
-        .route("/api/set_ngrok_token", post(h_set_ngrok_token))
-        .route("/api/start_ngrok_tunnel", post(h_start_ngrok_tunnel))
-        .route("/api/stop_ngrok_tunnel", post(h_stop_ngrok_tunnel))
-        // WMS config & tunnel
-        .route("/api/get_wms_config", post(h_get_wms_config))
-        .route("/api/set_wms_config", post(h_set_wms_config))
-        .route("/api/start_wms_tunnel", post(h_start_wms_tunnel))
-        .route("/api/stop_wms_tunnel", post(h_stop_wms_tunnel))
-        .route("/api/wms_manual_reconnect", post(h_wms_manual_reconnect))
-        // Voice
-        .route("/api/voice_start", post(h_voice_start))
-        .route("/api/voice_send_audio", post(h_voice_send_audio))
-        .route("/api/voice_stop", post(h_voice_stop))
-        .route("/api/voice_is_active", post(h_voice_is_active))
-        .route("/api/voice_refine_text", post(h_voice_refine_text))
-        .route("/api/get_dashscope_api_key", post(h_get_dashscope_api_key))
-        .route("/api/set_dashscope_api_key", post(h_set_dashscope_api_key))
-        .route(
-            "/api/get_dashscope_base_url",
-            post(h_get_dashscope_base_url),
-        )
-        .route(
-            "/api/set_dashscope_base_url",
-            post(h_set_dashscope_base_url),
-        )
-        .route(
-            "/api/get_voice_refine_enabled",
-            post(h_get_voice_refine_enabled),
-        )
-        .route(
-            "/api/set_voice_refine_enabled",
-            post(h_set_voice_refine_enabled),
-        )
-        // Misc
-        .route("/api/get_app_version", post(h_get_app_version))
-        // WebSocket (auth handled in upgrade handler via query param)
-        .route("/ws", get(h_ws_upgrade))
-        // WMS browser auth callback (no auth needed - token comes from WMS server)
-        .route("/auth/wms-callback", get(h_wms_auth_callback));
-
-    // Add cert download route when TLS is enabled
-    if let Some(pem) = cert_pem {
-        router = router
-            .route("/api/cert.pem", get(h_cert_pem))
-            .layer(Extension(Arc::new(pem)));
-    }
-
-    // Middleware: prevent caching of HTML (index.html) so iOS WebView always loads fresh content.
-    // JS/CSS assets use content-hash filenames from Vite, so they're naturally cache-busted.
-
-    router
+    build_api_router(cert_pem)
         .layer(axum::middleware::from_fn(auth_middleware))
         .layer(axum::middleware::from_fn(localhost_only_middleware))
         .layer(axum::middleware::from_fn(security_headers_middleware))
-        // Limit request body to 1MB
         .layer(RequestBodyLimitLayer::new(1024 * 1024))
         .fallback_service(serve_dir)
         .layer(axum::middleware::from_fn(no_cache_html_middleware))
         .layer(cors)
-}
-
-async fn no_cache_html_middleware(
-    req: axum::http::Request<axum::body::Body>,
-    next: axum::middleware::Next,
-) -> axum::response::Response {
-    let mut resp = next.run(req).await;
-    let is_html = resp
-        .headers()
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .map(|ct| ct.contains("text/html"))
-        .unwrap_or(false);
-    if is_html {
-        let headers = resp.headers_mut();
-        headers.insert(
-            "Cache-Control",
-            "no-cache, no-store, must-revalidate".parse().unwrap(),
-        );
-        headers.insert("Pragma", "no-cache".parse().unwrap());
-    }
-    resp
 }
 
 // ---------------------------------------------------------------------------

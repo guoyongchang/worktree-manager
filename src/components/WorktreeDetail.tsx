@@ -26,6 +26,7 @@ import {
   ExternalLinkIcon,
   CopyIcon,
   CheckIcon,
+  TrashIcon,
 } from './Icons';
 import { Badge } from '@/components/ui/badge';
 import { GitOperations } from './GitOperations';
@@ -80,6 +81,7 @@ interface WorktreeDetailProps {
   onRestore: () => void;
   onDelete?: () => void;
   onAddProject?: () => void;
+  onRemoveProject?: (name: string) => Promise<void>;
   onAddProjectToWorktree?: () => void;
   onRefresh?: () => void;
   onOpenTerminalPanel?: (path: string) => void;
@@ -162,6 +164,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
   onRestore,
   onDelete,
   onAddProject,
+  onRemoveProject,
   onAddProjectToWorktree,
   onRefresh,
   onOpenTerminalPanel,
@@ -183,6 +186,8 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
   const [exitError, setExitError] = useState<string | null>(null);
   const [detailView, setDetailView] = useState<'projects' | 'changedFiles'>('projects');
   const [focusProject, setFocusProject] = useState<string | null>(null);
+  const [removingProject, setRemovingProject] = useState<string | null>(null);
+  const [confirmRemoveProject, setConfirmRemoveProject] = useState<string | null>(null);
 
   const handleNavigateToChangedFiles = useCallback((projectName: string) => {
     setFocusProject(projectName);
@@ -355,7 +360,10 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                   ? 'text-blue-400 border-b-2 border-blue-400 font-medium'
                   : 'text-slate-400 hover:text-slate-200'
                   }`}
-                onClick={() => setDetailView('projects')}
+                onClick={() => {
+                  setFocusProject(null);
+                  setDetailView('projects');
+                }}
               >
                 {t('detail.projects', 'Projects')}
               </button>
@@ -364,7 +372,10 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                   ? 'text-blue-400 border-b-2 border-blue-400 font-medium'
                   : 'text-slate-400 hover:text-slate-200'
                   }`}
-                onClick={() => setDetailView('changedFiles')}
+                onClick={() => {
+                  setFocusProject(null);
+                  setDetailView('changedFiles');
+                }}
                 disabled={totalChanges === 0}
               >
                 {t('detail.changedFilesReview', 'Changed Files Review')}
@@ -381,6 +392,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
         {detailView === 'changedFiles' ? (
           <div style={{ height: 'calc(100vh - 200px)', minHeight: '400px' }}>
             <ChangedFilesPanel
+              reviewKey={`main:${mainWorkspace.path}`}
               projects={mainWorkspace.projects.map(p => ({
                 name: p.name,
                 path: p.path,
@@ -512,6 +524,16 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                               <FolderIcon className="w-3.5 h-3.5" />
                             </button>
                           )}
+                          {onRemoveProject && (
+                            <button
+                              onClick={() => setConfirmRemoveProject(proj.name)}
+                              className="p-1 hover:bg-red-600/20 rounded text-slate-500 hover:text-red-400 transition-colors"
+                              title={t('detail.removeProject', 'Remove from workspace')}
+                              aria-label={t('detail.removeProjectLabel', { name: proj.name })}
+                            >
+                              <TrashIcon className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                           {proj.has_uncommitted && <WarningIcon className="w-4 h-4 text-amber-500" />}
                         </div>
                       </div>
@@ -595,6 +617,36 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                                 {folder}
                               </span>
                             ))}
+                          </div>
+                        </div>
+                      )}
+                      {/* Remove confirmation */}
+                      {confirmRemoveProject === proj.name && (
+                        <div className="mt-2 p-2.5 bg-red-900/20 border border-red-800/40 rounded-lg">
+                          <p className="text-sm text-red-300 mb-2">{t('detail.confirmRemoveProject', { name: proj.name })}</p>
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => setConfirmRemoveProject(null)}
+                            >
+                              {t('common.cancel', 'Cancel')}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              disabled={removingProject === proj.name}
+                              onClick={async () => {
+                                setRemovingProject(proj.name);
+                                await onRemoveProject?.(proj.name);
+                                setRemovingProject(null);
+                                setConfirmRemoveProject(null);
+                              }}
+                            >
+                              {removingProject === proj.name
+                                ? t('detail.removing', 'Removing...')
+                                : t('detail.confirmRemove', 'Remove')}
+                            </Button>
                           </div>
                         </div>
                       )}
@@ -721,7 +773,10 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                   ? 'text-blue-400 border-b-2 border-blue-400 font-medium'
                   : 'text-slate-400 hover:text-slate-200'
                   }`}
-                onClick={() => setDetailView('projects')}
+                onClick={() => {
+                  setFocusProject(null);
+                  setDetailView('projects');
+                }}
               >
                 {t('detail.projects', 'Projects')}
               </button>
@@ -730,7 +785,10 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                   ? 'text-blue-400 border-b-2 border-blue-400 font-medium'
                   : 'text-slate-400 hover:text-slate-200'
                   }`}
-                onClick={() => setDetailView('changedFiles')}
+                onClick={() => {
+                  setFocusProject(null);
+                  setDetailView('changedFiles');
+                }}
                 disabled={totalChanges === 0}
               >
                 {t('detail.changedFilesReview', 'Changed Files Review')}
@@ -747,6 +805,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
         {detailView === 'changedFiles' ? (
           <div style={{ height: 'calc(100vh - 200px)', minHeight: '400px' }}>
             <ChangedFilesPanel
+              reviewKey={`worktree:${selectedWorktree.path}`}
               projects={selectedWorktree.projects}
               focusProject={focusProject}
             />

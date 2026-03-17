@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { UseWorkspaceReturn } from './useWorkspace';
 import type { UseModalsReturn } from './useModals';
 // Only need the cleanup function from terminal hook, not the full return type
@@ -11,7 +12,7 @@ import type {
   CreateProjectRequest,
   EditorType,
 } from '../types';
-import { isTauri, getWindowLabel } from '../lib/backend';
+import { isTauri, getWindowLabel, removeProjectFromConfig } from '../lib/backend';
 
 export interface UseWorkspaceActionsReturn {
   // Selected worktree
@@ -68,6 +69,7 @@ export interface UseWorkspaceActionsReturn {
   }) => Promise<void>;
   handleUpdateLinkedFolders: (projectName: string, folders: string[]) => Promise<void>;
   handleAddProjectToWorktree: (projectName: string, baseBranch: string) => Promise<void>;
+  handleRemoveProject: (name: string) => Promise<void>;
 
   // Archive / Delete / Restore
   contextMenu: ContextMenuState | null;
@@ -111,6 +113,7 @@ export function useWorkspaceActions(
   selectedWorktree: WorktreeListItem | null,
   setSelectedWorktree: (wt: WorktreeListItem | null) => void,
 ): UseWorkspaceActionsReturn {
+  const { t: tFn } = useTranslation();
   const [hasUserSelected, setHasUserSelected] = useState(false);
 
   // Loading states
@@ -318,6 +321,22 @@ export function useWorkspaceActions(
     }
   }, [workspace, selectedWorktree, modals]);
 
+  // Remove project from config
+  const handleRemoveProject = useCallback(async (name: string) => {
+    try {
+      await removeProjectFromConfig(name);
+      await workspace.loadData();
+    } catch (e) {
+      const msg = String(e);
+      const refMatch = msg.match(/referenced by worktree\(s\): (.+)/);
+      if (refMatch) {
+        workspace.setError(tFn('detail.removeProjectReferenced', { name, worktrees: refMatch[1] }));
+      } else {
+        workspace.setError(msg);
+      }
+    }
+  }, [workspace, tFn]);
+
   // Context menu
   const handleContextMenu = useCallback((e: React.MouseEvent, worktree: WorktreeListItem) => {
     e.preventDefault();
@@ -504,6 +523,7 @@ export function useWorkspaceActions(
     handleAddProject,
     handleUpdateLinkedFolders,
     handleAddProjectToWorktree,
+    handleRemoveProject,
 
     contextMenu,
     setContextMenu,

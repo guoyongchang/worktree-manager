@@ -210,14 +210,223 @@ pub(crate) async fn clone_project(
     blocking(move || clone_project_impl(&label, request)).await
 }
 
+// ==================== 主工作区项目管理 ====================
+
+pub fn scan_existing_projects_impl(
+    window_label: &str,
+) -> Result<Vec<crate::types::ExistingProjectInfo>, String> {
+    let (workspace_path, config) =
+        get_window_workspace_config(window_label).ok_or("No workspace selected")?;
+
+    let projects_dir = PathBuf::from(&workspace_path).join("projects");
+    if !projects_dir.exists() {
+        return Ok(vec![]);
+    }
+
+    let registered: std::collections::HashSet<String> =
+        config.projects.iter().map(|p| p.name.clone()).collect();
+
+    let mut result = vec![];
+    let entries = std::fs::read_dir(&projects_dir)
+        .map_err(|e| format!("Failed to read projects dir: {}", e))?;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
+
+        if name.starts_with('.') {
+            continue;
+        }
+
+        let is_registered = registered.contains(&name);
+
+        // Check if it's a git repo
+        if !path.join(".git").exists() {
+            continue;
+        }
+
+        // Get current branch
+        let current_branch = git_command()
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .current_dir(&path)
+            .output()
+            .ok()
+            .and_then(|o| {
+                if o.status.success() {
+                    Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| "unknown".to_string());
+
+        result.push(crate::types::ExistingProjectInfo {
+            name,
+            current_branch,
+            is_registered,
+        });
+    }
+
+    result.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(result)
+}
+
+#[tauri::command]
+pub(crate) async fn scan_existing_projects(
+    window: tauri::Window,
+) -> Result<Vec<crate::types::ExistingProjectInfo>, String> {
+    let label = window.label().to_string();
+    blocking(move || scan_existing_projects_impl(&label)).await
+}
+
+pub fn add_existing_project_impl(
+    window_label: &str,
+    name: String,
+    base_branch: String,
+    test_branch: String,
+    merge_strategy: String,
+) -> Result<(), String> {
+    let (workspace_path, mut config) =
+        get_window_workspace_config(window_label).ok_or("No workspace selected")?;
+
+    let projects_dir = PathBuf::from(&workspace_path).join("projects");
+    let project_path = projects_dir.join(&name);
+
+    if !project_path.exists() || !project_path.join(".git").exists() {
+        return Err(format!(
+            "Project '{}' does not exist or is not a git repository",
+            name
+        ));
+    }
+
+    // Check if already registered
+    if config.projects.iter().any(|p| p.name == name) {
+        return Err(format!("Project '{}' is already registered", name));
+    }
+
+    log::info!(
+        "[git] Adding existing project '{}' to config (base={}, test={})",
+        name,
+        base_branch,
+        test_branch
+    );
+
+    config.projects.push(ProjectConfig {
+        name: name.clone(),
+        base_branch,
+        test_branch,
+        merge_strategy,
+        linked_folders: vec![],
+    });
+
+    save_workspace_config_internal(&workspace_path, &config)?;
+    log::info!("[git] Successfully added existing project '{}'", name);
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) async fn add_existing_project(
+    window: tauri::Window,
+    name: String,
+    base_branch: String,
+    test_branch: String,
+    merge_strategy: String,
+) -> Result<(), String> {
+    let label = window.label().to_string();
+    blocking(move || add_existing_project_impl(&label, name, base_branch, test_branch, merge_strategy)).await
+}
+
+pub fn remove_project_from_config_impl(
+    window_label: &str,
+    name: String,
+) -> Result<(), String> {
+    let (workspace_path, mut config) =
+        get_window_workspace_config(window_label).ok_or("No workspace selected")?;
+
+    // Check that the project exists in config
+    if !config.projects.iter().any(|p| p.name == name) {
+        return Err(format!("Project '{}' is not in the configuration", name));
+    }
+
+    // Check that no worktree references this project
+    let root = PathBuf::from(&workspace_path);
+    let worktrees_dir = root.join(&config.worktrees_dir);
+    let mut referencing_worktrees = vec![];
+
+    if worktrees_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&worktrees_dir) {
+            for entry in entries.flatten() {
+                let wt_path = entry.path();
+                if !wt_path.is_dir() {
+                    continue;
+                }
+                let wt_name = wt_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                // Skip archived worktrees (they end with .archive)
+                if wt_name.ends_with(".archive") {
+                    continue;
+                }
+
+                let proj_in_wt = wt_path.join("projects").join(&name);
+                if proj_in_wt.symlink_metadata().is_ok() {
+                    referencing_worktrees.push(wt_name);
+                }
+            }
+        }
+    }
+
+    if !referencing_worktrees.is_empty() {
+        return Err(format!(
+            "Cannot remove project '{}': it is referenced by worktree(s): {}",
+            name,
+            referencing_worktrees.join(", ")
+        ));
+    }
+
+    log::info!(
+        "[git] Removing project '{}' from config (directory NOT deleted)",
+        name
+    );
+
+    config.projects.retain(|p| p.name != name);
+    save_workspace_config_internal(&workspace_path, &config)?;
+
+    log::info!("[git] Successfully removed project '{}' from config", name);
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) async fn remove_project_from_config(
+    window: tauri::Window,
+    name: String,
+) -> Result<(), String> {
+    let label = window.label().to_string();
+    blocking(move || remove_project_from_config_impl(&label, name)).await
+}
+
 // ==================== Tauri 命令：Git 高级操作 ====================
 
 #[tauri::command]
-pub(crate) async fn sync_with_base_branch(path: String, base_branch: String) -> Result<String, String> {
+pub(crate) async fn sync_with_base_branch(
+    path: String,
+    base_branch: String,
+) -> Result<String, String> {
     blocking(move || {
         let normalized = normalize_path(&path);
         git_ops::sync_with_base_branch(Path::new(&normalized), &base_branch)
-    }).await
+    })
+    .await
 }
 
 #[tauri::command]
@@ -225,27 +434,39 @@ pub(crate) async fn push_to_remote(path: String) -> Result<String, String> {
     blocking(move || {
         let normalized = normalize_path(&path);
         git_ops::push_to_remote(Path::new(&normalized))
-    }).await
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) async fn merge_to_test_branch(path: String, test_branch: String) -> Result<String, String> {
+pub(crate) async fn merge_to_test_branch(
+    path: String,
+    test_branch: String,
+) -> Result<String, String> {
     blocking(move || {
         let normalized = normalize_path(&path);
         git_ops::merge_to_test_branch(Path::new(&normalized), &test_branch)
-    }).await
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) async fn merge_to_base_branch(path: String, base_branch: String) -> Result<String, String> {
+pub(crate) async fn merge_to_base_branch(
+    path: String,
+    base_branch: String,
+) -> Result<String, String> {
     blocking(move || {
         let normalized = normalize_path(&path);
         git_ops::merge_to_base_branch(Path::new(&normalized), &base_branch)
-    }).await
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) async fn get_branch_diff_stats(path: String, base_branch: String) -> Result<git_ops::BranchDiffStats, String> {
+pub(crate) async fn get_branch_diff_stats(
+    path: String,
+    base_branch: String,
+) -> Result<git_ops::BranchDiffStats, String> {
     let result = tokio::task::spawn_blocking(move || {
         let normalized = normalize_path(&path);
         git_ops::get_branch_diff_stats(Path::new(&normalized), &base_branch)
@@ -265,7 +486,8 @@ pub(crate) async fn create_pull_request(
     blocking(move || {
         let normalized = normalize_path(&path);
         git_ops::create_pull_request(Path::new(&normalized), &base_branch, &title, &body)
-    }).await
+    })
+    .await
 }
 
 #[tauri::command]
@@ -273,7 +495,8 @@ pub(crate) async fn fetch_project_remote(path: String) -> Result<(), String> {
     blocking(move || {
         let normalized = normalize_path(&path);
         git_ops::fetch_remote(Path::new(&normalized))
-    }).await
+    })
+    .await
 }
 
 #[tauri::command]
@@ -284,7 +507,8 @@ pub(crate) async fn check_remote_branch_exists(
     blocking(move || {
         let normalized = normalize_path(&path);
         git_ops::check_remote_branch_exists(Path::new(&normalized), &branch_name)
-    }).await
+    })
+    .await
 }
 
 #[tauri::command]
@@ -292,7 +516,8 @@ pub(crate) async fn get_remote_branches(path: String) -> Result<Vec<String>, Str
     blocking(move || {
         let normalized = normalize_path(&path);
         git_ops::get_remote_branches(Path::new(&normalized))
-    }).await
+    })
+    .await
 }
 
 #[tauri::command]
@@ -300,7 +525,8 @@ pub(crate) async fn get_git_diff(path: String) -> Result<String, String> {
     blocking(move || {
         let normalized = normalize_path(&path);
         git_ops::get_git_diff(Path::new(&normalized))
-    }).await
+    })
+    .await
 }
 
 #[tauri::command]
@@ -308,7 +534,8 @@ pub(crate) async fn commit_all(path: String, message: String) -> Result<String, 
     blocking(move || {
         let normalized = normalize_path(&path);
         git_ops::commit_all(Path::new(&normalized), &message)
-    }).await
+    })
+    .await
 }
 
 #[tauri::command]
@@ -316,15 +543,20 @@ pub(crate) async fn get_changed_files(path: String) -> Result<Vec<git_ops::Chang
     blocking(move || {
         let normalized = normalize_path(&path);
         git_ops::get_changed_files(Path::new(&normalized))
-    }).await
+    })
+    .await
 }
 
 #[tauri::command]
-pub(crate) async fn get_file_diff(path: String, file_path: String) -> Result<git_ops::FileDiff, String> {
+pub(crate) async fn get_file_diff(
+    path: String,
+    file_path: String,
+) -> Result<git_ops::FileDiff, String> {
     blocking(move || {
         let normalized = normalize_path(&path);
         git_ops::get_file_diff(Path::new(&normalized), &file_path)
-    }).await
+    })
+    .await
 }
 
 // ==================== HTTP Server 共享接口 ====================

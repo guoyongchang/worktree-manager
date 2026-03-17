@@ -170,8 +170,6 @@ impl NonceCache {
 pub struct GlobalConfig {
     pub workspaces: Vec<WorkspaceRef>,
     pub current_workspace: Option<String>, // 当前选中的 workspace 路径
-    // TODO(security): ngrok_token is stored in plaintext in the config file.
-    // Consider using the OS keychain (e.g., keytar/keyring crate) for sensitive credentials.
     #[serde(default)]
     pub ngrok_token: Option<String>,
     #[serde(default)]
@@ -374,6 +372,15 @@ pub struct CloneProjectRequest {
     pub test_branch: String,
     pub merge_strategy: String,
     pub linked_folders: Vec<String>,
+}
+
+// ==================== 扫描已有项目 ====================
+
+#[derive(Debug, Serialize)]
+pub struct ExistingProjectInfo {
+    pub name: String,
+    pub current_branch: String,
+    pub is_registered: bool,
 }
 
 // ==================== 编辑器 ====================

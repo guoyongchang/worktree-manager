@@ -98,8 +98,12 @@ export async function callBackend<T = unknown>(
 
   if (!res.ok) {
     if (res.status === 401) {
+      const hadSession = !!getSessionId();
       clearSessionId();
-      window.location.replace(window.location.pathname || '/');
+      if (hadSession) {
+        // Only reload if we had a valid session that expired
+        window.location.replace(window.location.pathname || '/');
+      }
       throw new Error('Session expired');
     }
     const text = await res.text();
@@ -289,6 +293,11 @@ export async function wmsLogout(): Promise<WmsConfig> {
 /** WMS Browser Login: open browser to WMS admin page, wait for OAuth callback. */
 export async function wmsBrowserLogin(): Promise<string> {
   return callBackend<string>('wms_browser_login');
+}
+
+/** Cancel a pending WMS browser login. */
+export async function cancelWmsBrowserLogin(): Promise<void> {
+  return callBackend<void>('cancel_wms_browser_login');
 }
 
 export interface WmsUser {
@@ -544,6 +553,31 @@ export async function commitAll(path: string, message: string): Promise<string> 
 /** Generate commit message using AI */
 export async function generateCommitMessage(diff: string): Promise<string> {
   return callBackend<string>('generate_commit_message', { diff });
+}
+
+// ---------------------------------------------------------------------------
+// Project Management API
+// ---------------------------------------------------------------------------
+
+export interface ExistingProjectInfo {
+  name: string;
+  current_branch: string;
+  is_registered: boolean;
+}
+
+/** Scan projects/ directory for all git repos (with registration status) */
+export async function scanExistingProjects(): Promise<ExistingProjectInfo[]> {
+  return callBackend<ExistingProjectInfo[]>('scan_existing_projects');
+}
+
+/** Add an existing git project to workspace config */
+export async function addExistingProject(name: string, baseBranch: string, testBranch: string, mergeStrategy: string = 'merge'): Promise<void> {
+  return callBackend<void>('add_existing_project', { name, base_branch: baseBranch, test_branch: testBranch, merge_strategy: mergeStrategy });
+}
+
+/** Remove a project from workspace config (does not delete files) */
+export async function removeProjectFromConfig(name: string): Promise<void> {
+  return callBackend<void>('remove_project_from_config', { name });
 }
 
 // ---------------------------------------------------------------------------

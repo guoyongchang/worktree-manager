@@ -16,7 +16,10 @@ pub use types::*;
 pub use utils::normalize_path;
 
 // Re-exports of _impl functions used by http_server
-pub use commands::git::{clone_project_impl, switch_branch_internal};
+pub use commands::git::{
+    add_existing_project_impl, clone_project_impl, remove_project_from_config_impl,
+    scan_existing_projects_impl, switch_branch_internal,
+};
 pub use commands::sharing::{
     auto_register_tunnel_internal, kick_client_internal, start_ngrok_tunnel_internal,
     start_wms_tunnel_internal, stop_wms_tunnel_internal, wms_manual_reconnect_internal, WmsConfig,
@@ -152,6 +155,9 @@ pub fn run() {
             // Git 操作
             switch_branch,
             clone_project,
+            scan_existing_projects,
+            add_existing_project,
+            remove_project_from_config,
             sync_with_base_branch,
             push_to_remote,
             merge_to_test_branch,
@@ -173,6 +179,7 @@ pub fn run() {
             reveal_in_finder,
             detect_tools,
             set_git_path,
+            get_app_version,
             // 多窗口管理
             set_window_workspace,
             get_opened_workspaces,
@@ -213,6 +220,7 @@ pub fn run() {
             auto_register_tunnel,
             wms_login,
             wms_browser_login,
+            cancel_wms_browser_login,
             get_wms_user,
             wms_logout,
             start_wms_tunnel,
