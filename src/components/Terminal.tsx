@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
+import type { UnlistenFn } from '@tauri-apps/api/event';
 import { callBackend, isTauri, openLink, getPlatform } from '../lib/backend';
 import { getWebSocketManager } from '../lib/websocket';
 import { TERMINAL } from '../constants';
@@ -82,11 +83,18 @@ interface TerminalProps {
   clientId?: string;
 }
 
+interface PtyOutputEventPayload {
+  sessionId: string;
+  data: string;
+}
+
 export interface TerminalHandle {
   copyContent: () => Promise<void>;
 }
 
 const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible, clientId }, ref) => {
+  // Keep desktop PTY on polling until the event-stream path can preserve replay semantics.
+  const enableDesktopEventStreaming = false;
   const { t } = useTranslation();
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
@@ -96,6 +104,10 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
   const sessionIdRef = useRef<string>(`pty-${cwd.replace(/[\/#]/g, '-')}`);
   const readerIntervalRef = useRef<number | null>(null);
   const wsSubscribedRef = useRef(false);
+  const desktopUnlistenRef = useRef<UnlistenFn | null>(null);
+  const desktopListenerStartingRef = useRef(false);
+  const desktopListenerTokenRef = useRef(0);
+  const desktopTransportRef = useRef<'event' | 'polling' | null>(null);
   const initializedRef = useRef(false);
   const cwdRef = useRef(actualCwd);
   const mouseSelectionRef = useRef({
@@ -168,6 +180,25 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
     }
   }), []);
 
+  const handleIncomingData = useCallback((data: string) => {
+    if (!data || !xtermRef.current) return;
+    if (!gotFirstDataRef.current) {
+      gotFirstDataRef.current = true;
+      setInitStatus(null);
+    }
+    xtermRef.current.write(data);
+
+    if (!window._xtermRefreshed) {
+      window._xtermRefreshed = true;
+      setTimeout(() => {
+        if (xtermRef.current) xtermRef.current.refresh(0, xtermRef.current.rows - 1);
+      }, 100);
+      setTimeout(() => {
+        if (xtermRef.current) xtermRef.current.refresh(0, xtermRef.current.rows - 1);
+      }, 500);
+    }
+  }, []);
+
   useEffect(() => {
     if (!terminalRef.current || xtermRef.current) return;
 
@@ -233,8 +264,15 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
       }
     };
 
-    const handleMouseUp = () => {
+    const handleMouseUp = (event: MouseEvent) => {
       if (!mouseSelectionRef.current.pressed) return;
+      // Preserve xterm's native word/line selection on double/triple click.
+      const isMultiClickSelection = event.detail > 1;
+      if (isMultiClickSelection) {
+        mouseSelectionRef.current.pressed = false;
+        mouseSelectionRef.current.moved = false;
+        return;
+      }
       resetStuckSelection(false);
     };
 
@@ -308,34 +346,9 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
   }, []);
 
   const startReading = useCallback(() => {
-    if (!isTauri()) {
-      // Browser mode: WS subscribe is idempotent
-      if (wsSubscribedRef.current) return;
-      wsSubscribedRef.current = true;
-      getWebSocketManager().subscribePty(sessionIdRef.current, (data) => {
-        if (data && xtermRef.current) {
-          if (!gotFirstDataRef.current) {
-            gotFirstDataRef.current = true;
-            setInitStatus(null);
-          }
-          xtermRef.current.write(data);
-
-          // Force a few frame refreshes to defeat iOS Safari canvas bugs
-          // where the terminal stays blank if it received data while layout was settling.
-          if (!window._xtermRefreshed) {
-            window._xtermRefreshed = true;
-            setTimeout(() => {
-              if (xtermRef.current) xtermRef.current.refresh(0, xtermRef.current.rows - 1);
-            }, 100);
-            setTimeout(() => {
-              if (xtermRef.current) xtermRef.current.refresh(0, xtermRef.current.rows - 1);
-            }, 500);
-          }
-        }
-      });
-    } else {
-      // Tauri desktop: chained setTimeout polling (avoids request pile-up from setInterval)
+    const startDesktopPolling = () => {
       if (readerIntervalRef.current) return;
+      desktopTransportRef.current = 'polling';
 
       const scheduleNext = () => {
         readerIntervalRef.current = window.setTimeout(readLoop, TERMINAL.POLL_INTERVAL_MS);
@@ -345,14 +358,9 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
         try {
           const data = await callBackend<string>('pty_read', {
             sessionId: sessionIdRef.current,
+            ...(clientId ? { clientId } : {}),
           });
-          if (data && xtermRef.current) {
-            if (!gotFirstDataRef.current) {
-              gotFirstDataRef.current = true;
-              setInitStatus(null);
-            }
-            xtermRef.current.write(data);
-          }
+          handleIncomingData(data);
         } catch { /* noop */ }
 
         if (readerIntervalRef.current !== null) {
@@ -361,8 +369,63 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
       };
 
       scheduleNext();
+    };
+
+    if (!isTauri()) {
+      // Browser mode: WS subscribe is idempotent
+      if (wsSubscribedRef.current) return;
+      wsSubscribedRef.current = true;
+      getWebSocketManager().subscribePty(sessionIdRef.current, (data) => {
+        handleIncomingData(data);
+      });
+    } else {
+      if (!enableDesktopEventStreaming) {
+        startDesktopPolling();
+        return;
+      }
+
+      if (desktopUnlistenRef.current || desktopListenerStartingRef.current) return;
+      if (desktopTransportRef.current === 'polling') {
+        startDesktopPolling();
+        return;
+      }
+
+      desktopListenerStartingRef.current = true;
+      const token = ++desktopListenerTokenRef.current;
+
+      void import('@tauri-apps/api/event')
+        .then(async ({ listen }) => {
+          const unlisten = await listen<PtyOutputEventPayload>('pty-output', (event) => {
+            if (event.payload?.sessionId !== sessionIdRef.current) return;
+            handleIncomingData(event.payload.data);
+          });
+
+          if (desktopListenerTokenRef.current !== token) {
+            unlisten();
+            return;
+          }
+
+          desktopTransportRef.current = 'event';
+          desktopUnlistenRef.current = () => {
+            unlisten();
+            desktopUnlistenRef.current = null;
+            if (desktopTransportRef.current === 'event') {
+              desktopTransportRef.current = null;
+            }
+          };
+        })
+        .catch(() => {
+          if (desktopListenerTokenRef.current === token) {
+            startDesktopPolling();
+          }
+        })
+        .finally(() => {
+          if (desktopListenerTokenRef.current === token) {
+            desktopListenerStartingRef.current = false;
+          }
+        });
     }
-  }, []);
+  }, [enableDesktopEventStreaming, handleIncomingData]);
 
   // Initialize PTY session
   const initPty = useCallback(async () => {
@@ -411,6 +474,19 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
         setInitStatus('Restoring session...');
       }
 
+      if (exists && isTauri()) {
+        setInitStatus('Restoring buffered output...');
+        try {
+          const data = await callBackend<string>('pty_read', {
+            sessionId: sessionIdRef.current,
+            ...(clientId ? { clientId } : {}),
+          });
+          handleIncomingData(data);
+        } catch {
+          // Event stream will still resume live output even if restore failed.
+        }
+      }
+
       setInitStatus('Subscribing output...');
       initializedRef.current = true;
       startReading();
@@ -448,7 +524,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
       setInitError(String(e));
       console.error('[terminal] Failed to initialize PTY:', e);
     }
-  }, [clientId, startReading]);
+  }, [clientId, handleIncomingData, startReading]);
 
   // Create PTY session on first visibility
   useEffect(() => {
@@ -462,9 +538,17 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
       wsSubscribedRef.current = false;
       getWebSocketManager().unsubscribePty(sessionIdRef.current);
     }
+    desktopListenerTokenRef.current += 1;
+    desktopListenerStartingRef.current = false;
+    if (desktopUnlistenRef.current) {
+      desktopUnlistenRef.current();
+    }
     if (readerIntervalRef.current !== null) {
       clearTimeout(readerIntervalRef.current);
       readerIntervalRef.current = null;
+    }
+    if (desktopTransportRef.current === 'polling') {
+      desktopTransportRef.current = null;
     }
   }, []);
 
@@ -495,9 +579,10 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
         handleResize();
       }, 50);
       return () => clearTimeout(resizeTimer);
-    } else {
-      if (isTauri()) stopReading();
     }
+    // Desktop terminals stay mounted across worktree switches to preserve PTY state,
+    // so keep draining output even while hidden. Stopping polling here can let large
+    // bursts accumulate and eventually overflow any intermediate buffers.
   }, [visible, startReading, stopReading, handleResize]);
 
   // ResizeObserver for container size changes
@@ -534,14 +619,12 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
       if (connected && initializedRef.current && wsSubscribedRef.current) {
         console.log('[terminal] WS reconnected, re-subscribing PTY:', sessionIdRef.current);
         wsMgr.subscribePty(sessionIdRef.current, (data) => {
-          if (data && xtermRef.current) {
-            xtermRef.current.write(data);
-          }
+          handleIncomingData(data);
         });
       }
     });
     return unsub;
-  }, []);
+  }, [handleIncomingData]);
 
   return (
     <div className="h-full w-full flex flex-col overflow-hidden">

@@ -12,7 +12,11 @@ use crate::utils::normalize_path;
 pub(crate) fn open_in_terminal(path: String, terminal: Option<String>) -> Result<(), String> {
     let normalized = normalize_path(&path);
     let term = terminal.as_deref().unwrap_or("auto");
-    log::info!("[system] Opening terminal at: {} (type: {})", normalized, term);
+    log::info!(
+        "[system] Opening terminal at: {} (type: {})",
+        normalized,
+        term
+    );
 
     #[cfg(target_os = "macos")]
     {
@@ -34,21 +38,22 @@ pub(crate) fn open_in_terminal(path: String, terminal: Option<String>) -> Result
         const CREATE_NO_WINDOW: u32 = 0x08000000;
 
         let result = match term {
-            "cmd" => {
-                Command::new("cmd")
-                    .args(["/c", "start", "cmd", "/k", &format!("cd /d {}", normalized)])
-                    .creation_flags(CREATE_NO_WINDOW)
-                    .spawn()
-            }
-            "powershell" => {
-                Command::new("cmd")
-                    .args(["/c", "start", "powershell", "-NoExit", "-Command", &format!("Set-Location '{}'", normalized)])
-                    .creation_flags(CREATE_NO_WINDOW)
-                    .spawn()
-            }
-            "windowsterminal" => {
-                Command::new("wt").args(["-d", &normalized]).spawn()
-            }
+            "cmd" => Command::new("cmd")
+                .args(["/c", "start", "cmd", "/k", &format!("cd /d {}", normalized)])
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn(),
+            "powershell" => Command::new("cmd")
+                .args([
+                    "/c",
+                    "start",
+                    "powershell",
+                    "-NoExit",
+                    "-Command",
+                    &format!("Set-Location '{}'", normalized),
+                ])
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn(),
+            "windowsterminal" => Command::new("wt").args(["-d", &normalized]).spawn(),
             "gitbash" => {
                 // Search common Git Bash locations
                 let candidates = [
@@ -72,7 +77,10 @@ pub(crate) fn open_in_terminal(path: String, terminal: Option<String>) -> Result
                 }
                 match git_bash_path {
                     Some(p) => Command::new(p).arg(&format!("--cd={}", normalized)).spawn(),
-                    None => Err(std::io::Error::new(std::io::ErrorKind::NotFound, "Git Bash not found")),
+                    None => Err(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "Git Bash not found",
+                    )),
                 }
             }
             _ => {
@@ -146,11 +154,16 @@ fn editor_app_name(editor: &str) -> &'static str {
     }
 }
 
-pub(crate) fn open_editor_at_path(request: &OpenEditorRequest, custom_path: Option<&str>) -> Result<(), String> {
+pub(crate) fn open_editor_at_path(
+    request: &OpenEditorRequest,
+    custom_path: Option<&str>,
+) -> Result<(), String> {
     let path = &request.path;
     log::info!(
         "[system] Opening editor: type={}, path={}, custom={:?}",
-        request.editor, path, custom_path
+        request.editor,
+        path,
+        custom_path
     );
 
     // If custom path is provided, use it directly
@@ -161,7 +174,11 @@ pub(crate) fn open_editor_at_path(request: &OpenEditorRequest, custom_path: Opti
             if exe.ends_with(".app") {
                 match Command::new("open").args(["-a", exe, path]).spawn() {
                     Ok(_) => {
-                        log::info!("[system] Spawned custom editor via open -a '{}' for: {}", exe, path);
+                        log::info!(
+                            "[system] Spawned custom editor via open -a '{}' for: {}",
+                            exe,
+                            path
+                        );
                         return Ok(());
                     }
                     Err(e) => {
@@ -224,7 +241,10 @@ pub(crate) fn open_editor_at_path(request: &OpenEditorRequest, custom_path: Opti
 }
 
 #[tauri::command]
-pub(crate) fn open_in_editor(request: OpenEditorRequest, custom_path: Option<String>) -> Result<(), String> {
+pub(crate) fn open_in_editor(
+    request: OpenEditorRequest,
+    custom_path: Option<String>,
+) -> Result<(), String> {
     open_editor_at_path(&request, custom_path.as_deref())
 }
 
@@ -275,9 +295,11 @@ pub(crate) fn open_log_dir() -> Result<(), String> {
     log::info!("[system] Opening log directory: {:?}", log_dir);
 
     if !log_dir.exists() {
-        log::info!("[system] Log directory does not exist, creating: {:?}", log_dir);
-        std::fs::create_dir_all(&log_dir)
-            .map_err(|e| format!("无法创建日志目录: {}", e))?;
+        log::info!(
+            "[system] Log directory does not exist, creating: {:?}",
+            log_dir
+        );
+        std::fs::create_dir_all(&log_dir).map_err(|e| format!("无法创建日志目录: {}", e))?;
     }
 
     let dir_str = log_dir.to_str().unwrap_or("");
@@ -402,7 +424,11 @@ fn detect_git() -> Vec<DetectedTool> {
     let mut results = Vec::new();
 
     if let Some(path) = check_executable("git") {
-        results.push(DetectedTool { id: "git".into(), name: "Git".into(), path });
+        results.push(DetectedTool {
+            id: "git".into(),
+            name: "Git".into(),
+            path,
+        });
     }
 
     #[cfg(target_os = "windows")]
@@ -413,13 +439,21 @@ fn detect_git() -> Vec<DetectedTool> {
         ];
         for (p, name) in &candidates {
             if std::path::Path::new(p).exists() && !results.iter().any(|r| r.path == *p) {
-                results.push(DetectedTool { id: "git".into(), name: name.to_string(), path: p.to_string() });
+                results.push(DetectedTool {
+                    id: "git".into(),
+                    name: name.to_string(),
+                    path: p.to_string(),
+                });
             }
         }
         if let Ok(local) = std::env::var("LOCALAPPDATA") {
             let p = format!(r"{}\Programs\Git\cmd\git.exe", local);
             if std::path::Path::new(&p).exists() && !results.iter().any(|r| r.path == p) {
-                results.push(DetectedTool { id: "git".into(), name: "Git (User)".into(), path: p });
+                results.push(DetectedTool {
+                    id: "git".into(),
+                    name: "Git (User)".into(),
+                    path: p,
+                });
             }
         }
     }
@@ -432,27 +466,59 @@ fn detect_terminals() -> Vec<DetectedTool> {
 
     #[cfg(target_os = "macos")]
     {
-        results.push(DetectedTool { id: "terminal".into(), name: "Terminal.app".into(), path: "/System/Applications/Utilities/Terminal.app".into() });
+        results.push(DetectedTool {
+            id: "terminal".into(),
+            name: "Terminal.app".into(),
+            path: "/System/Applications/Utilities/Terminal.app".into(),
+        });
         if std::path::Path::new("/Applications/iTerm.app").exists() {
-            results.push(DetectedTool { id: "iterm2".into(), name: "iTerm2".into(), path: "/Applications/iTerm.app".into() });
+            results.push(DetectedTool {
+                id: "iterm2".into(),
+                name: "iTerm2".into(),
+                path: "/Applications/iTerm.app".into(),
+            });
         }
         if std::path::Path::new("/Applications/Warp.app").exists() {
-            results.push(DetectedTool { id: "warp".into(), name: "Warp".into(), path: "/Applications/Warp.app".into() });
+            results.push(DetectedTool {
+                id: "warp".into(),
+                name: "Warp".into(),
+                path: "/Applications/Warp.app".into(),
+            });
         }
         if std::path::Path::new("/Applications/Alacritty.app").exists() {
-            results.push(DetectedTool { id: "alacritty".into(), name: "Alacritty".into(), path: "/Applications/Alacritty.app".into() });
+            results.push(DetectedTool {
+                id: "alacritty".into(),
+                name: "Alacritty".into(),
+                path: "/Applications/Alacritty.app".into(),
+            });
         }
         if std::path::Path::new("/Applications/kitty.app").exists() {
-            results.push(DetectedTool { id: "kitty".into(), name: "kitty".into(), path: "/Applications/kitty.app".into() });
+            results.push(DetectedTool {
+                id: "kitty".into(),
+                name: "kitty".into(),
+                path: "/Applications/kitty.app".into(),
+            });
         }
     }
 
     #[cfg(target_os = "windows")]
     {
-        results.push(DetectedTool { id: "cmd".into(), name: "CMD".into(), path: "cmd.exe".into() });
-        results.push(DetectedTool { id: "powershell".into(), name: "PowerShell".into(), path: "powershell.exe".into() });
+        results.push(DetectedTool {
+            id: "cmd".into(),
+            name: "CMD".into(),
+            path: "cmd.exe".into(),
+        });
+        results.push(DetectedTool {
+            id: "powershell".into(),
+            name: "PowerShell".into(),
+            path: "powershell.exe".into(),
+        });
         if check_executable("wt").is_some() {
-            results.push(DetectedTool { id: "windowsterminal".into(), name: "Windows Terminal".into(), path: "wt.exe".into() });
+            results.push(DetectedTool {
+                id: "windowsterminal".into(),
+                name: "Windows Terminal".into(),
+                path: "wt.exe".into(),
+            });
         }
         // Git Bash
         let git_bash_candidates = [
@@ -461,7 +527,11 @@ fn detect_terminals() -> Vec<DetectedTool> {
         ];
         for p in &git_bash_candidates {
             if std::path::Path::new(p).exists() {
-                results.push(DetectedTool { id: "gitbash".into(), name: "Git Bash".into(), path: p.to_string() });
+                results.push(DetectedTool {
+                    id: "gitbash".into(),
+                    name: "Git Bash".into(),
+                    path: p.to_string(),
+                });
                 break;
             }
         }
@@ -481,7 +551,11 @@ fn detect_terminals() -> Vec<DetectedTool> {
         ];
         for (cmd, name) in &terminals {
             if let Some(path) = check_executable(cmd) {
-                results.push(DetectedTool { id: cmd.to_string(), name: name.to_string(), path });
+                results.push(DetectedTool {
+                    id: cmd.to_string(),
+                    name: name.to_string(),
+                    path,
+                });
             }
         }
     }
@@ -506,22 +580,38 @@ fn detect_editors() -> Vec<DetectedTool> {
 
     for (cmd, id, name) in &editors {
         if let Some(path) = check_executable(cmd) {
-            results.push(DetectedTool { id: id.to_string(), name: name.to_string(), path });
+            results.push(DetectedTool {
+                id: id.to_string(),
+                name: name.to_string(),
+                path,
+            });
         }
     }
 
     #[cfg(target_os = "macos")]
     {
         let mac_apps = [
-            ("/Applications/Visual Studio Code.app", "vscode", "Visual Studio Code"),
+            (
+                "/Applications/Visual Studio Code.app",
+                "vscode",
+                "Visual Studio Code",
+            ),
             ("/Applications/Cursor.app", "cursor", "Cursor"),
-            ("/Applications/Antigravity.app", "antigravity", "Antigravity"),
+            (
+                "/Applications/Antigravity.app",
+                "antigravity",
+                "Antigravity",
+            ),
             ("/Applications/Zed.app", "zed", "Zed"),
             ("/Applications/Sublime Text.app", "sublime", "Sublime Text"),
         ];
         for (app_path, id, name) in &mac_apps {
             if std::path::Path::new(app_path).exists() && !results.iter().any(|r| r.id == *id) {
-                results.push(DetectedTool { id: id.to_string(), name: name.to_string(), path: app_path.to_string() });
+                results.push(DetectedTool {
+                    id: id.to_string(),
+                    name: name.to_string(),
+                    path: app_path.to_string(),
+                });
             }
         }
     }
@@ -529,16 +619,33 @@ fn detect_editors() -> Vec<DetectedTool> {
     #[cfg(target_os = "windows")]
     {
         let win_locations = [
-            (r"Microsoft VS Code\Code.exe", "vscode", "Visual Studio Code"),
+            (
+                r"Microsoft VS Code\Code.exe",
+                "vscode",
+                "Visual Studio Code",
+            ),
             (r"Cursor\Cursor.exe", "cursor", "Cursor"),
-            (r"Programs\Microsoft VS Code\Code.exe", "vscode", "Visual Studio Code"),
+            (
+                r"Programs\Microsoft VS Code\Code.exe",
+                "vscode",
+                "Visual Studio Code",
+            ),
         ];
-        for base in &[std::env::var("LOCALAPPDATA").ok(), std::env::var("PROGRAMFILES").ok(), std::env::var("PROGRAMFILES(X86)").ok()] {
+        for base in &[
+            std::env::var("LOCALAPPDATA").ok(),
+            std::env::var("PROGRAMFILES").ok(),
+            std::env::var("PROGRAMFILES(X86)").ok(),
+        ] {
             if let Some(base) = base {
                 for (rel, id, name) in &win_locations {
                     let full = format!(r"{}\{}", base, rel);
-                    if std::path::Path::new(&full).exists() && !results.iter().any(|r| r.id == *id) {
-                        results.push(DetectedTool { id: id.to_string(), name: name.to_string(), path: full });
+                    if std::path::Path::new(&full).exists() && !results.iter().any(|r| r.id == *id)
+                    {
+                        results.push(DetectedTool {
+                            id: id.to_string(),
+                            name: name.to_string(),
+                            path: full,
+                        });
                     }
                 }
             }
@@ -558,7 +665,9 @@ pub(crate) fn detect_tools() -> DetectedTools {
     };
     log::info!(
         "[system] Detected: {} git, {} terminals, {} editors",
-        tools.git.len(), tools.terminals.len(), tools.editors.len()
+        tools.git.len(),
+        tools.terminals.len(),
+        tools.editors.len()
     );
     tools
 }
@@ -574,6 +683,11 @@ pub(crate) fn set_git_path(path: String) {
 
 pub fn set_git_path_internal(path: &str) {
     crate::utils::set_custom_git_path(path);
+}
+
+#[tauri::command]
+pub(crate) fn get_app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
 }
 
 // ==================== 更新镜像下载 ====================
@@ -626,10 +740,7 @@ pub(crate) async fn download_update_via_mirror(app: tauri::AppHandle) -> Result<
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .map_err(|e| format!("Failed to bind local server: {}", e))?;
-    let port = listener
-        .local_addr()
-        .map_err(|e| e.to_string())?
-        .port();
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
 
     let router = axum::Router::new().route(
         "/latest.json",
@@ -639,19 +750,27 @@ pub(crate) async fn download_update_via_mirror(app: tauri::AppHandle) -> Result<
         }),
     );
 
+    struct AbortServerOnDrop(Option<tokio::task::JoinHandle<()>>);
+
+    impl Drop for AbortServerOnDrop {
+        fn drop(&mut self) {
+            if let Some(handle) = self.0.take() {
+                handle.abort();
+            }
+        }
+    }
+
     let server_handle = tokio::spawn(async move {
         axum::serve(listener, router).await.ok();
     });
+    let mut server_guard = AbortServerOnDrop(Some(server_handle));
 
     // 4. Create a new updater instance pointing to the local endpoint
     let local_endpoint: url::Url = format!("http://127.0.0.1:{}/latest.json", port)
         .parse()
         .map_err(|e: url::ParseError| e.to_string())?;
 
-    log::info!(
-        "[system] Local manifest server at: {}",
-        local_endpoint
-    );
+    log::info!("[system] Local manifest server at: {}", local_endpoint);
 
     let updater = app
         .updater_builder()
@@ -714,7 +833,9 @@ pub(crate) async fn download_update_via_mirror(app: tauri::AppHandle) -> Result<
         .map_err(|e| format!("Mirror download failed: {}", e))?;
 
     // 7. Clean up local server
-    server_handle.abort();
+    if let Some(handle) = server_guard.0.take() {
+        handle.abort();
+    }
     log::info!("[system] Mirror update download complete");
 
     Ok(())
@@ -726,7 +847,10 @@ pub fn open_in_terminal_internal(path: &str, terminal: Option<&str>) -> Result<(
     open_in_terminal(path.to_string(), terminal.map(|s| s.to_string()))
 }
 
-pub fn open_in_editor_internal(request: &OpenEditorRequest, custom_path: Option<&str>) -> Result<(), String> {
+pub fn open_in_editor_internal(
+    request: &OpenEditorRequest,
+    custom_path: Option<&str>,
+) -> Result<(), String> {
     open_editor_at_path(request, custom_path)
 }
 

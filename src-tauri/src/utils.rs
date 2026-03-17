@@ -35,41 +35,44 @@ fn resolve_git_path() -> String {
     {
         use std::sync::OnceLock;
         static DETECTED_GIT: OnceLock<String> = OnceLock::new();
-        return DETECTED_GIT.get_or_init(|| {
-            // Try "git" from PATH first
-            #[allow(unused_mut)]
-            let mut check = std::process::Command::new("git");
-            check.arg("--version")
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null());
-            {
-                use std::os::windows::process::CommandExt;
-                const CREATE_NO_WINDOW: u32 = 0x08000000;
-                check.creation_flags(CREATE_NO_WINDOW);
-            }
-            if check.status().is_ok() {
-                return "git".to_string();
-            }
-            let candidates = [
-                r"C:\Program Files\Git\cmd\git.exe",
-                r"C:\Program Files (x86)\Git\cmd\git.exe",
-            ];
-            for path in &candidates {
-                if std::path::Path::new(path).exists() {
-                    log::info!("[git] Found git at: {}", path);
-                    return path.to_string();
+        return DETECTED_GIT
+            .get_or_init(|| {
+                // Try "git" from PATH first
+                #[allow(unused_mut)]
+                let mut check = std::process::Command::new("git");
+                check
+                    .arg("--version")
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null());
+                {
+                    use std::os::windows::process::CommandExt;
+                    const CREATE_NO_WINDOW: u32 = 0x08000000;
+                    check.creation_flags(CREATE_NO_WINDOW);
                 }
-            }
-            if let Ok(local) = std::env::var("LOCALAPPDATA") {
-                let p = format!(r"{}\Programs\Git\cmd\git.exe", local);
-                if std::path::Path::new(&p).exists() {
-                    log::info!("[git] Found git at: {}", p);
-                    return p;
+                if check.status().is_ok() {
+                    return "git".to_string();
                 }
-            }
-            log::warn!("[git] git not found in PATH or common locations, using 'git'");
-            "git".to_string()
-        }).clone();
+                let candidates = [
+                    r"C:\Program Files\Git\cmd\git.exe",
+                    r"C:\Program Files (x86)\Git\cmd\git.exe",
+                ];
+                for path in &candidates {
+                    if std::path::Path::new(path).exists() {
+                        log::info!("[git] Found git at: {}", path);
+                        return path.to_string();
+                    }
+                }
+                if let Ok(local) = std::env::var("LOCALAPPDATA") {
+                    let p = format!(r"{}\Programs\Git\cmd\git.exe", local);
+                    if std::path::Path::new(&p).exists() {
+                        log::info!("[git] Found git at: {}", p);
+                        return p;
+                    }
+                }
+                log::warn!("[git] git not found in PATH or common locations, using 'git'");
+                "git".to_string()
+            })
+            .clone();
     }
 
     #[cfg(not(target_os = "windows"))]

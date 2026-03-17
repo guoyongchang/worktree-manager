@@ -97,6 +97,15 @@ npm run tauri dev
 npm run tauri build
 ```
 
+**命令契约同步：**
+
+```bash
+npm run verify:contracts
+npm run docs:contracts
+```
+
+更多说明见 `docs/COMMAND_CONTRACTS.md`，生成结果位于 `docs/generated/command-contracts.md`。
+
 </details>
 
 ### 三步上手

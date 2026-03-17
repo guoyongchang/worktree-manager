@@ -8,6 +8,9 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "contracts": "npm run verify:contracts && npm run docs:contracts",
+    "verify:contracts": "node scripts/command-contracts.mjs check",
+    "docs:contracts": "node scripts/command-contracts.mjs generate",
     "prepare": "git config core.hooksPath .githooks"
   },
   "dependencies": {

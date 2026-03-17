@@ -31,16 +31,52 @@ export function useWorktreeLocks(
   }, [currentWorkspacePath, getLockedWorktreesFn, updateLocksIfChanged]);
 
   useEffect(() => {
-    if (!isTauri() && currentWorkspacePath) {
+    if (!currentWorkspacePath) return;
+
+    if (!isTauri()) {
       const wsManager = getWebSocketManager();
       wsManager.subscribeLocks(currentWorkspacePath, updateLocksIfChanged);
       refreshLockedWorktrees();
       return () => { wsManager.unsubscribeLocks(); };
-    } else {
-      refreshLockedWorktrees();
-      const interval = setInterval(refreshLockedWorktrees, 3000);
-      return () => clearInterval(interval);
     }
+
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+
+    refreshLockedWorktrees();
+
+    (async () => {
+      try {
+        const { listen } = await import('@tauri-apps/api/event');
+        const stop = await listen<{
+          workspacePath?: string;
+          locks?: Record<string, string>;
+        }>('lock-state-update', (event) => {
+          if (cancelled) return;
+          const payload = event.payload;
+          if (!payload || payload.workspacePath !== currentWorkspacePath || !payload.locks) {
+            return;
+          }
+          updateLocksIfChanged(payload.locks);
+        });
+        if (cancelled) {
+          stop();
+        } else {
+          unlisten = stop;
+          // Reconcile any lock changes that landed while the desktop listener was attaching.
+          void refreshLockedWorktrees();
+        }
+      } catch {
+        if (cancelled) return;
+        const interval = setInterval(refreshLockedWorktrees, 3000);
+        unlisten = () => clearInterval(interval);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, [refreshLockedWorktrees, currentWorkspacePath, updateLocksIfChanged]);
 
   return {

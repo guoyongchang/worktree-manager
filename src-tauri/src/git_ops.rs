@@ -1059,10 +1059,13 @@ pub fn create_pull_request(
         GitPlatform::GitHub => {
             // Check if gh CLI is available
             log::info!("[git] Checking gh CLI availability");
-            let gh_check = std::process::Command::new("gh").arg("--version").output().map_err(|_| {
-                "gh CLI is not installed. Please install it from https://cli.github.com/"
-                    .to_string()
-            })?;
+            let gh_check = std::process::Command::new("gh")
+                .arg("--version")
+                .output()
+                .map_err(|_| {
+                    "gh CLI is not installed. Please install it from https://cli.github.com/"
+                        .to_string()
+                })?;
 
             if !gh_check.status.success() {
                 log::error!("[git] gh CLI is not available");
@@ -1423,7 +1426,7 @@ pub fn commit_all(path: &Path, message: &str) -> Result<String, String> {
 #[derive(Debug, Serialize, Clone)]
 pub struct ChangedFile {
     pub path: String,
-    pub status: String,   // "M" | "A" | "D" | "R" | "?" (untracked) | "C" (copied)
+    pub status: String, // "M" | "A" | "D" | "R" | "?" (untracked) | "C" (copied)
     pub staged: bool,
 }
 
@@ -1454,22 +1457,26 @@ pub fn get_changed_files(path: &Path) -> Result<Vec<ChangedFile>, String> {
 
         // Handle rename: "R  old -> new"
         let file_path = if file_path.contains(" -> ") {
-            file_path.split(" -> ").last().unwrap_or(&file_path).to_string()
+            file_path
+                .split(" -> ")
+                .last()
+                .unwrap_or(&file_path)
+                .to_string()
         } else {
             file_path
         };
 
         // Determine status and staged state
         let (status, staged) = match (index_status, worktree_status) {
-            ('?', '?') => ("?".to_string(), false),     // untracked
-            ('A', _) => ("A".to_string(), true),         // added (staged)
-            ('D', _) => ("D".to_string(), true),         // deleted (staged)
-            ('R', _) => ("R".to_string(), true),         // renamed (staged)
-            ('C', _) => ("C".to_string(), true),         // copied (staged)
-            ('M', _) => ("M".to_string(), true),         // modified (staged)
-            (_, 'M') => ("M".to_string(), false),        // modified (unstaged)
-            (_, 'D') => ("D".to_string(), false),        // deleted (unstaged)
-            _ => ("M".to_string(), false),               // fallback
+            ('?', '?') => ("?".to_string(), false), // untracked
+            ('A', _) => ("A".to_string(), true),    // added (staged)
+            ('D', _) => ("D".to_string(), true),    // deleted (staged)
+            ('R', _) => ("R".to_string(), true),    // renamed (staged)
+            ('C', _) => ("C".to_string(), true),    // copied (staged)
+            ('M', _) => ("M".to_string(), true),    // modified (staged)
+            (_, 'M') => ("M".to_string(), false),   // modified (unstaged)
+            (_, 'D') => ("D".to_string(), false),   // deleted (unstaged)
+            _ => ("M".to_string(), false),          // fallback
         };
 
         files.push(ChangedFile {

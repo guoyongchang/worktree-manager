@@ -5,6 +5,11 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::http::HeaderValue;
+
+pub(crate) const REMOTE_PROXY_HEADER: &str = "x-worktree-remote-proxy";
+pub(crate) const REMOTE_PROXY_AUTH_HEADER: &str = "x-worktree-remote-proxy-auth";
 
 // ==================== Tunnel discovery ====================
 
@@ -272,10 +277,18 @@ async fn proxy_http(
     let mut builder = client.request(req_method, &url);
 
     for (name, value) in &headers {
-        if !is_hop_by_hop(name) {
+        if !is_hop_by_hop(name)
+            && !name.eq_ignore_ascii_case(REMOTE_PROXY_HEADER)
+            && !name.eq_ignore_ascii_case(REMOTE_PROXY_AUTH_HEADER)
+        {
             builder = builder.header(name.as_str(), value.as_str());
         }
     }
+    builder = builder.header(REMOTE_PROXY_HEADER, "wms");
+    builder = builder.header(
+        REMOTE_PROXY_AUTH_HEADER,
+        crate::state::REMOTE_PROXY_AUTH_TOKEN.as_str(),
+    );
 
     if let Some(b) = body {
         match BASE64.decode(&b) {
@@ -355,7 +368,27 @@ async fn handle_ws_open(
         path
     );
 
-    match tokio_tungstenite::connect_async(&url).await {
+    let mut request = match url.into_client_request() {
+        Ok(request) => request,
+        Err(e) => {
+            log::warn!(
+                "[wms-tunnel] Failed to build WS bridge request: stream_id={}, error={}",
+                stream_id,
+                e
+            );
+            return;
+        }
+    };
+    request
+        .headers_mut()
+        .insert(REMOTE_PROXY_HEADER, HeaderValue::from_static("wms"));
+    if let Ok(value) = HeaderValue::from_str(crate::state::REMOTE_PROXY_AUTH_TOKEN.as_str()) {
+        request
+            .headers_mut()
+            .insert(REMOTE_PROXY_AUTH_HEADER, value);
+    }
+
+    match tokio_tungstenite::connect_async(request).await {
         Ok((ws_stream, _)) => {
             log::info!("[wms-tunnel] WS bridge connected: stream_id={}", stream_id);
             let _ = send_tx.send(ClientMessage::WsOpened {

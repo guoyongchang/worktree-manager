@@ -1,7 +1,9 @@
-import { useState, useEffect, useRef, useCallback, type FC } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, type FC } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button } from '@/components/ui/button';
 import { getChangedFiles, getFileDiff } from '@/lib/backend';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { ChevronIcon, FolderIcon, LogIcon, RefreshIcon } from '@/components/Icons';
 import type { ChangedFile, FileDiff, ProjectStatus } from '../types';
 
 // ==================== Status helpers ====================
@@ -29,8 +31,107 @@ const STATUS_BG: Record<string, string> = {
     A: 'bg-emerald-500/10 border-emerald-500/30',
     D: 'bg-red-500/10 border-red-500/30',
     R: 'bg-blue-500/10 border-blue-500/30',
+    C: 'bg-sky-500/10 border-sky-500/30',
     '?': 'bg-slate-500/10 border-slate-500/30',
 };
+
+const STATUS_ORDER = ['M', 'A', 'D', 'R', 'C', '?'] as const;
+type ChangedFileEntry = ChangedFile & { projectName: string };
+const CHANGED_FILE_MEMORY_KEY = 'worktree-manager.changed-files.last-selection.v1';
+const LARGE_DIFF_THRESHOLD = 400;
+const DIFF_CONTEXT_LINES = 3;
+
+function readSelectionMemory(): Record<string, string> {
+    if (typeof window === 'undefined') return {};
+    try {
+        const raw = window.localStorage.getItem(CHANGED_FILE_MEMORY_KEY);
+        if (!raw) return {};
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+        return {};
+    }
+}
+
+function readRememberedSelection(reviewKey: string): string | null {
+    return readSelectionMemory()[reviewKey] ?? null;
+}
+
+function writeRememberedSelection(reviewKey: string, fileKey: string): void {
+    if (typeof window === 'undefined') return;
+    try {
+        const next = readSelectionMemory();
+        next[reviewKey] = fileKey;
+        window.localStorage.setItem(CHANGED_FILE_MEMORY_KEY, JSON.stringify(next));
+    } catch {
+        // ignore storage failures
+    }
+}
+
+function buildExpandedPathSet(files: ChangedFileEntry[]): Set<string> {
+    const paths = new Set<string>();
+    for (const file of files) {
+        const parts = [file.projectName, ...file.path.split('/')];
+        for (let i = 1; i < parts.length; i++) {
+            paths.add(parts.slice(0, i).join('/'));
+        }
+    }
+    return paths;
+}
+
+function countStatuses(files: ChangedFileEntry[]): Record<string, number> {
+    return files.reduce<Record<string, number>>((acc, file) => {
+        acc[file.status] = (acc[file.status] || 0) + 1;
+        return acc;
+    }, {});
+}
+
+type DiffRow =
+    | { type: 'pair'; pair: DiffPair }
+    | { type: 'gap'; hiddenCount: number };
+
+function buildChangedOnlyRows(pairs: DiffPair[], contextLines: number): DiffRow[] {
+    const changedIndices = pairs
+        .map((pair, index) => {
+            const changed = pair.left.type !== 'same' || pair.right.type !== 'same';
+            return changed ? index : -1;
+        })
+        .filter((index) => index >= 0);
+
+    if (changedIndices.length === 0) {
+        return pairs.map((pair) => ({ type: 'pair', pair }));
+    }
+
+    const ranges: Array<{ start: number; end: number }> = [];
+    for (const index of changedIndices) {
+        const start = Math.max(0, index - contextLines);
+        const end = Math.min(pairs.length - 1, index + contextLines);
+        const previous = ranges[ranges.length - 1];
+        if (!previous || start > previous.end + 1) {
+            ranges.push({ start, end });
+        } else {
+            previous.end = Math.max(previous.end, end);
+        }
+    }
+
+    const rows: DiffRow[] = [];
+    let cursor = 0;
+    for (const range of ranges) {
+        if (range.start > cursor) {
+            rows.push({ type: 'gap', hiddenCount: range.start - cursor });
+        }
+        for (let index = range.start; index <= range.end; index++) {
+            rows.push({ type: 'pair', pair: pairs[index] });
+        }
+        cursor = range.end + 1;
+    }
+
+    if (cursor < pairs.length) {
+        rows.push({ type: 'gap', hiddenCount: pairs.length - cursor });
+    }
+
+    return rows;
+}
 
 // ==================== Tree builder ====================
 
@@ -38,12 +139,12 @@ interface TreeNode {
     name: string;
     path: string;
     children: Map<string, TreeNode>;
-    file?: ChangedFile & { projectName: string };
+    file?: ChangedFileEntry;
     expanded: boolean;
 }
 
 function buildTree(
-    files: Array<ChangedFile & { projectName: string }>
+    files: ChangedFileEntry[]
 ): TreeNode {
     const root: TreeNode = {
         name: '',
@@ -231,6 +332,7 @@ const FileTreeItem: FC<{
         const file = node.file!;
         return (
             <button
+                data-file-key={node.path}
                 className={`w-full flex items-center gap-1.5 px-2 py-1 text-left text-xs transition-colors rounded-sm ${isSelected
                     ? 'bg-blue-500/20 text-blue-300'
                     : 'hover:bg-slate-700/50 text-slate-300'
@@ -255,22 +357,8 @@ const FileTreeItem: FC<{
                 style={{ paddingLeft: `${depth * 12 + 8}px` }}
                 onClick={() => onToggleExpand(node.path)}
             >
-                <svg
-                    className={`w-3 h-3 shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                >
-                    <path d="M9 18l6-6-6-6" />
-                </svg>
-                <svg className="w-3.5 h-3.5 shrink-0 text-blue-400/60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    {isExpanded ? (
-                        <path d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h6a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" />
-                    ) : (
-                        <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                    )}
-                </svg>
+                <ChevronIcon expanded={isExpanded} className="w-3 h-3 shrink-0" />
+                <FolderIcon className="w-3.5 h-3.5 shrink-0 text-blue-400/60" />
                 <span className="truncate font-medium">{node.name}</span>
                 <span className="text-[10px] text-slate-600 ml-auto shrink-0">
                     {countFiles(node)}
@@ -389,11 +477,65 @@ function highlightLine(line: string, lang: string | undefined): React.ReactNode 
 
 const DiffView: FC<{
     diff: FileDiff;
-    fileKey: string;
-}> = ({ diff, fileKey }) => {
+}> = ({ diff }) => {
+    const { t } = useTranslation();
+    const pairs = useMemo(
+        () => computeSideBySideDiff(diff.old_content, diff.new_content),
+        [diff.new_content, diff.old_content]
+    );
+    const lang = detectLanguage(diff.file_path);
+    const [showChangedOnly, setShowChangedOnly] = useState(pairs.length > LARGE_DIFF_THRESHOLD);
+
+    useEffect(() => {
+        setShowChangedOnly(pairs.length > LARGE_DIFF_THRESHOLD);
+    }, [diff.file_path, pairs.length]);
+
+    const changedOnlyRows = useMemo(
+        () => buildChangedOnlyRows(pairs, DIFF_CONTEXT_LINES),
+        [pairs]
+    );
+    const canUseChangedOnly = changedOnlyRows.some((row) => row.type === 'gap');
+    const useChangedOnlyMode = showChangedOnly && canUseChangedOnly;
+    const renderedRows = useChangedOnlyMode
+        ? changedOnlyRows
+        : pairs.map((pair) => ({ type: 'pair', pair } as DiffRow));
+
+    // Limit rendering to avoid lag
+    const MAX_LINES = 2000;
+    const truncated = !useChangedOnlyMode && pairs.length > MAX_LINES;
+    const displayRows = truncated ? renderedRows.slice(0, MAX_LINES) : renderedRows;
+
+    const renderLineCell = (line: DiffLine, side: 'left' | 'right') => {
+        const isChange = side === 'left' ? line.type === 'remove' : line.type === 'add';
+        const isEmpty = line.type === 'empty';
+        const lineNumber = side === 'left' ? line.oldLine : line.newLine;
+        const marker = side === 'left'
+            ? line.type === 'remove' ? '−' : ' '
+            : line.type === 'add' ? '+' : ' ';
+
+        return (
+            <div
+                className={`flex min-h-[1.6em] ${isChange
+                    ? side === 'left' ? 'bg-red-500/10' : 'bg-emerald-500/10'
+                    : isEmpty ? 'bg-slate-700/10' : ''
+                    }`}
+            >
+                <span className="w-10 shrink-0 text-right pr-2 text-slate-600 select-none text-[11px]">
+                    {lineNumber ?? ''}
+                </span>
+                <span className="w-4 shrink-0 text-center text-slate-600 select-none">
+                    {marker}
+                </span>
+                <pre className="flex-1 whitespace-pre-wrap break-all pr-2">
+                    {highlightLine(line.content, lang)}
+                </pre>
+            </div>
+        );
+    };
+
     if (diff.is_binary) {
         return (
-            <div id={`diff-${fileKey}`} className="border-b border-slate-700/50">
+            <div className="border-b border-slate-700/50">
                 <div className="sticky top-0 z-10 bg-slate-800 border-b border-slate-700/50 px-4 py-2 flex items-center gap-2">
                     <span className="text-xs font-mono text-slate-300">{diff.file_path}</span>
                     <span className="text-[10px] text-slate-500 px-1.5 py-0.5 rounded bg-slate-700/50">Binary</span>
@@ -405,16 +547,8 @@ const DiffView: FC<{
         );
     }
 
-    const pairs = computeSideBySideDiff(diff.old_content, diff.new_content);
-    const lang = detectLanguage(diff.file_path);
-
-    // Limit rendering to avoid lag
-    const MAX_LINES = 2000;
-    const truncated = pairs.length > MAX_LINES;
-    const displayPairs = truncated ? pairs.slice(0, MAX_LINES) : pairs;
-
     return (
-        <div id={`diff-${fileKey}`} className="border-b border-slate-700/50">
+        <div className="border-b border-slate-700/50">
             {/* Sticky file header */}
             <div className="sticky top-0 z-10 bg-slate-800/95 backdrop-blur-sm border-b border-slate-700/50 px-4 py-2 flex items-center gap-2">
                 <span className="text-xs font-mono text-slate-300">{diff.file_path}</span>
@@ -424,58 +558,55 @@ const DiffView: FC<{
                 {diff.is_deleted && (
                     <span className="text-[10px] text-red-400 px-1.5 py-0.5 rounded bg-red-500/10 border border-red-500/30">Deleted</span>
                 )}
+                {canUseChangedOnly && (
+                    <div className="ml-auto flex items-center gap-1">
+                        <Button
+                            variant={showChangedOnly ? 'secondary' : 'ghost'}
+                            size="sm"
+                            className="h-7 px-2 text-[11px]"
+                            onClick={() => setShowChangedOnly(true)}
+                        >
+                            {t('detail.showChangedBlocks', 'Changed blocks')}
+                        </Button>
+                        <Button
+                            variant={!showChangedOnly ? 'secondary' : 'ghost'}
+                            size="sm"
+                            className="h-7 px-2 text-[11px]"
+                            onClick={() => setShowChangedOnly(false)}
+                        >
+                            {t('detail.showFullDiff', 'Full file')}
+                        </Button>
+                    </div>
+                )}
             </div>
 
             {/* Side-by-side diff */}
-            <div className="grid grid-cols-2 text-[12px] font-mono leading-[1.6] overflow-x-auto">
-                {/* Left: old */}
-                <div className="border-r border-slate-700/30">
-                    {displayPairs.map((pair, i) => (
-                        <div
-                            key={i}
-                            className={`flex min-h-[1.6em] ${pair.left.type === 'remove'
-                                ? 'bg-red-500/10'
-                                : pair.left.type === 'empty'
-                                    ? 'bg-slate-700/10'
-                                    : ''
-                                }`}
-                        >
-                            <span className="w-10 shrink-0 text-right pr-2 text-slate-600 select-none text-[11px]">
-                                {pair.left.oldLine ?? ''}
-                            </span>
-                            <span className="w-4 shrink-0 text-center text-slate-600 select-none">
-                                {pair.left.type === 'remove' ? '−' : ' '}
-                            </span>
-                            <pre className="flex-1 whitespace-pre-wrap break-all pr-2">
-                                {highlightLine(pair.left.content, lang)}
-                            </pre>
+            <div className="text-[12px] font-mono leading-[1.6] overflow-x-auto">
+                {displayRows.map((row, index) => {
+                    if (row.type === 'gap') {
+                        return (
+                            <div key={`gap-${index}`} className="grid grid-cols-2">
+                                <div className="col-span-2 px-4 py-1.5 text-center text-[11px] text-slate-500 bg-slate-800/70 border-y border-slate-700/30">
+                                    {t('detail.hiddenUnchangedLines', {
+                                        count: row.hiddenCount,
+                                        defaultValue: '{{count}} unchanged lines hidden',
+                                    })}
+                                </div>
+                            </div>
+                        );
+                    }
+
+                    return (
+                        <div key={`pair-${index}`} className="grid grid-cols-2">
+                            <div className="border-r border-slate-700/30">
+                                {renderLineCell(row.pair.left, 'left')}
+                            </div>
+                            <div>
+                                {renderLineCell(row.pair.right, 'right')}
+                            </div>
                         </div>
-                    ))}
-                </div>
-                {/* Right: new */}
-                <div>
-                    {displayPairs.map((pair, i) => (
-                        <div
-                            key={i}
-                            className={`flex min-h-[1.6em] ${pair.right.type === 'add'
-                                ? 'bg-emerald-500/10'
-                                : pair.right.type === 'empty'
-                                    ? 'bg-slate-700/10'
-                                    : ''
-                                }`}
-                        >
-                            <span className="w-10 shrink-0 text-right pr-2 text-slate-600 select-none text-[11px]">
-                                {pair.right.newLine ?? ''}
-                            </span>
-                            <span className="w-4 shrink-0 text-center text-slate-600 select-none">
-                                {pair.right.type === 'add' ? '+' : ' '}
-                            </span>
-                            <pre className="flex-1 whitespace-pre-wrap break-all pr-2">
-                                {highlightLine(pair.right.content, lang)}
-                            </pre>
-                        </div>
-                    ))}
-                </div>
+                    );
+                })}
             </div>
 
             {truncated && (
@@ -492,29 +623,37 @@ const DiffView: FC<{
 
 interface ChangedFilesPanelProps {
     projects: ProjectStatus[];
+    reviewKey: string;
     focusProject?: string | null;
 }
 
 export const ChangedFilesPanel: FC<ChangedFilesPanelProps> = ({
     projects,
+    reviewKey,
     focusProject,
 }) => {
     const { t } = useTranslation();
-    const [allFiles, setAllFiles] = useState<
-        Array<ChangedFile & { projectName: string }>
-    >([]);
+    const [allFiles, setAllFiles] = useState<ChangedFileEntry[]>([]);
     const [loadingFiles, setLoadingFiles] = useState(false);
     const [diffs, setDiffs] = useState<Map<string, FileDiff>>(new Map());
     const [loadingDiffs, setLoadingDiffs] = useState<Set<string>>(new Set());
     const [selectedFile, setSelectedFile] = useState<string | null>(null);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [statusFilters, setStatusFilters] = useState<Set<string>>(new Set());
+    const [projectFilter, setProjectFilter] = useState<string | null>(focusProject ?? null);
     const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
     const [treeWidth, setTreeWidth] = useState(280);
-    const diffContainerRef = useRef<HTMLDivElement>(null);
     const resizingRef = useRef(false);
+    const treeContainerRef = useRef<HTMLDivElement>(null);
 
     const totalChanges = projects.reduce(
         (sum, p) => sum + p.uncommitted_count,
         0
+    );
+
+    const projectNames = useMemo(
+        () => projects.filter((project) => project.uncommitted_count > 0).map((project) => project.name),
+        [projects]
     );
 
     // Load all changed files
@@ -525,7 +664,7 @@ export const ChangedFilesPanel: FC<ChangedFilesPanelProps> = ({
         setLoadingFiles(true);
 
         const load = async () => {
-            const results: Array<ChangedFile & { projectName: string }> = [];
+            const results: ChangedFileEntry[] = [];
             await Promise.all(
                 projects.map(async (p) => {
                     if (p.uncommitted_count === 0) return;
@@ -545,16 +684,31 @@ export const ChangedFilesPanel: FC<ChangedFilesPanelProps> = ({
             if (!cancelled) {
                 setAllFiles(results);
                 setLoadingFiles(false);
-
-                // Initialize expanded paths
-                const paths = new Set<string>();
-                for (const f of results) {
-                    const parts = [f.projectName, ...f.path.split('/')];
-                    for (let i = 1; i < parts.length; i++) {
-                        paths.add(parts.slice(0, i).join('/'));
+                const rememberedSelection = readRememberedSelection(reviewKey);
+                setSelectedFile((prev) => {
+                    if (prev && results.some((file) => `${file.projectName}/${file.path}` === prev)) {
+                        return prev;
                     }
-                }
-                setExpandedPaths(paths);
+                    if (
+                        rememberedSelection &&
+                        results.some((file) => `${file.projectName}/${file.path}` === rememberedSelection)
+                    ) {
+                        return rememberedSelection;
+                    }
+                    return null;
+                });
+                setDiffs((prev) => {
+                    const next = new Map<string, FileDiff>();
+                    for (const file of results) {
+                        const key = `${file.projectName}/${file.path}`;
+                        const cached = prev.get(key);
+                        if (cached) {
+                            next.set(key, cached);
+                        }
+                    }
+                    return next;
+                });
+                setExpandedPaths(buildExpandedPathSet(results));
             }
         };
 
@@ -562,18 +716,21 @@ export const ChangedFilesPanel: FC<ChangedFilesPanelProps> = ({
         return () => {
             cancelled = true;
         };
-    }, [projects, totalChanges]);
+    }, [projects, reviewKey, totalChanges]);
 
-    // Load diff for a selected file
+    useEffect(() => {
+        setProjectFilter(focusProject ?? null);
+    }, [focusProject]);
+
+    useEffect(() => {
+        if (!selectedFile) return;
+        writeRememberedSelection(reviewKey, selectedFile);
+    }, [reviewKey, selectedFile]);
+
     const loadDiff = useCallback(
         async (projectName: string, filePath: string, key: string) => {
             if (diffs.has(key)) {
                 setSelectedFile(key);
-                // Scroll to diff
-                setTimeout(() => {
-                    const el = document.getElementById(`diff-${CSS.escape(key)}`);
-                    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }, 50);
                 return;
             }
 
@@ -586,10 +743,6 @@ export const ChangedFilesPanel: FC<ChangedFilesPanelProps> = ({
             try {
                 const diff = await getFileDiff(project.path, filePath);
                 setDiffs((prev) => new Map(prev).set(key, diff));
-                setTimeout(() => {
-                    const el = document.getElementById(`diff-${CSS.escape(key)}`);
-                    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }, 50);
             } catch (e) {
                 console.error('Failed to load diff:', e);
             } finally {
@@ -610,6 +763,18 @@ export const ChangedFilesPanel: FC<ChangedFilesPanelProps> = ({
         [loadDiff]
     );
 
+    const handleToggleStatusFilter = useCallback((status: string) => {
+        setStatusFilters((prev) => {
+            const next = new Set(prev);
+            if (next.has(status)) {
+                next.delete(status);
+            } else {
+                next.add(status);
+            }
+            return next;
+        });
+    }, []);
+
     const handleToggleExpand = useCallback((path: string) => {
         setExpandedPaths((prev) => {
             const next = new Set(prev);
@@ -622,65 +787,113 @@ export const ChangedFilesPanel: FC<ChangedFilesPanelProps> = ({
         });
     }, []);
 
-    // Load all diffs at once
-    const loadAllDiffs = useCallback(async () => {
-        const toLoad = allFiles.filter((f) => {
-            const key = `${f.projectName}/${f.path}`;
-            return !diffs.has(key) && f.status !== 'D';
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    const filesInScope = useMemo(() => {
+        return allFiles.filter((file) => {
+            if (projectFilter && file.projectName !== projectFilter) return false;
+            if (!normalizedQuery) return true;
+            const haystack = `${file.projectName}/${file.path}`.toLowerCase();
+            return haystack.includes(normalizedQuery);
         });
+    }, [allFiles, normalizedQuery, projectFilter]);
 
-        if (toLoad.length === 0) return;
+    const availableStatusCounts = useMemo(
+        () => countStatuses(filesInScope),
+        [filesInScope]
+    );
 
-        const keys = toLoad.map((f) => `${f.projectName}/${f.path}`);
-        setLoadingDiffs(new Set(keys));
+    const visibleFiles = useMemo(() => {
+        if (statusFilters.size === 0) return filesInScope;
+        return filesInScope.filter((file) => statusFilters.has(file.status));
+    }, [filesInScope, statusFilters]);
 
-        await Promise.all(
-            toLoad.map(async (f) => {
-                const project = projects.find((p) => p.name === f.projectName);
-                if (!project) return;
-                const key = `${f.projectName}/${f.path}`;
-                try {
-                    const diff = await getFileDiff(project.path, f.path);
-                    setDiffs((prev) => new Map(prev).set(key, diff));
-                } catch (e) {
-                    console.error(`Failed to load diff for ${f.path}:`, e);
-                } finally {
-                    setLoadingDiffs((prev) => {
-                        const next = new Set(prev);
-                        next.delete(key);
-                        return next;
-                    });
-                }
-            })
+    const visibleStatusCounts = useMemo(
+        () => countStatuses(visibleFiles),
+        [visibleFiles]
+    );
+
+    const orderedVisibleFiles = useMemo(
+        () => [...visibleFiles].sort((a, b) => {
+            const byProject = a.projectName.localeCompare(b.projectName);
+            if (byProject !== 0) return byProject;
+            return a.path.localeCompare(b.path);
+        }),
+        [visibleFiles]
+    );
+
+    useEffect(() => {
+        setSelectedFile((prev) => {
+            if (!prev) return null;
+            return visibleFiles.some((file) => `${file.projectName}/${file.path}` === prev)
+                ? prev
+                : null;
+        });
+    }, [visibleFiles]);
+
+    const selectedFileMeta = useMemo(
+        () => selectedFile
+            ? visibleFiles.find((file) => `${file.projectName}/${file.path}` === selectedFile)
+                ?? allFiles.find((file) => `${file.projectName}/${file.path}` === selectedFile)
+                ?? null
+            : null,
+        [allFiles, selectedFile, visibleFiles]
+    );
+    const selectedDiff = selectedFile ? diffs.get(selectedFile) ?? null : null;
+    const isSelectedDiffLoading = selectedFile ? loadingDiffs.has(selectedFile) : false;
+    const selectedIndex = selectedFile
+        ? orderedVisibleFiles.findIndex((file) => `${file.projectName}/${file.path}` === selectedFile)
+        : -1;
+
+    useEffect(() => {
+        if (!selectedFileMeta || selectedDiff || isSelectedDiffLoading) return;
+        const key = `${selectedFileMeta.projectName}/${selectedFileMeta.path}`;
+        void loadDiff(selectedFileMeta.projectName, selectedFileMeta.path, key);
+    }, [isSelectedDiffLoading, loadDiff, selectedDiff, selectedFileMeta]);
+
+    const effectiveExpandedPaths = useMemo(() => {
+        const next = new Set(expandedPaths);
+        const shouldForceExpand = Boolean(projectFilter || normalizedQuery || statusFilters.size > 0);
+
+        if (shouldForceExpand) {
+            buildExpandedPathSet(visibleFiles).forEach((path) => next.add(path));
+        }
+
+        if (selectedFileMeta) {
+            buildExpandedPathSet([selectedFileMeta]).forEach((path) => next.add(path));
+        }
+
+        return next;
+    }, [expandedPaths, normalizedQuery, projectFilter, selectedFileMeta, statusFilters, visibleFiles]);
+
+    useEffect(() => {
+        if (!selectedFile || !treeContainerRef.current) return;
+        const target = treeContainerRef.current.querySelector<HTMLElement>(
+            `[data-file-key="${CSS.escape(selectedFile)}"]`
         );
-    }, [allFiles, diffs, projects]);
+        target?.scrollIntoView({ block: 'nearest' });
+    }, [effectiveExpandedPaths, selectedFile]);
 
-    // Auto-load all diffs once files are fetched
-    useEffect(() => {
-        if (allFiles.length > 0 && !loadingFiles && diffs.size === 0) {
-            loadAllDiffs();
-        }
-    }, [allFiles, loadingFiles]); // eslint-disable-line react-hooks/exhaustive-deps
+    const clearFilters = useCallback(() => {
+        setSearchQuery('');
+        setStatusFilters(new Set());
+        setProjectFilter(null);
+    }, []);
 
-    // Auto-focus on a specific project's first file when focusProject is set
+    const selectRelativeFile = useCallback((offset: -1 | 1) => {
+        if (selectedIndex < 0) return;
+        const target = orderedVisibleFiles[selectedIndex + offset];
+        if (!target) return;
+        const key = `${target.projectName}/${target.path}`;
+        void loadDiff(target.projectName, target.path, key);
+    }, [loadDiff, orderedVisibleFiles, selectedIndex]);
+
     useEffect(() => {
-        if (!focusProject || allFiles.length === 0 || loadingFiles) return;
-        const projectFiles = allFiles.filter(f => f.projectName === focusProject);
-        if (projectFiles.length === 0) return;
-        const firstFile = projectFiles[0];
-        const key = `${firstFile.projectName}/${firstFile.path}`;
-        // If diff is already loaded, just select and scroll
-        if (diffs.has(key)) {
-            setSelectedFile(key);
-            setTimeout(() => {
-                const el = document.getElementById(`diff-${CSS.escape(key)}`);
-                el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }, 100);
-        } else {
-            // Load diff then scroll
-            loadDiff(firstFile.projectName, firstFile.path, key);
-        }
-    }, [focusProject, allFiles, loadingFiles, diffs.size]); // eslint-disable-line react-hooks/exhaustive-deps
+        if (selectedFile || orderedVisibleFiles.length === 0) return;
+        if (!focusProject && orderedVisibleFiles.length !== 1) return;
+        const target = orderedVisibleFiles[0];
+        const key = `${target.projectName}/${target.path}`;
+        void loadDiff(target.projectName, target.path, key);
+    }, [focusProject, loadDiff, orderedVisibleFiles, selectedFile]);
 
     // Resize handler for tree panel
     const handleMouseDown = useCallback(() => {
@@ -698,64 +911,125 @@ export const ChangedFilesPanel: FC<ChangedFilesPanelProps> = ({
         document.addEventListener('mouseup', handleMouseUp);
     }, []);
 
-    const tree = buildTree(allFiles);
+    const tree = useMemo(() => buildTree(visibleFiles), [visibleFiles]);
 
     if (totalChanges === 0) return null;
 
     return (
         <div className="h-full flex flex-col">
-            {/* Header bar */}
-            <div className="shrink-0 flex items-center gap-2 px-4 py-2 border-b border-slate-700/50 bg-slate-800/30">
-                <svg className="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <path d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-                </svg>
-                <span className="text-sm font-medium text-slate-300">
-                    {t('detail.changedFiles', 'Changed Files')}
-                </span>
-                <span className="text-xs text-slate-500 bg-slate-700/50 px-2 py-0.5 rounded-full">
-                    {totalChanges}
-                </span>
-                <Button
-                    variant="ghost"
-                    size="sm"
-                    className="ml-auto h-6 text-[11px] text-blue-400 hover:text-blue-300"
-                    onClick={loadAllDiffs}
-                >
-                    {t('detail.loadAllDiffs', 'Load All Diffs')}
-                </Button>
+            <div className="shrink-0 border-b border-slate-700/50 bg-slate-800/30">
+                <div className="flex items-center gap-2 px-4 py-2">
+                    <LogIcon className="w-4 h-4 text-slate-400" />
+                    <span className="text-sm font-medium text-slate-300">
+                        {t('detail.changedFiles', 'Changed Files')}
+                    </span>
+                    <span className="text-xs text-slate-500 bg-slate-700/50 px-2 py-0.5 rounded-full">
+                        {totalChanges}
+                    </span>
+                    {visibleFiles.length !== allFiles.length && (
+                        <span className="text-xs text-blue-300 bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 rounded-full">
+                            {visibleFiles.length}/{allFiles.length}
+                        </span>
+                    )}
+                </div>
+                <div className="px-4 pb-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                        <Input
+                            value={searchQuery}
+                            onChange={(event) => setSearchQuery(event.target.value)}
+                            placeholder={t('detail.filterChangedFiles', 'Filter by project or file path')}
+                            className="h-8 bg-slate-900/60 border-slate-700 text-sm"
+                        />
+                        {(searchQuery || statusFilters.size > 0 || projectFilter) && (
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 shrink-0 text-xs text-slate-300"
+                                onClick={clearFilters}
+                            >
+                                {t('common.clear', 'Clear')}
+                            </Button>
+                        )}
+                    </div>
+
+                    {projectNames.length > 1 && (
+                        <div className="flex flex-wrap gap-1.5">
+                            <button
+                                className={`rounded-md border px-2 py-1 text-[11px] transition-colors ${
+                                    projectFilter === null
+                                        ? 'border-blue-500/40 bg-blue-500/15 text-blue-200'
+                                        : 'border-slate-700 bg-slate-800/50 text-slate-400 hover:text-slate-200'
+                                }`}
+                                onClick={() => setProjectFilter(null)}
+                            >
+                                {t('common.all', 'All')}
+                            </button>
+                            {projectNames.map((projectName) => {
+                                const projectCount = allFiles.filter((file) => file.projectName === projectName).length;
+                                return (
+                                    <button
+                                        key={projectName}
+                                        className={`rounded-md border px-2 py-1 text-[11px] transition-colors ${
+                                            projectFilter === projectName
+                                                ? 'border-blue-500/40 bg-blue-500/15 text-blue-200'
+                                                : 'border-slate-700 bg-slate-800/50 text-slate-400 hover:text-slate-200'
+                                        }`}
+                                        onClick={() => setProjectFilter(projectName)}
+                                    >
+                                        {projectName} ({projectCount})
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
+
+                    <div className="flex flex-wrap gap-1.5">
+                        {STATUS_ORDER.map((status) => {
+                            const count = availableStatusCounts[status] || 0;
+                            if (count === 0) return null;
+                            const active = statusFilters.has(status);
+                            return (
+                                <button
+                                    key={status}
+                                    title={STATUS_LABELS[status]}
+                                    className={`rounded-md border px-2 py-1 text-[11px] transition-colors ${
+                                        active
+                                            ? `${STATUS_BG[status]} ${STATUS_COLORS[status]}`
+                                            : 'border-slate-700 bg-slate-800/50 text-slate-400 hover:text-slate-200'
+                                    }`}
+                                    onClick={() => handleToggleStatusFilter(status)}
+                                >
+                                    <span className="font-mono">{status}</span> {count}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
             </div>
 
             {/* Content */}
             <div className="flex-1 min-h-0 flex">
                 {/* File tree sidebar */}
                 <div
+                    ref={treeContainerRef}
                     className="shrink-0 border-r border-slate-700/50 overflow-y-auto bg-slate-800/30"
                     style={{ width: `${treeWidth}px` }}
                 >
                     {loadingFiles ? (
                         <div className="flex items-center justify-center py-8">
-                            <svg
-                                className="w-5 h-5 text-slate-500 animate-spin"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                            >
-                                <circle
-                                    cx="12"
-                                    cy="12"
-                                    r="10"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeDasharray="60"
-                                    strokeDashoffset="15"
-                                />
-                            </svg>
+                            <RefreshIcon className="w-5 h-5 text-slate-500 animate-spin" />
+                        </div>
+                    ) : visibleFiles.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center px-4 py-10 text-center text-slate-500 gap-2">
+                            <LogIcon className="w-8 h-8" />
+                            <p className="text-sm">{t('detail.noChangedFilesMatch', 'No changed files match the current filters')}</p>
                         </div>
                     ) : (
                         <div className="py-1">
                             {/* Summary */}
                             <div className="px-3 py-1.5 flex items-center gap-2 text-[11px] text-slate-500 border-b border-slate-700/30 mb-1">
-                                {['M', 'A', 'D', '?'].map((s) => {
-                                    const count = allFiles.filter((f) => f.status === s).length;
+                                {STATUS_ORDER.map((s) => {
+                                    const count = visibleStatusCounts[s] || 0;
                                     if (count === 0) return null;
                                     return (
                                         <span
@@ -779,7 +1053,7 @@ export const ChangedFilesPanel: FC<ChangedFilesPanelProps> = ({
                                         depth={0}
                                         selectedFile={selectedFile}
                                         onSelect={handleSelectFile}
-                                        expandedPaths={expandedPaths}
+                                        expandedPaths={effectiveExpandedPaths}
                                         onToggleExpand={handleToggleExpand}
                                     />
                                 ))}
@@ -794,29 +1068,71 @@ export const ChangedFilesPanel: FC<ChangedFilesPanelProps> = ({
                 />
 
                 {/* Diff content */}
-                <div className="flex-1 overflow-y-auto" ref={diffContainerRef}>
-                    {diffs.size === 0 && loadingDiffs.size === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-full text-slate-500 gap-2">
-                            <svg className="w-10 h-10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1">
-                                <path d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
-                            </svg>
-                            <p className="text-sm">{t('detail.selectFileToDiff', 'Select a file to view diff')}</p>
-                        </div>
-                    ) : (
-                        <div>
-                            {Array.from(diffs.entries()).map(([key, diff]) => (
-                                <DiffView key={key} diff={diff} fileKey={key} />
-                            ))}
-                            {loadingDiffs.size > 0 && (
-                                <div className="flex items-center justify-center py-4 gap-2 text-slate-500">
-                                    <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                                        <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" strokeDasharray="60" strokeDashoffset="15" />
-                                    </svg>
-                                    <span className="text-xs">Loading {loadingDiffs.size} diff(s)...</span>
-                                </div>
-                            )}
+                <div className="flex-1 min-w-0 flex flex-col">
+                    {selectedFileMeta && (
+                        <div className="shrink-0 flex items-center gap-2 px-4 py-2 border-b border-slate-700/50 bg-slate-900/40">
+                            <span className={`font-mono text-xs font-bold ${STATUS_COLORS[selectedFileMeta.status] || 'text-slate-400'}`}>
+                                {selectedFileMeta.status}
+                            </span>
+                            <span className="rounded bg-slate-700/60 px-2 py-0.5 text-[11px] text-slate-300">
+                                {selectedFileMeta.projectName}
+                            </span>
+                            <span className="min-w-0 truncate text-xs text-slate-400">
+                                {selectedFileMeta.path}
+                            </span>
+                            <div className="ml-auto flex items-center gap-2">
+                                <span className="text-[11px] text-slate-500">
+                                    {selectedIndex >= 0 ? `${selectedIndex + 1}/${orderedVisibleFiles.length}` : null}
+                                </span>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 text-xs"
+                                    disabled={selectedIndex <= 0}
+                                    onClick={() => selectRelativeFile(-1)}
+                                >
+                                    {t('common.previous', 'Previous')}
+                                </Button>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 text-xs"
+                                    disabled={selectedIndex < 0 || selectedIndex >= orderedVisibleFiles.length - 1}
+                                    onClick={() => selectRelativeFile(1)}
+                                >
+                                    {t('common.next', 'Next')}
+                                </Button>
+                            </div>
                         </div>
                     )}
+
+                    <div className="flex-1 overflow-y-auto">
+                        {visibleFiles.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center h-full text-slate-500 gap-2">
+                                <LogIcon className="w-10 h-10" />
+                                <p className="text-sm">{t('detail.noChangedFilesMatch', 'No changed files match the current filters')}</p>
+                            </div>
+                        ) : !selectedFile ? (
+                            <div className="flex flex-col items-center justify-center h-full text-slate-500 gap-2">
+                                <LogIcon className="w-10 h-10" />
+                                <p className="text-sm">{t('detail.selectFileToDiff', 'Select a file to view diff')}</p>
+                            </div>
+                        ) : isSelectedDiffLoading ? (
+                            <div className="flex flex-col items-center justify-center h-full text-slate-500 gap-3">
+                                <RefreshIcon className="w-5 h-5 animate-spin" />
+                                <p className="text-sm text-slate-400">
+                                    {selectedFileMeta?.path || t('common.loading')}
+                                </p>
+                            </div>
+                        ) : selectedDiff ? (
+                            <DiffView diff={selectedDiff} />
+                        ) : (
+                            <div className="flex flex-col items-center justify-center h-full text-slate-500 gap-2">
+                                <LogIcon className="w-10 h-10" />
+                                <p className="text-sm">{t('detail.selectFileToDiff', 'Select a file to view diff')}</p>
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
         </div>

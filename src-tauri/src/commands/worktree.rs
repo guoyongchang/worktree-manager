@@ -14,7 +14,9 @@ use crate::types::{
     MainProjectStatus, MainWorkspaceOccupation, MainWorkspaceStatus, ProjectConfig, ProjectStatus,
     ScannedFolder, WorktreeArchiveStatus, WorktreeListItem,
 };
-use crate::utils::{git_command, normalize_path, run_git_command_with_timeout, scan_dir_for_linkable_folders};
+use crate::utils::{
+    git_command, normalize_path, run_git_command_with_timeout, scan_dir_for_linkable_folders,
+};
 
 /// Cross-platform symlink creation.
 /// On Unix: uses std::os::unix::fs::symlink.
@@ -963,7 +965,10 @@ pub fn delete_archived_worktree_impl(window_label: &str, name: String) -> Result
 }
 
 #[tauri::command]
-pub(crate) async fn delete_archived_worktree(window: tauri::Window, name: String) -> Result<(), String> {
+pub(crate) async fn delete_archived_worktree(
+    window: tauri::Window,
+    name: String,
+) -> Result<(), String> {
     let label = window.label().to_string();
     tokio::task::spawn_blocking(move || delete_archived_worktree_impl(&label, name))
         .await

@@ -21,22 +21,13 @@ export function useBrowserAuth(): UseBrowserAuthReturn {
   useEffect(() => {
     if (isTauri()) return;
 
-    // Check URL ?session_id=mobile-xxx param for auto-authentication from iOS app.
-    // The backend auto-accepts any session starting with "mobile-" (http_server.rs),
-    // so we just store it in sessionStorage and skip the password screen.
+    // Older links may still carry `session_id`; it is no longer trusted for auto-auth.
     const urlParams = new URLSearchParams(window.location.search);
-    const mobileSessionId = urlParams.get('session_id');
-    if (mobileSessionId && mobileSessionId.startsWith('mobile-')) {
-      // Store the mobile session ID so all subsequent API calls include it
-      sessionStorage.setItem('wm_session_id', mobileSessionId);
-      // Remove session_id from URL to keep it clean
+    if (urlParams.has('session_id')) {
       urlParams.delete('session_id');
       const cleanSearch = urlParams.toString();
       const cleanUrl = window.location.pathname + (cleanSearch ? '?' + cleanSearch : '');
       window.history.replaceState({}, '', cleanUrl);
-      // Reload to initialize all singletons (WebSocket, etc.) with the new session ID
-      window.location.replace(cleanUrl);
-      return;
     }
 
     // Check URL #pwd= fragment for auto-authentication via shared link

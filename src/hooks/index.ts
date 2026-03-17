@@ -16,3 +16,5 @@ export { useWorkspaceActions } from './useWorkspaceActions';
 export type { UseWorkspaceActionsReturn } from './useWorkspaceActions';
 export { useMainOccupation } from './useMainOccupation';
 export type { UseMainOccupationReturn } from './useMainOccupation';
+export { useAppShellState } from './useAppShellState';
+export type { UseAppShellStateReturn } from './useAppShellState';

@@ -4,14 +4,19 @@ use ngrok::tunnel::{EndpointInfo, HttpTunnel}; // EndpointInfo trait import: pro
 
 use crate::config::{get_window_workspace_path, load_global_config, save_global_config_internal};
 use crate::http_server;
+
 use crate::state::{
-    AUTHENTICATED_SESSIONS, CLIENT_NOTIFICATION_BROADCAST, CONNECTED_CLIENTS, SHARE_STATE, TOKIO_RT,
+    PendingWmsBrowserLogin, AUTHENTICATED_SESSIONS, CLIENT_NOTIFICATION_BROADCAST,
+    CONNECTED_CLIENTS, PENDING_WMS_BROWSER_LOGIN, SHARE_STATE, TOKIO_RT,
+    WMS_BROWSER_LOGIN_CANCEL,
 };
 use crate::tls;
 use crate::types::{ConnectedClient, ShareStateInfo};
+use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 // ==================== 分享功能命令 ====================
 
@@ -215,7 +220,8 @@ pub async fn start_ngrok_tunnel_internal() -> Result<String, String> {
         state.port
     };
 
-    let ngrok_token = load_global_config()
+    let config = load_global_config();
+    let ngrok_token = config
         .ngrok_token
         .ok_or("未配置 ngrok token，请先在设置中配置".to_string())?;
     log::info!("[ngrok] Token configured, forwarding to port {}", port);
@@ -345,12 +351,12 @@ pub(crate) async fn set_wms_config(
     } else {
         Some(server_url)
     };
-    config.wms_token = if token.is_empty() { None } else { Some(token) };
     config.wms_subdomain = if subdomain.is_empty() {
         None
     } else {
         Some(subdomain)
     };
+    config.wms_token = if token.is_empty() { None } else { Some(token) };
     save_global_config_internal(&config)?;
     Ok(())
 }
@@ -379,7 +385,7 @@ pub async fn auto_register_tunnel_internal() -> Result<WmsConfig, String> {
         }
     };
 
-    let jwt = config.wms_jwt.clone();
+    let jwt = config.wms_jwt;
     let server_url = config
         .wms_server_url
         .clone()
@@ -447,8 +453,8 @@ pub async fn auto_register_tunnel_internal() -> Result<WmsConfig, String> {
     // Save to config
     let mut config = load_global_config();
     config.wms_server_url = Some(server_url.clone());
-    config.wms_token = Some(result.token.clone());
     config.wms_subdomain = Some(result.subdomain.clone());
+    config.wms_token = Some(result.token.clone());
     save_global_config_internal(&config)?;
 
     Ok(WmsConfig {
@@ -475,9 +481,9 @@ pub(crate) async fn destroy_current_device_registration() -> Result<(), String> 
 
     // Clear wms config and regenerate device_id
     let mut config = load_global_config();
-    config.wms_token = None;
     config.wms_subdomain = None;
     config.device_id = Some(uuid::Uuid::new_v4().to_string());
+    config.wms_token = None;
     save_global_config_internal(&config)?;
 
     log::info!(
@@ -485,6 +491,99 @@ pub(crate) async fn destroy_current_device_registration() -> Result<(), String> 
         config.device_id
     );
     Ok(())
+}
+
+const WMS_BROWSER_LOGIN_TIMEOUT: Duration = Duration::from_secs(120);
+const WMS_BROWSER_LOGIN_STATE_TTL: Duration = Duration::from_secs(150);
+
+fn constant_time_eq(left: &str, right: &str) -> bool {
+    left.len() == right.len()
+        && left
+            .as_bytes()
+            .iter()
+            .zip(right.as_bytes())
+            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+            == 0
+}
+
+fn clear_pending_wms_browser_login() {
+    if let Ok(mut pending) = PENDING_WMS_BROWSER_LOGIN.lock() {
+        *pending = None;
+    }
+}
+
+fn register_pending_wms_browser_login() -> Result<String, String> {
+    let mut state_bytes = [0u8; 32];
+    SystemRandom::new()
+        .fill(&mut state_bytes)
+        .map_err(|_| "Failed to generate browser login state".to_string())?;
+    let state = hex::encode(state_bytes);
+
+    let mut pending = PENDING_WMS_BROWSER_LOGIN
+        .lock()
+        .map_err(|_| "Internal state error".to_string())?;
+    *pending = Some(PendingWmsBrowserLogin {
+        state: state.clone(),
+        created_at: std::time::Instant::now(),
+    });
+    Ok(state)
+}
+
+pub(crate) fn validate_pending_wms_browser_login_state(state: &str) -> Result<(), String> {
+    let mut pending = PENDING_WMS_BROWSER_LOGIN
+        .lock()
+        .map_err(|_| "Internal state error".to_string())?;
+
+    let Some(current) = pending.as_ref() else {
+        return Err("No pending browser login".to_string());
+    };
+
+    if current.created_at.elapsed() > WMS_BROWSER_LOGIN_STATE_TTL {
+        *pending = None;
+        return Err("Browser login state expired".to_string());
+    }
+
+    if !constant_time_eq(&current.state, state) {
+        return Err("Invalid browser login state".to_string());
+    }
+
+    *pending = None;
+    Ok(())
+}
+
+pub(crate) async fn complete_wms_browser_login(
+    app: Option<tauri::AppHandle>,
+    token: String,
+) -> Result<WmsConfig, String> {
+    log::info!(
+        "[wms-browser-login] Completing browser login, token_len={}",
+        token.len()
+    );
+
+    if let Err(e) = destroy_current_device_registration().await {
+        log::warn!("[wms-browser-login] Failed to destroy old device: {}", e);
+    }
+
+    {
+        let mut config = load_global_config();
+        config.wms_jwt = Some(token);
+        save_global_config_internal(&config)?;
+    }
+
+    let wms_config = auto_register_tunnel_internal().await?;
+
+    if let Some(app) = app {
+        use tauri::Emitter;
+        let _ = app.emit(
+            "wms-login-success",
+            serde_json::json!({
+                "server_url": wms_config.server_url,
+                "subdomain": wms_config.subdomain,
+            }),
+        );
+    }
+
+    Ok(wms_config)
 }
 
 /// WMS Login: authenticate with server, destroy current device, re-register under logged-in user.
@@ -586,7 +685,12 @@ pub(crate) async fn wms_browser_login(app: tauri::AppHandle) -> Result<String, S
         .map_err(|e| format!("Failed to get port: {}", e))?
         .port();
 
-    let callback_url = format!("http://localhost:{}/auth/wms-callback", port);
+    let callback_state = register_pending_wms_browser_login()?;
+    let callback_url = format!(
+        "http://localhost:{}/auth/wms-callback?state={}",
+        port,
+        urlencoding::encode(&callback_state)
+    );
     let browser_url = format!(
         "{}/admin?callback={}",
         admin_url.trim_end_matches('/'),
@@ -599,95 +703,148 @@ pub(crate) async fn wms_browser_login(app: tauri::AppHandle) -> Result<String, S
         port
     );
 
+    // Reset the cancel channel before starting
+    let _ = WMS_BROWSER_LOGIN_CANCEL.0.send(false);
+    let mut cancel_rx = WMS_BROWSER_LOGIN_CANCEL.1.clone();
+
     // 2. Open system browser
     use tauri_plugin_opener::OpenerExt;
-    app.opener()
-        .open_url(&browser_url, None::<&str>)
-        .map_err(|e| format!("Failed to open browser: {}", e))?;
+    if let Err(e) = app.opener().open_url(&browser_url, None::<&str>) {
+        clear_pending_wms_browser_login();
+        return Err(format!("Failed to open browser: {}", e));
+    }
 
-    // 3. Wait for callback (timeout 120s)
-    let token = tokio::time::timeout(std::time::Duration::from_secs(120), async {
+    // 3. Wait for callback (timeout 120s), with cancellation support
+    let token = tokio::time::timeout(WMS_BROWSER_LOGIN_TIMEOUT, async {
         loop {
-            let (stream, _) = listener
-                .accept()
-                .await
-                .map_err(|e| format!("Accept failed: {}", e))?;
+            tokio::select! {
+                // Check for cancellation
+                _ = cancel_rx.changed() => {
+                    if *cancel_rx.borrow() {
+                        clear_pending_wms_browser_login();
+                        return Err("Login cancelled".to_string());
+                    }
+                }
+                // Accept incoming connection
+                result = listener.accept() => {
+                    let (stream, addr) = result
+                        .map_err(|e| format!("Accept failed: {}", e))?;
 
-            let mut buf = vec![0u8; 8192];
-            stream
-                .readable()
-                .await
-                .map_err(|e| format!("Stream not readable: {}", e))?;
-            let n = stream
-                .try_read(&mut buf)
-                .map_err(|e| format!("Read failed: {}", e))?;
-            let request = String::from_utf8_lossy(&buf[..n]);
+                    if !addr.ip().is_loopback() {
+                        log::warn!(
+                            "[wms-browser-login] Ignoring non-loopback callback connection from {}",
+                            addr.ip()
+                        );
+                        continue;
+                    }
 
-            // Parse GET /auth/wms-callback?token=...
-            if let Some(line) = request.lines().next() {
-                if let Some(path) = line.split_whitespace().nth(1) {
-                    if path.starts_with("/auth/wms-callback") {
-                        // Extract token from query
-                        if let Some(query) = path.split('?').nth(1) {
-                            for param in query.split('&') {
-                                if let Some(val) = param.strip_prefix("token=") {
-                                    let token =
-                                        urlencoding::decode(val).unwrap_or_default().to_string();
+                    let mut buf = vec![0u8; 8192];
+                    stream
+                        .readable()
+                        .await
+                        .map_err(|e| format!("Stream not readable: {}", e))?;
+                    let n = stream
+                        .try_read(&mut buf)
+                        .map_err(|e| format!("Read failed: {}", e))?;
+                    let request = String::from_utf8_lossy(&buf[..n]);
 
-                                    // Send success response
-                                    let html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Login OK</title>\
-                                        <style>body{font-family:-apple-system,sans-serif;background:#0f172a;color:#e2e8f0;\
-                                        display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}\
-                                        .c{text-align:center;padding:3rem;border-radius:1rem;background:#1e293b;border:1px solid #334155}\
-                                        .i{margin-bottom:1rem}h1{font-size:1.25rem;margin:0 0 .5rem}\
-                                        p{color:#94a3b8;font-size:.875rem;margin:0}</style></head>\
-                                        <body><div class=\"c\"><div class=\"i\"><svg width=\"48\" height=\"48\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#4ade80\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M22 11.08V12a10 10 0 1 1-5.93-9.14\"/><polyline points=\"22 4 12 14.01 9 11.01\"/></svg></div><h1>Login Successful!</h1>\
-                                        <p>You may close this tab and return to Worktree Manager.</p></div></body></html>";
+                    // Parse GET /auth/wms-callback?state=...&token=...
+                    if let Some(line) = request.lines().next() {
+                        if let Some(path) = line.split_whitespace().nth(1) {
+                            if path.starts_with("/auth/wms-callback") {
+                                let parsed = url::Url::parse(&format!("http://localhost{}", path))
+                                    .map_err(|e| format!("Invalid callback URL: {}", e))?;
+                                let mut returned_state = None;
+                                let mut token = None;
+                                for (key, value) in parsed.query_pairs() {
+                                    match key.as_ref() {
+                                        "state" => returned_state = Some(value.into_owned()),
+                                        "token" => token = Some(value.into_owned()),
+                                        _ => {}
+                                    }
+                                }
+
+                                let Some(token) = token else {
+                                    let html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Login Failed</title></head>\
+                                        <body style=\"font-family:-apple-system,sans-serif;background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0\">\
+                                        <div style=\"text-align:center;padding:3rem;border-radius:1rem;background:#1e293b;border:1px solid #334155\"><h1 style=\"font-size:1.25rem;margin:0 0 .5rem\">Login Failed</h1><p style=\"color:#94a3b8;font-size:.875rem;margin:0\">Missing callback token. Please return to Worktree Manager and try again.</p></div></body></html>";
                                     let response = format!(
-                                        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                                        "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                                         html.len(),
                                         html
                                     );
                                     let _ = stream.try_write(response.as_bytes());
+                                    continue;
+                                };
 
-                                    return Ok::<String, String>(token);
+                                let validation = returned_state
+                                    .as_deref()
+                                    .ok_or_else(|| "Missing browser login state".to_string())
+                                    .and_then(validate_pending_wms_browser_login_state);
+
+                                if let Err(e) = validation {
+                                    log::warn!("[wms-browser-login] Rejected callback: {}", e);
+                                    let html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Login Failed</title></head>\
+                                        <body style=\"font-family:-apple-system,sans-serif;background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0\">\
+                                        <div style=\"text-align:center;padding:3rem;border-radius:1rem;background:#1e293b;border:1px solid #334155\"><h1 style=\"font-size:1.25rem;margin:0 0 .5rem\">Login Failed</h1><p style=\"color:#94a3b8;font-size:.875rem;margin:0\">This login callback is no longer valid. Please return to Worktree Manager and try again.</p></div></body></html>";
+                                    let response = format!(
+                                        "HTTP/1.1 403 Forbidden\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                                        html.len(),
+                                        html
+                                    );
+                                    let _ = stream.try_write(response.as_bytes());
+                                    continue;
                                 }
+
+                                let html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Login OK</title>\
+                                    <style>body{font-family:-apple-system,sans-serif;background:#0f172a;color:#e2e8f0;\
+                                    display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}\
+                                    .c{text-align:center;padding:3rem;border-radius:1rem;background:#1e293b;border:1px solid #334155}\
+                                    .i{margin-bottom:1rem}h1{font-size:1.25rem;margin:0 0 .5rem}\
+                                    p{color:#94a3b8;font-size:.875rem;margin:0}</style></head>\
+                                    <body><div class=\"c\"><div class=\"i\" style=\"font-size:3rem\">✅</div><h1>Login Successful!</h1>\
+                                    <p>You may close this tab and return to Worktree Manager.</p></div></body></html>";
+                                let response = format!(
+                                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                                    html.len(),
+                                    html
+                                );
+                                let _ = stream.try_write(response.as_bytes());
+
+                                return Ok::<String, String>(token);
                             }
                         }
                     }
+                    // Not the right request, continue listening
                 }
             }
-            // Not the right request, continue listening
         }
     })
     .await
-    .map_err(|_| "Login timed out (120s). Please try again.".to_string())?
-    .map_err(|e| format!("Callback error: {}", e))?;
+    .map_err(|_| {
+        clear_pending_wms_browser_login();
+        "Login timed out (120s). Please try again.".to_string()
+    })?
+    .map_err(|e| {
+        clear_pending_wms_browser_login();
+        format!("Callback error: {}", e)
+    })?;
 
     log::info!("[wms-browser-login] Got token, len={}", token.len());
 
-    // 4. Save JWT, re-register device
-    destroy_current_device_registration().await.ok();
-
-    {
-        let mut config = load_global_config();
-        config.wms_jwt = Some(token.clone());
-        save_global_config_internal(&config)?;
-    }
-
-    let wms_config = auto_register_tunnel_internal().await?;
-
-    // 5. Emit event
-    use tauri::Emitter;
-    let _ = app.emit(
-        "wms-login-success",
-        serde_json::json!({
-            "server_url": wms_config.server_url,
-            "subdomain": wms_config.subdomain,
-        }),
-    );
+    // 4. Save JWT, re-register device, emit event
+    complete_wms_browser_login(Some(app), token).await?;
 
     Ok("Login successful".to_string())
+}
+
+/// Cancel a pending WMS browser login.
+#[tauri::command]
+pub(crate) async fn cancel_wms_browser_login() -> Result<(), String> {
+    log::info!("[wms-browser-login] Cancelling pending browser login");
+    clear_pending_wms_browser_login();
+    let _ = WMS_BROWSER_LOGIN_CANCEL.0.send(true);
+    Ok(())
 }
 
 /// Fetch the current WMS user info using the stored JWT.
@@ -702,9 +859,16 @@ pub struct WmsUser {
 #[tauri::command]
 pub(crate) async fn get_wms_user() -> Result<WmsUser, String> {
     let config = load_global_config();
-    let jwt = match config.wms_jwt.as_ref() {
-        Some(jwt) => jwt.clone(),
-        None => return Ok(WmsUser { username: None, email: None, display_name: None, avatar_url: None }),
+    let jwt = match config.wms_jwt {
+        Some(jwt) => jwt,
+        None => {
+            return Ok(WmsUser {
+                username: None,
+                email: None,
+                display_name: None,
+                avatar_url: None,
+            })
+        }
     };
     let tunnel_url = config
         .wms_server_url
@@ -725,7 +889,12 @@ pub(crate) async fn get_wms_user() -> Result<WmsUser, String> {
         .map_err(|e| format!("Failed to fetch user info: {}", e))?;
 
     if !resp.status().is_success() {
-        return Ok(WmsUser { username: None, email: None, display_name: None, avatar_url: None });
+        return Ok(WmsUser {
+            username: None,
+            email: None,
+            display_name: None,
+            avatar_url: None,
+        });
     }
 
     #[derive(Deserialize)]
@@ -736,7 +905,10 @@ pub(crate) async fn get_wms_user() -> Result<WmsUser, String> {
         avatar_url: Option<String>,
     }
 
-    let me: MeResponse = resp.json().await.map_err(|e| format!("Parse error: {}", e))?;
+    let me: MeResponse = resp
+        .json()
+        .await
+        .map_err(|e| format!("Parse error: {}", e))?;
     Ok(WmsUser {
         username: me.username,
         email: me.email,
@@ -800,8 +972,9 @@ pub async fn start_wms_tunnel_internal(window: Option<tauri::Window>) -> Result<
 
     // Auto-register if token/subdomain not configured
     let config = load_global_config();
+    let configured_token = config.wms_token;
     let (server_url, subdomain, token) = {
-        let has_token = config.wms_token.as_ref().is_some_and(|t| !t.is_empty());
+        let has_token = configured_token.as_ref().is_some_and(|t| !t.is_empty());
         let has_subdomain = config.wms_subdomain.as_ref().is_some_and(|s| !s.is_empty());
 
         if !has_token || !has_subdomain {
@@ -818,9 +991,12 @@ pub async fn start_wms_tunnel_internal(window: Option<tauri::Window>) -> Result<
             )
         } else {
             (
-                "https://tunnel.kirov-opensource.com".to_string(),
+                config
+                    .wms_server_url
+                    .clone()
+                    .unwrap_or_else(|| "https://tunnel.kirov-opensource.com".to_string()),
                 config.wms_subdomain.unwrap(),
-                config.wms_token.filter(|t| !t.is_empty()),
+                configured_token.filter(|t| !t.is_empty()),
             )
         }
     };

@@ -18,6 +18,8 @@ import {
   kickClient,
   getWmsConfig,
   wmsBrowserLogin,
+  cancelWmsBrowserLogin,
+  wmsLogin,
   getWmsUser,
   wmsLogout,
 } from '../lib/backend';
@@ -65,6 +67,13 @@ export interface UseShareFeatureReturn {
   setShowWmsLoginDialog: (show: boolean) => void;
   wmsLoginLoading: boolean;
   handleWmsBrowserLogin: () => Promise<void>;
+  handleCancelWmsBrowserLogin: () => void;
+  handleWmsFormLogin: () => Promise<void>;
+  wmsUsername: string;
+  setWmsUsername: (v: string) => void;
+  wmsPassword: string;
+  setWmsPassword: (v: string) => void;
+  wmsFormLoginLoading: boolean;
   handleWmsLogout: () => Promise<void>;
   showShareDisclaimer: boolean;
   setShowShareDisclaimer: (show: boolean) => void;
@@ -97,6 +106,9 @@ export function useShareFeature(
   const [wmsUser, setWmsUser] = useState<WmsUser | null>(null);
   const [showWmsLoginDialog, setShowWmsLoginDialog] = useState(false);
   const [wmsLoginLoading, setWmsLoginLoading] = useState(false);
+  const [wmsUsername, setWmsUsername] = useState('');
+  const [wmsPassword, setWmsPassword] = useState('');
+  const [wmsFormLoginLoading, setWmsFormLoginLoading] = useState(false);
   const [pendingShareAction, setPendingShareAction] = useState<'toggle' | 'quick' | null>(null);
 
   // Sharing disclaimer (one-time per install)
@@ -331,6 +343,28 @@ export function useShareFeature(
     }
   }, [setError]);
 
+  // Shared post-login action: start tunnel if there was a pending share action
+  const executePostLoginAction = useCallback(async () => {
+    const action = pendingShareAction;
+    setPendingShareAction(null);
+    if (action === 'toggle' || action === 'quick') {
+      setWmsLoading(true);
+      try {
+        const wmsUrl = await startWmsTunnel();
+        setShareWmsUrl(wmsUrl);
+        const state = await getShareState();
+        if (state.active) {
+          setShareActive(true);
+          setShareUrls(state.urls);
+        }
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setWmsLoading(false);
+      }
+    }
+  }, [setError, pendingShareAction]);
+
   // Handle WMS browser login: called from login dialog
   const handleWmsBrowserLogin = useCallback(async () => {
     setWmsLoginLoading(true);
@@ -338,50 +372,41 @@ export function useShareFeature(
       await wmsBrowserLogin();
       setWmsLoggedIn(true);
       setShowWmsLoginDialog(false);
-      // Fetch user info after login
       getWmsUser().then(u => { if (u.username) setWmsUser(u); }).catch(() => { });
-      // Auto-execute pending share action after login
-      const action = pendingShareAction;
-      setPendingShareAction(null);
-      if (action === 'toggle') {
-        // Retry handleToggleWms
-        setWmsLoading(true);
-        try {
-          const wmsUrl = await startWmsTunnel();
-          setShareWmsUrl(wmsUrl);
-          const state = await getShareState();
-          if (state.active) {
-            setShareActive(true);
-            setShareUrls(state.urls);
-          }
-        } catch (e) {
-          setError(String(e));
-        } finally {
-          setWmsLoading(false);
-        }
-      } else if (action === 'quick') {
-        // Retry handleQuickShare
-        setWmsLoading(true);
-        try {
-          const wmsUrl = await startWmsTunnel();
-          setShareWmsUrl(wmsUrl);
-          const state = await getShareState();
-          if (state.active) {
-            setShareActive(true);
-            setShareUrls(state.urls);
-          }
-        } catch (e) {
-          setError(String(e));
-        } finally {
-          setWmsLoading(false);
-        }
-      }
+      await executePostLoginAction();
     } catch (e) {
       setError(String(e));
     } finally {
       setWmsLoginLoading(false);
     }
-  }, [setError, pendingShareAction]);
+  }, [setError, executePostLoginAction]);
+
+  // Handle WMS form login (username/password): called from login dialog
+  const handleWmsFormLogin = useCallback(async () => {
+    if (!wmsUsername.trim() || !wmsPassword.trim()) return;
+    setWmsFormLoginLoading(true);
+    try {
+      await wmsLogin(wmsUsername.trim(), wmsPassword);
+      setWmsLoggedIn(true);
+      setShowWmsLoginDialog(false);
+      setWmsUsername('');
+      setWmsPassword('');
+      getWmsUser().then(u => { if (u.username) setWmsUser(u); }).catch(() => { });
+      await executePostLoginAction();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setWmsFormLoginLoading(false);
+    }
+  }, [setError, wmsUsername, wmsPassword, executePostLoginAction]);
+
+  // Cancel a pending WMS browser login
+  const handleCancelWmsBrowserLogin = useCallback(() => {
+    cancelWmsBrowserLogin().catch(() => { });
+    setWmsLoginLoading(false);
+    setShowWmsLoginDialog(false);
+    setPendingShareAction(null);
+  }, []);
 
   // Handle WMS logout: clear JWT and user info
   const handleWmsLogout = useCallback(async () => {
@@ -501,6 +526,13 @@ export function useShareFeature(
     setShowWmsLoginDialog,
     wmsLoginLoading,
     handleWmsBrowserLogin,
+    handleCancelWmsBrowserLogin,
+    handleWmsFormLogin,
+    wmsUsername,
+    setWmsUsername,
+    wmsPassword,
+    setWmsPassword,
+    wmsFormLoginLoading,
     handleWmsLogout,
     showShareDisclaimer,
     setShowShareDisclaimer,

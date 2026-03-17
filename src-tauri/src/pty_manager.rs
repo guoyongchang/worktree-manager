@@ -1,12 +1,18 @@
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
-use std::sync::mpsc::{channel, Receiver};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+use tauri::Emitter;
 use tokio::sync::broadcast;
 
 /// Max replay buffer size per session (64 KB)
 const REPLAY_BUFFER_CAP: usize = 64 * 1024;
+/// Keep up to 8 MB of desktop PTY output so remounted terminals can replay recent data
+/// without letting abandoned sessions grow without bound.
+const DESKTOP_PENDING_BUFFER_CAP: usize = 8 * 1024 * 1024;
+/// Drop desktop reader cursors that have stopped polling so they no longer pin backlog in memory.
+const DESKTOP_READER_TTL: Duration = Duration::from_secs(10);
 
 /// Get the default shell for the current platform.
 /// Windows: COMSPEC -> PowerShell -> cmd.exe
@@ -139,11 +145,121 @@ pub(crate) fn bytes_to_utf8_with_pending(data: &[u8]) -> (String, Vec<u8>) {
     }
 }
 
-struct PtyReader {
-    receiver: Receiver<Vec<u8>>,
-    /// Leftover bytes from the previous `read_from_session` call that formed
-    /// an incomplete UTF-8 multi-byte sequence at a chunk boundary.
+struct DesktopReaderState {
+    offset: u64,
     utf8_pending: Vec<u8>,
+    last_read_at: Instant,
+}
+
+impl DesktopReaderState {
+    fn new(offset: u64, now: Instant) -> Self {
+        Self {
+            offset,
+            utf8_pending: Vec::new(),
+            last_read_at: now,
+        }
+    }
+}
+
+struct DesktopPendingBuffer {
+    bytes: VecDeque<u8>,
+    start_offset: u64,
+    end_offset: u64,
+    readers: HashMap<String, DesktopReaderState>,
+}
+
+impl DesktopPendingBuffer {
+    fn new() -> Self {
+        Self {
+            bytes: VecDeque::new(),
+            start_offset: 0,
+            end_offset: 0,
+            readers: HashMap::new(),
+        }
+    }
+
+    fn append(&mut self, data: &[u8]) {
+        if data.is_empty() {
+            return;
+        }
+
+        self.cleanup_stale_readers();
+        self.bytes.extend(data.iter().copied());
+        self.end_offset += data.len() as u64;
+        self.compact();
+    }
+
+    fn read_for_reader(&mut self, reader_id: &str) -> Vec<u8> {
+        self.cleanup_stale_readers();
+        let now = Instant::now();
+        let start_offset = self.start_offset;
+        let end_offset = self.end_offset;
+        let reader = self
+            .readers
+            .entry(reader_id.to_string())
+            .or_insert_with(|| DesktopReaderState::new(start_offset, now));
+
+        if reader.offset < start_offset {
+            reader.offset = start_offset;
+            reader.utf8_pending.clear();
+        }
+
+        let skip = (reader.offset.saturating_sub(start_offset)) as usize;
+        let mut result = std::mem::take(&mut reader.utf8_pending);
+        result.extend(self.bytes.iter().skip(skip).copied());
+        reader.offset = end_offset;
+        reader.last_read_at = now;
+
+        self.compact();
+        result
+    }
+
+    fn store_utf8_pending(&mut self, reader_id: &str, pending: Vec<u8>) {
+        if let Some(reader) = self.readers.get_mut(reader_id) {
+            reader.utf8_pending = pending;
+            reader.last_read_at = Instant::now();
+        }
+    }
+
+    fn cleanup_stale_readers(&mut self) {
+        self.readers
+            .retain(|_, reader| reader.last_read_at.elapsed() < DESKTOP_READER_TTL);
+    }
+
+    fn compact(&mut self) {
+        let retain_from = self
+            .readers
+            .values()
+            .map(|reader| reader.offset)
+            .min()
+            .unwrap_or_else(|| {
+                self.end_offset
+                    .saturating_sub(DESKTOP_PENDING_BUFFER_CAP as u64)
+            });
+
+        if retain_from > self.start_offset {
+            let drop_len = (retain_from - self.start_offset) as usize;
+            self.bytes.drain(..drop_len);
+            self.start_offset = retain_from;
+        }
+
+        if self.bytes.len() > DESKTOP_PENDING_BUFFER_CAP {
+            let drop_len = self.bytes.len() - DESKTOP_PENDING_BUFFER_CAP;
+            self.bytes.drain(..drop_len);
+            self.start_offset += drop_len as u64;
+        }
+
+        for reader in self.readers.values_mut() {
+            if reader.offset < self.start_offset {
+                reader.offset = self.start_offset;
+                reader.utf8_pending.clear();
+            }
+        }
+    }
+}
+
+struct PtyReader {
+    desktop_buffer: Arc<Mutex<DesktopPendingBuffer>>,
 }
 
 pub struct PtySession {
@@ -274,8 +390,8 @@ impl PtyManager {
             .try_clone_reader()
             .map_err(|e| format!("Failed to get reader: {}", e))?;
 
-        // Create channel for async reading (desktop polling via invoke)
-        let (tx, rx) = channel::<Vec<u8>>();
+        let desktop_pending_buffer = Arc::new(Mutex::new(DesktopPendingBuffer::new()));
+        let desktop_pending_clone = desktop_pending_buffer.clone();
 
         // Create broadcast channel for WebSocket subscribers
         let (broadcast_tx, _) = broadcast::channel::<Vec<u8>>(256);
@@ -285,10 +401,12 @@ impl PtyManager {
         let replay_buffer: Arc<Mutex<VecDeque<u8>>> =
             Arc::new(Mutex::new(VecDeque::with_capacity(REPLAY_BUFFER_CAP)));
         let replay_buf_clone = replay_buffer.clone();
+        let session_id = id.to_string();
 
         // Spawn a thread to read from PTY
         std::thread::spawn(move || {
             let mut buf = [0u8; 4096];
+            let mut event_utf8_pending: Vec<u8> = Vec::new();
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => break, // EOF
@@ -305,9 +423,34 @@ impl PtyManager {
                                 rb.drain(..excess);
                             }
                         }
-                        // Send to mpsc (for desktop pty_read polling)
-                        if tx.send(data).is_err() {
-                            break; // Receiver dropped
+                        // Desktop readers consume per-client cursors from a shared backlog
+                        // so multiple windows do not steal output from each other.
+                        if let Ok(mut pending) = desktop_pending_clone.lock() {
+                            pending.append(&data);
+                        }
+
+                        // Desktop event push path: emit UTF-8 text chunks to all windows.
+                        let combined = if event_utf8_pending.is_empty() {
+                            data
+                        } else {
+                            let mut combined = std::mem::take(&mut event_utf8_pending);
+                            combined.extend(data);
+                            combined
+                        };
+                        let (text, pending) = bytes_to_utf8_with_pending(&combined);
+                        event_utf8_pending = pending;
+                        if !text.is_empty() {
+                            if let Some(handle) =
+                                crate::state::APP_HANDLE.lock().ok().and_then(|h| h.clone())
+                            {
+                                let _ = handle.emit(
+                                    "pty-output",
+                                    serde_json::json!({
+                                        "sessionId": session_id,
+                                        "data": text,
+                                    }),
+                                );
+                            }
                         }
                     }
                     Err(_) => break,
@@ -319,8 +462,7 @@ impl PtyManager {
             master: pair.master,
             writer,
             reader: PtyReader {
-                receiver: rx,
-                utf8_pending: Vec::new(),
+                desktop_buffer: desktop_pending_buffer,
             },
             child,
             broadcast_tx,
@@ -350,22 +492,31 @@ impl PtyManager {
         Ok(())
     }
 
-    pub fn read_from_session(&self, id: &str) -> Result<String, String> {
+    pub fn read_from_session(&self, id: &str, reader_id: Option<&str>) -> Result<String, String> {
         let session = self
             .sessions
             .get(id)
             .ok_or_else(|| "Session not found".to_string())?;
 
-        let mut session = session.lock().map_err(|e| format!("Lock error: {}", e))?;
+        let session = session.lock().map_err(|e| format!("Lock error: {}", e))?;
+        let reader_key = reader_id.unwrap_or(id);
 
-        // Non-blocking: collect all available data
-        let mut result = std::mem::take(&mut session.reader.utf8_pending);
-        while let Ok(data) = session.reader.receiver.try_recv() {
-            result.extend(data);
-        }
+        // Non-blocking: replay only this reader's unread bytes.
+        let mut pending = session
+            .reader
+            .desktop_buffer
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        let result = pending.read_for_reader(reader_key);
+        drop(pending);
 
         let (text, pending) = bytes_to_utf8_with_pending(&result);
-        session.reader.utf8_pending = pending;
+        session
+            .reader
+            .desktop_buffer
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?
+            .store_utf8_pending(reader_key, pending);
         Ok(text)
     }
 

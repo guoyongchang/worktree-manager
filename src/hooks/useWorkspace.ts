@@ -113,7 +113,9 @@ export function useWorkspace(ready = true): UseWorkspaceReturn {
         callBackend<WorkspaceConfig>("get_workspace_config"),
         callBackend<WorktreeListItem[]>("list_worktrees", { includeArchived: true }),
         callBackend<MainWorkspaceStatus>("get_main_workspace_status"),
-        callBackend<string>("get_config_path_info"),
+        // get_config_path_info is localhost-only; in browser sharing mode it returns 403.
+        // Catch individually so it doesn't break the entire loadData.
+        callBackend<string>("get_config_path_info").catch(() => ''),
       ]);
       // Discard stale results if a newer load has started
       if (version !== loadVersion.current) {

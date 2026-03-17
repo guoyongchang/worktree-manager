@@ -52,11 +52,11 @@ pub(crate) fn pty_write(session_id: String, data: String) -> Result<(), String> 
 }
 
 #[tauri::command]
-pub(crate) fn pty_read(session_id: String) -> Result<String, String> {
+pub(crate) fn pty_read(session_id: String, client_id: Option<String>) -> Result<String, String> {
     let manager = PTY_MANAGER
         .lock()
         .map_err(|e| format!("Lock error: {}", e))?;
-    manager.read_from_session(&session_id)
+    manager.read_from_session(&session_id, client_id.as_deref())
 }
 
 #[tauri::command]

@@ -69,6 +69,7 @@ pub fn load_global_config() -> GlobalConfig {
         default_config
     };
 
+
     {
         let mut cache = GLOBAL_CONFIG_CACHE.lock().unwrap();
         *cache = Some(config.clone());
@@ -97,6 +98,7 @@ pub fn save_global_config_internal(config: &GlobalConfig) -> Result<(), String> 
 
     Ok(())
 }
+
 
 // ==================== Workspace 配置加载/保存 ====================
 
@@ -187,6 +189,46 @@ pub(crate) fn get_window_workspace_config(window_label: &str) -> Option<(String,
     let workspace_path = get_window_workspace_path(window_label)?;
     let config = load_workspace_config(&workspace_path);
     Some((workspace_path, config))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::Value;
+
+    #[test]
+    fn global_config_round_trip() {
+        let config = GlobalConfig {
+            current_workspace: Some("/tmp/workspace".to_string()),
+            ngrok_token: Some(" my-ngrok ".to_string()),
+            wms_token: None,
+            dashscope_api_key: Some("my-dashscope".to_string()),
+            wms_jwt: Some("my-jwt".to_string()),
+            ..GlobalConfig::default()
+        };
+
+        let serialized = serde_json::to_string_pretty(&config).expect("serialize config");
+        let value: Value = serde_json::from_str(&serialized).expect("parse serialized config");
+        let object = value.as_object().expect("config json object");
+
+        assert_eq!(
+            object.get("current_workspace"),
+            Some(&Value::String("/tmp/workspace".to_string()))
+        );
+        assert_eq!(
+            object.get("ngrok_token"),
+            Some(&Value::String(" my-ngrok ".to_string()))
+        );
+        assert_eq!(
+            object.get("dashscope_api_key"),
+            Some(&Value::String("my-dashscope".to_string()))
+        );
+        assert_eq!(
+            object.get("wms_jwt"),
+            Some(&Value::String("my-jwt".to_string()))
+        );
+        assert_eq!(object.get("wms_token"), Some(&Value::Null));
+    }
 }
 
 // ==================== 主工作区占用状态 ====================

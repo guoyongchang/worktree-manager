@@ -9,6 +9,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tauri::Emitter;
 
 use crate::config::{load_global_config, save_global_config_internal};
+
 use crate::state::APP_HANDLE;
 
 // ==================== Voice Session State ====================

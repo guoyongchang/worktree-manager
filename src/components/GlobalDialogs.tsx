@@ -218,36 +218,75 @@ export const GlobalDialogs: FC<GlobalDialogsProps> = ({
 
       {/* WMS Login Required Dialog */}
       <Dialog open={share.showWmsLoginDialog} onOpenChange={(open) => {
-        if (!open && !share.wmsLoginLoading) {
-          share.setShowWmsLoginDialog(false);
+        if (!open) {
+          share.handleCancelWmsBrowserLogin();
         }
       }}>
         <DialogContent className="max-w-[420px]">
           <DialogHeader>
             <DialogTitle>{t('app.wmsLoginTitle', 'Login Required')}</DialogTitle>
             <DialogDescription>
-              {t('app.wmsLoginDesc', 'Public sharing requires a WMS account. Please login via your browser to continue.')}
+              {t('app.wmsLoginDesc', 'Public sharing requires a WMS account. Please login to continue.')}
             </DialogDescription>
           </DialogHeader>
-          <div className="py-4 flex flex-col items-center gap-3">
-            <div className="w-14 h-14 rounded-full bg-blue-500/10 flex items-center justify-center">
-              <svg className="w-7 h-7 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
-              </svg>
+          <div className="py-3 space-y-3">
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">{t('app.wmsUsername', 'Username / Email')}</label>
+              <Input
+                type="text"
+                placeholder={t('app.wmsUsernamePlaceholder', 'Enter username or email')}
+                value={share.wmsUsername}
+                onChange={(e) => share.setWmsUsername(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') share.handleWmsFormLogin(); }}
+                disabled={share.wmsFormLoginLoading || share.wmsLoginLoading}
+                className="text-sm"
+              />
             </div>
-            <p className="text-xs text-slate-500 text-center">
-              {t('app.wmsLoginHint', 'You can login with Email, GitHub, or Google. A browser window will open for authentication.')}
-            </p>
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">{t('app.wmsPasswordLabel', 'Password')}</label>
+              <Input
+                type="password"
+                placeholder={t('app.wmsPasswordPlaceholder', 'Enter password')}
+                value={share.wmsPassword}
+                onChange={(e) => share.setWmsPassword(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') share.handleWmsFormLogin(); }}
+                disabled={share.wmsFormLoginLoading || share.wmsLoginLoading}
+                className="text-sm"
+              />
+            </div>
           </div>
-          <DialogFooter>
-            <Button variant="secondary" onClick={() => share.setShowWmsLoginDialog(false)} disabled={share.wmsLoginLoading}>
-              {t('common.cancel')}
-            </Button>
-            <Button onClick={share.handleWmsBrowserLogin} disabled={share.wmsLoginLoading}>
+          <DialogFooter className="flex flex-col gap-3 sm:flex-col">
+            <div className="flex gap-2 w-full justify-end">
+              <Button variant="secondary" onClick={share.handleCancelWmsBrowserLogin}>
+                {t('common.cancel')}
+              </Button>
+              <Button
+                onClick={share.handleWmsFormLogin}
+                disabled={share.wmsFormLoginLoading || share.wmsLoginLoading || !share.wmsUsername.trim() || !share.wmsPassword.trim()}
+              >
+                {share.wmsFormLoginLoading ? (
+                  <span className="flex items-center gap-2">
+                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                    {t('app.wmsLoggingIn', 'Logging in...')}
+                  </span>
+                ) : t('app.wmsLoginSubmit', 'Login')}
+              </Button>
+            </div>
+            <div className="flex items-center gap-2 w-full">
+              <div className="flex-1 h-px bg-slate-700" />
+              <span className="text-xs text-slate-500">{t('common.or', 'or')}</span>
+              <div className="flex-1 h-px bg-slate-700" />
+            </div>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={share.handleWmsBrowserLogin}
+              disabled={share.wmsFormLoginLoading || share.wmsLoginLoading}
+            >
               {share.wmsLoginLoading ? (
                 <span className="flex items-center gap-2">
                   <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-                  {t('app.wmsLoginWaiting', 'Waiting for login...')}
+                  {t('app.wmsLoginWaiting', 'Waiting for browser login...')}
                 </span>
               ) : t('app.wmsLoginButton', 'Login via Browser')}
             </Button>

@@ -3,7 +3,8 @@ use tauri::Emitter;
 
 use crate::config::{load_global_config, load_occupation_state};
 use crate::state::{
-    LOCK_BROADCAST, TERMINAL_STATES, TERMINAL_STATE_BROADCAST, WINDOW_WORKSPACES, WORKTREE_LOCKS,
+    APP_HANDLE, LOCK_BROADCAST, TERMINAL_STATES, TERMINAL_STATE_BROADCAST, WINDOW_WORKSPACES,
+    WORKTREE_LOCKS,
 };
 use crate::types::TerminalState;
 
@@ -319,12 +320,18 @@ pub(crate) fn broadcast_lock_state(workspace_path: &str) {
         lock_snapshot.len()
     );
     let occupation = load_occupation_state(workspace_path);
-    if let Ok(json_str) = serde_json::to_string(&serde_json::json!({
+    let payload = serde_json::json!({
         "workspacePath": workspace_path,
         "locks": lock_snapshot,
         "occupation": occupation,
-    })) {
+    });
+
+    if let Ok(json_str) = serde_json::to_string(&payload) {
         let _ = LOCK_BROADCAST.send(json_str);
+    }
+
+    if let Some(app_handle) = APP_HANDLE.lock().ok().and_then(|handle| handle.clone()) {
+        let _ = app_handle.emit("lock-state-update", payload);
     }
 }
 
