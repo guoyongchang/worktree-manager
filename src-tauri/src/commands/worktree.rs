@@ -10,9 +10,10 @@ use crate::config::{
 use crate::git_ops::{get_branch_status, get_worktree_info_for_branches};
 use crate::state::PTY_MANAGER;
 use crate::types::{
-    AddProjectToWorktreeRequest, CreateWorktreeRequest, DeployProjectError, DeployToMainResult,
-    MainProjectStatus, MainWorkspaceOccupation, MainWorkspaceStatus, ProjectConfig, ProjectStatus,
-    ScannedFolder, WorktreeArchiveStatus, WorktreeListItem,
+    AddProjectToWorktreeRequest, CreateProjectRequest, CreateWorktreeRequest,
+    DeployProjectError, DeployToMainResult, MainProjectStatus, MainWorkspaceOccupation,
+    MainWorkspaceStatus, ProjectConfig, ProjectStatus, ScannedFolder, WorktreeArchiveStatus,
+    WorktreeListItem,
 };
 use crate::utils::{
     git_command, normalize_path, run_git_command_with_timeout, scan_dir_for_linkable_folders,
@@ -251,6 +252,125 @@ pub(crate) async fn get_main_workspace_status(
         .map_err(|e| format!("Task join error: {}", e))?
 }
 
+/// Set up a single project inside a worktree: fetch → branch check → worktree add → symlink.
+fn setup_project_worktree(
+    root: &std::path::Path,
+    worktree_path: &std::path::Path,
+    worktree_name: &str,
+    proj_req: &CreateProjectRequest,
+    proj_config: &ProjectConfig,
+) -> Result<(), String> {
+    let main_proj_path = root.join("projects").join(&proj_req.name);
+    let wt_proj_path = worktree_path.join("projects").join(&proj_req.name);
+
+    // Fetch origin first (with timeout)
+    log::info!("[worktree] Project '{}': git fetch origin", proj_req.name);
+    run_git_command_with_timeout(&["fetch", "origin"], main_proj_path.to_str().unwrap())?;
+
+    // Check if branch already exists
+    let branch_check = git_command()
+        .args([
+            "-C",
+            main_proj_path.to_str().unwrap(),
+            "branch",
+            "--list",
+            worktree_name,
+        ])
+        .output();
+
+    let branch_exists = branch_check
+        .as_ref()
+        .map(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty())
+        .unwrap_or(false);
+
+    // Create worktree: use existing branch or create new one
+    let output = if branch_exists {
+        log::info!(
+            "Branch '{}' already exists, using it for project {}",
+            worktree_name,
+            proj_req.name
+        );
+        git_command()
+            .args([
+                "-C",
+                main_proj_path.to_str().unwrap(),
+                "worktree",
+                "add",
+                wt_proj_path.to_str().unwrap(),
+                worktree_name,
+            ])
+            .output()
+            .map_err(|e| format!("Failed to create worktree: {}", e))?
+    } else {
+        log::info!(
+            "Creating new branch '{}' for project {} from origin/{}",
+            worktree_name,
+            proj_req.name,
+            proj_req.base_branch
+        );
+        git_command()
+            .args([
+                "-C",
+                main_proj_path.to_str().unwrap(),
+                "worktree",
+                "add",
+                wt_proj_path.to_str().unwrap(),
+                "-b",
+                worktree_name,
+                &format!("origin/{}", proj_req.base_branch),
+            ])
+            .output()
+            .map_err(|e| format!("Failed to create worktree: {}", e))?
+    };
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        log::error!(
+            "[worktree] FAILED: git worktree add for project '{}': {}",
+            proj_req.name,
+            stderr
+        );
+        return Err(format!(
+            "Failed to create worktree for {}: {}",
+            proj_req.name, stderr
+        ));
+    }
+    log::info!(
+        "[worktree] Project '{}': git worktree add succeeded",
+        proj_req.name
+    );
+
+    // Link configured folders
+    log::info!(
+        "[worktree] Project '{}': Creating symlinks for {} linked folders",
+        proj_req.name,
+        proj_config.linked_folders.len()
+    );
+    for folder_name in &proj_config.linked_folders {
+        let main_folder = main_proj_path.join(folder_name);
+        let wt_folder = wt_proj_path.join(folder_name);
+
+        if main_folder.exists() && !wt_folder.exists() {
+            create_symlink(&main_folder, &wt_folder).ok();
+
+            // Remove from git index if it's tracked
+            git_command()
+                .args([
+                    "-C",
+                    wt_proj_path.to_str().unwrap(),
+                    "rm",
+                    "--cached",
+                    "-r",
+                    folder_name,
+                ])
+                .output()
+                .ok();
+        }
+    }
+
+    Ok(())
+}
+
 pub fn create_worktree_impl(
     window_label: &str,
     request: CreateWorktreeRequest,
@@ -263,13 +383,13 @@ pub fn create_worktree_impl(
 
     let project_count = request.projects.len();
     log::info!(
-        "[worktree] Creating worktree '{}' in workspace '{}' with {} projects",
+        "[worktree] Creating worktree '{}' in workspace '{}' with {} projects (parallel)",
         request.name,
         workspace_path,
         project_count
     );
 
-    // Create worktree directory
+    // Step 1: Create worktree directory
     log::info!(
         "[worktree] Step 1: Creating directory structure at {}",
         worktree_path.display()
@@ -277,7 +397,7 @@ pub fn create_worktree_impl(
     std::fs::create_dir_all(worktree_path.join("projects"))
         .map_err(|e| format!("Failed to create worktree directory: {}", e))?;
 
-    // Create symlinks for workspace-level items
+    // Step 2: Create symlinks for workspace-level items (fast, sequential)
     log::info!(
         "[worktree] Step 2: Creating workspace-level symlinks ({} items)",
         config.linked_workspace_items.len()
@@ -296,128 +416,59 @@ pub fn create_worktree_impl(
         }
     }
 
-    // Create worktrees for each project
-    for proj_req in &request.projects {
-        let proj_config = config
+    // Step 3: Set up each project in parallel
+    log::info!(
+        "[worktree] Step 3: Setting up {} projects in parallel",
+        project_count
+    );
+
+    // Pre-resolve project configs
+    let proj_configs: Vec<_> = request
+        .projects
+        .iter()
+        .map(|proj_req| {
+            config
+                .projects
+                .iter()
+                .find(|p| p.name == proj_req.name)
+                .cloned()
+                .unwrap_or(ProjectConfig {
+                    name: proj_req.name.clone(),
+                    base_branch: proj_req.base_branch.clone(),
+                    test_branch: "test".to_string(),
+                    merge_strategy: "merge".to_string(),
+                    linked_folders: vec![],
+                })
+        })
+        .collect();
+
+    // Use scoped threads for parallel execution
+    let errors: Vec<String> = std::thread::scope(|s| {
+        let handles: Vec<_> = request
             .projects
             .iter()
-            .find(|p| p.name == proj_req.name)
-            .cloned()
-            .unwrap_or(ProjectConfig {
-                name: proj_req.name.clone(),
-                base_branch: proj_req.base_branch.clone(),
-                test_branch: "test".to_string(),
-                merge_strategy: "merge".to_string(),
-                linked_folders: vec![],
-            });
+            .zip(proj_configs.iter())
+            .map(|(proj_req, proj_config)| {
+                s.spawn(|| {
+                    setup_project_worktree(
+                        &root,
+                        &worktree_path,
+                        &request.name,
+                        proj_req,
+                        proj_config,
+                    )
+                })
+            })
+            .collect();
 
-        let main_proj_path = root.join("projects").join(&proj_req.name);
-        let wt_proj_path = worktree_path.join("projects").join(&proj_req.name);
+        handles
+            .into_iter()
+            .filter_map(|h| h.join().ok().and_then(|r| r.err()))
+            .collect()
+    });
 
-        // Fetch origin first (with timeout)
-        log::info!("[worktree] Project '{}': git fetch origin", proj_req.name);
-        run_git_command_with_timeout(&["fetch", "origin"], main_proj_path.to_str().unwrap())?;
-
-        // Check if branch already exists
-        let branch_check = git_command()
-            .args([
-                "-C",
-                main_proj_path.to_str().unwrap(),
-                "branch",
-                "--list",
-                &request.name,
-            ])
-            .output();
-
-        let branch_exists = branch_check
-            .as_ref()
-            .map(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty())
-            .unwrap_or(false);
-
-        // Create worktree: use existing branch or create new one
-        let output = if branch_exists {
-            log::info!(
-                "Branch '{}' already exists, using it for project {}",
-                request.name,
-                proj_req.name
-            );
-            git_command()
-                .args([
-                    "-C",
-                    main_proj_path.to_str().unwrap(),
-                    "worktree",
-                    "add",
-                    wt_proj_path.to_str().unwrap(),
-                    &request.name,
-                ])
-                .output()
-                .map_err(|e| format!("Failed to create worktree: {}", e))?
-        } else {
-            log::info!(
-                "Creating new branch '{}' for project {} from origin/{}",
-                request.name,
-                proj_req.name,
-                proj_req.base_branch
-            );
-            git_command()
-                .args([
-                    "-C",
-                    main_proj_path.to_str().unwrap(),
-                    "worktree",
-                    "add",
-                    wt_proj_path.to_str().unwrap(),
-                    "-b",
-                    &request.name,
-                    &format!("origin/{}", proj_req.base_branch),
-                ])
-                .output()
-                .map_err(|e| format!("Failed to create worktree: {}", e))?
-        };
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            log::error!(
-                "[worktree] FAILED: git worktree add for project '{}': {}",
-                proj_req.name,
-                stderr
-            );
-            return Err(format!(
-                "Failed to create worktree for {}: {}",
-                proj_req.name, stderr
-            ));
-        }
-        log::info!(
-            "[worktree] Project '{}': git worktree add succeeded",
-            proj_req.name
-        );
-
-        // Link configured folders
-        log::info!(
-            "[worktree] Project '{}': Creating symlinks for {} linked folders",
-            proj_req.name,
-            proj_config.linked_folders.len()
-        );
-        for folder_name in &proj_config.linked_folders {
-            let main_folder = main_proj_path.join(folder_name);
-            let wt_folder = wt_proj_path.join(folder_name);
-
-            if main_folder.exists() && !wt_folder.exists() {
-                create_symlink(&main_folder, &wt_folder).ok();
-
-                // Remove from git index if it's tracked
-                git_command()
-                    .args([
-                        "-C",
-                        wt_proj_path.to_str().unwrap(),
-                        "rm",
-                        "--cached",
-                        "-r",
-                        folder_name,
-                    ])
-                    .output()
-                    .ok();
-            }
-        }
+    if !errors.is_empty() {
+        return Err(errors.join("\n"));
     }
 
     log::info!(
@@ -428,15 +479,27 @@ pub fn create_worktree_impl(
     Ok(normalize_path(&worktree_path.to_string_lossy()))
 }
 
+/// Worktree creation timeout: 10 minutes (for large repos with slow fetch)
+const CREATE_WORKTREE_TIMEOUT_SECS: u64 = 600;
+
 #[tauri::command]
 pub(crate) async fn create_worktree(
     window: tauri::Window,
     request: CreateWorktreeRequest,
 ) -> Result<String, String> {
     let label = window.label().to_string();
-    tokio::task::spawn_blocking(move || create_worktree_impl(&label, request))
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(CREATE_WORKTREE_TIMEOUT_SECS),
+        tokio::task::spawn_blocking(move || create_worktree_impl(&label, request)),
+    )
+    .await
+    {
+        Ok(join_result) => join_result.map_err(|e| format!("Task join error: {}", e))?,
+        Err(_) => Err(format!(
+            "Worktree creation timed out after {} minutes",
+            CREATE_WORKTREE_TIMEOUT_SECS / 60
+        )),
+    }
 }
 
 pub fn archive_worktree_impl(window_label: &str, name: String) -> Result<(), String> {
