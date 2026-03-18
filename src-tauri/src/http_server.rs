@@ -336,9 +336,12 @@ async fn h_scan_existing_projects(headers: HeaderMap) -> Response {
 async fn h_add_existing_project(headers: HeaderMap, Json(args): Json<Value>) -> Response {
     let sid = session_id(&headers);
     let name = args["name"].as_str().unwrap_or("").to_string();
-    let base_branch = args["base_branch"].as_str().unwrap_or("").to_string();
-    let test_branch = args["test_branch"].as_str().unwrap_or("").to_string();
-    let merge_strategy = args["merge_strategy"].as_str().unwrap_or("merge").to_string();
+    let base_branch = args.get("baseBranch").or_else(|| args.get("base_branch"))
+        .and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let test_branch = args.get("testBranch").or_else(|| args.get("test_branch"))
+        .and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let merge_strategy = args.get("mergeStrategy").or_else(|| args.get("merge_strategy"))
+        .and_then(|v| v.as_str()).unwrap_or("merge").to_string();
     result_ok(add_existing_project_impl(&sid, name, base_branch, test_branch, merge_strategy))
 }
 

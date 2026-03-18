@@ -572,7 +572,7 @@ export async function scanExistingProjects(): Promise<ExistingProjectInfo[]> {
 
 /** Add an existing git project to workspace config */
 export async function addExistingProject(name: string, baseBranch: string, testBranch: string, mergeStrategy: string = 'merge'): Promise<void> {
-  return callBackend<void>('add_existing_project', { name, base_branch: baseBranch, test_branch: testBranch, merge_strategy: mergeStrategy });
+  return callBackend<void>('add_existing_project', { name, baseBranch, testBranch, mergeStrategy });
 }
 
 /** Remove a project from workspace config (does not delete files) */
