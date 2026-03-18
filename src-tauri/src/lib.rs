@@ -239,6 +239,7 @@ pub fn run() {
             voice_is_active,
             voice_refine_text,
             // 更新镜像
+            check_mirror_update,
             download_update_via_mirror,
             // DevTools
             open_devtools,

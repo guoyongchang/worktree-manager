@@ -3,7 +3,7 @@ export type { UseWorkspaceReturn } from './useWorkspace';
 export { useTerminal } from './useTerminal';
 export type { UseTerminalReturn } from './useTerminal';
 export { useUpdater } from './useUpdater';
-export type { UseUpdaterReturn, UpdaterState, UpdateInfo, DownloadProgress } from './useUpdater';
+export type { UseUpdaterReturn, UpdaterState, UpdateInfo, DownloadProgress, ChannelStatus } from './useUpdater';
 export { useShareFeature } from './useShareFeature';
 export type { UseShareFeatureReturn } from './useShareFeature';
 export { useBrowserAuth } from './useBrowserAuth';

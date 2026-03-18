@@ -207,7 +207,7 @@ function App() {
                   onBack={() => setViewMode('main')}
                   onSaveConfig={handleSaveConfig}
                   onClearError={() => workspace.setError(null)}
-                  onCheckUpdate={() => updater.checkForUpdates(false)}
+                  onCheckUpdate={() => updater.openCheckerDialog()}
                   checkingUpdate={updater.state === 'checking'}
                   workspaces={workspace.workspaces}
                   currentWorkspace={workspace.currentWorkspace}
@@ -244,7 +244,7 @@ function App() {
                   onOpenSettings={openSettings}
                   onOpenCreateModal={actions.openCreateModal}
                   updaterState={updater.state}
-                  onCheckUpdate={() => updater.checkForUpdates(false)}
+                  onCheckUpdate={() => updater.openCheckerDialog()}
                   onOpenInNewWindow={isTauri() ? actions.handleOpenInNewWindow : undefined}
                   lockedWorktrees={locks.lockedWorktrees}
                   collapsed={sidebarCollapsed}

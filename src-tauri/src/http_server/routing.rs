@@ -11,7 +11,7 @@ use super::{
     h_auth_verify, h_auto_register_tunnel, h_broadcast_terminal_state, h_cert_pem,
     h_check_remote_branch_exists, h_check_worktree_status, h_clone_project, h_commit_all,
     h_create_pull_request, h_create_workspace, h_create_worktree, h_delete_archived_worktree,
-    h_deploy_to_main, h_detect_tools, h_download_update_via_mirror, h_exit_main_occupation,
+    h_deploy_to_main, h_detect_tools, h_check_mirror_update, h_download_update_via_mirror, h_exit_main_occupation,
     h_fetch_project_remote, h_generate_commit_message, h_get_app_version, h_get_branch_diff_stats,
     h_get_changed_files, h_get_config_path_info, h_get_connected_clients, h_get_current_workspace,
     h_get_dashscope_api_key, h_get_dashscope_base_url, h_get_file_diff, h_get_git_diff,
@@ -228,6 +228,10 @@ pub(super) fn build_api_router(cert_pem: Option<String>) -> Router {
             post(h_set_voice_refine_enabled),
         )
         .route("/api/get_app_version", post(h_get_app_version))
+        .route(
+            "/api/check_mirror_update",
+            post(h_check_mirror_update),
+        )
         .route(
             "/api/download_update_via_mirror",
             post(h_download_update_via_mirror),

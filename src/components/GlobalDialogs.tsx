@@ -17,6 +17,7 @@ import {
   UpdateErrorDialog,
   UpToDateToast,
 } from './UpdaterDialogs';
+import { UpdateCheckerDialog } from './UpdateCheckerDialog';
 import type { UseUpdaterReturn } from '../hooks/useUpdater';
 import type { UseShareFeatureReturn } from '../hooks/useShareFeature';
 import type { WorktreeListItem } from '../types';
@@ -49,6 +50,20 @@ export const GlobalDialogs: FC<GlobalDialogsProps> = ({
 
   return (
     <>
+      {/* Update Checker Dialog (dual-channel) */}
+      <UpdateCheckerDialog
+        open={updater.showCheckerDialog}
+        onOpenChange={(open) => !open && updater.closeCheckerDialog()}
+        officialStatus={updater.officialStatus}
+        mirrorStatus={updater.mirrorStatus}
+        updateInfo={updater.updateInfo}
+        mirrorVersion={updater.mirrorVersion}
+        officialError={updater.officialError}
+        mirrorError={updater.mirrorError}
+        onOfficialDownload={updater.startDownload}
+        onMirrorDownload={updater.downloadViaMirror}
+      />
+
       {/* Updater Dialogs */}
       {updater.updateInfo && (
         <UpdateNotificationDialog

@@ -690,6 +690,65 @@ pub(crate) fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+// ==================== 更新镜像检测 ====================
+
+/// 通过 gh-proxy.org 镜像检测最新版本（仅检测，不下载）
+/// 返回 JSON: { "version": "...", "pub_date": "...", "notes": "..." }
+#[tauri::command]
+pub(crate) async fn check_mirror_update() -> Result<serde_json::Value, String> {
+    log::info!("[system] Checking mirror for updates...");
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("HTTP client error: {}", e))?;
+
+    let endpoint =
+        "https://gh-proxy.org/https://github.com/guoyongchang/worktree-manager/releases/latest/download/latest.json";
+    let resp = client
+        .get(endpoint)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch mirror manifest: {}", e))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Mirror returned HTTP {}", resp.status()));
+    }
+
+    let manifest: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse mirror manifest: {}", e))?;
+
+    let version = manifest
+        .get("version")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let pub_date = manifest
+        .get("pub_date")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let notes = manifest
+        .get("notes")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    log::info!(
+        "[system] Mirror latest version: {} (pub_date: {})",
+        version,
+        pub_date
+    );
+
+    Ok(serde_json::json!({
+        "version": version,
+        "pub_date": pub_date,
+        "notes": notes,
+        "current_version": env!("CARGO_PKG_VERSION"),
+    }))
+}
+
 // ==================== 更新镜像下载 ====================
 
 /// 通过 gh-proxy.org 镜像下载更新（内置更新流程，非浏览器跳转）

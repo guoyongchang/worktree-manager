@@ -9,6 +9,8 @@ export type UpdaterState =
   | 'success'
   | 'error';
 
+export type ChannelStatus = 'idle' | 'checking' | 'available' | 'up-to-date' | 'error';
+
 export interface UpdateInfo {
   version: string;
   currentVersion: string;
@@ -35,6 +37,15 @@ export interface UseUpdaterReturn {
   restartApp: () => Promise<void>;
   dismiss: () => void;
   retry: () => Promise<void>;
+  // Dual-channel checker dialog
+  showCheckerDialog: boolean;
+  openCheckerDialog: () => void;
+  closeCheckerDialog: () => void;
+  officialStatus: ChannelStatus;
+  mirrorStatus: ChannelStatus;
+  mirrorVersion: string | null;
+  officialError: string;
+  mirrorError: string;
 }
 
 export function useUpdater(): UseUpdaterReturn {
@@ -48,6 +59,14 @@ export function useUpdater(): UseUpdaterReturn {
   });
   const [errorMessage, setErrorMessage] = useState('');
   const [showUpToDateToast, setShowUpToDateToast] = useState(false);
+
+  // Dual-channel checker dialog state
+  const [showCheckerDialog, setShowCheckerDialog] = useState(false);
+  const [officialStatus, setOfficialStatus] = useState<ChannelStatus>('idle');
+  const [mirrorStatus, setMirrorStatus] = useState<ChannelStatus>('idle');
+  const [mirrorVersion, setMirrorVersion] = useState<string | null>(null);
+  const [officialError, setOfficialError] = useState('');
+  const [mirrorError, setMirrorError] = useState('');
 
   // Store the native Update object (Tauri only)
   const updateRef = useRef<unknown>(null);
@@ -123,6 +142,96 @@ export function useUpdater(): UseUpdaterReturn {
     }
   }, []);
 
+  // --- Dual-channel checker ---
+
+  const checkOfficialChannel = useCallback(async () => {
+    if (!isTauri()) {
+      setOfficialStatus('up-to-date');
+      return;
+    }
+    setOfficialStatus('checking');
+    try {
+      const { check } = await import('@tauri-apps/plugin-updater');
+      const update = await check();
+      if (update) {
+        updateRef.current = update;
+        const notes = update.body
+          ? update.body.split('\n').filter((line: string) => line.trim())
+          : [];
+        setUpdateInfo({
+          version: update.version,
+          currentVersion: update.currentVersion,
+          date: update.date ?? new Date().toISOString().split('T')[0],
+          notes,
+        });
+        setOfficialStatus('available');
+      } else {
+        setOfficialStatus('up-to-date');
+      }
+    } catch (err) {
+      console.error('[updater] Official channel check failed:', err);
+      setOfficialError(String(err));
+      setOfficialStatus('error');
+    }
+  }, []);
+
+  const checkMirrorChannel = useCallback(async () => {
+    setMirrorStatus('checking');
+    try {
+      const manifest = await callBackend<{
+        version: string;
+        pub_date: string;
+        notes: string;
+        current_version: string;
+      }>('check_mirror_update');
+
+      const latestVersion = manifest.version;
+      const currentVersion = manifest.current_version;
+
+      setMirrorVersion(latestVersion);
+      if (latestVersion && latestVersion !== currentVersion) {
+        // Also populate updateInfo if official hasn't found it yet
+        if (!updateRef.current) {
+          setUpdateInfo((prev) =>
+            prev ?? {
+              version: latestVersion,
+              currentVersion,
+              date: manifest.pub_date?.split('T')[0] ?? new Date().toISOString().split('T')[0],
+              notes: manifest.notes
+                ? String(manifest.notes).split('\n').filter((l: string) => l.trim())
+                : [],
+            },
+          );
+        }
+        setMirrorStatus('available');
+      } else {
+        setMirrorStatus('up-to-date');
+      }
+    } catch (err) {
+      console.error('[updater] Mirror channel check failed:', err);
+      setMirrorError(String(err));
+      setMirrorStatus('error');
+    }
+  }, []);
+
+  const openCheckerDialog = useCallback(() => {
+    setShowCheckerDialog(true);
+    setOfficialStatus('idle');
+    setMirrorStatus('idle');
+    setOfficialError('');
+    setMirrorError('');
+    setMirrorVersion(null);
+    // Kick off both checks in parallel
+    checkOfficialChannel();
+    checkMirrorChannel();
+  }, [checkOfficialChannel, checkMirrorChannel]);
+
+  const closeCheckerDialog = useCallback(() => {
+    setShowCheckerDialog(false);
+  }, []);
+
+  // --- Download flows ---
+
   const startDownload = useCallback(async () => {
     const update = updateRef.current as {
       version: string;
@@ -130,6 +239,7 @@ export function useUpdater(): UseUpdaterReturn {
     } | null;
     if (!update) return;
 
+    setShowCheckerDialog(false);
     setState('downloading');
     let totalBytes = 0;
     let downloadedBytes = 0;
@@ -183,6 +293,7 @@ export function useUpdater(): UseUpdaterReturn {
   const downloadViaMirror = useCallback(async () => {
     if (!updateInfo) return;
 
+    setShowCheckerDialog(false);
     setState('downloading');
     let totalBytes = 0;
     let downloadedBytes = 0;
@@ -278,5 +389,14 @@ export function useUpdater(): UseUpdaterReturn {
     restartApp,
     dismiss,
     retry,
+    // Dual-channel checker dialog
+    showCheckerDialog,
+    openCheckerDialog,
+    closeCheckerDialog,
+    officialStatus,
+    mirrorStatus,
+    mirrorVersion,
+    officialError,
+    mirrorError,
   };
 }

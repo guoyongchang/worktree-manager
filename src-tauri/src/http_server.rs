@@ -1169,6 +1169,10 @@ async fn h_get_app_version() -> Response {
     Json(json!(env!("CARGO_PKG_VERSION"))).into_response()
 }
 
+async fn h_check_mirror_update() -> Response {
+    result_json(crate::commands::system::check_mirror_update().await)
+}
+
 async fn h_download_update_via_mirror() -> Response {
     let app = match current_app_handle() {
         Ok(app) => app,
