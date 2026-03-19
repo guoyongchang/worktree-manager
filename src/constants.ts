@@ -5,6 +5,7 @@ export const EDITORS: EditorConfig[] = [
   { id: 'cursor', name: 'Cursor', icon: 'C' },
   { id: 'antigravity', name: 'Antigravity', icon: 'A' },
   { id: 'idea', name: 'IDEA', icon: 'I' },
+  { id: 'codex', name: 'Codex', icon: 'X' },
 ];
 
 // Terminal configuration

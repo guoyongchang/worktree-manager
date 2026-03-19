@@ -99,7 +99,7 @@ export interface WorktreeArchiveStatus {
 }
 
 // Editor types
-export type EditorType = 'vscode' | 'cursor' | 'antigravity' | 'idea';
+export type EditorType = 'vscode' | 'cursor' | 'antigravity' | 'idea' | 'codex';
 
 export interface EditorConfig {
   id: EditorType;

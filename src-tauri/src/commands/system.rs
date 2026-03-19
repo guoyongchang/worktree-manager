@@ -139,6 +139,7 @@ fn editor_cli_command(editor: &str) -> &'static str {
         "cursor" => "cursor",
         "antigravity" => "antigravity",
         "idea" => "idea",
+        "codex" => "codex",
         _ => "code",
     }
 }
@@ -150,6 +151,7 @@ fn editor_app_name(editor: &str) -> &'static str {
         "cursor" => "Cursor",
         "antigravity" => "Antigravity",
         "idea" => "IntelliJ IDEA",
+        "codex" => "Codex",
         _ => "Visual Studio Code",
     }
 }
@@ -187,9 +189,24 @@ pub(crate) fn open_editor_at_path(
                     }
                 }
             }
-            match Command::new(exe).arg(path).spawn() {
+            // Codex uses subcommand: `codex app <path>`
+            // First invocation launches the app; after a delay, second invocation opens the path.
+            let spawn_result = if request.editor == "codex" {
+                Command::new(exe).args(["app", path]).spawn()
+            } else {
+                Command::new(exe).arg(path).spawn()
+            };
+            match spawn_result {
                 Ok(_) => {
                     log::info!("[system] Spawned custom editor '{}' for: {}", exe, path);
+                    if request.editor == "codex" {
+                        let exe_owned = exe.to_string();
+                        let path_owned = path.to_string();
+                        std::thread::spawn(move || {
+                            std::thread::sleep(std::time::Duration::from_secs(3));
+                            let _ = Command::new(&exe_owned).args(["app", &path_owned]).spawn();
+                        });
+                    }
                     return Ok(());
                 }
                 Err(e) => {
@@ -202,6 +219,31 @@ pub(crate) fn open_editor_at_path(
 
     #[cfg(target_os = "macos")]
     {
+        // Codex uses subcommand: `codex app <path>`
+        // First invocation launches the app; after a delay, second invocation opens the path.
+        if request.editor == "codex" {
+            let cmd = editor_cli_command(&request.editor);
+            match Command::new(cmd).args(["app", path]).spawn() {
+                Ok(_) => {
+                    log::info!("[system] Spawned {} app (1st, launch) for: {}", cmd, path);
+                    // Spawn background thread to send the command again after the app starts
+                    let path_owned = path.to_string();
+                    let cmd_owned = cmd.to_string();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_secs(3));
+                        match Command::new(&cmd_owned).args(["app", &path_owned]).spawn() {
+                            Ok(_) => log::info!("[system] Spawned {} app (2nd, open path) for: {}", cmd_owned, path_owned),
+                            Err(e) => log::warn!("[system] Codex 2nd invocation failed (app may already have the path): {}", e),
+                        }
+                    });
+                    return Ok(());
+                }
+                Err(e) => {
+                    log::error!("[system] Failed to spawn codex: {}", e);
+                    return Err(format!("无法打开 Codex，请确认已安装该编辑器: {}", e));
+                }
+            }
+        }
         let app_name = editor_app_name(&request.editor);
         if Command::new("open")
             .args(["-a", app_name, path])
@@ -223,12 +265,58 @@ pub(crate) fn open_editor_at_path(
         }
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+        let cmd = editor_cli_command(&request.editor);
+        if request.editor == "codex" {
+            // Windows: Codex is a UWP app, launch via shell:AppsFolder
+            let aumid = r"OpenAI.Codex_2p2nqsd0c76g0!App";
+            match Command::new("explorer")
+                .arg(format!(r"shell:AppsFolder\{}", aumid))
+                .spawn()
+            {
+                Ok(_) => log::info!("[system] Launched Codex UWP app"),
+                Err(e) => {
+                    log::error!("[system] Failed to launch Codex UWP: {}", e);
+                    return Err(format!("无法打开 Codex: {}", e));
+                }
+            }
+        } else {
+            match Command::new(cmd).arg(path).spawn() {
+                Ok(_) => {
+                    log::info!("[system] Spawned {} for: {}", cmd, path);
+                }
+                Err(e) => {
+                    log::error!("[system] Failed to spawn editor process: {}", e);
+                    return Err(format!("无法打开编辑器 {}: {}", cmd, e));
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
     {
         let cmd = editor_cli_command(&request.editor);
-        match Command::new(cmd).arg(path).spawn() {
+        // Codex uses subcommand: `codex app <path>`
+        let spawn_result = if request.editor == "codex" {
+            Command::new(cmd).args(["app", path]).spawn()
+        } else {
+            Command::new(cmd).arg(path).spawn()
+        };
+        match spawn_result {
             Ok(_) => {
                 log::info!("[system] Spawned {} for: {}", cmd, path);
+                if request.editor == "codex" {
+                    let path_owned = path.to_string();
+                    let cmd_owned = cmd.to_string();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_secs(3));
+                        let _ = Command::new(&cmd_owned).args(["app", &path_owned]).spawn();
+                    });
+                }
             }
             Err(e) => {
                 log::error!("[system] Failed to spawn editor process: {}", e);
@@ -571,6 +659,7 @@ fn detect_editors() -> Vec<DetectedTool> {
         ("cursor", "cursor", "Cursor"),
         ("antigravity", "antigravity", "Antigravity"),
         ("idea", "idea", "IntelliJ IDEA"),
+        ("codex", "codex", "Codex"),
         ("zed", "zed", "Zed"),
         ("sublime_text", "sublime", "Sublime Text"),
         ("atom", "atom", "Atom"),
@@ -645,6 +734,28 @@ fn detect_editors() -> Vec<DetectedTool> {
                             id: id.to_string(),
                             name: name.to_string(),
                             path: full,
+                        });
+                    }
+                }
+            }
+        }
+        // Detect Codex UWP app
+        if !results.iter().any(|r| r.id == "codex") {
+            // Check if Codex UWP package is installed via PowerShell
+            let ps_result = Command::new("powershell")
+                .args(["-NoProfile", "-Command", "Get-AppxPackage -Name 'OpenAI.Codex' | Select-Object -ExpandProperty InstallLocation"])
+                .creation_flags(CREATE_NO_WINDOW)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null())
+                .output();
+            if let Ok(output) = ps_result {
+                if output.status.success() {
+                    let location = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    if !location.is_empty() {
+                        results.push(DetectedTool {
+                            id: "codex".into(),
+                            name: "Codex (UWP)".into(),
+                            path: location,
                         });
                     }
                 }

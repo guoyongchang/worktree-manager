@@ -767,6 +767,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                     { id: 'cursor', name: 'Cursor', defaultCmd: 'cursor' },
                     { id: 'antigravity', name: 'Antigravity', defaultCmd: 'antigravity' },
                     { id: 'idea', name: 'IntelliJ IDEA', defaultCmd: 'idea' },
+                    { id: 'codex', name: 'Codex', defaultCmd: 'codex' },
                   ] as const).map((editor) => {
                     const pathKey = `editor_${editor.id}`;
                     const detected = detectedTools?.editors.find(e => e.id === editor.id);
