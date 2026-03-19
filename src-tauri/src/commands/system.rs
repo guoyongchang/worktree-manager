@@ -741,6 +741,8 @@ fn detect_editors() -> Vec<DetectedTool> {
         }
         // Detect Codex UWP app
         if !results.iter().any(|r| r.id == "codex") {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
             // Check if Codex UWP package is installed via PowerShell
             let ps_result = Command::new("powershell")
                 .args(["-NoProfile", "-Command", "Get-AppxPackage -Name 'OpenAI.Codex' | Select-Object -ExpandProperty InstallLocation"])
