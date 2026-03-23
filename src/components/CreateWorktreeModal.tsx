@@ -18,10 +18,13 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import type { WorkspaceConfig } from '../types';
+import { containsNonAscii, generateFolderAlias } from '../lib/bip39-words';
 
 // Git branch name rules: no spaces, ~, ^, :, \, .., *, ?, [, leading/trailing dots, @{
 const WORKTREE_NAME_INVALID_CHARS = /[\s~^:*?\[\\]/;
 const WORKTREE_NAME_INVALID_PATTERNS = /(?:\.\.)|(?:^\.)|(?:\.$)|(?:@\{)|(?:\.lock$)/;
+// Folder alias validation: only allow lowercase letters, digits, and hyphens
+const FOLDER_ALIAS_VALID = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 interface CreateWorktreeModalProps {
   open: boolean;
@@ -29,6 +32,10 @@ interface CreateWorktreeModalProps {
   config: WorkspaceConfig | null;
   worktreeName: string;
   onWorktreeNameChange: (name: string) => void;
+  folderAlias: string;
+  onFolderAliasChange: (alias: string) => void;
+  useFolderAlias: boolean;
+  onUseFolderAliasChange: (use: boolean) => void;
   selectedProjects: Map<string, string>;
   onToggleProject: (name: string, baseBranch: string) => void;
   onUpdateBaseBranch: (name: string, baseBranch: string) => void;
@@ -42,6 +49,10 @@ export const CreateWorktreeModal: FC<CreateWorktreeModalProps> = ({
   config,
   worktreeName,
   onWorktreeNameChange,
+  folderAlias,
+  onFolderAliasChange,
+  useFolderAlias,
+  onUseFolderAliasChange,
   selectedProjects,
   onToggleProject,
   onUpdateBaseBranch,
@@ -79,6 +90,25 @@ export const CreateWorktreeModal: FC<CreateWorktreeModalProps> = ({
     return min > 0 ? `${min}:${sec.toString().padStart(2, '0')}` : `${sec}s`;
   };
 
+  const hasNonAscii = useMemo(() => containsNonAscii(worktreeName.trim()), [worktreeName]);
+
+  // Auto-generate folder alias when non-ASCII is first detected
+  const prevHasNonAscii = useRef(false);
+  useEffect(() => {
+    if (hasNonAscii && !prevHasNonAscii.current) {
+      if (!folderAlias) {
+        onFolderAliasChange(generateFolderAlias());
+      }
+      onUseFolderAliasChange(true);
+    }
+    if (!hasNonAscii) {
+      onUseFolderAliasChange(false);
+    }
+    prevHasNonAscii.current = hasNonAscii;
+    // folderAlias intentionally excluded - only checked on hasNonAscii transition
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasNonAscii, onFolderAliasChange, onUseFolderAliasChange]);
+
   const nameValidation = useMemo(() => {
     const trimmed = worktreeName.trim();
     if (!trimmed) {
@@ -93,7 +123,19 @@ export const CreateWorktreeModal: FC<CreateWorktreeModalProps> = ({
     return { valid: true, error: '' };
   }, [worktreeName]);
 
-  const canSubmit = nameValidation.valid && selectedProjects.size > 0 && !creating;
+  const aliasValidation = useMemo(() => {
+    if (!useFolderAlias) return { valid: true, error: '' };
+    const trimmed = folderAlias.trim();
+    if (!trimmed) return { valid: false, error: t('createWorktree.aliasRequired') };
+    if (!FOLDER_ALIAS_VALID.test(trimmed)) return { valid: false, error: t('createWorktree.aliasInvalid') };
+    return { valid: true, error: '' };
+  }, [useFolderAlias, folderAlias]);
+
+  const canSubmit = nameValidation.valid && aliasValidation.valid && selectedProjects.size > 0 && !creating;
+
+  const handleRegenerate = () => {
+    onFolderAliasChange(generateFolderAlias());
+  };
 
   if (!config) return null;
 
@@ -119,6 +161,56 @@ export const CreateWorktreeModal: FC<CreateWorktreeModalProps> = ({
               <p className="text-red-400 text-xs mt-1">{nameValidation.error}</p>
             )}
           </div>
+
+          {/* Folder alias section — shown when non-ASCII characters detected */}
+          {hasNonAscii && nameValidation.valid && (
+            <div className="mb-5 p-3 rounded-lg border border-amber-500/30 bg-amber-500/5">
+              <div className="flex items-start gap-2 mb-2">
+                <svg className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+                <p className="text-xs text-amber-300/90">{t('createWorktree.nonAsciiWarning')}</p>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer mb-2">
+                <Checkbox
+                  checked={useFolderAlias}
+                  onChange={() => onUseFolderAliasChange(!useFolderAlias)}
+                />
+                <span className="text-sm text-slate-300">{t('createWorktree.useFolderAlias')}</span>
+              </label>
+              {useFolderAlias && (
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="text"
+                      value={folderAlias}
+                      onChange={(e) => onFolderAliasChange(e.target.value)}
+                      placeholder="apple-brave-crane"
+                      className={`flex-1 text-sm h-8 ${aliasValidation.error ? 'border-red-500 focus:border-red-500' : ''}`}
+                    />
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={handleRegenerate}
+                      className="h-8 px-2 shrink-0"
+                      type="button"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                    </Button>
+                  </div>
+                  {aliasValidation.error && (
+                    <p className="text-red-400 text-xs mt-1">{aliasValidation.error}</p>
+                  )}
+                  <p className="text-xs text-slate-500 mt-1.5">
+                    {t('createWorktree.aliasMappingHint', { alias: folderAlias.trim() || '...', name: worktreeName.trim() })}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-medium text-slate-300 mb-2">{t('createWorktree.selectProjects')}</label>
             <div className="space-y-2">

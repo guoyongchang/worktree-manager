@@ -42,6 +42,10 @@ export interface UseWorkspaceActionsReturn {
   // Create worktree
   newWorktreeName: string;
   setNewWorktreeName: (v: string) => void;
+  folderAlias: string;
+  setFolderAlias: (v: string) => void;
+  useFolderAlias: boolean;
+  setUseFolderAlias: (v: boolean) => void;
   selectedProjects: Map<string, string>;
   toggleProjectSelection: (name: string, baseBranch: string) => void;
   updateProjectBaseBranch: (name: string, baseBranch: string) => void;
@@ -130,6 +134,8 @@ export function useWorkspaceActions(
 
   // Create worktree form state
   const [newWorktreeName, setNewWorktreeName] = useState('');
+  const [folderAlias, setFolderAlias] = useState('');
+  const [useFolderAlias, setUseFolderAlias] = useState(false);
   const [selectedProjects, setSelectedProjects] = useState<Map<string, string>>(new Map());
 
   // Add/create workspace form state
@@ -233,6 +239,8 @@ export function useWorkspaceActions(
   // Create worktree
   const openCreateModal = useCallback(() => {
     setNewWorktreeName('');
+    setFolderAlias('');
+    setUseFolderAlias(false);
     setSelectedProjects(new Map());
     modals.setModal('showCreateModal', true);
   }, [modals]);
@@ -264,14 +272,15 @@ export function useWorkspaceActions(
       const projects: CreateProjectRequest[] = Array.from(selectedProjects.entries()).map(
         ([name, base_branch]) => ({ name, base_branch })
       );
-      await workspace.createWorktree(newWorktreeName.trim(), projects);
+      const effectiveFolderAlias = useFolderAlias && folderAlias.trim() ? folderAlias.trim() : undefined;
+      await workspace.createWorktree(newWorktreeName.trim(), projects, effectiveFolderAlias);
       modals.setModal('showCreateModal', false);
     } catch (e) {
       workspace.setError(String(e));
     } finally {
       setCreating(false);
     }
-  }, [workspace, newWorktreeName, selectedProjects, modals]);
+  }, [workspace, newWorktreeName, selectedProjects, modals, useFolderAlias, folderAlias]);
 
   // Add project
   const handleAddProject = useCallback(async (project: {
@@ -505,6 +514,10 @@ export function useWorkspaceActions(
 
     newWorktreeName,
     setNewWorktreeName,
+    folderAlias,
+    setFolderAlias,
+    useFolderAlias,
+    setUseFolderAlias,
     selectedProjects,
     toggleProjectSelection,
     updateProjectBaseBranch,

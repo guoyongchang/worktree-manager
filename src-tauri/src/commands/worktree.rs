@@ -92,12 +92,34 @@ pub(crate) async fn list_worktrees(
         .map_err(|e| format!("Task join error: {}", e))?
 }
 
+/// Load worktree folder-name → display-name mapping from mapping.json
+fn load_worktree_mapping(mapping_path: &std::path::Path) -> HashMap<String, String> {
+    if let Ok(content) = std::fs::read_to_string(mapping_path) {
+        serde_json::from_str(&content).unwrap_or_default()
+    } else {
+        HashMap::new()
+    }
+}
+
+/// Save worktree folder-name → display-name mapping to mapping.json
+fn save_worktree_mapping(mapping_path: &std::path::Path, mapping: &HashMap<String, String>) {
+    if let Ok(json) = serde_json::to_string_pretty(mapping) {
+        if let Err(e) = std::fs::write(mapping_path, json) {
+            log::warn!("[worktree] Failed to save mapping.json: {}", e);
+        }
+    }
+}
+
 fn scan_worktrees_dir(
     dir: &PathBuf,
     config: &crate::types::WorkspaceConfig,
     include_archived: bool,
 ) -> Result<Vec<WorktreeListItem>, String> {
     let mut result = vec![];
+
+    // Load display name mapping
+    let mapping_path = dir.join("mapping.json");
+    let mapping = load_worktree_mapping(&mapping_path);
 
     let entries = std::fs::read_dir(dir).map_err(|e| format!("Failed to read directory: {}", e))?;
 
@@ -182,8 +204,17 @@ fn scan_worktrees_dir(
             }
         }
 
+        // Look up display name from mapping (strip .archive suffix for lookup)
+        let lookup_key = if is_archived {
+            name.trim_end_matches(".archive")
+        } else {
+            &name
+        };
+        let display_name = mapping.get(lookup_key).cloned();
+
         result.push(WorktreeListItem {
             name,
+            display_name,
             path: normalize_path(&path.to_string_lossy()),
             is_archived,
             projects,
@@ -379,12 +410,16 @@ pub fn create_worktree_impl(
         get_window_workspace_config(window_label).ok_or("No workspace selected")?;
 
     let root = PathBuf::from(&workspace_path);
-    let worktree_path = root.join(&config.worktrees_dir).join(&request.name);
+
+    // Use folder_name for the directory if provided, otherwise use name
+    let actual_folder_name = request.folder_name.as_deref().unwrap_or(&request.name);
+    let worktree_path = root.join(&config.worktrees_dir).join(actual_folder_name);
 
     let project_count = request.projects.len();
     log::info!(
-        "[worktree] Creating worktree '{}' in workspace '{}' with {} projects (parallel)",
+        "[worktree] Creating worktree '{}' (folder: '{}') in workspace '{}' with {} projects (parallel)",
         request.name,
+        actual_folder_name,
         workspace_path,
         project_count
     );
@@ -471,9 +506,26 @@ pub fn create_worktree_impl(
         return Err(errors.join("\n"));
     }
 
+    // Save display name mapping if folder_name differs from name
+    if request.folder_name.is_some() {
+        let mapping_path = root.join(&config.worktrees_dir).join("mapping.json");
+        let mut mapping = load_worktree_mapping(&mapping_path);
+        mapping.insert(
+            actual_folder_name.to_string(),
+            request.name.clone(),
+        );
+        save_worktree_mapping(&mapping_path, &mapping);
+        log::info!(
+            "[worktree] Saved folder alias mapping: '{}' → '{}'",
+            actual_folder_name,
+            request.name
+        );
+    }
+
     log::info!(
-        "[worktree] Successfully created worktree '{}' with {} projects",
+        "[worktree] Successfully created worktree '{}' (folder: '{}') with {} projects",
         request.name,
+        actual_folder_name,
         project_count
     );
     Ok(normalize_path(&worktree_path.to_string_lossy()))
@@ -943,7 +995,11 @@ pub fn delete_archived_worktree_impl(window_label: &str, name: String) -> Result
         return Err("Archived worktree does not exist".to_string());
     }
 
-    let branch_name = name.strip_suffix(".archive").unwrap_or(&name);
+    let folder_key = name.strip_suffix(".archive").unwrap_or(&name);
+    // Check mapping for the actual branch name (may differ from folder name if aliased)
+    let mapping_path = root.join(&config.worktrees_dir).join("mapping.json");
+    let mapping = load_worktree_mapping(&mapping_path);
+    let branch_name = mapping.get(folder_key).map(|s| s.as_str()).unwrap_or(folder_key);
     log::info!(
         "[worktree] Deleting archived worktree '{}' (branch: {}) in workspace '{}'",
         name,
@@ -1019,6 +1075,14 @@ pub fn delete_archived_worktree_impl(window_label: &str, name: String) -> Result
     );
     fs::remove_dir_all(&archive_path)
         .map_err(|e| format!("Failed to delete archived worktree: {}", e))?;
+
+    // Clean up mapping entry if exists
+    if mapping.contains_key(folder_key) {
+        let mut mapping = mapping;
+        mapping.remove(folder_key);
+        save_worktree_mapping(&mapping_path, &mapping);
+        log::info!("[worktree] Removed mapping entry for '{}'", folder_key);
+    }
 
     log::info!(
         "[worktree] Successfully deleted archived worktree '{}'",

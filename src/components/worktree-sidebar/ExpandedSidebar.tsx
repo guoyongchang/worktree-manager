@@ -540,9 +540,9 @@ const WorktreeList: FC<{
                 <TooltipProvider delayDuration={300}>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <span className="font-medium text-sm truncate flex-1">{worktree.name}</span>
+                      <span className="font-medium text-sm truncate flex-1">{worktree.display_name || worktree.name}</span>
                     </TooltipTrigger>
-                    <TooltipContent side="right">{worktree.name}</TooltipContent>
+                    <TooltipContent side="right">{worktree.display_name ? `${worktree.display_name} (${worktree.name})` : worktree.name}</TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
                 {isDeployed && (
@@ -592,7 +592,7 @@ const WorktreeList: FC<{
         >
           <div className="flex items-center gap-2.5">
             <ArchiveIcon className="w-4 h-4 text-slate-500" />
-            <span className="font-medium text-sm truncate">{worktree.name}</span>
+            <span className="font-medium text-sm truncate">{worktree.display_name || worktree.name}</span>
           </div>
         </div>
       ))}

@@ -151,7 +151,7 @@ export const MobileWorktreeList: FC<MobileWorktreeListProps> = ({
                                 <span className={`w-2 h-2 rounded-full shrink-0 ${statusColors[status]}`} />
                                 <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2">
-                                        <span className="text-sm font-medium text-slate-200 truncate">{wt.name}</span>
+                                        <span className="text-sm font-medium text-slate-200 truncate">{wt.display_name || wt.name}</span>
                                         {isLocked && <Lock className="w-3 h-3 text-amber-400/70" />}
                                     </div>
                                     <div className="flex items-center gap-2 mt-0.5">

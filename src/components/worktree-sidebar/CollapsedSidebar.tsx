@@ -114,7 +114,7 @@ export const CollapsedSidebar: FC<CollapsedSidebarProps> = ({
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="right">
-                  {worktree.name}{isLockedByOther ? ` (${t('sidebar.occupied')})` : ''}
+                  {worktree.display_name || worktree.name}{isLockedByOther ? ` (${t('sidebar.occupied')})` : ''}
                 </TooltipContent>
               </Tooltip>
             );

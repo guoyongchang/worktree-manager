@@ -266,6 +266,8 @@ impl Default for WorkspaceConfig {
 #[derive(Debug, Serialize)]
 pub struct WorktreeListItem {
     pub name: String,
+    /// Display name from mapping.json (for non-ASCII aliased worktrees)
+    pub display_name: Option<String>,
     pub path: String,
     pub is_archived: bool,
     pub projects: Vec<ProjectStatus>,
@@ -329,6 +331,9 @@ pub struct ScannedFolder {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateWorktreeRequest {
     pub name: String,
+    /// Optional English folder alias (for non-ASCII names that may break IDEs)
+    #[serde(default, alias = "folderName")]
+    pub folder_name: Option<String>,
     pub projects: Vec<CreateProjectRequest>,
 }
 

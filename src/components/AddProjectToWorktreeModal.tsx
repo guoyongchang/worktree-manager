@@ -78,7 +78,7 @@ export const AddProjectToWorktreeModal: FC<AddProjectToWorktreeModalProps> = ({
         </DialogHeader>
         <div className="py-4">
           <p className="text-sm text-slate-400 mb-4">
-            {t('addProjectToWorktree.desc', { name: worktree.name })}
+            {t('addProjectToWorktree.desc', { name: worktree.display_name || worktree.name })}
           </p>
 
           {availableProjects.length === 0 ? (

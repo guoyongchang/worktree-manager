@@ -173,7 +173,7 @@ export const MobileWorktreeDetail: FC<MobileWorktreeDetailProps> = ({
                     </button>
                 )}
                 <div className="flex-1 min-w-0">
-                    <h2 className="text-base font-semibold truncate">{selectedWorktree.name}</h2>
+                    <h2 className="text-base font-semibold truncate">{selectedWorktree.display_name || selectedWorktree.name}</h2>
                     <button onClick={() => handleCopyPath(selectedWorktree.path)} className="text-[10px] text-slate-500 truncate block max-w-full text-left">
                         {selectedWorktree.path}
                     </button>

@@ -62,6 +62,8 @@ export interface MainWorkspaceStatus {
 // Worktree types
 export interface WorktreeListItem {
   name: string;
+  /** Display name from mapping (for aliased non-ASCII worktrees) */
+  display_name?: string;
   path: string;
   is_archived: boolean;
   projects: ProjectStatus[];

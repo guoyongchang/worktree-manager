@@ -430,6 +430,10 @@ function App() {
           config={workspace.config}
           worktreeName={actions.newWorktreeName}
           onWorktreeNameChange={actions.setNewWorktreeName}
+          folderAlias={actions.folderAlias}
+          onFolderAliasChange={actions.setFolderAlias}
+          useFolderAlias={actions.useFolderAlias}
+          onUseFolderAliasChange={actions.setUseFolderAlias}
           selectedProjects={actions.selectedProjects}
           onToggleProject={actions.toggleProjectSelection}
           onUpdateBaseBranch={actions.updateProjectBaseBranch}

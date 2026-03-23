@@ -28,7 +28,7 @@ export const ArchiveConfirmationModal: FC<ArchiveConfirmationModalProps> = ({
         <div className="p-5 border-b border-slate-700">
           <h3 className="text-lg font-semibold text-slate-100">{t('archive.title')}</h3>
           <p className="text-sm text-slate-400 mt-1 select-text">
-            {archiveModal.worktree.name} → {archiveModal.worktree.name}.archive
+            {archiveModal.worktree.display_name || archiveModal.worktree.name} → {archiveModal.worktree.name}.archive
           </p>
         </div>
 

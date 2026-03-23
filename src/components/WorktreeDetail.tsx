@@ -676,7 +676,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               {selectedWorktree.is_archived ? <ArchiveIcon className="w-5 h-5 text-slate-500" /> : <FolderIcon className="w-5 h-5 text-blue-400" />}
-              <h2 className="text-xl font-semibold text-slate-100 truncate">{selectedWorktree.name}</h2>
+              <h2 className="text-xl font-semibold text-slate-100 truncate">{selectedWorktree.display_name || selectedWorktree.name}</h2>
             </div>
             <PathDisplay path={selectedWorktree.path} />
           </div>

@@ -29,7 +29,7 @@ export interface UseWorkspaceReturn {
   addWorkspace: (name: string, path: string) => Promise<void>;
   createWorkspace: (name: string, path: string) => Promise<void>;
   removeWorkspace: (path: string) => Promise<void>;
-  createWorktree: (name: string, projects: CreateProjectRequest[]) => Promise<void>;
+  createWorktree: (name: string, projects: CreateProjectRequest[], folderName?: string) => Promise<void>;
   cloneProject: (project: {
     name: string;
     repo_url: string;
@@ -197,8 +197,8 @@ export function useWorkspace(ready = true): UseWorkspaceReturn {
     }
   }, [loadWorkspaces, loadData]);
 
-  const createWorktree = useCallback(async (name: string, projects: CreateProjectRequest[]) => {
-    await callBackend("create_worktree", { request: { name, projects } });
+  const createWorktree = useCallback(async (name: string, projects: CreateProjectRequest[], folderName?: string) => {
+    await callBackend("create_worktree", { request: { name, folderName: folderName || null, projects } });
     await loadData();
   }, [loadData]);
 
