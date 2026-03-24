@@ -149,6 +149,44 @@ const PathDisplay: FC<{ path: string }> = ({ path }) => {
   );
 };
 
+const CopyableTitle: FC<{ text: string; className?: string }> = ({ text, className }) => {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
+
+  return (
+    <TooltipProvider delayDuration={300}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={handleCopy}
+            className={`group flex items-center gap-1.5 min-w-0 max-w-full hover:text-white transition-colors ${className || ''}`}
+          >
+            <span className="truncate">{text}</span>
+            {copied ? (
+              <CheckIcon className="w-3.5 h-3.5 text-green-400 shrink-0" />
+            ) : (
+              <CopyIcon className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 text-slate-400" />
+            )}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          {copied ? t('common.copied', 'Copied!') : t('common.clickToCopy', 'Click to copy')}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+};
+
 export const WorktreeDetail: FC<WorktreeDetailProps> = ({
   selectedWorktree,
   mainWorkspace,
@@ -676,7 +714,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               {selectedWorktree.is_archived ? <ArchiveIcon className="w-5 h-5 text-slate-500" /> : <FolderIcon className="w-5 h-5 text-blue-400" />}
-              <h2 className="text-xl font-semibold text-slate-100 truncate">{selectedWorktree.display_name || selectedWorktree.name}</h2>
+              <CopyableTitle text={selectedWorktree.display_name || selectedWorktree.name} className="text-xl font-semibold text-slate-100" />
             </div>
             <PathDisplay path={selectedWorktree.path} />
           </div>
