@@ -332,7 +332,11 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
 
 
     term.onData((data) => {
-      writeToPty(sessionIdRef.current, data);
+      // Convert full-width characters to half-width for terminal compatibility
+      const converted = data.replace(/[\uff01-\uff5e]/g, (ch) =>
+        String.fromCharCode(ch.charCodeAt(0) - 0xfee0)
+      ).replace(/\u3000/g, ' ');
+      writeToPty(sessionIdRef.current, converted);
     });
 
     return () => {
