@@ -20,14 +20,22 @@ pub(crate) fn open_in_terminal(path: String, terminal: Option<String>) -> Result
 
     #[cfg(target_os = "macos")]
     {
+        let app_name = match term {
+            "iterm2" => "iTerm",
+            "warp" => "Warp",
+            "alacritty" => "Alacritty",
+            "kitty" => "kitty",
+            "ghostty" => "Ghostty",
+            _ => "Terminal", // "terminal", "auto", or unknown
+        };
         match Command::new("open")
-            .args(["-a", "Terminal", &normalized])
+            .args(["-a", app_name, &normalized])
             .spawn()
         {
-            Ok(_) => log::info!("[system] Spawned Terminal.app for: {}", normalized),
+            Ok(_) => log::info!("[system] Spawned {} for: {}", app_name, normalized),
             Err(e) => {
-                log::error!("[system] Failed to spawn Terminal.app: {}", e);
-                return Err(format!("Failed to open terminal: {}", e));
+                log::error!("[system] Failed to spawn {}: {}", app_name, e);
+                return Err(format!("Failed to open terminal {}: {}", app_name, e));
             }
         }
     }
@@ -587,6 +595,13 @@ fn detect_terminals() -> Vec<DetectedTool> {
                 path: "/Applications/kitty.app".into(),
             });
         }
+        if std::path::Path::new("/Applications/Ghostty.app").exists() {
+            results.push(DetectedTool {
+                id: "ghostty".into(),
+                name: "Ghostty".into(),
+                path: "/Applications/Ghostty.app".into(),
+            });
+        }
     }
 
     #[cfg(target_os = "windows")]
@@ -634,6 +649,7 @@ fn detect_terminals() -> Vec<DetectedTool> {
             ("xterm", "XTerm"),
             ("alacritty", "Alacritty"),
             ("kitty", "kitty"),
+            ("ghostty", "Ghostty"),
             ("wezterm", "WezTerm"),
             ("tilix", "Tilix"),
         ];
