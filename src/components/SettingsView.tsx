@@ -283,6 +283,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
     setToolsDetecting(true);
     try {
       const tools = await callBackend('detect_tools') as DetectedToolsResult;
+      console.log('[detect_tools] editors received:', tools.editors.map(e => ({ id: e.id, hasIcon: !!e.icon, iconLen: e.icon?.length || 0 })));
       setDetectedTools(tools);
 
       // Store editor icons and list in localStorage for cross-component access
