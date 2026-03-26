@@ -535,48 +535,63 @@ fn extract_macos_app_icon(app_path: &str) -> Option<String> {
     Some(format!("data:image/png;base64,{}", b64))
 }
 
-/// Extract icon from a Windows .exe file using PowerShell + System.Drawing
+/// Batch-extract icons from multiple Windows .exe files in a single PowerShell process.
+/// Returns a map of exe_path → base64 PNG data URL.
 #[cfg(target_os = "windows")]
-fn extract_windows_exe_icon(exe_path: &str) -> Option<String> {
+fn extract_windows_exe_icons_batch(
+    paths: &[String],
+) -> std::collections::HashMap<String, String> {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-    if exe_path.is_empty() || !std::path::Path::new(exe_path).exists() {
-        return None;
+    if paths.is_empty() {
+        return std::collections::HashMap::new();
     }
+
+    let paths_ps = paths
+        .iter()
+        .map(|p| format!("'{}'", p.replace("'", "''")))
+        .collect::<Vec<_>>()
+        .join(",");
 
     let ps_script = format!(
         r#"
 Add-Type -AssemblyName System.Drawing
-$icon = [System.Drawing.Icon]::ExtractAssociatedIcon('{}')
-if ($icon) {{
-    $bmp = $icon.ToBitmap()
-    $ms = New-Object System.IO.MemoryStream
-    $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
-    [Convert]::ToBase64String($ms.ToArray())
+$paths = @({})
+$result = @{{}}
+foreach ($p in $paths) {{
+    try {{
+        $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($p)
+        if ($icon) {{
+            $bmp = $icon.ToBitmap()
+            $ms = New-Object System.IO.MemoryStream
+            $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+            $result[$p] = [Convert]::ToBase64String($ms.ToArray())
+            $ms.Dispose(); $bmp.Dispose(); $icon.Dispose()
+        }}
+    }} catch {{}}
 }}
+if ($result.Count -gt 0) {{ ConvertTo-Json -InputObject $result -Compress }} else {{ Write-Output '{{}}' }}
 "#,
-        exe_path.replace("'", "''")
+        paths_ps
     );
 
-    let output = Command::new("powershell")
-        .args(["-NoProfile", "-Command", &ps_script])
+    let output = match Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &ps_script])
         .creation_flags(CREATE_NO_WINDOW)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .output()
-        .ok()?;
+    {
+        Ok(o) => o,
+        Err(e) => {
+            log::warn!("[system] Batch icon extraction failed: {}", e);
+            return std::collections::HashMap::new();
+        }
+    };
 
-    if !output.status.success() {
-        return None;
-    }
-
-    let b64 = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if b64.is_empty() {
-        return None;
-    }
-
-    Some(format!("data:image/png;base64,{}", b64))
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    serde_json::from_str(stdout.trim()).unwrap_or_default()
 }
 // ==================== Tool Detection ====================
 
@@ -796,20 +811,110 @@ fn detect_terminals() -> Vec<DetectedTool> {
     results
 }
 
+/// Query Windows registry (HKLM + HKCU uninstall keys) for installed editors.
+/// Returns actual .exe paths, enabling correct icon extraction.
+#[cfg(target_os = "windows")]
+fn detect_editors_via_registry() -> Vec<DetectedTool> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    // Each entry: (display_name_substring, id, friendly_name, exe_relative_to_InstallLocation)
+    // Paths use Windows backslash. Pattern matching is case-insensitive (-like).
+    let ps_script = r#"
+$editors = @(
+    [pscustomobject]@{P='Microsoft Visual Studio Code';Id='vscode';N='VS Code';E='Code.exe'},
+    [pscustomobject]@{P='Visual Studio Code - Insiders';Id='vscode-insiders';N='VS Code Insiders';E='Code - Insiders.exe'},
+    [pscustomobject]@{P='VSCodium';Id='vscodium';N='VSCodium';E='VSCodium.exe'},
+    [pscustomobject]@{P='Cursor';Id='cursor';N='Cursor';E='Cursor.exe'},
+    [pscustomobject]@{P='Windsurf';Id='windsurf';N='Windsurf';E='Windsurf.exe'},
+    [pscustomobject]@{P='Trae';Id='trae';N='Trae';E='Trae.exe'},
+    [pscustomobject]@{P='Antigravity';Id='antigravity';N='Antigravity';E='Antigravity.exe'},
+    [pscustomobject]@{P='IntelliJ IDEA';Id='idea';N='IntelliJ IDEA';E='bin\idea64.exe'},
+    [pscustomobject]@{P='WebStorm';Id='webstorm';N='WebStorm';E='bin\webstorm64.exe'},
+    [pscustomobject]@{P='PyCharm';Id='pycharm';N='PyCharm';E='bin\pycharm64.exe'},
+    [pscustomobject]@{P='GoLand';Id='goland';N='GoLand';E='bin\goland64.exe'},
+    [pscustomobject]@{P='Rider';Id='rider';N='Rider';E='bin\rider64.exe'},
+    [pscustomobject]@{P='CLion';Id='clion';N='CLion';E='bin\clion64.exe'},
+    [pscustomobject]@{P='RustRover';Id='rustrover';N='RustRover';E='bin\rustrover64.exe'},
+    [pscustomobject]@{P='Fleet';Id='fleet';N='Fleet';E='bin\Fleet.exe'},
+    [pscustomobject]@{P='DataGrip';Id='datagrip';N='DataGrip';E='bin\datagrip64.exe'},
+    [pscustomobject]@{P='PhpStorm';Id='phpstorm';N='PhpStorm';E='bin\phpstorm64.exe'},
+    [pscustomobject]@{P='Android Studio';Id='android-studio';N='Android Studio';E='bin\studio64.exe'},
+    [pscustomobject]@{P='Sublime Text';Id='sublime';N='Sublime Text';E='sublime_text.exe'},
+    [pscustomobject]@{P='Zed';Id='zed';N='Zed';E='zed.exe'}
+)
+$found = @{}
+$regPaths = @(
+    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
+    'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
+    'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
+)
+foreach ($rp in $regPaths) {
+    if (-not (Test-Path $rp)) { continue }
+    Get-ChildItem $rp -ErrorAction SilentlyContinue | ForEach-Object {
+        $app = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue
+        if (-not $app -or -not $app.DisplayName -or -not $app.InstallLocation) { return }
+        foreach ($ed in $editors) {
+            if ($found.ContainsKey($ed.Id)) { continue }
+            if ($app.DisplayName -like "*$($ed.P)*") {
+                $exePath = Join-Path $app.InstallLocation $ed.E
+                if (Test-Path $exePath) {
+                    $found[$ed.Id] = [pscustomobject]@{id=$ed.Id;name=$ed.N;path=$exePath}
+                }
+            }
+        }
+    }
+}
+$result = @($found.Values)
+if ($result.Count -gt 0) { ConvertTo-Json -InputObject $result -Compress } else { Write-Output '[]' }
+"#;
+
+    let output = match Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", ps_script])
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+    {
+        Ok(o) => o,
+        Err(e) => {
+            log::warn!("[system] Registry editor scan failed: {}", e);
+            return Vec::new();
+        }
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let trimmed = stdout.trim();
+    if trimmed.is_empty() || trimmed == "null" || trimmed == "[]" {
+        return Vec::new();
+    }
+
+    #[derive(serde::Deserialize)]
+    struct RegEntry {
+        id: String,
+        name: String,
+        path: String,
+    }
+
+    // ConvertTo-Json may emit an object (not array) when count == 1; handle both
+    let entries: Vec<RegEntry> = serde_json::from_str(trimmed)
+        .or_else(|_| serde_json::from_str::<RegEntry>(trimmed).map(|r| vec![r]))
+        .unwrap_or_default();
+
+    entries
+        .into_iter()
+        .map(|r| DetectedTool {
+            id: r.id,
+            name: r.name,
+            path: r.path,
+            icon: None,
+        })
+        .collect()
+}
+
 fn detect_editors() -> Vec<DetectedTool> {
     let mut results = Vec::new();
 
-    // On Windows, use .cmd variants to avoid picking up bash scripts from bin/
-    #[cfg(target_os = "windows")]
-    let editors: &[(&str, &str, &str)] = &[
-        ("code.cmd", "vscode", "Visual Studio Code"),
-        ("cursor.cmd", "cursor", "Cursor"),
-        ("antigravity.cmd", "antigravity", "Antigravity"),
-        ("idea.cmd", "idea", "IntelliJ IDEA"),
-        ("codex.cmd", "codex", "Codex"),
-        ("zed.cmd", "zed", "Zed"),
-        ("subl.exe", "sublime", "Sublime Text"),
-    ];
     #[cfg(not(target_os = "windows"))]
     let editors: &[(&str, &str, &str)] = &[
         ("code", "vscode", "Visual Studio Code"),
@@ -821,6 +926,7 @@ fn detect_editors() -> Vec<DetectedTool> {
         ("sublime_text", "sublime", "Sublime Text"),
     ];
 
+    #[cfg(not(target_os = "windows"))]
     for (cmd, id, name) in editors {
         if let Some(path) = check_executable(cmd) {
             results.push(DetectedTool {
@@ -900,118 +1006,43 @@ fn detect_editors() -> Vec<DetectedTool> {
 
     #[cfg(target_os = "windows")]
     {
-        // Comprehensive Windows IDE scanning
-        let win_apps: &[(&str, &str, &str)] = &[
-            // VS Code family
-            (r"Microsoft VS Code\Code.exe", "vscode", "VS Code"),
-            (r"Microsoft VS Code Insiders\Code - Insiders.exe", "vscode-insiders", "VS Code Insiders"),
-            (r"VSCodium\VSCodium.exe", "vscodium", "VSCodium"),
-            // AI-powered editors
-            (r"Cursor\Cursor.exe", "cursor", "Cursor"),
-            (r"Antigravity\Antigravity.exe", "antigravity", "Antigravity"),
-            (r"Windsurf\Windsurf.exe", "windsurf", "Windsurf"),
-            (r"Trae\Trae.exe", "trae", "Trae"),
-            // JetBrains family
-            (r"JetBrains\IntelliJ IDEA*\bin\idea64.exe", "idea", "IntelliJ IDEA"),
-            (r"JetBrains\WebStorm*\bin\webstorm64.exe", "webstorm", "WebStorm"),
-            (r"JetBrains\PyCharm*\bin\pycharm64.exe", "pycharm", "PyCharm"),
-            (r"JetBrains\GoLand*\bin\goland64.exe", "goland", "GoLand"),
-            (r"JetBrains\Rider*\bin\rider64.exe", "rider", "Rider"),
-            (r"JetBrains\CLion*\bin\clion64.exe", "clion", "CLion"),
-            (r"JetBrains\RustRover*\bin\rustrover64.exe", "rustrover", "RustRover"),
-            (r"JetBrains\Fleet*\bin\Fleet.exe", "fleet", "Fleet"),
-            (r"JetBrains\DataGrip*\bin\datagrip64.exe", "datagrip", "DataGrip"),
-            (r"JetBrains\PhpStorm*\bin\phpstorm64.exe", "phpstorm", "PhpStorm"),
-            // Google
-            (r"Android\Android Studio\bin\studio64.exe", "android-studio", "Android Studio"),
-            // Other editors
-            (r"Sublime Text\sublime_text.exe", "sublime", "Sublime Text"),
-            (r"Zed\zed.exe", "zed", "Zed"),
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+        // Primary: registry-based detection — handles all install locations (Programs, Toolbox, etc.)
+        // and provides actual .exe paths for correct icon extraction.
+        for tool in detect_editors_via_registry() {
+            if !results.iter().any(|r| r.id == tool.id) {
+                results.push(tool);
+            }
+        }
+
+        // Secondary: CLI detection for tools in PATH but absent from registry
+        // (e.g., installed via scoop / winget without standard registry entries)
+        let cli_fallback: &[(&str, &str, &str)] = &[
+            ("code.cmd", "vscode", "Visual Studio Code"),
+            ("cursor.cmd", "cursor", "Cursor"),
+            ("antigravity.cmd", "antigravity", "Antigravity"),
+            ("idea.cmd", "idea", "IntelliJ IDEA"),
+            ("codex.cmd", "codex", "Codex"),
+            ("zed.cmd", "zed", "Zed"),
+            ("subl.exe", "sublime", "Sublime Text"),
         ];
-
-        let env_bases: Vec<String> = [
-            std::env::var("LOCALAPPDATA").ok(),
-            std::env::var("PROGRAMFILES").ok(),
-            std::env::var("PROGRAMFILES(X86)").ok(),
-            std::env::var("APPDATA").ok(),
-        ]
-        .iter()
-        .filter_map(|v| v.clone())
-        .collect();
-
-        for (rel, id, name) in win_apps {
-            // If already detected via CLI, update its path to the .exe and extract icon
-            let existing_idx = results.iter().position(|r| r.id == *id);
-            // Handle wildcard patterns (JetBrains versioned dirs like "IntelliJ IDEA 2024.1")
-            if rel.contains('*') {
-                // Split pattern at the wildcard: "JetBrains\IntelliJ IDEA*\bin\idea64.exe"
-                // -> dir_prefix = "JetBrains", pattern_prefix = "IntelliJ IDEA", suffix = "bin\idea64.exe"
-                let parts: Vec<&str> = rel.splitn(2, '*').collect();
-                if parts.len() == 2 {
-                    let before_star = parts[0].trim_end_matches('\\');
-                    let after_star = parts[1].trim_start_matches('\\');
-                    // Split before_star into parent dir and name prefix
-                    let (parent_rel, name_prefix) = if let Some(pos) = before_star.rfind('\\') {
-                        (&before_star[..pos], &before_star[pos + 1..])
-                    } else {
-                        ("", before_star)
-                    };
-
-                    'base_loop: for base in &env_bases {
-                        let parent_dir = if parent_rel.is_empty() {
-                            base.clone()
-                        } else {
-                            format!("{}\\{}", base, parent_rel)
-                        };
-                        if let Ok(entries) = std::fs::read_dir(&parent_dir) {
-                            for entry in entries.flatten() {
-                                let entry_name = entry.file_name().to_string_lossy().to_string();
-                                if entry_name.starts_with(name_prefix) && entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                                    let full = format!("{}\\{}\\{}", parent_dir, entry_name, after_star);
-                                    if std::path::Path::new(&full).exists() {
-                                        let icon = extract_windows_exe_icon(&full);
-                                        if let Some(idx) = existing_idx {
-                                            results[idx].icon = icon;
-                                        } else {
-                                            results.push(DetectedTool {
-                                                id: id.to_string(),
-                                                name: name.to_string(),
-                                                path: full,
-                                                icon,
-                                            });
-                                        }
-                                        break 'base_loop;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            } else {
-                for base in &env_bases {
-                    let full = format!(r"{}\{}", base, rel);
-                    if std::path::Path::new(&full).exists() {
-                        let icon = extract_windows_exe_icon(&full);
-                        if let Some(idx) = existing_idx {
-                            results[idx].icon = icon;
-                        } else {
-                            results.push(DetectedTool {
-                                id: id.to_string(),
-                                name: name.to_string(),
-                                path: full,
-                                icon,
-                            });
-                        }
-                        break;
-                    }
+        for (cmd, id, name) in cli_fallback {
+            if !results.iter().any(|r| r.id == *id) {
+                if let Some(path) = check_executable(cmd) {
+                    results.push(DetectedTool {
+                        id: id.to_string(),
+                        name: name.to_string(),
+                        path,
+                        icon: None,
+                    });
                 }
             }
         }
 
-        // Detect Codex UWP app
+        // Codex UWP (Windows Store app — not in the standard uninstall registry)
         if !results.iter().any(|r| r.id == "codex") {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
             let ps_result = Command::new("powershell")
                 .args(["-NoProfile", "-Command", "Get-AppxPackage -Name 'OpenAI.Codex' | Select-Object -ExpandProperty InstallLocation"])
                 .creation_flags(CREATE_NO_WINDOW)
@@ -1033,13 +1064,22 @@ fn detect_editors() -> Vec<DetectedTool> {
             }
         }
 
-        // Backfill icons for CLI-detected editors
-        let win_lookup: std::collections::HashMap<&str, &str> = win_apps.iter()
-            .map(|(_, id, _)| (*id, *id))
+        // Batch icon extraction: single PowerShell process for all .exe paths
+        let exe_paths: Vec<String> = results
+            .iter()
+            .filter(|t| t.icon.is_none() && t.path.to_ascii_lowercase().ends_with(".exe"))
+            .map(|t| t.path.clone())
             .collect();
-        for tool in results.iter_mut() {
-            if tool.icon.is_none() && win_lookup.contains_key(tool.id.as_str()) {
-                tool.icon = extract_windows_exe_icon(&tool.path);
+        if !exe_paths.is_empty() {
+            let icon_map = extract_windows_exe_icons_batch(&exe_paths);
+            for tool in results.iter_mut() {
+                if tool.icon.is_none() {
+                    if let Some(b64) = icon_map.get(&tool.path) {
+                        if !b64.is_empty() {
+                            tool.icon = Some(format!("data:image/png;base64,{}", b64));
+                        }
+                    }
+                }
             }
         }
     }
