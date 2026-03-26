@@ -466,7 +466,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
 
       if (!exists) {
         setInitStatus('Creating PTY session...');
-        const shell = localStorage.getItem('preferred_terminal') || undefined;
+        const shell = localStorage.getItem('preferred_shell') || undefined;
         await callBackend('pty_create', {
           sessionId: sessionIdRef.current,
           cwd: cwdRef.current,

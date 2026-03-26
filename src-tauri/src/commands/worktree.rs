@@ -200,6 +200,7 @@ fn scan_worktrees_dir(
                     behind_base: info.behind_base,
                     ahead_of_test: info.ahead_of_test,
                     unpushed_commits: info.unpushed_commits,
+                    remote_url: info.remote_url,
                 });
             }
         }

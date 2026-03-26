@@ -35,6 +35,8 @@ import {
   Mic,
   Link,
   QrCode,
+  Code,
+  FolderOpen,
 } from 'lucide-react';
 
 interface IconProps {
@@ -198,3 +200,33 @@ export const LinkIcon: FC<IconProps> = ({ className = "w-4 h-4" }) => (
 export const QrCodeIcon: FC<IconProps> = ({ className = "w-4 h-4" }) => (
   <QrCode className={className} />
 );
+
+export const CodeIcon: FC<IconProps> = ({ className = "w-4 h-4" }) => (
+  <Code className={className} />
+);
+
+export const FolderOpenIcon: FC<IconProps> = ({ className = "w-4 h-4" }) => (
+  <FolderOpen className={className} />
+);
+
+/** IDE-specific icon: uses system-extracted app icon if available, falls back to simple-icons library. */
+export const EditorIcon: FC<{ editorId: string; className?: string }> = ({ editorId, className = "w-4 h-4" }) => {
+  const sizeMatch = className.match(/w-(\d+\.?\d*)/);
+  const size = sizeMatch ? parseFloat(sizeMatch[1]) * 4 : 16;
+
+  // Check localStorage for system-extracted icon (base64 data URL from detect_tools)
+  try {
+    const iconsJson = localStorage.getItem('editor_icons');
+    if (iconsJson) {
+      const icons = JSON.parse(iconsJson);
+      if (icons[editorId]) {
+        return <img src={icons[editorId]} width={size} height={size} alt={editorId} style={{ flexShrink: 0, borderRadius: 3 }} />;
+      }
+    }
+  } catch { /* ignore parse errors */ }
+
+  // Fallback: use generic code icon
+  return <Code className={className} />;
+};
+
+

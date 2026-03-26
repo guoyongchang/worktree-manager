@@ -466,6 +466,118 @@ fn get_platform_log_dir() -> Result<PathBuf, String> {
     }
 }
 
+// ==================== App Icon Extraction ====================
+
+/// Extract the app icon from a macOS .app bundle and return as base64 data URL.
+/// Reads Info.plist → CFBundleIconFile → converts .icns to 32x32 PNG → base64.
+#[cfg(target_os = "macos")]
+fn extract_macos_app_icon(app_path: &str) -> Option<String> {
+    use std::process::Command;
+
+    let app = std::path::Path::new(app_path);
+    if !app.exists() {
+        return None;
+    }
+
+    // Step 1: Read CFBundleIconFile from Info.plist
+    let plist_output = Command::new("defaults")
+        .arg("read")
+        .arg(app.join("Contents/Info.plist").to_string_lossy().to_string())
+        .arg("CFBundleIconFile")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+
+    if !plist_output.status.success() {
+        return None;
+    }
+
+    let mut icon_file = String::from_utf8_lossy(&plist_output.stdout).trim().to_string();
+    if icon_file.is_empty() {
+        return None;
+    }
+
+    // Ensure .icns extension
+    if !icon_file.ends_with(".icns") {
+        icon_file.push_str(".icns");
+    }
+
+    let icns_path = app.join("Contents/Resources").join(&icon_file);
+    if !icns_path.exists() {
+        return None;
+    }
+
+    // Step 2: Convert .icns to 32x32 PNG using sips
+    let tmp_png = format!("/tmp/wm_icon_{}.png", app.file_name()?.to_string_lossy().replace(' ', "_"));
+    let sips_output = Command::new("sips")
+        .args(["-s", "format", "png"])
+        .arg(icns_path.to_string_lossy().to_string())
+        .args(["--out", &tmp_png])
+        .args(["--resampleWidth", "256"])
+        .args(["-z", "256", "256"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+
+    if !sips_output.status.success() {
+        return None;
+    }
+
+    // Step 3: Read PNG and base64 encode
+    let png_data = std::fs::read(&tmp_png).ok()?;
+    // Clean up temp file
+    let _ = std::fs::remove_file(&tmp_png);
+
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&png_data);
+    Some(format!("data:image/png;base64,{}", b64))
+}
+
+/// Extract icon from a Windows .exe file using PowerShell + System.Drawing
+#[cfg(target_os = "windows")]
+fn extract_windows_exe_icon(exe_path: &str) -> Option<String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    if exe_path.is_empty() || !std::path::Path::new(exe_path).exists() {
+        return None;
+    }
+
+    let ps_script = format!(
+        r#"
+Add-Type -AssemblyName System.Drawing
+$icon = [System.Drawing.Icon]::ExtractAssociatedIcon('{}')
+if ($icon) {{
+    $bmp = $icon.ToBitmap()
+    $ms = New-Object System.IO.MemoryStream
+    $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+    [Convert]::ToBase64String($ms.ToArray())
+}}
+"#,
+        exe_path.replace("'", "''")
+    );
+
+    let output = Command::new("powershell")
+        .args(["-NoProfile", "-Command", &ps_script])
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let b64 = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if b64.is_empty() {
+        return None;
+    }
+
+    Some(format!("data:image/png;base64,{}", b64))
+}
 // ==================== Tool Detection ====================
 
 #[derive(Debug, Clone, Serialize)]
@@ -473,6 +585,8 @@ pub struct DetectedTool {
     pub id: String,
     pub name: String,
     pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -480,6 +594,7 @@ pub struct DetectedTools {
     pub git: Vec<DetectedTool>,
     pub terminals: Vec<DetectedTool>,
     pub editors: Vec<DetectedTool>,
+    pub shells: Vec<DetectedTool>,
 }
 
 fn check_executable(name: &str) -> Option<String> {
@@ -524,6 +639,7 @@ fn detect_git() -> Vec<DetectedTool> {
             id: "git".into(),
             name: "Git".into(),
             path,
+            icon: None,
         });
     }
 
@@ -539,6 +655,7 @@ fn detect_git() -> Vec<DetectedTool> {
                     id: "git".into(),
                     name: name.to_string(),
                     path: p.to_string(),
+                    icon: None,
                 });
             }
         }
@@ -549,6 +666,7 @@ fn detect_git() -> Vec<DetectedTool> {
                     id: "git".into(),
                     name: "Git (User)".into(),
                     path: p,
+                    icon: None,
                 });
             }
         }
@@ -566,12 +684,14 @@ fn detect_terminals() -> Vec<DetectedTool> {
             id: "terminal".into(),
             name: "Terminal.app".into(),
             path: "/System/Applications/Utilities/Terminal.app".into(),
+            icon: None,
         });
         if std::path::Path::new("/Applications/iTerm.app").exists() {
             results.push(DetectedTool {
                 id: "iterm2".into(),
                 name: "iTerm2".into(),
                 path: "/Applications/iTerm.app".into(),
+                icon: None,
             });
         }
         if std::path::Path::new("/Applications/Warp.app").exists() {
@@ -579,6 +699,7 @@ fn detect_terminals() -> Vec<DetectedTool> {
                 id: "warp".into(),
                 name: "Warp".into(),
                 path: "/Applications/Warp.app".into(),
+                icon: None,
             });
         }
         if std::path::Path::new("/Applications/Alacritty.app").exists() {
@@ -586,6 +707,7 @@ fn detect_terminals() -> Vec<DetectedTool> {
                 id: "alacritty".into(),
                 name: "Alacritty".into(),
                 path: "/Applications/Alacritty.app".into(),
+                icon: None,
             });
         }
         if std::path::Path::new("/Applications/kitty.app").exists() {
@@ -593,6 +715,7 @@ fn detect_terminals() -> Vec<DetectedTool> {
                 id: "kitty".into(),
                 name: "kitty".into(),
                 path: "/Applications/kitty.app".into(),
+                icon: None,
             });
         }
         if std::path::Path::new("/Applications/Ghostty.app").exists() {
@@ -600,6 +723,7 @@ fn detect_terminals() -> Vec<DetectedTool> {
                 id: "ghostty".into(),
                 name: "Ghostty".into(),
                 path: "/Applications/Ghostty.app".into(),
+                icon: None,
             });
         }
     }
@@ -659,6 +783,7 @@ fn detect_terminals() -> Vec<DetectedTool> {
                     id: cmd.to_string(),
                     name: name.to_string(),
                     path,
+                icon: None,
                 });
             }
         }
@@ -678,9 +803,6 @@ fn detect_editors() -> Vec<DetectedTool> {
         ("codex", "codex", "Codex"),
         ("zed", "zed", "Zed"),
         ("sublime_text", "sublime", "Sublime Text"),
-        ("atom", "atom", "Atom"),
-        ("nvim", "neovim", "Neovim"),
-        ("vim", "vim", "Vim"),
     ];
 
     for (cmd, id, name) in &editors {
@@ -689,77 +811,184 @@ fn detect_editors() -> Vec<DetectedTool> {
                 id: id.to_string(),
                 name: name.to_string(),
                 path,
+                icon: None,
             });
         }
     }
 
     #[cfg(target_os = "macos")]
     {
-        let mac_apps = [
-            (
-                "/Applications/Visual Studio Code.app",
-                "vscode",
-                "Visual Studio Code",
-            ),
+        // Comprehensive scan of /Applications for all known IDEs/editors
+        let mac_apps: &[(&str, &str, &str)] = &[
+            // VS Code family
+            ("/Applications/Visual Studio Code.app", "vscode", "VS Code"),
+            ("/Applications/Visual Studio Code - Insiders.app", "vscode-insiders", "VS Code Insiders"),
+            ("/Applications/VSCodium.app", "vscodium", "VSCodium"),
+            // AI-powered editors
             ("/Applications/Cursor.app", "cursor", "Cursor"),
-            (
-                "/Applications/Antigravity.app",
-                "antigravity",
-                "Antigravity",
-            ),
+            ("/Applications/Antigravity.app", "antigravity", "Antigravity"),
+            ("/Applications/Windsurf.app", "windsurf", "Windsurf"),
+            ("/Applications/Trae.app", "trae", "Trae"),
+            // JetBrains family
+            ("/Applications/IntelliJ IDEA.app", "idea", "IntelliJ IDEA"),
+            ("/Applications/IntelliJ IDEA CE.app", "idea-ce", "IntelliJ IDEA CE"),
+            ("/Applications/WebStorm.app", "webstorm", "WebStorm"),
+            ("/Applications/PyCharm.app", "pycharm", "PyCharm"),
+            ("/Applications/PyCharm CE.app", "pycharm-ce", "PyCharm CE"),
+            ("/Applications/GoLand.app", "goland", "GoLand"),
+            ("/Applications/Rider.app", "rider", "Rider"),
+            ("/Applications/CLion.app", "clion", "CLion"),
+            ("/Applications/RustRover.app", "rustrover", "RustRover"),
+            ("/Applications/Fleet.app", "fleet", "Fleet"),
+            ("/Applications/DataGrip.app", "datagrip", "DataGrip"),
+            ("/Applications/PhpStorm.app", "phpstorm", "PhpStorm"),
+            ("/Applications/Aqua.app", "aqua", "Aqua"),
+            // Apple
+            ("/Applications/Xcode.app", "xcode", "Xcode"),
+            // Google
+            ("/Applications/Android Studio.app", "android-studio", "Android Studio"),
+            // Other editors
             ("/Applications/Zed.app", "zed", "Zed"),
             ("/Applications/Sublime Text.app", "sublime", "Sublime Text"),
+            ("/Applications/Nova.app", "nova", "Nova"),
+            ("/Applications/BBEdit.app", "bbedit", "BBEdit"),
+            ("/Applications/TextMate.app", "textmate", "TextMate"),
+            ("/Applications/CotEditor.app", "coteditor", "CotEditor"),
+            ("/Applications/Codex.app", "codex", "Codex"),
         ];
-        for (app_path, id, name) in &mac_apps {
+        for (app_path, id, name) in mac_apps {
             if std::path::Path::new(app_path).exists() && !results.iter().any(|r| r.id == *id) {
+                let icon = extract_macos_app_icon(app_path);
                 results.push(DetectedTool {
                     id: id.to_string(),
                     name: name.to_string(),
                     path: app_path.to_string(),
+                    icon,
                 });
+            }
+        }
+        // Backfill icons for CLI-detected editors using known .app paths
+        let app_lookup: std::collections::HashMap<&str, &str> = mac_apps.iter()
+            .map(|(path, id, _)| (*id, *path))
+            .collect();
+        for tool in results.iter_mut() {
+            if tool.icon.is_none() {
+                if let Some(app_path) = app_lookup.get(tool.id.as_str()) {
+                    if std::path::Path::new(app_path).exists() {
+                        tool.icon = extract_macos_app_icon(app_path);
+                    }
+                }
             }
         }
     }
 
     #[cfg(target_os = "windows")]
     {
-        let win_locations = [
-            (
-                r"Microsoft VS Code\Code.exe",
-                "vscode",
-                "Visual Studio Code",
-            ),
+        // Comprehensive Windows IDE scanning
+        let win_apps: &[(&str, &str, &str)] = &[
+            // VS Code family
+            (r"Microsoft VS Code\Code.exe", "vscode", "VS Code"),
+            (r"Microsoft VS Code Insiders\Code - Insiders.exe", "vscode-insiders", "VS Code Insiders"),
+            (r"VSCodium\VSCodium.exe", "vscodium", "VSCodium"),
+            // AI-powered editors
             (r"Cursor\Cursor.exe", "cursor", "Cursor"),
-            (
-                r"Programs\Microsoft VS Code\Code.exe",
-                "vscode",
-                "Visual Studio Code",
-            ),
+            (r"Antigravity\Antigravity.exe", "antigravity", "Antigravity"),
+            (r"Windsurf\Windsurf.exe", "windsurf", "Windsurf"),
+            (r"Trae\Trae.exe", "trae", "Trae"),
+            // JetBrains family
+            (r"JetBrains\IntelliJ IDEA*\bin\idea64.exe", "idea", "IntelliJ IDEA"),
+            (r"JetBrains\WebStorm*\bin\webstorm64.exe", "webstorm", "WebStorm"),
+            (r"JetBrains\PyCharm*\bin\pycharm64.exe", "pycharm", "PyCharm"),
+            (r"JetBrains\GoLand*\bin\goland64.exe", "goland", "GoLand"),
+            (r"JetBrains\Rider*\bin\rider64.exe", "rider", "Rider"),
+            (r"JetBrains\CLion*\bin\clion64.exe", "clion", "CLion"),
+            (r"JetBrains\RustRover*\bin\rustrover64.exe", "rustrover", "RustRover"),
+            (r"JetBrains\Fleet*\bin\Fleet.exe", "fleet", "Fleet"),
+            (r"JetBrains\DataGrip*\bin\datagrip64.exe", "datagrip", "DataGrip"),
+            (r"JetBrains\PhpStorm*\bin\phpstorm64.exe", "phpstorm", "PhpStorm"),
+            // Google
+            (r"Android\Android Studio\bin\studio64.exe", "android-studio", "Android Studio"),
+            // Other editors
+            (r"Sublime Text\sublime_text.exe", "sublime", "Sublime Text"),
+            (r"Zed\zed.exe", "zed", "Zed"),
         ];
-        for base in &[
+
+        let env_bases: Vec<String> = [
             std::env::var("LOCALAPPDATA").ok(),
             std::env::var("PROGRAMFILES").ok(),
             std::env::var("PROGRAMFILES(X86)").ok(),
-        ] {
-            if let Some(base) = base {
-                for (rel, id, name) in &win_locations {
+            std::env::var("APPDATA").ok(),
+        ]
+        .iter()
+        .filter_map(|v| v.clone())
+        .collect();
+
+        for (rel, id, name) in win_apps {
+            if results.iter().any(|r| r.id == *id) {
+                continue;
+            }
+            // Handle wildcard patterns (JetBrains versioned dirs like "IntelliJ IDEA 2024.1")
+            if rel.contains('*') {
+                // Split pattern at the wildcard: "JetBrains\IntelliJ IDEA*\bin\idea64.exe"
+                // -> dir_prefix = "JetBrains", pattern_prefix = "IntelliJ IDEA", suffix = "bin\idea64.exe"
+                let parts: Vec<&str> = rel.splitn(2, '*').collect();
+                if parts.len() == 2 {
+                    let before_star = parts[0].trim_end_matches('\\');
+                    let after_star = parts[1].trim_start_matches('\\');
+                    // Split before_star into parent dir and name prefix
+                    let (parent_rel, name_prefix) = if let Some(pos) = before_star.rfind('\\') {
+                        (&before_star[..pos], &before_star[pos + 1..])
+                    } else {
+                        ("", before_star)
+                    };
+
+                    'base_loop: for base in &env_bases {
+                        let parent_dir = if parent_rel.is_empty() {
+                            base.clone()
+                        } else {
+                            format!("{}\\{}", base, parent_rel)
+                        };
+                        if let Ok(entries) = std::fs::read_dir(&parent_dir) {
+                            for entry in entries.flatten() {
+                                let entry_name = entry.file_name().to_string_lossy().to_string();
+                                if entry_name.starts_with(name_prefix) && entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                                    let full = format!("{}\\{}\\{}", parent_dir, entry_name, after_star);
+                                    if std::path::Path::new(&full).exists() {
+                                        let icon = extract_windows_exe_icon(&full);
+                                        results.push(DetectedTool {
+                                            id: id.to_string(),
+                                            name: name.to_string(),
+                                            path: full,
+                                            icon,
+                                        });
+                                        break 'base_loop;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                for base in &env_bases {
                     let full = format!(r"{}\{}", base, rel);
-                    if std::path::Path::new(&full).exists() && !results.iter().any(|r| r.id == *id)
-                    {
+                    if std::path::Path::new(&full).exists() {
+                        let icon = extract_windows_exe_icon(&full);
                         results.push(DetectedTool {
                             id: id.to_string(),
                             name: name.to_string(),
                             path: full,
+                            icon,
                         });
+                        break;
                     }
                 }
             }
         }
+
         // Detect Codex UWP app
         if !results.iter().any(|r| r.id == "codex") {
             use std::os::windows::process::CommandExt;
             const CREATE_NO_WINDOW: u32 = 0x08000000;
-            // Check if Codex UWP package is installed via PowerShell
             let ps_result = Command::new("powershell")
                 .args(["-NoProfile", "-Command", "Get-AppxPackage -Name 'OpenAI.Codex' | Select-Object -ExpandProperty InstallLocation"])
                 .creation_flags(CREATE_NO_WINDOW)
@@ -774,10 +1003,99 @@ fn detect_editors() -> Vec<DetectedTool> {
                             id: "codex".into(),
                             name: "Codex (UWP)".into(),
                             path: location,
+                            icon: None,
                         });
                     }
                 }
             }
+        }
+
+        // Backfill icons for CLI-detected editors
+        let win_lookup: std::collections::HashMap<&str, &str> = win_apps.iter()
+            .map(|(_, id, _)| (*id, *id))
+            .collect();
+        for tool in results.iter_mut() {
+            if tool.icon.is_none() && win_lookup.contains_key(tool.id.as_str()) {
+                tool.icon = extract_windows_exe_icon(&tool.path);
+            }
+        }
+    }
+
+    results
+}
+
+fn detect_shells() -> Vec<DetectedTool> {
+    let mut results = Vec::new();
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let shells = [
+            ("zsh", "Zsh"),
+            ("bash", "Bash"),
+            ("fish", "Fish"),
+            ("nu", "Nushell"),
+            ("pwsh", "PowerShell"),
+        ];
+        for (cmd, name) in &shells {
+            if let Some(path) = check_executable(cmd) {
+                results.push(DetectedTool {
+                    id: cmd.to_string(),
+                    name: name.to_string(),
+                    path,
+                icon: None,
+                });
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // PowerShell 7+ (pwsh)
+        if let Some(path) = check_executable("pwsh") {
+            results.push(DetectedTool {
+                id: "pwsh".into(),
+                name: "PowerShell 7".into(),
+                path,
+                icon: None,
+            });
+        }
+        // Windows PowerShell 5.x
+        let ps5 = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe";
+        if std::path::Path::new(ps5).exists() {
+            results.push(DetectedTool {
+                id: "powershell".into(),
+                name: "Windows PowerShell".into(),
+                path: ps5.to_string(),
+            });
+        }
+        // CMD
+        results.push(DetectedTool {
+            id: "cmd".into(),
+            name: "CMD".into(),
+            path: "cmd.exe".into(),
+        });
+        // Git Bash
+        let git_bash_candidates = [
+            r"C:\Program Files\Git\bin\bash.exe",
+            r"C:\Program Files (x86)\Git\bin\bash.exe",
+        ];
+        for p in &git_bash_candidates {
+            if std::path::Path::new(p).exists() {
+                results.push(DetectedTool {
+                    id: "bash".into(),
+                    name: "Git Bash".into(),
+                    path: p.to_string(),
+                });
+                break;
+            }
+        }
+        // Nushell
+        if let Some(path) = check_executable("nu") {
+            results.push(DetectedTool {
+                id: "nu".into(),
+                name: "Nushell".into(),
+                path,
+            });
         }
     }
 
@@ -791,6 +1109,7 @@ pub(crate) fn detect_tools() -> DetectedTools {
         git: detect_git(),
         terminals: detect_terminals(),
         editors: detect_editors(),
+        shells: detect_shells(),
     };
     log::info!(
         "[system] Detected: {} git, {} terminals, {} editors",

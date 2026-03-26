@@ -288,6 +288,7 @@ pub struct ProjectStatus {
     pub behind_base: usize,
     pub ahead_of_test: usize,
     pub unpushed_commits: usize,
+    pub remote_url: String,
 }
 
 #[derive(Debug, Serialize)]

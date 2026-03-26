@@ -1,4 +1,4 @@
-import { useState, type FC, useCallback } from 'react';
+import { useState, useEffect, type FC, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import {
@@ -27,12 +27,15 @@ import {
   CopyIcon,
   CheckIcon,
   TrashIcon,
+  FolderOpenIcon,
+  GithubIcon,
+  EditorIcon,
 } from './Icons';
 import { Badge } from '@/components/ui/badge';
 import { GitOperations } from './GitOperations';
 import { ChangedFilesPanel } from './ChangedFilesPanel';
 import { EDITORS } from '../constants';
-import { isTauri } from '@/lib/backend';
+import { isTauri, openLink } from '@/lib/backend';
 import type {
   WorktreeListItem,
   MainWorkspaceStatus,
@@ -110,6 +113,21 @@ const statusBorderColor: Record<ReturnType<typeof getProjectStatus>, string> = {
   info: 'border-l-blue-500',
   sync: 'border-l-blue-400',
 };
+
+/** Convert a git remote URL (SSH or HTTPS) to a web-browsable URL. */
+function gitUrlToWebUrl(remoteUrl: string): string | null {
+  if (!remoteUrl) return null;
+  let url = remoteUrl.trim();
+  // SSH: git@github.com:user/repo.git → https://github.com/user/repo
+  const sshMatch = url.match(/^git@([^:]+):(.+?)(\.git)?$/);
+  if (sshMatch) return `https://${sshMatch[1]}/${sshMatch[2]}`;
+  // HTTPS: https://github.com/user/repo.git → https://github.com/user/repo
+  if (url.startsWith('http')) {
+    url = url.replace(/\.git$/, '');
+    return url;
+  }
+  return null;
+}
 
 
 const PathDisplay: FC<{ path: string }> = ({ path }) => {
@@ -218,7 +236,47 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
   onRefreshAfterDeploy,
 }) => {
   const { t } = useTranslation();
-  const selectedEditorName = EDITORS.find(e => e.id === selectedEditor)?.name || 'VS Code';
+  // Dynamic editor list from system detection (auto-detected on startup)
+  const readDetectedEditors = useCallback((): Array<{ id: string; name: string }> => {
+    try {
+      const stored = localStorage.getItem('detected_editors');
+      const hiddenIds: string[] = JSON.parse(localStorage.getItem('hidden_editors') || '[]');
+      if (stored) {
+        const parsed = JSON.parse(stored) as Array<{ id: string; name: string }>;
+        const visible = parsed.filter(e => !hiddenIds.includes(e.id));
+        if (visible.length > 0) return visible;
+      }
+    } catch { /* ignore */ }
+    return EDITORS; // fallback to hardcoded list
+  }, []);
+
+  const [detectedEditors, setDetectedEditors] = useState(readDetectedEditors);
+
+  useEffect(() => {
+    const handleDetected = () => setDetectedEditors(readDetectedEditors());
+    window.addEventListener('editors-detected', handleDetected);
+    return () => window.removeEventListener('editors-detected', handleDetected);
+  }, [readDetectedEditors]);
+
+  const selectedEditorName = detectedEditors.find((e: { id: string; name: string }) => e.id === selectedEditor)?.name || selectedEditor;
+
+  // Per-project IDE preference: returns project-specific editor or global default
+  // Falls back to first visible editor if the preferred one is no longer available
+  const getProjectEditor = useCallback((projName: string): string => {
+    try {
+      const prefs: Record<string, string> = JSON.parse(localStorage.getItem('project_preferred_editors') || '{}');
+      if (prefs[projName]) {
+        // Validate: is this editor still in the visible list?
+        if (detectedEditors.some(e => e.id === prefs[projName])) {
+          return prefs[projName];
+        }
+      }
+    } catch { /* ignore */ }
+    // Fallback: global selected editor if still visible, otherwise first in list
+    if (detectedEditors.some(e => e.id === selectedEditor)) return selectedEditor;
+    return detectedEditors[0]?.id || selectedEditor;
+  }, [selectedEditor, detectedEditors]);
+
   const [switchingBranch, setSwitchingBranch] = useState<string | null>(null);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [exitError, setExitError] = useState<string | null>(null);
@@ -334,10 +392,11 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
               )}
               <div className="inline-flex rounded-md">
                 <Button
-                  className="rounded-r-none border-r border-blue-700/50"
+                  className="rounded-r-none border-r border-blue-700/50 px-2.5"
                   onClick={() => onOpenInEditor(mainWorkspace.path)}
+                  title={selectedEditorName}
                 >
-                  {selectedEditorName}
+                  <EditorIcon editorId={selectedEditor} className="w-5 h-5" />
                 </Button>
                 <DropdownMenu open={showEditorMenu} onOpenChange={onShowEditorMenu}>
                   <DropdownMenuTrigger asChild>
@@ -346,7 +405,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    {EDITORS.map(editor => (
+                    {detectedEditors.map(editor => (
                       <div
                         key={editor.id}
                         className="flex items-stretch rounded-sm text-sm"
@@ -358,6 +417,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                             onShowEditorMenu(false);
                           }}
                         >
+                          <EditorIcon editorId={editor.id} className="w-4 h-4" />
                           {editor.name}
                           {editor.id === selectedEditor && (
                             <CheckIcon className="w-3 h-3 text-green-400" />
@@ -445,6 +505,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                 behind_base: p.behind_base,
                 ahead_of_test: p.ahead_of_test,
                 unpushed_commits: p.unpushed_commits,
+                remote_url: '',
               }))}
               focusProject={focusProject}
             />
@@ -472,6 +533,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                       behind_base: proj.behind_base,
                       ahead_of_test: proj.ahead_of_test,
                       unpushed_commits: proj.unpushed_commits,
+                      remote_url: '',
                     };
                     const status = getProjectStatus(projAsStatus);
                     return (
@@ -496,12 +558,12 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  onClick={() => onOpenInEditor(projectPath)}
-                                  title={t('detail.openInEditorLabel', { editor: selectedEditorName })}
+                                  onClick={() => onOpenInEditor(projectPath, getProjectEditor(proj.name) as any)}
+                                  title={t('detail.openInEditorLabel', { editor: detectedEditors.find(e => e.id === getProjectEditor(proj.name))?.name || selectedEditorName })}
                                   aria-label={t('detail.openInEditorProject', { editor: selectedEditorName, name: proj.name })}
                                   className="h-7 w-7"
                                 >
-                                  <FolderIcon className="w-3.5 h-3.5" />
+                                  <EditorIcon editorId={getProjectEditor(proj.name)} className="w-4.5 h-4.5" />
                                 </Button>
                                 <Button
                                   variant="ghost"
@@ -511,7 +573,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                                   aria-label={t('detail.openExternalTerminalProject', { name: proj.name })}
                                   className="h-7 w-7"
                                 >
-                                  <TerminalIcon className="w-3.5 h-3.5" />
+                                  <TerminalIcon className="w-4.5 h-4.5" />
                                 </Button>
                               </div>
                             )}
@@ -630,6 +692,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                           behind_base: proj.behind_base,
                           ahead_of_test: 0,
                           unpushed_commits: proj.unpushed_commits,
+                          remote_url: '',
                         }} onClickUncommitted={() => handleNavigateToChangedFiles(proj.name)} />
                       </div>
                       {/* Git operations */}
@@ -734,10 +797,11 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                   <>
                     <div className="inline-flex rounded-md">
                       <Button
-                        className="rounded-r-none border-r border-blue-700/50"
+                        className="rounded-r-none border-r border-blue-700/50 px-2.5"
                         onClick={() => onOpenInEditor(selectedWorktree.path)}
+                        title={selectedEditorName}
                       >
-                        {selectedEditorName}
+                        <EditorIcon editorId={selectedEditor} className="w-5 h-5" />
                       </Button>
                       <DropdownMenu open={showEditorMenu} onOpenChange={onShowEditorMenu}>
                         <DropdownMenuTrigger asChild>
@@ -746,7 +810,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          {EDITORS.map(editor => (
+                          {detectedEditors.map(editor => (
                             <div
                               key={editor.id}
                               className="flex items-stretch rounded-sm text-sm"
@@ -758,6 +822,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                                   onShowEditorMenu(false);
                                 }}
                               >
+                                <EditorIcon editorId={editor.id} className="w-4 h-4" />
                                 {editor.name}
                                 {editor.id === selectedEditor && (
                                   <CheckIcon className="w-3 h-3 text-green-400" />
@@ -872,13 +937,36 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                         <Button
                           variant="ghost"
                           size="icon"
-                          onClick={() => onOpenInEditor(proj.path)}
-                          title={t('detail.openInEditorLabel', { editor: selectedEditorName })}
+                          onClick={() => onOpenInEditor(proj.path, getProjectEditor(proj.name) as any)}
+                          title={t('detail.openInEditorLabel', { editor: detectedEditors.find(e => e.id === getProjectEditor(proj.name))?.name || selectedEditorName })}
                           aria-label={t('detail.openInEditorProject', { editor: selectedEditorName, name: proj.name })}
                           className="h-7 w-7"
                         >
-                          <FolderIcon className="w-3.5 h-3.5" />
+                          <EditorIcon editorId={getProjectEditor(proj.name)} className="w-4.5 h-4.5" />
                         </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => onRevealInFinder(proj.path)}
+                          title={t('detail.revealInFinder')}
+                          className="h-7 w-7"
+                        >
+                          <FolderOpenIcon className="w-4.5 h-4.5" />
+                        </Button>
+                        {(() => {
+                          const webUrl = gitUrlToWebUrl(proj.remote_url);
+                          return webUrl ? (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => openLink(webUrl)}
+                              title={t('detail.openRemoteRepo', 'Open in Browser')}
+                              className="h-7 w-7"
+                            >
+                              <GithubIcon className="w-4.5 h-4.5" />
+                            </Button>
+                          ) : null;
+                        })()}
                         <Button
                           variant="ghost"
                           size="icon"
@@ -887,7 +975,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                           aria-label={t('detail.openExternalTerminalProject', { name: proj.name })}
                           className="h-7 w-7"
                         >
-                          <TerminalIcon className="w-3.5 h-3.5" />
+                          <TerminalIcon className="w-4.5 h-4.5" />
                         </Button>
                       </div>
                     )}

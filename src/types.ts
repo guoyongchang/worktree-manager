@@ -34,6 +34,7 @@ export interface ProjectStatus {
   behind_base: number;
   ahead_of_test: number;
   unpushed_commits: number;
+  remote_url: string;
 }
 
 export interface MainProjectStatus {
@@ -100,11 +101,11 @@ export interface WorktreeArchiveStatus {
   projects: BranchStatus[];
 }
 
-// Editor types
-export type EditorType = 'vscode' | 'cursor' | 'antigravity' | 'idea' | 'codex';
+// Editor types — dynamic, any string editor ID from system detection
+export type EditorType = string;
 
 export interface EditorConfig {
-  id: EditorType;
+  id: string;
   name: string;
   icon: string;
 }

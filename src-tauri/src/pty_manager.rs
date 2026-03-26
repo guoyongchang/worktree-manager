@@ -88,14 +88,49 @@ fn resolve_shell_from_id(id: &str) -> String {
             // Fallback
             "bash.exe".to_string()
         }
-        // For macOS/Linux terminal IDs or unknown IDs, check if it's an absolute path
+        // Shell IDs: zsh, bash, fish, nu, pwsh — resolve via PATH lookup
         other => {
-            if std::path::Path::new(other).exists() {
-                other.to_string()
-            } else {
-                log::warn!("[pty] Unknown terminal id '{}', using default shell", other);
-                get_default_shell()
+            // First check if it's an absolute path
+            if std::path::Path::new(other).is_absolute() && std::path::Path::new(other).exists() {
+                return other.to_string();
             }
+            // Try to find the executable by name
+            #[cfg(not(target_os = "windows"))]
+            {
+                let output = std::process::Command::new("which")
+                    .arg(other)
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::null())
+                    .output();
+                if let Ok(out) = output {
+                    if out.status.success() {
+                        let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                        if !path.is_empty() {
+                            return path;
+                        }
+                    }
+                }
+            }
+            #[cfg(target_os = "windows")]
+            {
+                let output = std::process::Command::new("where")
+                    .arg(other)
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::null())
+                    .output();
+                if let Ok(out) = output {
+                    if out.status.success() {
+                        if let Some(path) = String::from_utf8_lossy(&out.stdout).lines().next() {
+                            let path = path.trim().to_string();
+                            if !path.is_empty() {
+                                return path;
+                            }
+                        }
+                    }
+                }
+            }
+            log::warn!("[pty] Shell '{}' not found, using default shell", other);
+            get_default_shell()
         }
     }
 }

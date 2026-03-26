@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { UseWorkspaceReturn } from './useWorkspace';
 import type { UseModalsReturn } from './useModals';
@@ -12,7 +12,7 @@ import type {
   CreateProjectRequest,
   EditorType,
 } from '../types';
-import { isTauri, getWindowLabel, removeProjectFromConfig } from '../lib/backend';
+import { isTauri, getWindowLabel, removeProjectFromConfig, callBackend } from '../lib/backend';
 
 export interface UseWorkspaceActionsReturn {
   // Selected worktree
@@ -150,7 +150,42 @@ export function useWorkspaceActions(
   const [deleteConfirmWorktree, setDeleteConfirmWorktree] = useState<WorktreeListItem | null>(null);
 
   // Editor selection
-  const [selectedEditor, setSelectedEditor] = useState<EditorType>('vscode');
+  const [selectedEditor, setSelectedEditor] = useState<EditorType>(() => {
+    return (localStorage.getItem('preferred_editor') as EditorType) || 'vscode';
+  });
+
+  // Auto-detect tools on mount only if no editors cached yet
+  useEffect(() => {
+    const existing = localStorage.getItem('detected_editors');
+    if (existing) {
+      try {
+        const parsed = JSON.parse(existing);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Already have cached editors, just notify components
+          window.dispatchEvent(new Event('editors-detected'));
+          return;
+        }
+      } catch { /* ignore */ }
+    }
+    // No cached editors — run detection
+    callBackend('detect_tools').then((tools: any) => {
+      if (tools?.editors) {
+        const editorIcons: Record<string, string> = {};
+        const editorList: Array<{ id: string; name: string; icon?: string }> = [];
+        const toolPaths = JSON.parse(localStorage.getItem('tool_paths') || '{}');
+        for (const editor of tools.editors) {
+          if (editor.icon) editorIcons[editor.id] = editor.icon;
+          editorList.push({ id: editor.id, name: editor.name, icon: editor.icon });
+          const key = `editor_${editor.id}`;
+          if (!toolPaths[key]) toolPaths[key] = editor.path;
+        }
+        localStorage.setItem('editor_icons', JSON.stringify(editorIcons));
+        localStorage.setItem('detected_editors', JSON.stringify(editorList));
+        localStorage.setItem('tool_paths', JSON.stringify(toolPaths));
+        window.dispatchEvent(new Event('editors-detected'));
+      }
+    }).catch(() => { /* ignore detect errors */ });
+  }, []);
 
   // Select worktree with lock handling
   const handleSelectWorktree = useCallback(async (worktree: WorktreeListItem | null) => {

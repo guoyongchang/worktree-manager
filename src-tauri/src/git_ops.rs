@@ -142,6 +142,7 @@ pub struct WorktreeInfo {
     pub behind_base: usize,
     pub ahead_of_test: usize,
     pub unpushed_commits: usize,
+    pub remote_url: String,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -167,6 +168,7 @@ impl Default for WorktreeInfo {
             behind_base: 0,
             ahead_of_test: 0,
             unpushed_commits: 0,
+            remote_url: String::new(),
         }
     }
 }
@@ -195,6 +197,13 @@ pub fn get_worktree_info_for_branches(
     if let Ok(head) = repo.head() {
         if let Some(name) = head.shorthand() {
             info.current_branch = name.to_string();
+        }
+    }
+
+    // Get remote URL
+    if let Ok(remote) = repo.find_remote("origin") {
+        if let Some(url) = remote.url() {
+            info.remote_url = url.to_string();
         }
     }
 
