@@ -580,7 +580,7 @@ if ($icon) {{
 }
 // ==================== Tool Detection ====================
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Default)]
 pub struct DetectedTool {
     pub id: String,
     pub name: String,
@@ -734,17 +734,20 @@ fn detect_terminals() -> Vec<DetectedTool> {
             id: "cmd".into(),
             name: "CMD".into(),
             path: "cmd.exe".into(),
+            icon: None,
         });
         results.push(DetectedTool {
             id: "powershell".into(),
             name: "PowerShell".into(),
             path: "powershell.exe".into(),
+            icon: None,
         });
         if check_executable("wt").is_some() {
             results.push(DetectedTool {
                 id: "windowsterminal".into(),
                 name: "Windows Terminal".into(),
                 path: "wt.exe".into(),
+                icon: None,
             });
         }
         // Git Bash
@@ -758,6 +761,7 @@ fn detect_terminals() -> Vec<DetectedTool> {
                     id: "gitbash".into(),
                     name: "Git Bash".into(),
                     path: p.to_string(),
+                    icon: None,
                 });
                 break;
             }
@@ -1066,6 +1070,7 @@ fn detect_shells() -> Vec<DetectedTool> {
                 id: "powershell".into(),
                 name: "Windows PowerShell".into(),
                 path: ps5.to_string(),
+                icon: None,
             });
         }
         // CMD
@@ -1073,6 +1078,7 @@ fn detect_shells() -> Vec<DetectedTool> {
             id: "cmd".into(),
             name: "CMD".into(),
             path: "cmd.exe".into(),
+            icon: None,
         });
         // Git Bash
         let git_bash_candidates = [
@@ -1085,6 +1091,7 @@ fn detect_shells() -> Vec<DetectedTool> {
                     id: "bash".into(),
                     name: "Git Bash".into(),
                     path: p.to_string(),
+                    icon: None,
                 });
                 break;
             }
@@ -1095,6 +1102,7 @@ fn detect_shells() -> Vec<DetectedTool> {
                 id: "nu".into(),
                 name: "Nushell".into(),
                 path,
+                icon: None,
             });
         }
     }
