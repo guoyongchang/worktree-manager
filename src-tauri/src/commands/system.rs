@@ -480,7 +480,7 @@ fn extract_macos_app_icon(app_path: &str) -> Option<String> {
     }
 
     // Step 1: Read CFBundleIconFile from Info.plist
-    let plist_output = Command::new("defaults")
+    let plist_output = Command::new("/usr/bin/defaults")
         .arg("read")
         .arg(app.join("Contents/Info.plist").to_string_lossy().to_string())
         .arg("CFBundleIconFile")
@@ -510,7 +510,7 @@ fn extract_macos_app_icon(app_path: &str) -> Option<String> {
 
     // Step 2: Convert .icns to 32x32 PNG using sips
     let tmp_png = format!("/tmp/wm_icon_{}.png", app.file_name()?.to_string_lossy().replace(' ', "_"));
-    let sips_output = Command::new("sips")
+    let sips_output = Command::new("/usr/bin/sips")
         .args(["-s", "format", "png"])
         .arg(icns_path.to_string_lossy().to_string())
         .args(["--out", &tmp_png])
@@ -617,7 +617,7 @@ fn check_executable(name: &str) -> Option<String> {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        let output = Command::new("which")
+        let output = Command::new("/usr/bin/which")
             .arg(name)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
