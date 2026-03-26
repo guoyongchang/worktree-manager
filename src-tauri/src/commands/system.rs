@@ -799,7 +799,19 @@ fn detect_terminals() -> Vec<DetectedTool> {
 fn detect_editors() -> Vec<DetectedTool> {
     let mut results = Vec::new();
 
-    let editors = [
+    // On Windows, use .cmd variants to avoid picking up bash scripts from bin/
+    #[cfg(target_os = "windows")]
+    let editors: &[(&str, &str, &str)] = &[
+        ("code.cmd", "vscode", "Visual Studio Code"),
+        ("cursor.cmd", "cursor", "Cursor"),
+        ("antigravity.cmd", "antigravity", "Antigravity"),
+        ("idea.cmd", "idea", "IntelliJ IDEA"),
+        ("codex.cmd", "codex", "Codex"),
+        ("zed.cmd", "zed", "Zed"),
+        ("subl.exe", "sublime", "Sublime Text"),
+    ];
+    #[cfg(not(target_os = "windows"))]
+    let editors: &[(&str, &str, &str)] = &[
         ("code", "vscode", "Visual Studio Code"),
         ("cursor", "cursor", "Cursor"),
         ("antigravity", "antigravity", "Antigravity"),
@@ -809,7 +821,7 @@ fn detect_editors() -> Vec<DetectedTool> {
         ("sublime_text", "sublime", "Sublime Text"),
     ];
 
-    for (cmd, id, name) in &editors {
+    for (cmd, id, name) in editors {
         if let Some(path) = check_executable(cmd) {
             results.push(DetectedTool {
                 id: id.to_string(),
@@ -928,9 +940,8 @@ fn detect_editors() -> Vec<DetectedTool> {
         .collect();
 
         for (rel, id, name) in win_apps {
-            if results.iter().any(|r| r.id == *id) {
-                continue;
-            }
+            // If already detected via CLI, update its path to the .exe and extract icon
+            let existing_idx = results.iter().position(|r| r.id == *id);
             // Handle wildcard patterns (JetBrains versioned dirs like "IntelliJ IDEA 2024.1")
             if rel.contains('*') {
                 // Split pattern at the wildcard: "JetBrains\IntelliJ IDEA*\bin\idea64.exe"
@@ -959,12 +970,16 @@ fn detect_editors() -> Vec<DetectedTool> {
                                     let full = format!("{}\\{}\\{}", parent_dir, entry_name, after_star);
                                     if std::path::Path::new(&full).exists() {
                                         let icon = extract_windows_exe_icon(&full);
-                                        results.push(DetectedTool {
-                                            id: id.to_string(),
-                                            name: name.to_string(),
-                                            path: full,
-                                            icon,
-                                        });
+                                        if let Some(idx) = existing_idx {
+                                            results[idx].icon = icon;
+                                        } else {
+                                            results.push(DetectedTool {
+                                                id: id.to_string(),
+                                                name: name.to_string(),
+                                                path: full,
+                                                icon,
+                                            });
+                                        }
                                         break 'base_loop;
                                     }
                                 }
@@ -977,12 +992,16 @@ fn detect_editors() -> Vec<DetectedTool> {
                     let full = format!(r"{}\{}", base, rel);
                     if std::path::Path::new(&full).exists() {
                         let icon = extract_windows_exe_icon(&full);
-                        results.push(DetectedTool {
-                            id: id.to_string(),
-                            name: name.to_string(),
-                            path: full,
-                            icon,
-                        });
+                        if let Some(idx) = existing_idx {
+                            results[idx].icon = icon;
+                        } else {
+                            results.push(DetectedTool {
+                                id: id.to_string(),
+                                name: name.to_string(),
+                                path: full,
+                                icon,
+                            });
+                        }
                         break;
                     }
                 }
