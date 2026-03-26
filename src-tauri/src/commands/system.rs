@@ -1119,11 +1119,13 @@ pub(crate) fn detect_tools() -> DetectedTools {
         editors: detect_editors(),
         shells: detect_shells(),
     };
+    let icons_count = tools.editors.iter().filter(|e| e.icon.is_some()).count();
     log::info!(
-        "[system] Detected: {} git, {} terminals, {} editors",
+        "[system] Detected: {} git, {} terminals, {} editors ({} with icons)",
         tools.git.len(),
         tools.terminals.len(),
-        tools.editors.len()
+        tools.editors.len(),
+        icons_count
     );
     tools
 }
