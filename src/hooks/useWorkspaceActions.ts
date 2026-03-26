@@ -160,8 +160,10 @@ export function useWorkspaceActions(
     if (existing) {
       try {
         const parsed = JSON.parse(existing);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          // Already have cached editors, just notify components
+        const icons = JSON.parse(localStorage.getItem('editor_icons') || '{}');
+        const hasIcons = Object.keys(icons).length > 0 || parsed.some((e: any) => e.icon);
+        if (Array.isArray(parsed) && parsed.length > 0 && hasIcons) {
+          // Already have cached editors with icons, just notify components
           window.dispatchEvent(new Event('editors-detected'));
           return;
         }

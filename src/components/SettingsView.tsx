@@ -250,8 +250,17 @@ export const SettingsView: FC<SettingsViewProps> = ({
     try {
       const editors = JSON.parse(localStorage.getItem('detected_editors') || '[]');
       if (editors.length > 0) {
-        // Reconstruct from cached data — git/terminals/shells will be populated on manual detect
-        return { git: [], terminals: [], editors, shells: [] } as DetectedToolsResult;
+        // Merge in cached icons from editor_icons localStorage
+        const cachedIcons: Record<string, string> = JSON.parse(localStorage.getItem('editor_icons') || '{}');
+        const editorsWithIcons = editors.map((e: any) => ({
+          ...e,
+          icon: e.icon || cachedIcons[e.id] || undefined,
+        }));
+        // Only use cache if at least some icons are present
+        const hasAnyIcon = editorsWithIcons.some((e: any) => e.icon);
+        if (hasAnyIcon) {
+          return { git: [], terminals: [], editors: editorsWithIcons, shells: [] } as DetectedToolsResult;
+        }
       }
     } catch { /* ignore */ }
     return null;
