@@ -275,9 +275,6 @@ pub(crate) fn open_editor_at_path(
 
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-
         let cmd = editor_cli_command(&request.editor);
         if request.editor == "codex" {
             // Windows: Codex is a UWP app, launch via shell:AppsFolder
@@ -1012,7 +1009,7 @@ fn detect_editors() -> Vec<DetectedTool> {
         // Primary: registry-based detection — handles all install locations (Programs, Toolbox, etc.)
         // and provides actual .exe paths for correct icon extraction.
         for tool in detect_editors_via_registry() {
-            if !results.iter().any(|r| r.id == tool.id) {
+            if !results.iter().any(|r: &DetectedTool| r.id == tool.id) {
                 results.push(tool);
             }
         }
