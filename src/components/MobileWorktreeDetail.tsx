@@ -128,7 +128,7 @@ export const MobileWorktreeDetail: FC<MobileWorktreeDetailProps> = ({
     }, [selectedWorktree, onSwitchBranch]);
 
     const handleCopyPath = useCallback(async (path: string) => {
-        try { await navigator.clipboard.writeText(path); } catch { }
+        try { await navigator.clipboard.writeText(path); } catch { /* clipboard API may not be available */ }
     }, []);
 
     // Swipe-right to go back

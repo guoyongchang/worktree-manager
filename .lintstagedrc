@@ -1,0 +1,12 @@
+{
+  "src/**/*.{ts,tsx}": [
+    "eslint --fix",
+    "bash -c 'tsc --noEmit'"
+  ],
+  "src/locales/*.json": [
+    "node scripts/check-i18n.mjs"
+  ],
+  "src-tauri/**/*.rs": [
+    "bash -c 'cd src-tauri && cargo fmt -- --check && cargo clippy -- -D warnings'"
+  ]
+}

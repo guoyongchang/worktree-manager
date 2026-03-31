@@ -330,7 +330,7 @@ export function useVoiceInput(
 
   // ---- 监听后端语音事件（Tauri 事件 / WebSocket） ----
   useEffect(() => {
-    let unlisten: Array<() => void> = [];
+    const unlisten: Array<() => void> = [];
 
     const handleVoiceEvent = (event: string, payload: Record<string, unknown>) => {
       // Only process voice events if this client has an active voice session (microphone acquired).

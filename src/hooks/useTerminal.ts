@@ -29,7 +29,7 @@ export interface UseTerminalReturn {
 
 /** Close a single PTY session by path */
 function closePtySession(path: string): void {
-  const sessionId = `pty-${path.replace(/[\/#]/g, '-')}`;
+  const sessionId = `pty-${path.replace(/[/#]/g, '-')}`;
   callBackend('pty_close', { sessionId }).catch(() => { });
 }
 

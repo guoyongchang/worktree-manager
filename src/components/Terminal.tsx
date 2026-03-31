@@ -101,7 +101,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
   const fitAddonRef = useRef<FitAddon | null>(null);
   // Extract actual cwd (remove #timestamp suffix if present)
   const actualCwd = cwd.split('#')[0];
-  const sessionIdRef = useRef<string>(`pty-${cwd.replace(/[\/#]/g, '-')}`);
+  const sessionIdRef = useRef<string>(`pty-${cwd.replace(/[/#]/g, '-')}`);
   const readerIntervalRef = useRef<number | null>(null);
   const wsSubscribedRef = useRef(false);
   const desktopUnlistenRef = useRef<UnlistenFn | null>(null);
@@ -447,12 +447,12 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
           document.fonts.ready,
           new Promise(r => setTimeout(r, 100))
         ]);
-      } catch (e) { /* ignore */ }
+      } catch (_e) { /* ignore */ }
 
       try {
         fitAddon.fit();
-      } catch (e) {
-        console.warn('[terminal] fitAddon.fit() failed during init', e);
+      } catch (_e) {
+        console.warn('[terminal] fitAddon.fit() failed during init', _e);
       }
 
       const cols = Math.max(term.cols || 80, 2);
@@ -499,7 +499,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
       requestAnimationFrame(() => {
         setTimeout(() => {
           if (fitAddonRef.current && xtermRef.current) {
-            try { fitAddonRef.current.fit(); } catch (e) { /* ignore */ }
+            try { fitAddonRef.current.fit(); } catch (_e) { /* ignore */ }
             const newCols = Math.max(xtermRef.current.cols || 80, 2);
             const newRows = Math.max(xtermRef.current.rows || 24, 2);
             if (newCols !== cols || newRows !== rows || exists) {
@@ -560,7 +560,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
   const handleResize = useCallback(() => {
     if (!fitAddonRef.current || !xtermRef.current || !visible || !initializedRef.current) return;
 
-    try { fitAddonRef.current.fit(); } catch (e) { /* ignore */ }
+    try { fitAddonRef.current.fit(); } catch (_e) { /* ignore */ }
     const cols = Math.max(xtermRef.current.cols || 80, 2);
     const rows = Math.max(xtermRef.current.rows || 24, 2);
 

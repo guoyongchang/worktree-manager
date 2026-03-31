@@ -528,7 +528,7 @@ const WorktreeList: FC<{
                 }`}
               onClick={() => {
                 if (longPressFiredRef.current) return;
-                canSelect && onSelectWorktree(worktree);
+                if (canSelect) onSelectWorktree(worktree);
               }}
               onContextMenu={(e) => canSelect && onContextMenu(e, worktree)}
               onTouchStart={(e) => canSelect && onTouchStart(e, worktree)}

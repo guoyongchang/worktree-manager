@@ -294,7 +294,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
     try {
       await onDeployToMain?.(name);
       onRefreshAfterDeploy?.();
-    } catch (e: any) {
+    } catch (_e: any) {
       // Error surfaces via the error prop from parent
     }
   }, [onDeployToMain, onRefreshAfterDeploy]);

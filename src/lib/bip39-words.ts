@@ -211,6 +211,7 @@ const BIP39_WORDS = [
 
 /** Check if a string contains non-ASCII characters (e.g., Chinese, Japanese, Korean) */
 export function containsNonAscii(str: string): boolean {
+  // eslint-disable-next-line no-control-regex
   return /[^\x00-\x7F]/.test(str);
 }
 
