@@ -155,25 +155,34 @@ useEffect(() => {
 
 ```typescript
 const sortedActiveWorktrees = useMemo(() => {
-  return [...activeWorktrees].sort((a, b) => 
-    a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
-  )
+  return [...activeWorktrees].sort((a, b) => {
+    const nameA = a.display_name || a.name
+    const nameB = b.display_name || b.name
+    return nameA.localeCompare(nameB, undefined, { sensitivity: 'base' })
+  })
 }, [activeWorktrees])
 
 const sortedArchivedWorktrees = useMemo(() => {
-  return [...archivedWorktrees].sort((a, b) => 
-    a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
-  )
+  return [...archivedWorktrees].sort((a, b) => {
+    const nameA = a.display_name || a.name
+    const nameB = b.display_name || b.name
+    return nameA.localeCompare(nameB, undefined, { sensitivity: 'base' })
+  })
 }, [archivedWorktrees])
 ```
 
 **排序规则：**
-- 按 `name` 字段字母顺序升序排序
+- 优先使用 `display_name` 字段排序，如果不存在则回退到 `name` 字段
 - 使用 `localeCompare()` 支持多语言字符（中文、英文等）
 - `sensitivity: 'base'` 实现大小写不敏感排序
 - 活跃和归档列表独立排序，不混合
 - 使用 `useMemo` 避免每次渲染都重新排序
 - 使用扩展运算符 `[...]` 创建新数组，避免修改原数组
+
+**为什么使用 display_name：**
+- 中文字符的文件夹名称会被映射成三个单词的形式（如 `feature-1` → `feature-yi`）
+- `display_name` 保存了用户设置的原始名称，更适合用于排序和显示
+- 回退到 `name` 确保向后兼容（旧数据可能没有 display_name）
 
 **渲染更新：**
 
