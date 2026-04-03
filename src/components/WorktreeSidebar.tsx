@@ -64,6 +64,23 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
   const archivedWorktrees = worktrees.filter((worktree) => worktree.is_archived);
   const { longPressFiredRef, handleTouchStart, handleTouchEnd, handleTouchMove } = useLongPressContextMenu(onContextMenu);
   const [currentWindowLabel, setCurrentWindowLabel] = useState('main');
+  const [sidebarWidth, setSidebarWidth] = useState<number>(288); // Default 288px (w-72)
+
+  // Restore width from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem('sidebar-width');
+    if (saved) {
+      const width = Number(saved);
+      if (width >= 200 && width <= 500) {
+        setSidebarWidth(width);
+      }
+    }
+  }, []);
+
+  // Persist width to localStorage
+  useEffect(() => {
+    localStorage.setItem('sidebar-width', String(sidebarWidth));
+  }, [sidebarWidth]);
 
   useEffect(() => {
     getWindowLabel().then(setCurrentWindowLabel);
@@ -135,6 +152,8 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
       shareWmsUrl={shareWmsUrl}
       showArchived={showArchived}
       showWorkspaceMenu={showWorkspaceMenu}
+      sidebarWidth={sidebarWidth}
+      setSidebarWidth={setSidebarWidth}
       switchingWorkspace={switchingWorkspace}
       updaterState={updaterState}
       wmsConnected={wmsConnected}

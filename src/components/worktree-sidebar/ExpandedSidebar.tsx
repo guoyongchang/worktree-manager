@@ -1,4 +1,4 @@
-import { useEffect, useState, type FC, type MutableRefObject, type TouchEvent } from 'react';
+import { useEffect, useMemo, useState, type FC, type MutableRefObject, type TouchEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { openLink } from '@/lib/backend';
@@ -53,6 +53,8 @@ interface ExpandedSidebarProps extends Omit<WorktreeSidebarProps, 'worktrees'> {
   onTouchStart: (e: TouchEvent, worktree: WorktreeListItem) => void;
   onTouchEnd: () => void;
   onTouchMove: () => void;
+  sidebarWidth: number;
+  setSidebarWidth: (width: number) => void;
 }
 
 export const ExpandedSidebar: FC<ExpandedSidebarProps> = ({
@@ -100,6 +102,8 @@ export const ExpandedSidebar: FC<ExpandedSidebarProps> = ({
   shareWmsUrl,
   showArchived,
   showWorkspaceMenu,
+  sidebarWidth,
+  setSidebarWidth,
   switchingWorkspace = false,
   updaterState,
   wmsConnected = true,
@@ -115,6 +119,7 @@ export const ExpandedSidebar: FC<ExpandedSidebarProps> = ({
   const [appVersion, setAppVersion] = useState('');
   const [isMainWin, setIsMainWin] = useState(true);
   const [switchConfirmPath, setSwitchConfirmPath] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   const isDev = import.meta.env.DEV;
 
@@ -127,6 +132,33 @@ export const ExpandedSidebar: FC<ExpandedSidebarProps> = ({
       getAppVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
     }
   }, [isMainWin, isDev]);
+
+  // Sidebar width drag resize
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const newWidth = e.clientX;
+      const clampedWidth = Math.max(200, Math.min(500, newWidth));
+      setSidebarWidth(clampedWidth);
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isDragging, setSidebarWidth]);
 
   const handleSwitchClick = (workspacePath: string) => {
     if (currentWorkspace?.path === workspacePath) return;
@@ -159,7 +191,10 @@ export const ExpandedSidebar: FC<ExpandedSidebarProps> = ({
         className="fixed inset-0 bg-black/50 z-40 sm:hidden"
         onClick={onToggleCollapsed}
       />
-      <div className="w-72 bg-slate-800/50 border-r border-slate-700/50 flex flex-col shrink-0 max-sm:fixed max-sm:inset-y-0 max-sm:left-0 max-sm:z-50 max-sm:w-[85vw] max-sm:max-w-[320px] max-sm:bg-slate-800">
+      <div
+        style={{ width: `${sidebarWidth}px` }}
+        className="bg-slate-800/50 border-r border-slate-700/50 flex flex-col shrink-0 relative max-sm:fixed max-sm:inset-y-0 max-sm:left-0 max-sm:z-50 max-sm:w-[85vw] max-sm:max-w-[320px] max-sm:bg-slate-800"
+      >
         <div className="p-3 border-b border-slate-700/50">
           <div className="flex items-center gap-1.5">
             {isTauri ? (
@@ -304,6 +339,27 @@ export const ExpandedSidebar: FC<ExpandedSidebarProps> = ({
           onCheckUpdate={onCheckUpdate}
           onOpenLogDir={handleOpenLogDir}
         />
+
+        {/* Drag handle for resizing - hidden on mobile */}
+        <div
+          onMouseDown={(e) => {
+            e.preventDefault();
+            setIsDragging(true);
+          }}
+          className={`absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/50 transition-colors max-sm:hidden ${isDragging ? 'bg-blue-500/50' : ''}`}
+          aria-label={t('sidebar.resizeWidth', 'Resize sidebar width')}
+        >
+          <div className="absolute right-0 top-1/2 -translate-y-1/2 w-4 h-12 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity pointer-events-none">
+            <svg className="w-3 h-3 text-slate-400" viewBox="0 0 24 24" fill="currentColor">
+              <circle cx="9" cy="6" r="1.5" />
+              <circle cx="9" cy="12" r="1.5" />
+              <circle cx="9" cy="18" r="1.5" />
+              <circle cx="15" cy="6" r="1.5" />
+              <circle cx="15" cy="12" r="1.5" />
+              <circle cx="15" cy="18" r="1.5" />
+            </svg>
+          </div>
+        </div>
 
         <Dialog open={!!switchConfirmPath} onOpenChange={(open) => !open && setSwitchConfirmPath(null)}>
           <DialogContent className="max-w-[400px]">
@@ -493,6 +549,24 @@ const WorktreeList: FC<{
 }) => {
   const { t } = useTranslation();
 
+  // Sort active worktrees by display_name (or name) alphabetically
+  const sortedActiveWorktrees = useMemo(() => {
+    return [...activeWorktrees].sort((a, b) => {
+      const nameA = a.display_name || a.name;
+      const nameB = b.display_name || b.name;
+      return nameA.localeCompare(nameB, undefined, { sensitivity: 'base' });
+    });
+  }, [activeWorktrees]);
+
+  // Sort archived worktrees by display_name (or name) alphabetically
+  const sortedArchivedWorktrees = useMemo(() => {
+    return [...archivedWorktrees].sort((a, b) => {
+      const nameA = a.display_name || a.name;
+      const nameB = b.display_name || b.name;
+      return nameA.localeCompare(nameB, undefined, { sensitivity: 'base' });
+    });
+  }, [archivedWorktrees]);
+
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="px-4 py-2">
@@ -500,7 +574,7 @@ const WorktreeList: FC<{
           {t('sidebar.active')} ({activeWorktrees.length})
         </span>
       </div>
-      {activeWorktrees.length === 0 ? (
+      {sortedActiveWorktrees.length === 0 ? (
         <div className="px-4 py-8 text-center">
           <div className="flex justify-center mb-3">
             <FolderIcon className="w-10 h-10 text-slate-600" />
@@ -509,7 +583,7 @@ const WorktreeList: FC<{
           <p className="text-slate-600 text-xs mt-1">{t('sidebar.noWorktreesHint')}</p>
         </div>
       ) : (
-        activeWorktrees.map((worktree) => {
+        sortedActiveWorktrees.map((worktree) => {
           const lockedBy = lockedWorktrees[worktree.name];
           const isLockedByOther = lockedBy && lockedBy !== currentWindowLabel;
           const isDeployed = worktree.name === occupation?.worktree_name;
@@ -540,7 +614,7 @@ const WorktreeList: FC<{
                 <TooltipProvider delayDuration={300}>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <span className="font-medium text-sm truncate flex-1">{worktree.display_name || worktree.name}</span>
+                      <span className="font-medium text-sm line-clamp-2 break-words flex-1">{worktree.display_name || worktree.name}</span>
                     </TooltipTrigger>
                     <TooltipContent side="right">{worktree.display_name ? `${worktree.display_name} (${worktree.name})` : worktree.name}</TooltipContent>
                   </Tooltip>
@@ -584,7 +658,7 @@ const WorktreeList: FC<{
         <ChevronIcon expanded={showArchived} className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-400 transition-colors" />
       </div>
 
-      {showArchived && archivedWorktrees.map((worktree) => (
+      {showArchived && sortedArchivedWorktrees.map((worktree) => (
         <div
           key={worktree.name}
           className={`px-4 py-2.5 cursor-pointer transition-colors opacity-60 ${selectedWorktree?.name === worktree.name ? 'bg-slate-700/30' : 'hover:bg-slate-700/20'}`}
@@ -592,7 +666,14 @@ const WorktreeList: FC<{
         >
           <div className="flex items-center gap-2.5">
             <ArchiveIcon className="w-4 h-4 text-slate-500" />
-            <span className="font-medium text-sm truncate">{worktree.display_name || worktree.name}</span>
+            <TooltipProvider delayDuration={300}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="font-medium text-sm line-clamp-2 break-words flex-1">{worktree.display_name || worktree.name}</span>
+                </TooltipTrigger>
+                <TooltipContent side="right">{worktree.display_name ? `${worktree.display_name} (${worktree.name})` : worktree.name}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           </div>
         </div>
       ))}
