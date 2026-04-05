@@ -130,9 +130,15 @@ worktree-manager/
 
 1. **YAML Frontmatter** — 每个文件包含 tags 和 aliases
 2. **Wiki Links** — 使用 `[[file]]` 和 `[[file#heading]]` 交叉引用
-3. **Callouts** — 用 `> [!warning]` 高亮关键约束，`> [!note]` 补充说明
-4. **Tags** — `#architecture`, `#feature`, `#api`, `#core-constraint`
-5. **MOC 模式** — CLAUDE.md 作为 Map of Content，分领域索引
+3. **双向链接策略** — 充分利用 Obsidian backlinks：
+   - 概念页主动链接相关实现页（如 `[[terminal-system]]` 在架构页和功能页都被引用）
+   - 不需要手动维护"被引用"列表，Obsidian 的 backlinks 面板自动展示反向引用
+   - 同一概念在不同上下文中出现时均使用 `[[wiki-link]]`，形成自然的知识图谱
+   - 核心概念（如 `[[dual-mode]]`、`[[PTY]]`、`[[worktree-lock]]`）作为高连接度节点，在多个文档中被引用，通过 Graph View 可视化系统全貌
+   - 使用 `[[file|显示文本]]` 别名链接保持行文自然
+4. **Callouts** — 用 `> [!warning]` 高亮关键约束，`> [!note]` 补充说明
+5. **Tags** — `#architecture`, `#feature`, `#api`, `#core-constraint`
+6. **MOC 模式** — CLAUDE.md 作为 Map of Content，分领域索引，通过 `[[]]` 链接所有子页
 
 #### CLAUDE.md（vault 版 MOC）内容结构
 
