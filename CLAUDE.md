@@ -43,6 +43,6 @@ activatedTerminals（标签栏显示）和 mountedTerminals（组件挂载/PTY �
 - 后端全局状态 + 命令分类 → /Users/guo/Work/GuoVault/Guo/workspaces/worktree-manager/claude-reference/backend-state.md
 - 终端系统架构详情 → /Users/guo/Work/GuoVault/Guo/workspaces/worktree-manager/claude-reference/terminal-architecture.md
 - 双模式通信详情 → /Users/guo/Work/GuoVault/Guo/workspaces/worktree-manager/claude-reference/dual-mode.md
-- 命令契约同步规则 → docs/COMMAND_CONTRACTS.md
+- 命令契约同步规则 → /Users/guo/Work/GuoVault/Guo/workspaces/worktree-manager/claude-reference/COMMAND_CONTRACTS.md
 - 完整知识库(Obsidian) → /Users/guo/Work/GuoVault/Guo/workspaces/worktree-manager/CLAUDE.md
 - 数据类型定义 → src/types.ts
