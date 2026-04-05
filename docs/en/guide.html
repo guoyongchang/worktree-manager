@@ -1,0 +1,1264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>User Guide - Git Worktree Manager</title>
+  <meta name="description" content="Complete user guide for Git Worktree Manager, including installation, configuration, and best practices">
+  <meta name="keywords" content="Git Worktree, user guide, tutorial, multi-branch development">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="User Guide - Git Worktree Manager">
+  <meta property="og:description" content="Complete user guide with installation, configuration, and best practices">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="../icons/app-icon.svg">
+  <link rel="apple-touch-icon" href="../icons/128x128.png">
+
+  <!-- TailwindCSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#3b82f6',
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: #1e293b; }
+    ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+    .prose code {
+      background: #0d1117;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.9em;
+      color: #22c55e;
+    }
+
+    .prose pre {
+      background: #0d1117;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 1.25rem;
+      overflow-x: auto;
+    }
+
+    .prose pre code {
+      background: transparent;
+      padding: 0;
+      color: #e2e8f0;
+    }
+
+    .kbd {
+      display: inline-block;
+      padding: 2px 8px;
+      font-family: ui-monospace, monospace;
+      font-size: 0.85em;
+      color: #e2e8f0;
+      background: #1e293b;
+      border: 1px solid #475569;
+      border-radius: 4px;
+      box-shadow: 0 1px 0 #475569;
+    }
+
+    .lang-switcher a { text-decoration: none; }
+    .lang-active { color: #60a5fa; font-weight: 600; }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100">
+
+  <!-- Navigation -->
+  <nav class="fixed top-0 w-full bg-slate-900/95 backdrop-blur-sm border-b border-slate-700 z-50">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6">
+      <div class="flex items-center justify-between h-16">
+        <div class="flex items-center gap-3">
+          <a href="index.html" class="flex items-center gap-3">
+            <img src="../icons/app-icon.svg" alt="Worktree Manager" class="w-8 h-8">
+            <span class="text-xl font-bold">Worktree Manager</span>
+          </a>
+        </div>
+        <div class="hidden md:flex items-center gap-6">
+          <a href="index.html" class="text-slate-300 hover:text-blue-300 transition">Home</a>
+          <a href="guide.html" class="text-blue-400 hover:text-blue-300 transition">Guide</a>
+          <span class="lang-switcher"><a href="../guide.html" class="text-slate-300 hover:text-blue-300 transition">中文</a> | <span class="lang-active">English</span></span>
+          <a href="https://github.com/guoyongchang/worktree-manager" target="_blank" class="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition">
+            <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            GitHub
+          </a>
+        </div>
+        <button type="button" aria-label="Open menu" class="md:hidden p-2 rounded-lg hover:bg-slate-800 transition" onclick="toggleMobileMenu()">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+          </svg>
+        </button>
+      </div>
+      <div id="mobile-menu" class="hidden md:hidden pb-4">
+        <a href="index.html" class="block py-2 text-slate-300 hover:text-blue-300">Home</a>
+        <a href="guide.html" class="block py-2 text-blue-400">Guide</a>
+        <a href="https://github.com/guoyongchang/worktree-manager" target="_blank" class="block py-2 text-slate-300 hover:text-blue-300">GitHub</a>
+        <span class="block py-2 lang-switcher"><a href="../guide.html" class="text-slate-300 hover:text-blue-300 transition">中文</a> | <span class="lang-active">English</span></span>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <main class="pt-24 pb-20">
+    <div class="max-w-4xl mx-auto px-4">
+
+      <!-- Header -->
+      <div class="mb-12">
+        <h1 class="text-4xl md:text-5xl font-bold mb-4">User Guide</h1>
+        <p class="text-xl text-slate-400">From installation to mastery, a comprehensive guide to Git Worktree Manager</p>
+      </div>
+
+      <!-- Table of Contents -->
+      <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 mb-12">
+        <h2 class="text-xl font-bold mb-4 flex items-center gap-2">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"></path>
+          </svg>
+          Table of Contents
+        </h2>
+        <nav class="space-y-2 text-slate-300">
+          <a href="#installation" class="block hover:text-blue-400 transition">1. Installation &amp; Setup</a>
+          <a href="#getting-started" class="block hover:text-blue-400 transition">2. Getting Started</a>
+          <a href="#workspace" class="block hover:text-blue-400 transition">3. Workspace Management</a>
+          <a href="#worktree" class="block hover:text-blue-400 transition">4. Worktree Operations</a>
+          <a href="#multi-window" class="block hover:text-blue-400 transition">5. Multi-Window &amp; Workspace Switching</a>
+          <a href="#terminal" class="block hover:text-blue-400 transition">6. Terminal</a>
+          <a href="#voice-input" class="block hover:text-blue-400 transition">7. Voice Input</a>
+          <a href="#ide-integration" class="block hover:text-blue-400 transition">8. IDE Integration</a>
+          <a href="#smart-scan" class="block hover:text-blue-400 transition">9. Smart Folder Scan</a>
+          <a href="#remote-sharing" class="block hover:text-blue-400 transition">10. Remote Sharing &amp; Collaboration</a>
+          <a href="#configuration" class="block hover:text-blue-400 transition">11. Configuration</a>
+          <a href="#keyboard-shortcuts" class="block hover:text-blue-400 transition">12. Keyboard Shortcuts</a>
+          <a href="#best-practices" class="block hover:text-blue-400 transition">13. Best Practices</a>
+          <a href="#troubleshooting" class="block hover:text-blue-400 transition">14. Troubleshooting</a>
+        </nav>
+      </div>
+
+      <!-- Content Sections -->
+      <div class="prose prose-invert max-w-none space-y-16">
+
+        <!-- 1. Installation -->
+        <section id="installation">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">1</span>
+            Installation &amp; Setup
+          </h2>
+
+          <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 mb-6">
+            <h3 class="text-xl font-semibold mb-4">Download &amp; Install (Recommended)</h3>
+            <p class="text-slate-300 mb-4">Head to the GitHub Releases page and download the installer for your platform:</p>
+            <div class="mb-4">
+              <a href="https://github.com/guoyongchang/worktree-manager/releases/latest" target="_blank" class="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                Download Latest Version
+              </a>
+            </div>
+            <div class="flex gap-3 flex-wrap text-sm text-slate-400 mb-4">
+              <span class="flex items-center gap-1">&#x2705; macOS (Intel + ARM)</span>
+              <span class="flex items-center gap-1">&#x2705; Windows</span>
+              <span class="flex items-center gap-1">&#x2705; Linux</span>
+            </div>
+            <div class="bg-green-900/20 border border-green-700/50 rounded-lg p-3">
+              <p class="text-green-300 text-sm">&#x1F504; Built-in auto-update: once installed, new versions are pushed automatically -- no manual downloads needed.</p>
+            </div>
+          </div>
+
+          <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 mb-6">
+            <h3 class="text-xl font-semibold mb-4 flex items-center gap-2">
+              <svg class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+              macOS Installation Notes
+            </h3>
+            <ol class="space-y-3 text-slate-300">
+              <li class="flex items-start gap-2">
+                <span class="flex-shrink-0 w-6 h-6 bg-slate-700 rounded-full flex items-center justify-center text-xs font-bold text-slate-300">1</span>
+                <span>Download the <code>.dmg</code> file, open it, and drag the app into the Applications folder.</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <span class="flex-shrink-0 w-6 h-6 bg-slate-700 rounded-full flex items-center justify-center text-xs font-bold text-slate-300">2</span>
+                <span>If you see "cannot verify the developer" on first launch, <strong>right-click the app</strong> and select <strong>"Open"</strong>.</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <span class="flex-shrink-0 w-6 h-6 bg-slate-700 rounded-full flex items-center justify-center text-xs font-bold text-slate-300">3</span>
+                <span>If it still won't open, go to <strong>System Settings &rarr; Privacy &amp; Security</strong>, find the prompt at the bottom, and click <strong>"Open Anyway"</strong>.</span>
+              </li>
+              <li class="flex items-start gap-2">
+                <span class="flex-shrink-0 w-6 h-6 bg-slate-700 rounded-full flex items-center justify-center text-xs font-bold text-slate-300">4</span>
+                <span>If none of the above works, open Terminal and run: <code>xattr -cr "/Applications/Worktree Manager.app"</code></span>
+              </li>
+            </ol>
+          </div>
+
+          <details class="bg-slate-800/50 border border-slate-700 rounded-xl p-6 mb-6">
+            <summary class="font-semibold text-slate-300 cursor-pointer hover:text-blue-400 transition">&#x1F6E0;&#xFE0F; Build from Source (For Developers)</summary>
+            <div class="mt-4">
+              <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 mb-4">
+                <h4 class="text-lg font-semibold mb-4">Prerequisites</h4>
+                <ul class="space-y-2 text-slate-300">
+                  <li class="flex items-start gap-2">
+                    <span class="text-green-400 mt-1">&#x2713;</span>
+                    <span><strong>Node.js</strong> 20+ (<a href="https://nodejs.org" class="text-blue-400 hover:underline">Download</a>)</span>
+                  </li>
+                  <li class="flex items-start gap-2">
+                    <span class="text-green-400 mt-1">&#x2713;</span>
+                    <span><strong>Rust</strong> 1.70+ (<a href="https://rustup.rs" class="text-blue-400 hover:underline">Install Guide</a>)</span>
+                  </li>
+                  <li class="flex items-start gap-2">
+                    <span class="text-green-400 mt-1">&#x2713;</span>
+                    <span><strong>Git</strong> 2.0+ (available on command line)</span>
+                  </li>
+                </ul>
+              </div>
+
+              <h4 class="text-lg font-semibold mb-4">Build Steps</h4>
+              <pre class="mb-4"><code># 1. Clone the project
+git clone https://github.com/guoyongchang/worktree-manager.git
+cd worktree-manager
+
+# 2. Install dependencies
+npm install
+
+# 3. Run in development mode
+npm run tauri dev
+
+# 4. Build for production (optional)
+npm run tauri build</code></pre>
+
+              <div class="bg-blue-900/20 border border-blue-700 rounded-lg p-4">
+                <p class="text-blue-200"><strong>&#x1F4A1; Tip:</strong> The first run may take a few minutes to download Rust dependencies. Please be patient.</p>
+              </div>
+            </div>
+          </details>
+        </section>
+
+        <!-- 2. Getting Started -->
+        <section id="getting-started">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">2</span>
+            Getting Started
+          </h2>
+
+          <div class="space-y-6">
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-3 flex items-center gap-2">
+                <span class="flex items-center justify-center w-8 h-8 bg-blue-600 rounded-full text-sm">1</span>
+                Create a Workspace
+              </h3>
+              <p class="text-slate-300 mb-4">After launching the app, you'll need to create or import a workspace on first use:</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li><strong>New Workspace</strong>: Select an empty directory and the app will initialize it automatically</li>
+                <li><strong>Import Existing Project</strong>: Select a directory containing Git projects</li>
+              </ul>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-3 flex items-center gap-2">
+                <span class="flex items-center justify-center w-8 h-8 bg-blue-600 rounded-full text-sm">2</span>
+                Add a Project
+              </h3>
+              <p class="text-slate-300 mb-4">Add Git projects to your workspace using any of these three methods:</p>
+              <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                  <thead>
+                    <tr class="border-b border-slate-600">
+                      <th class="py-2 px-4">Method</th>
+                      <th class="py-2 px-4">Format</th>
+                      <th class="py-2 px-4">Example</th>
+                    </tr>
+                  </thead>
+                  <tbody class="text-slate-300">
+                    <tr class="border-b border-slate-700">
+                      <td class="py-2 px-4">GitHub Shorthand</td>
+                      <td class="py-2 px-4"><code>owner/repo</code></td>
+                      <td class="py-2 px-4"><code>facebook/react</code></td>
+                    </tr>
+                    <tr class="border-b border-slate-700">
+                      <td class="py-2 px-4">SSH</td>
+                      <td class="py-2 px-4"><code>git@host:owner/repo.git</code></td>
+                      <td class="py-2 px-4"><code>git@github.com:facebook/react.git</code></td>
+                    </tr>
+                    <tr>
+                      <td class="py-2 px-4">HTTPS</td>
+                      <td class="py-2 px-4"><code>https://host/owner/repo.git</code></td>
+                      <td class="py-2 px-4"><code>https://github.com/facebook/react.git</code></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-3 flex items-center gap-2">
+                <span class="flex items-center justify-center w-8 h-8 bg-blue-600 rounded-full text-sm">3</span>
+                Create a Worktree
+              </h3>
+              <p class="text-slate-300 mb-4">Click the <code>+</code> button in the sidebar and follow the wizard:</p>
+              <ol class="list-decimal list-inside space-y-2 text-slate-300">
+                <li>Enter a branch name (e.g. <code>feature/login</code>)</li>
+                <li>Choose which branch to base it on (defaults to <code>main</code>)</li>
+                <li>Select the projects to include</li>
+                <li>Configure folders to link (e.g. <code>node_modules</code>)</li>
+                <li>Click "Create" and wait for it to finish</li>
+              </ol>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-3 flex items-center gap-2">
+                <span class="flex items-center justify-center w-8 h-8 bg-blue-600 rounded-full text-sm">4</span>
+                Start Developing
+              </h3>
+              <p class="text-slate-300 mb-4">From the Worktree list:</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li>Click <strong>Open IDE</strong>: opens in VS Code / Cursor / IDEA</li>
+                <li>Click <strong>Terminal</strong>: run commands in the built-in terminal</li>
+                <li>Click the <strong>folder icon</strong>: open in your file manager</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <!-- 3. Workspace -->
+        <section id="workspace">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">3</span>
+            Workspace Management
+          </h2>
+
+          <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 mb-6">
+            <h3 class="text-xl font-semibold mb-4">Directory Structure</h3>
+            <pre><code>workspace/
+├── .worktree-manager.json    # Workspace configuration
+├── projects/                 # Main repository directory
+│   ├── frontend/             # Git project (main branch)
+│   └── backend/
+├── worktrees/                # Worktree directory
+│   ├── feature-login/
+│   │   ├── projects/
+│   │   │   ├── frontend/     # Independent branch working directory
+│   │   │   └── backend/
+│   │   ├── .claude → ../../.claude    # Symlink
+│   │   └── CLAUDE.md → ../../CLAUDE.md
+│   └── hotfix-bug/
+│       └── ...
+├── .claude/                  # Globally shared files
+└── CLAUDE.md</code></pre>
+          </div>
+
+          <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+            <h3 class="text-xl font-semibold mb-4">Global File Sharing</h3>
+            <p class="text-slate-300 mb-4">Set <code>linked_workspace_items</code> in the workspace config to automatically symlink these files/folders to all Worktrees:</p>
+            <pre><code>{
+  "linked_workspace_items": [
+    ".claude",
+    "CLAUDE.md",
+    "requirement-docs"
+  ]
+}</code></pre>
+            <p class="text-slate-300 mt-4">Ideal for AI development configs, requirement docs, and other resources shared across branches.</p>
+          </div>
+        </section>
+
+        <!-- 4. Worktree Operations -->
+        <section id="worktree">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">4</span>
+            Worktree Operations
+          </h2>
+
+          <div class="grid md:grid-cols-2 gap-4">
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-lg font-semibold mb-3">&#x1F504; Switch Branches</h3>
+              <p class="text-slate-300 text-sm">Click a different Worktree in the list to switch -- no <code>git checkout</code> needed</p>
+            </div>
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-lg font-semibold mb-3">&#x1F4CA; Status Monitoring</h3>
+              <p class="text-slate-300 text-sm">Real-time display of commit count, uncommitted changes, and test branch merge status</p>
+            </div>
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-lg font-semibold mb-3">&#x1F5D1;&#xFE0F; Archive Worktree</h3>
+              <p class="text-slate-300 text-sm">Archive when done -- checks for uncommitted/unpushed code first to prevent data loss</p>
+            </div>
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-lg font-semibold mb-3">&#x267B;&#xFE0F; Restore Archive</h3>
+              <p class="text-slate-300 text-sm">One-click restore of previously archived Worktrees from the archive list</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- 5. Multi-Window -->
+        <section id="multi-window">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">5</span>
+            Multi-Window &amp; Workspace Switching
+          </h2>
+
+          <div class="space-y-6">
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">Multi-Window Workflow</h3>
+              <p class="text-slate-300 mb-4">Each Workspace can be opened in its own independent window, letting you work on multiple workspaces simultaneously without interference.</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li>In the sidebar Workspace list, click the <strong>external link icon</strong> (&#x2197;&#xFE0F;) next to a Workspace name to open it in a new window</li>
+                <li>Each window runs independently -- you can view and operate different Workspaces at the same time</li>
+                <li>When the main window closes, child windows close as well</li>
+              </ul>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">Window Title</h3>
+              <p class="text-slate-300 mb-4">The window title dynamically shows the current workspace and branch info in this format:</p>
+              <div class="bg-slate-950 rounded-lg p-3 font-mono text-sm text-blue-400 mb-4">
+                {WorkspaceName} - {WorktreeName}
+              </div>
+              <p class="text-slate-300 text-sm">This makes it easy to tell windows apart when working with multiple workspaces.</p>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">Worktree Locking</h3>
+              <p class="text-slate-300 mb-4">When a Worktree is already open in one window, it shows as <strong>"occupied"</strong> in other windows.</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li>An occupied Worktree cannot be operated on from another window, preventing conflicts</li>
+                <li>Switching to a different Worktree automatically releases the lock on the current one</li>
+                <li>Closing a window automatically releases all locks held by that window</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <!-- 6. Terminal -->
+        <section id="terminal">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">6</span>
+            Terminal
+          </h2>
+
+          <div class="space-y-6">
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">Built-in Terminal</h3>
+              <p class="text-slate-300 mb-4">Each Worktree has its own built-in terminal with the working directory automatically set to the Worktree root. No need to <code>cd</code> manually.</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li>The terminal panel is at the bottom of the app and can be resized by dragging</li>
+                <li>Switching Worktrees automatically switches to the corresponding terminal session</li>
+                <li>Terminal sessions persist throughout the Worktree lifecycle and won't be lost when switching</li>
+              </ul>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">Multiple Tabs</h3>
+              <p class="text-slate-300 mb-4">Each Worktree can have multiple terminal tabs:</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li>Click the <code>+</code> button in the terminal panel to create a new tab</li>
+                <li>Click a tab to switch between terminal sessions</li>
+                <li>Click the <code>x</code> button on a tab to close that terminal</li>
+                <li>Each tab runs as an independent terminal process</li>
+              </ul>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">Fullscreen Mode</h3>
+              <p class="text-slate-300 mb-4">The terminal supports fullscreen mode for when you need more space:</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li>Click the <strong>maximize icon</strong> in the top-right corner of the terminal panel to enter fullscreen</li>
+                <li>Press <span class="kbd">Escape</span> to exit fullscreen mode</li>
+                <li>In fullscreen mode, the terminal fills the entire application window</li>
+              </ul>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">External Terminal</h3>
+              <p class="text-slate-300">If you prefer your system's native terminal, click the <strong>"Open in External Terminal"</strong> button in the terminal panel. It will open your default terminal app and navigate to the Worktree directory automatically.</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- 7. Voice Input -->
+        <section id="voice-input">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">7</span>
+            Voice Input
+          </h2>
+
+          <div class="space-y-6">
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">Overview</h3>
+              <p class="text-slate-300 mb-4">Voice input is powered by <strong>Alibaba Cloud Dashscope Paraformer</strong> real-time speech recognition. Speak into your microphone and your speech is transcribed in real time and injected into the current terminal. Great for hands-free scenarios or quick command entry.</p>
+              <p class="text-slate-300 mb-4">Two operation modes are supported:</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li><strong>Push-to-Talk</strong>: Hold <span class="kbd">Alt</span>+<span class="kbd">V</span> to speak, release to stop recording and transcribe</li>
+                <li><strong>Click to Toggle</strong>: Click the microphone icon in the terminal panel to enter standby mode, then hold <span class="kbd">Alt</span>+<span class="kbd">V</span> to speak</li>
+              </ul>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">Configuring Dashscope</h3>
+              <p class="text-slate-300 mb-4">Before using voice input, you need to configure a Dashscope API Key:</p>
+              <ol class="list-decimal list-inside space-y-3 text-slate-300">
+                <li>Open the <strong>Settings page</strong> (gear icon)</li>
+                <li>Scroll to the <strong>"Speech Recognition (Dashscope)"</strong> section</li>
+                <li>Go to the <a href="https://dashscope.console.aliyun.com/apiKey" class="text-blue-400 hover:underline">Dashscope Console</a> to get your API Key</li>
+                <li>Paste the API Key into the input field and click <strong>"Save"</strong></li>
+                <li>Click the <strong>"Test Connection"</strong> button to verify the configuration</li>
+              </ol>
+              <div class="bg-green-900/20 border border-green-700/50 rounded-lg p-3 mt-4">
+                <p class="text-green-300 text-sm">Dashscope Paraformer supports mixed Chinese-English recognition with fast speed and high accuracy. Works on all desktop platforms (macOS / Windows / Linux).</p>
+              </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">Microphone Settings</h3>
+              <p class="text-slate-300 mb-4">In the Speech Recognition section of Settings, you can manage microphone devices:</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li><strong>Select Microphone</strong>: A dropdown lists all available audio input devices. You can choose a specific microphone (e.g. external mic, headset mic). Defaults to the system default device</li>
+                <li><strong>Microphone Test</strong>: Click the "Test" button to see a real-time volume meter. Speak into the mic to confirm it's working. The test stops automatically after 10 seconds</li>
+                <li><strong>Connection Test</strong>: Click "Test Connection" to verify the API Key and WebSocket address are configured correctly. A green "Connection Successful" message appears on success</li>
+              </ul>
+              <div class="bg-blue-900/20 border border-blue-700 rounded-lg p-4 mt-4">
+                <p class="text-blue-200 text-sm"><strong>&#x1F4A1; Tip:</strong> The system will prompt for microphone permission on first use -- click "Allow". If you accidentally denied it, macOS users can go to <strong>System Settings &rarr; Privacy &amp; Security &rarr; Microphone</strong> to enable it manually.</p>
+              </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">Usage Flow</h3>
+              <ol class="list-decimal list-inside space-y-3 text-slate-300">
+                <li>Click the <strong>microphone icon</strong> in the top-right of the terminal panel to enter <strong>standby mode</strong> (icon turns blue, microphone is active)</li>
+                <li>Hold <span class="kbd">Alt</span>+<span class="kbd">V</span> to start speaking -- connects to Dashscope and streams audio in real time</li>
+                <li>Release <span class="kbd">Alt</span>+<span class="kbd">V</span> to stop recording -- the transcription is automatically typed into the terminal</li>
+                <li>You can press and release repeatedly for multiple voice inputs while the mic stays in standby</li>
+                <li>Click the microphone icon again to exit standby mode and release the microphone</li>
+              </ol>
+              <div class="bg-slate-950 rounded-lg p-4 mt-4 font-mono text-sm">
+                <span class="text-slate-500"># State flow</span><br>
+                <span class="text-slate-400">Idle</span> <span class="text-slate-600">&rarr;</span> <span class="text-blue-400">[Click mic]</span> <span class="text-slate-600">&rarr;</span> <span class="text-green-400">Standby</span> <span class="text-slate-600">&rarr;</span> <span class="text-blue-400">[Hold Alt+V]</span> <span class="text-slate-600">&rarr;</span> <span class="text-red-400">Recording</span> <span class="text-slate-600">&rarr;</span> <span class="text-blue-400">[Release]</span> <span class="text-slate-600">&rarr;</span> <span class="text-green-400">Standby</span>
+              </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">Voice Commands</h3>
+              <p class="text-slate-300 mb-4">In addition to regular text transcription, the following voice command keywords trigger terminal actions when spoken:</p>
+              <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                  <thead>
+                    <tr class="border-b border-slate-600">
+                      <th class="py-2 px-4">Voice Keyword</th>
+                      <th class="py-2 px-4">Terminal Action</th>
+                    </tr>
+                  </thead>
+                  <tbody class="text-slate-300">
+                    <tr class="border-b border-slate-700">
+                      <td class="py-2 px-4"><code>submit</code> / <code>enter</code></td>
+                      <td class="py-2 px-4">Press Enter</td>
+                    </tr>
+                    <tr class="border-b border-slate-700">
+                      <td class="py-2 px-4"><code>backspace</code> / <code>delete</code></td>
+                      <td class="py-2 px-4">Delete previous character (Backspace)</td>
+                    </tr>
+                    <tr class="border-b border-slate-700">
+                      <td class="py-2 px-4"><code>clear</code></td>
+                      <td class="py-2 px-4">Interrupt current input (Ctrl+C)</td>
+                    </tr>
+                    <tr>
+                      <td class="py-2 px-4"><code>escape</code></td>
+                      <td class="py-2 px-4">Send ESC key</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p class="text-slate-400 text-sm mt-4">Example: Hold Alt+V and say <code>git status</code>, release, then hold again and say <code>enter</code> -- this types <code>git status</code> in the terminal and presses Enter to execute.</p>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">AI Voice Refinement</h3>
+              <p class="text-slate-300 mb-4">Voice transcriptions often contain filler words ("um", "uh", "like", "you know") and grammatical errors. The AI Voice Refinement feature integrates the <strong>Qwen large language model</strong> to automatically polish transcribed text:</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li><strong>Remove Filler Words</strong>: Automatically detects and removes meaningless words like "um", "uh", "like", etc.</li>
+                <li><strong>Grammar Correction</strong>: Converts colloquial expressions into proper command format</li>
+                <li><strong>Preserve Intent</strong>: The refinement process keeps the original meaning intact without changing command semantics</li>
+              </ul>
+              <div class="bg-slate-950 rounded-lg p-4 mt-4 font-mono text-sm">
+                <span class="text-slate-500"># Voice refinement example</span><br>
+                <span class="text-red-400">Raw transcription:</span> <span class="text-slate-300">um so like git status just to check</span><br>
+                <span class="text-green-400">Refined result:</span> <span class="text-slate-300">git status</span>
+              </div>
+              <div class="bg-blue-900/20 border border-blue-700 rounded-lg p-4 mt-4">
+                <p class="text-blue-200 text-sm"><strong>&#x1F4A1; Configuration:</strong> In the Speech Recognition section of Settings, configure a Qwen API Key (via the Dashscope platform) to enable AI refinement. The refinement feature can be toggled on/off independently.</p>
+              </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">Mobile Voice Input</h3>
+              <p class="text-slate-300 mb-4">In browser remote mode (accessing from phone/tablet), the terminal panel provides a dedicated <strong>push-to-talk button</strong>:</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li><strong>Long-press to Talk</strong>: Long-press the microphone button at the bottom of the terminal to start recording, release to stop</li>
+                <li><strong>Touch Optimized</strong>: Button size and interactions are optimized for touchscreens -- operable with one hand</li>
+                <li><strong>AI Refinement Included</strong>: Mobile voice input also goes through AI refinement processing</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <!-- 8. IDE Integration -->
+        <section id="ide-integration">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">8</span>
+            IDE Integration
+          </h2>
+
+          <div class="space-y-6">
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">Supported IDEs</h3>
+              <p class="text-slate-300 mb-4">Worktree Manager supports a variety of popular IDEs and editors:</p>
+              <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <div class="bg-slate-900 rounded-lg p-3 text-center">
+                  <span class="block text-lg font-semibold text-slate-200">VS Code</span>
+                  <span class="text-xs text-slate-500">code</span>
+                </div>
+                <div class="bg-slate-900 rounded-lg p-3 text-center">
+                  <span class="block text-lg font-semibold text-slate-200">Cursor</span>
+                  <span class="text-xs text-slate-500">cursor</span>
+                </div>
+                <div class="bg-slate-900 rounded-lg p-3 text-center">
+                  <span class="block text-lg font-semibold text-slate-200">IntelliJ IDEA</span>
+                  <span class="text-xs text-slate-500">idea</span>
+                </div>
+                <div class="bg-slate-900 rounded-lg p-3 text-center">
+                  <span class="block text-lg font-semibold text-slate-200">Zed</span>
+                  <span class="text-xs text-slate-500">zed</span>
+                </div>
+                <div class="bg-slate-900 rounded-lg p-3 text-center">
+                  <span class="block text-lg font-semibold text-slate-200">Sublime Text</span>
+                  <span class="text-xs text-slate-500">subl</span>
+                </div>
+                <div class="bg-slate-900 rounded-lg p-3 text-center">
+                  <span class="block text-lg font-semibold text-slate-200">Windsurf</span>
+                  <span class="text-xs text-slate-500">windsurf</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">Switch Default IDE</h3>
+              <p class="text-slate-300 mb-4">In the Worktree detail view, click the <strong>dropdown arrow</strong> next to the IDE button to see the IDE selection list:</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li>Selecting an IDE makes it the default for the current project</li>
+                <li>Next time you click the IDE button, it will open with the last selected IDE</li>
+                <li>Different projects can have different default IDEs</li>
+              </ul>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">Quick Open</h3>
+              <p class="text-slate-300 mb-4">In the IDE dropdown menu, each IDE option has a <strong>quick-open icon</strong> (&#x2197;&#xFE0F;) on the right:</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li>Clicking the icon opens the project with that IDE <strong>without changing the default IDE setting</strong></li>
+                <li>Handy for occasionally opening with a different IDE</li>
+              </ul>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">Open in File Manager</h3>
+              <p class="text-slate-300">At the bottom of the IDE dropdown menu, there's an <strong>"Open in File Manager"</strong> option that opens the Worktree's project directory in your system file manager (Finder / File Explorer).</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- 9. Smart Folder Scan -->
+        <section id="smart-scan">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">9</span>
+            Smart Folder Scan
+          </h2>
+
+          <div class="space-y-6">
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">Overview</h3>
+              <p class="text-slate-300 mb-4">Smart Folder Scan automatically detects large folders in your project that are good candidates for linking, helping you quickly configure <code>linked_folders</code>.</p>
+              <p class="text-slate-300">Once linked, newly created Worktrees will automatically symlink these folders from the main repository -- no need to reinstall dependencies or rebuild, saving significant disk space and time.</p>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">How to Use</h3>
+              <ol class="list-decimal list-inside space-y-2 text-slate-300">
+                <li>Go to the <strong>Workspace Settings</strong> page</li>
+                <li>Find the <strong>Linked Folders</strong> configuration for your project</li>
+                <li>Click the <strong>scan button</strong> (magnifying glass icon)</li>
+                <li>The system will automatically scan the project directory and list all linkable folders</li>
+                <li>Check the folders you want to link and confirm</li>
+              </ol>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">Auto-Detected Folder Types</h3>
+              <p class="text-slate-300 mb-4">The scan automatically identifies these common large folders:</p>
+              <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                  <thead>
+                    <tr class="border-b border-slate-600">
+                      <th class="py-2 px-4">Folder</th>
+                      <th class="py-2 px-4">Purpose</th>
+                    </tr>
+                  </thead>
+                  <tbody class="text-slate-300">
+                    <tr class="border-b border-slate-700">
+                      <td class="py-2 px-4"><code>node_modules</code></td>
+                      <td class="py-2 px-4">Node.js dependencies</td>
+                    </tr>
+                    <tr class="border-b border-slate-700">
+                      <td class="py-2 px-4"><code>.next</code></td>
+                      <td class="py-2 px-4">Next.js build artifacts</td>
+                    </tr>
+                    <tr class="border-b border-slate-700">
+                      <td class="py-2 px-4"><code>dist</code></td>
+                      <td class="py-2 px-4">General build output</td>
+                    </tr>
+                    <tr class="border-b border-slate-700">
+                      <td class="py-2 px-4"><code>build</code></td>
+                      <td class="py-2 px-4">Build output</td>
+                    </tr>
+                    <tr class="border-b border-slate-700">
+                      <td class="py-2 px-4"><code>vendor</code></td>
+                      <td class="py-2 px-4">PHP / Go dependencies</td>
+                    </tr>
+                    <tr class="border-b border-slate-700">
+                      <td class="py-2 px-4"><code>.output</code></td>
+                      <td class="py-2 px-4">Nuxt 3 build output</td>
+                    </tr>
+                    <tr class="border-b border-slate-700">
+                      <td class="py-2 px-4"><code>.nuxt</code></td>
+                      <td class="py-2 px-4">Nuxt.js build artifacts</td>
+                    </tr>
+                    <tr>
+                      <td class="py-2 px-4"><code>target</code></td>
+                      <td class="py-2 px-4">Rust / Java build output</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 10. Remote Sharing -->
+        <section id="remote-sharing">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">10</span>
+            Remote Sharing &amp; Collaboration
+          </h2>
+
+          <div class="space-y-6">
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">Overview</h3>
+              <p class="text-slate-300 mb-4">Remote sharing lets you share your current workspace via browser with colleagues. They don't need to install anything -- just open the link to view your Worktrees, use the terminal, and even collaborate on development.</p>
+              <div class="bg-blue-900/20 border border-blue-700 rounded-lg p-4 mb-4">
+                <p class="text-blue-200 text-sm"><strong>Use Cases:</strong></p>
+                <ul class="list-disc list-inside space-y-1 text-blue-200 text-sm mt-2">
+                  <li>Pair programming -- remote colleagues join your terminal via browser for real-time collaboration</li>
+                  <li>Code demos -- let PMs or QA view your branch status in the browser</li>
+                  <li>Remote assistance -- help colleagues troubleshoot by operating directly in their shared terminal</li>
+                  <li>Mobile access -- check workspace status from a tablet or phone browser on the go</li>
+                </ul>
+              </div>
+              <p class="text-slate-300 text-sm">Sharing supports three modes: <strong>LAN direct connection</strong> (same Wi-Fi / intranet), <strong>WMS built-in tunnel</strong> (no extra tools needed), and <strong>ngrok tunneling</strong> (using the ngrok service).</p>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">Enable Sharing</h3>
+              <p class="text-slate-300 mb-4">In the desktop app, follow these steps to enable sharing:</p>
+              <ol class="list-decimal list-inside space-y-3 text-slate-300">
+                <li>Find the <strong>"Share" button</strong> at the bottom of the sidebar and click to open the sharing panel</li>
+                <li>Set the <strong>port number</strong> (recommended range: 49152-65535, also supports dev ports 3000-9999)</li>
+                <li>Set an <strong>access password</strong> (required, protects your workspace)</li>
+                <li>Click <strong>"Start Sharing"</strong> -- the system will start a built-in HTTP server</li>
+                <li>Once sharing is active, a <strong>LAN access URL</strong> will be displayed (e.g. <code>http://192.168.1.100:49152</code>)</li>
+              </ol>
+              <div class="bg-slate-950 rounded-lg p-4 mt-4 font-mono text-sm">
+                <span class="text-slate-500"># Example URL after sharing is enabled</span><br>
+                <span class="text-green-400">LAN Address: http://192.168.1.100:49152</span><br>
+                <span class="text-slate-500"># Share this address and password with your colleague</span>
+              </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">Browser Mode Access</h3>
+              <p class="text-slate-300 mb-4">When a collaborator opens the shared link:</p>
+              <ol class="list-decimal list-inside space-y-2 text-slate-300">
+                <li>The browser shows a <strong>password entry page</strong> -- enter the password you set to gain access</li>
+                <li>Once inside, they see the same interface as the desktop app, including the Worktree list and branch status</li>
+                <li>They can use the <strong>built-in terminal</strong> (streamed in real time via WebSocket)</li>
+                <li>They can <strong>join collaboration</strong> and share terminal sessions with the desktop user</li>
+                <li>All operations sync in real time via WebSocket with minimal latency</li>
+              </ol>
+              <div class="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4 mt-4">
+                <p class="text-yellow-200 text-sm"><strong>&#x26A0;&#xFE0F; Note:</strong> Terminal operations from the browser directly affect files on your machine. Only share with people you trust.</p>
+              </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">ngrok Internet Tunneling</h3>
+              <p class="text-slate-300 mb-4">If your collaborator isn't on the same LAN, you can use ngrok for internet tunneling to access via a public URL:</p>
+
+              <h4 class="text-lg font-semibold mb-3 text-slate-200">Step 1: Install ngrok and Get a Token</h4>
+              <ol class="list-decimal list-inside space-y-2 text-slate-300 mb-4">
+                <li>Go to <a href="https://ngrok.com" class="text-blue-400 hover:underline">ngrok.com</a> and create a free account</li>
+                <li>Copy your Authtoken from the <a href="https://dashboard.ngrok.com/get-started/your-authtoken" class="text-blue-400 hover:underline">ngrok Dashboard</a></li>
+              </ol>
+
+              <h4 class="text-lg font-semibold mb-3 text-slate-200">Step 2: Configure the Token in the App</h4>
+              <ol class="list-decimal list-inside space-y-2 text-slate-300 mb-4">
+                <li>Open the <strong>Settings page</strong> (gear icon)</li>
+                <li>Scroll to the bottom and find the <strong>"Internet Sharing (ngrok)"</strong> section</li>
+                <li>Paste the Authtoken into the input field and click <strong>"Save"</strong></li>
+              </ol>
+
+              <h4 class="text-lg font-semibold mb-3 text-slate-200">Step 3: Enable the Internet Tunnel</h4>
+              <ol class="list-decimal list-inside space-y-2 text-slate-300 mb-4">
+                <li>First enable <strong>LAN sharing</strong> as described above</li>
+                <li>In the sharing panel, click the <strong>"Enable Internet"</strong> button</li>
+                <li>Wait for the ngrok tunnel to establish (usually takes a few seconds)</li>
+                <li>The generated public URL (e.g. <code>https://xxxx.ngrok-free.app</code>) can be shared with anyone</li>
+              </ol>
+
+              <div class="bg-slate-950 rounded-lg p-4 font-mono text-sm">
+                <span class="text-slate-500"># ngrok public URL example</span><br>
+                <span class="text-green-400">Public URL: https://a1b2c3d4.ngrok-free.app</span><br>
+                <span class="text-slate-500"># Anyone with internet access can reach this URL</span>
+              </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">WMS Built-in Tunnel</h3>
+              <p class="text-slate-300 mb-4">In addition to ngrok, Worktree Manager includes a built-in WMS tunnel service that enables public access without installing any extra tools:</p>
+              <ol class="list-decimal list-inside space-y-3 text-slate-300">
+                <li>First enable <strong>LAN sharing</strong> as described above</li>
+                <li>In the sharing panel, click the <strong>"WMS Tunnel"</strong> button</li>
+                <li>The system will automatically connect to <code>tunnel.kirov-opensource.com</code> and assign a unique subdomain</li>
+                <li>The generated public URL (e.g. <code>https://your-name.tunnel.kirov-opensource.com</code>) can be shared with anyone</li>
+              </ol>
+              <div class="bg-green-900/20 border border-green-700/50 rounded-lg p-3 mt-4">
+                <p class="text-green-300 text-sm"><strong>Advantages:</strong> No third-party account registration needed, no extra software to install. Supports automatic reconnection on disconnect with a retry countdown display.</p>
+              </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">QR Code Sharing</h3>
+              <p class="text-slate-300 mb-4">Once sharing is enabled, the sharing panel automatically generates a QR code for the current share URL:</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li><strong>Scan to Access</strong>: Scan the QR code with your phone/tablet to open the workspace directly in a mobile browser</li>
+                <li><strong>Embedded Password</strong>: The QR code link can embed the access password (via URL fragment), so scanning auto-authenticates without manual password entry</li>
+                <li><strong>All Modes Supported</strong>: LAN, WMS tunnel, and ngrok modes all support QR code generation</li>
+              </ul>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">Client Management</h3>
+              <p class="text-slate-300 mb-4">The sharing panel lets you view and manage all connected clients in real time:</p>
+              <ul class="list-disc list-inside space-y-2 text-slate-300">
+                <li><strong>Connection List</strong>: Shows all connected browser clients with IP address, connection time, and other details</li>
+                <li><strong>Kick Session</strong>: You can kick individual client sessions -- kicked users must re-enter the password to reconnect</li>
+                <li><strong>Password Update</strong>: Changing the password automatically kicks all connected clients</li>
+              </ul>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">Security Considerations</h3>
+              <div class="space-y-3">
+                <div class="flex items-start gap-3">
+                  <span class="text-green-400 mt-0.5">&#x2713;</span>
+                  <div>
+                    <p class="text-slate-200 font-medium">Password Protection</p>
+                    <p class="text-slate-400 text-sm">All shares require a password. Browser clients must authenticate before accessing any API</p>
+                  </div>
+                </div>
+                <div class="flex items-start gap-3">
+                  <span class="text-green-400 mt-0.5">&#x2713;</span>
+                  <div>
+                    <p class="text-slate-200 font-medium">Brute-Force Protection</p>
+                    <p class="text-slate-400 text-sm">Built-in rate limiting: max 5 authentication attempts per IP per 60 seconds</p>
+                  </div>
+                </div>
+                <div class="flex items-start gap-3">
+                  <span class="text-green-400 mt-0.5">&#x2713;</span>
+                  <div>
+                    <p class="text-slate-200 font-medium">Session Isolation</p>
+                    <p class="text-slate-400 text-sm">Each browser client gets a unique server-generated session ID that cannot be forged</p>
+                  </div>
+                </div>
+                <div class="flex items-start gap-3">
+                  <span class="text-green-400 mt-0.5">&#x2713;</span>
+                  <div>
+                    <p class="text-slate-200 font-medium">CORS Restrictions</p>
+                    <p class="text-slate-400 text-sm">Only allows cross-origin requests from localhost, LAN IPs, and the current ngrok URL</p>
+                  </div>
+                </div>
+                <div class="flex items-start gap-3">
+                  <span class="text-green-400 mt-0.5">&#x2713;</span>
+                  <div>
+                    <p class="text-slate-200 font-medium">Full Control</p>
+                    <p class="text-slate-400 text-sm">The sharer can change the password at any time (auto-kicks all connected users), close the internet tunnel, or stop sharing entirely</p>
+                  </div>
+                </div>
+              </div>
+              <div class="bg-red-900/20 border border-red-700 rounded-lg p-4 mt-4">
+                <p class="text-red-200 text-sm"><strong>&#x26A0;&#xFE0F; Important:</strong> Sharing exposes your workspace files and terminal. Use a strong password and only share with people you trust. Be extra cautious with ngrok internet mode, as anyone with the link and password can access your workspace. Always disable sharing when not in use.</p>
+              </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">Sharing Troubleshooting</h3>
+              <div class="space-y-4">
+                <details class="border border-slate-600 rounded-lg p-4 cursor-pointer">
+                  <summary class="font-semibold text-slate-200">Colleague can't access LAN share?</summary>
+                  <div class="mt-3 text-slate-300 text-sm space-y-2">
+                    <ul class="list-disc list-inside space-y-1">
+                      <li>Confirm both parties are on the same LAN / Wi-Fi</li>
+                      <li>Check if the firewall allows the port (macOS may show a firewall prompt -- click "Allow")</li>
+                      <li>Try testing connectivity with <code>curl http://your-ip:port/api/get_share_info</code></li>
+                      <li>If using a corporate VPN, network isolation may be the issue -- try ngrok internet mode instead</li>
+                    </ul>
+                  </div>
+                </details>
+                <details class="border border-slate-600 rounded-lg p-4 cursor-pointer">
+                  <summary class="font-semibold text-slate-200">ngrok tunnel fails to start?</summary>
+                  <div class="mt-3 text-slate-300 text-sm space-y-2">
+                    <ul class="list-disc list-inside space-y-1">
+                      <li>Check if the ngrok token is configured correctly (bottom of Settings page)</li>
+                      <li>Confirm your network can reach the internet (ngrok needs to connect to its servers)</li>
+                      <li>Free ngrok has a simultaneous tunnel limit -- make sure no other tunnels are running</li>
+                      <li>If it times out, try again -- ngrok can occasionally be slow to connect</li>
+                    </ul>
+                  </div>
+                </details>
+                <details class="border border-slate-600 rounded-lg p-4 cursor-pointer">
+                  <summary class="font-semibold text-slate-200">Browser terminal not responding?</summary>
+                  <div class="mt-3 text-slate-300 text-sm space-y-2">
+                    <ul class="list-disc list-inside space-y-1">
+                      <li>Check WebSocket connection status (Browser DevTools &rarr; Network &rarr; WS)</li>
+                      <li>If using ngrok, confirm the ngrok tunnel is still running</li>
+                      <li>Try refreshing the page to reconnect</li>
+                    </ul>
+                  </div>
+                </details>
+                <details class="border border-slate-600 rounded-lg p-4 cursor-pointer">
+                  <summary class="font-semibold text-slate-200">Port is already in use?</summary>
+                  <div class="mt-3 text-slate-300 text-sm space-y-2">
+                    <p>Simply switch to a different port number. Ports in the 49152-65535 range are recommended -- these are dynamic/private ports unlikely to be used by other programs.</p>
+                    <pre class="mt-2"><code># Check port usage (macOS/Linux)
+lsof -i :49152</code></pre>
+                  </div>
+                </details>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 11. Configuration -->
+        <section id="configuration">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">11</span>
+            Configuration
+          </h2>
+
+          <div class="space-y-6">
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">Global Configuration</h3>
+              <p class="text-slate-300 mb-3">Location: <code>~/.config/worktree-manager/global.json</code></p>
+              <pre><code>{
+  "workspaces": [
+    { "name": "My Project", "path": "/path/to/workspace" }
+  ],
+  "current_workspace": "/path/to/workspace",
+  "ngrok_token": "2abc...xyz",
+  "last_share_port": 49152
+}</code></pre>
+              <div class="mt-4 space-y-2 text-sm">
+                <p class="text-slate-300"><strong>ngrok_token</strong>: Optional. ngrok Authtoken for internet tunneling</p>
+                <p class="text-slate-300"><strong>last_share_port</strong>: Optional. Last used sharing port, auto-filled next time</p>
+              </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">Workspace Configuration</h3>
+              <p class="text-slate-300 mb-3">Location: <code>{workspace}/.worktree-manager.json</code></p>
+              <pre><code>{
+  "name": "My Project",
+  "worktrees_dir": "worktrees",
+  "linked_workspace_items": [".claude", "CLAUDE.md"],
+  "projects": [
+    {
+      "name": "frontend",
+      "base_branch": "main",
+      "test_branch": "test",
+      "merge_strategy": "merge",
+      "linked_folders": ["node_modules", ".next"]
+    }
+  ]
+}</code></pre>
+              <div class="mt-4 space-y-2 text-sm">
+                <p class="text-slate-300"><strong>worktrees_dir</strong>: Directory where Worktrees are stored</p>
+                <p class="text-slate-300"><strong>linked_workspace_items</strong>: Globally shared files</p>
+                <p class="text-slate-300"><strong>linked_folders</strong>: Project-level folder linking</p>
+                <p class="text-slate-300"><strong>merge_strategy</strong>: Merge strategy (<code>merge</code> or <code>rebase</code>)</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 12. Keyboard Shortcuts -->
+        <section id="keyboard-shortcuts">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">12</span>
+            Keyboard Shortcuts
+          </h2>
+
+          <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+            <div class="overflow-x-auto">
+              <table class="w-full text-left border-collapse">
+                <thead>
+                  <tr class="border-b border-slate-600">
+                    <th class="py-3 px-4">Shortcut</th>
+                    <th class="py-3 px-4">Action</th>
+                    <th class="py-3 px-4">Context</th>
+                  </tr>
+                </thead>
+                <tbody class="text-slate-300">
+                  <tr class="border-b border-slate-700">
+                    <td class="py-3 px-4"><span class="kbd">Escape</span></td>
+                    <td class="py-3 px-4">Exit terminal fullscreen</td>
+                    <td class="py-3 px-4">Terminal fullscreen mode</td>
+                  </tr>
+                  <tr class="border-b border-slate-700">
+                    <td class="py-3 px-4"><span class="kbd">Escape</span></td>
+                    <td class="py-3 px-4">Close dropdown menu / dialog</td>
+                    <td class="py-3 px-4">Any menu or dialog open</td>
+                  </tr>
+                  <tr class="border-b border-slate-700">
+                    <td class="py-3 px-4"><span class="kbd">Alt</span>+<span class="kbd">V</span> (hold)</td>
+                    <td class="py-3 px-4">Push-to-talk, release to stop</td>
+                    <td class="py-3 px-4">Microphone in standby mode</td>
+                  </tr>
+                  <tr>
+                    <td class="py-3 px-4">Right-click</td>
+                    <td class="py-3 px-4">Open Worktree context menu</td>
+                    <td class="py-3 px-4">On a Worktree list item</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 13. Best Practices -->
+        <section id="best-practices">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">13</span>
+            Best Practices
+          </h2>
+
+          <div class="space-y-4">
+            <div class="bg-gradient-to-r from-green-900/20 to-slate-800 border border-green-700 rounded-xl p-6">
+              <h3 class="text-lg font-semibold mb-2 text-green-400">&#x2705; Recommended</h3>
+              <ul class="space-y-2 text-slate-300">
+                <li>&#x2022; Create a separate Worktree for each feature or task</li>
+                <li>&#x2022; Use consistent branch naming conventions (e.g. <code>feature/xxx</code>, <code>hotfix/xxx</code>)</li>
+                <li>&#x2022; Regularly archive merged Worktrees to keep the list clean</li>
+                <li>&#x2022; Add frequently used dependency directories to <code>linked_folders</code></li>
+                <li>&#x2022; Use the built-in terminal to avoid path confusion</li>
+              </ul>
+            </div>
+
+            <div class="bg-gradient-to-r from-red-900/20 to-slate-800 border border-red-700 rounded-xl p-6">
+              <h3 class="text-lg font-semibold mb-2 text-red-400">&#x26A0;&#xFE0F; Avoid</h3>
+              <ul class="space-y-2 text-slate-300">
+                <li>&#x2022; Don't manually delete Worktree directories -- use the archive feature instead</li>
+                <li>&#x2022; Don't modify the same file in multiple Worktrees simultaneously (linked files excepted)</li>
+                <li>&#x2022; Don't link files that may cause conflicts (e.g. <code>.env</code>)</li>
+                <li>&#x2022; Avoid creating too many Worktrees (10 or fewer recommended)</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <!-- 14. Troubleshooting -->
+        <section id="troubleshooting">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">14</span>
+            Troubleshooting
+          </h2>
+
+          <div class="space-y-4">
+            <details class="bg-slate-800 border border-slate-700 rounded-xl p-6 cursor-pointer">
+              <summary class="font-semibold text-lg">Q: macOS says the app is "damaged" or "cannot verify the developer"?</summary>
+              <div class="mt-4 text-slate-300 space-y-2">
+                <p>This happens because the app isn't notarized by Apple, so macOS security blocks it. Follow these steps:</p>
+                <ol class="list-decimal list-inside space-y-2 mt-3">
+                  <li><strong>Right-click</strong> the app icon and select "Open" (don't double-click)</li>
+                  <li>If it still won't open, go to <strong>System Settings &rarr; Privacy &amp; Security</strong>, find the blocked app prompt at the bottom, and click <strong>"Open Anyway"</strong></li>
+                  <li>If none of the above works, open <strong>Terminal</strong> and run:</li>
+                </ol>
+                <pre><code>xattr -cr "/Applications/Worktree Manager.app"</code></pre>
+                <p>Then reopen the app. This command removes the quarantine attribute from the file.</p>
+              </div>
+            </details>
+
+            <details class="bg-slate-800 border border-slate-700 rounded-xl p-6 cursor-pointer">
+              <summary class="font-semibold text-lg">Q: Worktree creation failed?</summary>
+              <div class="mt-4 text-slate-300 space-y-2">
+                <p><strong>Possible causes:</strong></p>
+                <ul class="list-disc list-inside">
+                  <li>Branch name already exists</li>
+                  <li>Git repository has uncommitted changes</li>
+                  <li>Insufficient disk space</li>
+                </ul>
+                <p class="mt-3"><strong>Solution:</strong> Check the error message, ensure the main repository is in a clean state, or manually run <code>git worktree add</code> to see the detailed error.</p>
+              </div>
+            </details>
+
+            <details class="bg-slate-800 border border-slate-700 rounded-xl p-6 cursor-pointer">
+              <summary class="font-semibold text-lg">Q: Symlinks broken / files not found?</summary>
+              <div class="mt-4 text-slate-300 space-y-2">
+                <p>Check that the <code>linked_folders</code> configuration is correct and that the corresponding folders exist in the main repository. Run in terminal:</p>
+                <pre><code>ls -la worktrees/your-worktree/</code></pre>
+                <p>Check if the links are intact. If broken, you can delete and recreate the Worktree.</p>
+              </div>
+            </details>
+
+            <details class="bg-slate-800 border border-slate-700 rounded-xl p-6 cursor-pointer">
+              <summary class="font-semibold text-lg">Q: How to open a workspace in a new window?</summary>
+              <div class="mt-4 text-slate-300 space-y-2">
+                <p>In the sidebar Workspace list, hover over a Workspace name and an <strong>external link icon</strong> (&#x2197;&#xFE0F;) will appear on the right.</p>
+                <p>Click the icon to open that workspace in a new window. The new window is independent and won't affect the main window.</p>
+              </div>
+            </details>
+
+            <details class="bg-slate-800 border border-slate-700 rounded-xl p-6 cursor-pointer">
+              <summary class="font-semibold text-lg">Q: How to make the terminal fullscreen?</summary>
+              <div class="mt-4 text-slate-300 space-y-2">
+                <p>Click the <strong>maximize icon</strong> in the top-right corner of the terminal panel to enter fullscreen mode.</p>
+                <p>Press <span class="kbd">Escape</span> to exit fullscreen and return to the normal layout.</p>
+              </div>
+            </details>
+
+            <details class="bg-slate-800 border border-slate-700 rounded-xl p-6 cursor-pointer">
+              <summary class="font-semibold text-lg">Q: Which folders should I link?</summary>
+              <div class="mt-4 text-slate-300 space-y-2">
+                <p>Here are commonly recommended folders to link, by project type:</p>
+                <ul class="list-disc list-inside space-y-1 mt-3">
+                  <li><code>node_modules</code> -- Node.js / frontend project dependencies</li>
+                  <li><code>.next</code> -- Next.js build cache</li>
+                  <li><code>dist</code> -- General build output directory</li>
+                  <li><code>build</code> -- React / other framework build output</li>
+                  <li><code>vendor</code> -- PHP Composer / Go dependencies</li>
+                  <li><code>.output</code> -- Nuxt 3 build output</li>
+                  <li><code>.nuxt</code> -- Nuxt.js build cache</li>
+                  <li><code>target</code> -- Rust Cargo / Java Maven build output</li>
+                </ul>
+                <div class="bg-blue-900/20 border border-blue-700 rounded-lg p-3 mt-4">
+                  <p class="text-blue-200 text-sm"><strong>&#x1F4A1; Tip:</strong> You can also use the <strong>Smart Folder Scan</strong> feature for automatic detection. See <a href="#smart-scan" class="text-blue-400 hover:underline">Section 9</a>.</p>
+                </div>
+              </div>
+            </details>
+
+            <details class="bg-slate-800 border border-slate-700 rounded-xl p-6 cursor-pointer">
+              <summary class="font-semibold text-lg">Q: How to sync workspaces across multiple computers?</summary>
+              <div class="mt-4 text-slate-300 space-y-2">
+                <p>The workspace configuration is stored in <code>.worktree-manager.json</code> and can be added to version control:</p>
+                <pre><code>git add .worktree-manager.json
+git commit -m "Add worktree config"
+git push</code></pre>
+                <p>After pulling on another computer, the workspace will automatically recognize the configuration.</p>
+              </div>
+            </details>
+
+            <details class="bg-slate-800 border border-slate-700 rounded-xl p-6 cursor-pointer">
+              <summary class="font-semibold text-lg">Q: Can archived Worktrees be restored?</summary>
+              <div class="mt-4 text-slate-300 space-y-2">
+                <p>Yes! Find the Worktree in the archive list and click "Restore". Note that the branch state may differ from when it was archived (if the remote has been updated).</p>
+              </div>
+            </details>
+
+            <details class="bg-slate-800 border border-slate-700 rounded-xl p-6 cursor-pointer">
+              <summary class="font-semibold text-lg">Q: Which operating systems are supported?</summary>
+              <div class="mt-4 text-slate-300 space-y-2">
+                <p>Currently supported:</p>
+                <ul class="list-disc list-inside">
+                  <li>&#x2705; macOS (Intel + Apple Silicon)</li>
+                  <li>&#x2705; Linux (Ubuntu, Debian, Arch, etc.)</li>
+                  <li>&#x26A0;&#xFE0F; Windows (experimental support, symlinks require administrator privileges)</li>
+                </ul>
+              </div>
+            </details>
+          </div>
+        </section>
+
+      </div>
+
+      <!-- CTA -->
+      <div class="mt-16 bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-700 rounded-xl p-8 text-center">
+        <h3 class="text-2xl font-bold mb-3">Still Have Questions?</h3>
+        <p class="text-slate-300 mb-6">Feel free to open an Issue or join the discussion on GitHub</p>
+        <div class="flex gap-3 justify-center flex-wrap">
+          <a href="https://github.com/guoyongchang/worktree-manager/issues" target="_blank" class="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition">
+            Submit an Issue
+          </a>
+          <a href="https://github.com/guoyongchang/worktree-manager/discussions" target="_blank" class="inline-flex items-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white rounded-lg font-medium transition">
+            Join Discussion
+          </a>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="text-center py-12 px-4 border-t border-slate-700">
+    <div class="max-w-5xl mx-auto">
+      <p class="text-slate-400">
+        <a href="https://github.com/guoyongchang/worktree-manager" class="text-blue-400 hover:text-blue-300">GitHub</a>
+        <span class="mx-2">&middot;</span>
+        <a href="https://github.com/guoyongchang/worktree-manager/issues" class="text-blue-400 hover:text-blue-300">Report Issue</a>
+        <span class="mx-2">&middot;</span>
+        <a href="../guide.html" class="text-blue-400 hover:text-blue-300">中文版</a>
+        <span class="mx-2">&middot;</span>
+        <a href="index.html" class="text-blue-400 hover:text-blue-300">Home</a>
+        <span class="mx-2">&middot;</span>
+        <span>MIT License</span>
+      </p>
+      <p class="mt-4 text-slate-500">Made with &#x2764;&#xFE0F; using Tauri + React + Rust</p>
+      <p class="mt-2 text-xs text-slate-600">&copy; 2025-2026 Worktree Manager Team</p>
+    </div>
+  </footer>
+
+  <script>
+    function toggleMobileMenu() {
+      const menu = document.getElementById('mobile-menu');
+      menu.classList.toggle('hidden');
+    }
+
+    // Smooth scroll for anchor links
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+      anchor.addEventListener('click', function (e) {
+        e.preventDefault();
+        const target = document.querySelector(this.getAttribute('href'));
+        if (target) {
+          const offset = 80; // nav height
+          const targetPosition = target.offsetTop - offset;
+          window.scrollTo({
+            top: targetPosition,
+            behavior: 'smooth'
+          });
+        }
+      });
+    });
+  </script>
+
+</body>
+</html>

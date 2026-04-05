@@ -13,7 +13,8 @@ dist-ssr
 *.local
 
 .claude/
-docs/
+docs/**/*.md
+!docs/generated/
 
 # Requirement docs (internal)
 requirement-docs/

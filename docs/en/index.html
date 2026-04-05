@@ -1,0 +1,1002 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Git Worktree Manager - Multi-Branch Parallel Development Tool</title>
+  <meta name="description" content="An elegant Git Worktree visual management tool for efficient multi-branch parallel development. Supports smart folder linking, built-in terminal, and remote sharing.">
+  <meta name="keywords" content="Git Worktree, Git branch management, multi-branch development, Tauri, React, developer tools">
+  <meta name="author" content="Worktree Manager Team">
+
+  <!-- Open Graph / Social Media -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://github.com/guoyongchang/worktree-manager">
+  <meta property="og:title" content="Git Worktree Manager - Multi-Branch Parallel Development Tool">
+  <meta property="og:description" content="An elegant Git Worktree visual management tool for efficient multi-branch parallel development">
+  <meta property="og:image" content="https://guoyongchang.github.io/worktree-manager/icons/icon.png">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Git Worktree Manager">
+  <meta name="twitter:description" content="An elegant Git Worktree visual management tool">
+  <meta name="twitter:image" content="https://guoyongchang.github.io/worktree-manager/icons/icon.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="../icons/app-icon.svg">
+  <link rel="apple-touch-icon" href="../icons/128x128.png">
+
+  <!-- TailwindCSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#3b82f6',
+            'primary-hover': '#2563eb',
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    /* Custom scrollbar */
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: #1e293b; }
+    ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+    /* Feature Cards */
+    .feature-card {
+      background-color: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 0.75rem;
+      padding: 1.5rem;
+      transition: all 0.3s;
+    }
+    .feature-card:hover {
+      border-color: rgba(59, 130, 246, 0.5);
+      box-shadow: 0 10px 15px -3px rgba(59, 130, 246, 0.1);
+    }
+    .feature-icon {
+      font-size: 2.25rem;
+      margin-bottom: 1rem;
+    }
+    .feature-card h3 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      color: #f1f5f9;
+    }
+    .feature-card p {
+      color: #94a3b8;
+      font-size: 0.875rem;
+      line-height: 1.625;
+    }
+
+    /* Steps */
+    .steps {
+      max-width: 48rem;
+      margin: 0 auto 3rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+    .step {
+      display: flex;
+      gap: 1rem;
+      align-items: flex-start;
+    }
+    .step-number {
+      flex-shrink: 0;
+      width: 2.5rem;
+      height: 2.5rem;
+      border-radius: 9999px;
+      background: linear-gradient(to bottom right, #3b82f6, #1d4ed8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 700;
+      font-size: 1.125rem;
+    }
+    .step h3 {
+      font-size: 1.125rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      color: #f1f5f9;
+    }
+    .step p {
+      color: #94a3b8;
+      line-height: 1.625;
+    }
+    .step ul {
+      color: #94a3b8;
+      line-height: 1.625;
+      margin-top: 0.5rem;
+      list-style: disc;
+      padding-left: 1.25rem;
+    }
+    .step ul li {
+      margin-bottom: 0.25rem;
+    }
+
+    /* Directory Tree */
+    .tree-section {
+      margin-top: 3rem;
+      background-color: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 0.75rem;
+      padding: 1.5rem;
+    }
+    .tree-section h3 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      color: #f1f5f9;
+    }
+    .tree {
+      background-color: #020617;
+      border-radius: 0.5rem;
+      padding: 1rem;
+      overflow-x: auto;
+    }
+    .tree pre {
+      font-size: 0.875rem;
+      font-family: ui-monospace, monospace;
+      color: #cbd5e1;
+      line-height: 1.625;
+    }
+    .tree .dir {
+      color: #60a5fa;
+      font-weight: 600;
+    }
+    .tree .link {
+      color: #4ade80;
+    }
+    .tree .comment {
+      color: #64748b;
+      font-style: italic;
+    }
+
+    /* Code Block */
+    .code-block {
+      margin-top: 2rem;
+      background-color: #020617;
+      border: 1px solid #334155;
+      border-radius: 0.75rem;
+      padding: 1.5rem;
+      font-family: ui-monospace, monospace;
+      font-size: 0.875rem;
+      overflow-x: auto;
+    }
+    .code-comment {
+      color: #64748b;
+      display: block;
+      margin-bottom: 0.25rem;
+    }
+    .code-cmd {
+      color: #60a5fa;
+      display: block;
+      margin-bottom: 0.75rem;
+    }
+
+    /* Tech Grid */
+    .tech-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1rem;
+    }
+    @media (min-width: 768px) {
+      .tech-grid {
+        grid-template-columns: repeat(3, 1fr);
+      }
+    }
+    .tech-item {
+      background-color: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 0.5rem;
+      padding: 1rem;
+      text-align: center;
+      transition: border-color 0.2s;
+    }
+    .tech-item:hover {
+      border-color: rgba(59, 130, 246, 0.5);
+    }
+    .tech-label {
+      display: block;
+      font-size: 0.75rem;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.25rem;
+    }
+    .tech-value {
+      display: block;
+      font-size: 1.125rem;
+      font-weight: 600;
+      color: #f1f5f9;
+    }
+
+    /* Workflow Comparison */
+    .workflow-compare {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      margin-top: 1rem;
+      margin-bottom: 1rem;
+    }
+    @media (max-width: 640px) {
+      .workflow-compare { grid-template-columns: 1fr; }
+    }
+    .workflow-col {
+      padding: 1rem;
+      border-radius: 0.5rem;
+    }
+    .workflow-old {
+      background: rgba(239, 68, 68, 0.04);
+      border: 1px solid rgba(239, 68, 68, 0.15);
+    }
+    .workflow-new {
+      background: rgba(34, 197, 94, 0.04);
+      border: 1px solid rgba(34, 197, 94, 0.15);
+    }
+    .workflow-col h4 {
+      font-weight: 600;
+      margin-bottom: 0.75rem;
+      font-size: 0.6875rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .workflow-old h4 { color: #f87171; }
+    .workflow-new h4 { color: #4ade80; }
+    .workflow-steps {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.375rem;
+      align-items: center;
+    }
+    .wf-step {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.25rem 0.625rem;
+      border-radius: 0.375rem;
+      font-family: ui-monospace, monospace;
+      font-size: 0.6875rem;
+      white-space: nowrap;
+    }
+    .workflow-old .wf-step {
+      background: rgba(239, 68, 68, 0.1);
+      color: #fca5a5;
+      border: 1px solid rgba(239, 68, 68, 0.12);
+    }
+    .workflow-new .wf-step {
+      background: rgba(34, 197, 94, 0.1);
+      color: #86efac;
+      border: 1px solid rgba(34, 197, 94, 0.12);
+    }
+    .wf-arrow { color: #475569; font-size: 0.6875rem; }
+    .wf-result {
+      margin-top: 0.75rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .workflow-old .wf-result { color: #f87171; }
+    .workflow-new .wf-result { color: #4ade80; }
+
+    /* Container */
+    .container {
+      max-width: 72rem;
+      margin: 0 auto;
+      padding: 0 1rem;
+    }
+
+    /* Section Headers */
+    section h2 {
+      font-size: 1.875rem;
+      font-weight: 700;
+      margin-bottom: 0.75rem;
+    }
+    @media (min-width: 768px) {
+      section h2 {
+        font-size: 2.25rem;
+      }
+    }
+    section > div > h2 {
+      text-align: center;
+    }
+    section > div > p:first-of-type {
+      text-align: center;
+      color: #94a3b8;
+      font-size: 1.125rem;
+      margin-bottom: 3rem;
+    }
+
+    /* Download section */
+    .download-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 1rem 2rem;
+      background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+      color: white;
+      border-radius: 0.75rem;
+      font-size: 1.125rem;
+      font-weight: 600;
+      transition: all 0.3s;
+      box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+    }
+    .download-btn:hover {
+      box-shadow: 0 6px 20px rgba(59, 130, 246, 0.5);
+      transform: translateY(-1px);
+    }
+    .platform-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      background-color: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 0.5rem;
+      color: #94a3b8;
+      font-size: 0.875rem;
+      transition: border-color 0.2s;
+    }
+    .platform-badge:hover {
+      border-color: rgba(59, 130, 246, 0.5);
+    }
+
+    /* Collapsible build from source */
+    details.build-source summary {
+      cursor: pointer;
+      color: #94a3b8;
+      font-size: 0.875rem;
+    }
+    details.build-source summary:hover {
+      color: #cbd5e1;
+    }
+    details.build-source[open] summary {
+      margin-bottom: 1rem;
+    }
+
+    /* Install steps */
+    .install-step {
+      display: flex;
+      gap: 0.75rem;
+      align-items: flex-start;
+    }
+    .install-step-num {
+      flex-shrink: 0;
+      width: 1.75rem;
+      height: 1.75rem;
+      border-radius: 9999px;
+      background-color: #334155;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #94a3b8;
+      font-weight: 600;
+      font-size: 0.75rem;
+    }
+
+    /* Language switcher */
+    .lang-switcher {
+      font-size: 0.875rem;
+      color: #94a3b8;
+    }
+    .lang-switcher a {
+      color: #94a3b8;
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+    .lang-switcher a:hover {
+      color: #60a5fa;
+    }
+    .lang-active {
+      color: #f1f5f9 !important;
+      font-weight: 600;
+    }
+
+    /* NEW badge */
+    .badge-new {
+      font-size: 0.6em;
+      vertical-align: middle;
+      background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 600;
+      color: white;
+      letter-spacing: 0.05em;
+    }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100">
+
+  <!-- Navigation -->
+  <nav class="fixed top-0 w-full bg-slate-900/95 backdrop-blur-sm border-b border-slate-700 z-50">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6">
+      <div class="flex items-center justify-between h-16">
+        <div class="flex items-center gap-3">
+          <img src="../icons/app-icon.svg" alt="Worktree Manager" class="w-8 h-8">
+          <span class="text-xl font-bold">Worktree Manager</span>
+        </div>
+        <div class="hidden md:flex items-center gap-6">
+          <a href="index.html" class="text-blue-400 hover:text-blue-300 transition">Home</a>
+          <a href="guide.html" class="text-slate-300 hover:text-blue-300 transition">Guide</a>
+          <a href="https://github.com/guoyongchang/worktree-manager" target="_blank" class="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition">
+            <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            GitHub
+          </a>
+          <span class="lang-switcher"><a href="../index.html">中文</a> | <span class="lang-active">English</span></span>
+        </div>
+        <!-- Mobile menu button -->
+        <button type="button" aria-label="Open menu" class="md:hidden p-2 rounded-lg hover:bg-slate-800 transition" onclick="toggleMobileMenu()">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+          </svg>
+        </button>
+      </div>
+      <!-- Mobile menu -->
+      <div id="mobile-menu" class="hidden md:hidden pb-4">
+        <a href="index.html" class="block py-2 text-blue-400">Home</a>
+        <a href="guide.html" class="block py-2 text-slate-300 hover:text-blue-300">Guide</a>
+        <a href="https://github.com/guoyongchang/worktree-manager" target="_blank" class="block py-2 text-slate-300 hover:text-blue-300">GitHub</a>
+        <div class="py-2 lang-switcher"><a href="../index.html">中文</a> | <span class="lang-active">English</span></div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <header class="pt-32 pb-20 px-4 text-center bg-gradient-to-b from-slate-800 to-slate-900">
+    <img src="../icons/app-icon.svg" alt="Worktree Manager" class="w-24 h-24 mx-auto mb-6">
+    <h1 class="text-4xl md:text-5xl font-bold mb-4">Git Worktree Manager</h1>
+    <p class="text-xl text-slate-400 max-w-2xl mx-auto mb-8">An elegant Git Worktree visual management tool for efficient multi-branch parallel development. Supports remote sharing and real-time collaboration.</p>
+    <div class="flex gap-3 justify-center flex-wrap">
+      <a href="https://github.com/guoyongchang/worktree-manager/releases/latest" class="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+        Download Latest
+      </a>
+      <a href="https://github.com/guoyongchang/worktree-manager" class="inline-flex items-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white rounded-lg font-medium transition">
+        <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+      <a href="guide.html" class="inline-flex items-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white rounded-lg font-medium transition">Get Started</a>
+    </div>
+  </header>
+
+  <!-- Download -->
+  <section class="py-16 bg-gradient-to-b from-slate-900 via-slate-800/50 to-slate-900">
+    <div class="max-w-5xl mx-auto px-4 text-center">
+      <h2 class="text-3xl md:text-4xl font-bold mb-3">Download &amp; Install</h2>
+      <p class="text-slate-400 text-lg mb-8">Ready to use, with auto-updates</p>
+
+      <!-- Download button -->
+      <div class="mb-8">
+        <a href="https://github.com/guoyongchang/worktree-manager/releases/latest" class="download-btn">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+          Download Latest Version
+        </a>
+      </div>
+
+      <!-- Platform badges -->
+      <div class="flex gap-3 justify-center flex-wrap mb-8">
+        <div class="platform-badge">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+          macOS (Intel + ARM)
+        </div>
+        <div class="platform-badge">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M3,12V6.75L9,5.43V11.91L3,12M20,3V11.75L10,11.9V5.21L20,3M3,13L9,13.09V19.9L3,18.75V13M10,13.25L20,13.5V22L10,20.09V13.25Z"/></svg>
+          Windows
+        </div>
+        <div class="platform-badge">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M20.581 19.049c-.55-.446-.336-1.431-.907-1.917.553-3.365-.997-6.331-2.845-8.232-1.551-1.595-1.051-3.147-1.051-4.49 0-2.146-.881-4.41-3.55-4.41C9.56 0 8.903 2.261 8.903 4.41c0 1.343.5 2.895-1.051 4.49-1.848 1.901-3.398 4.867-2.845 8.232-.571.486-.357 1.471-.907 1.917-1.407 1.142.647 1.792 1.144 1.234.497-.558 1.837-.14 2.442.39.604.53 2.048.392 2.048-.233 0-.625-.817-1.648-1.155-2.092-.338-.444-.56-1.727.203-2.236 1.028-.684 2.403.387 3.446.387 1.043 0 2.418-1.071 3.446-.387.764.509.541 1.792.203 2.236-.338.444-1.155 1.467-1.155 2.092 0 .625 1.444.763 2.048.233.605-.53 1.945-.948 2.442-.39.497.558 2.551-.092 1.144-1.234z"/></svg>
+          Linux
+        </div>
+      </div>
+
+      <!-- Auto-update note -->
+      <div class="inline-flex items-center gap-2 px-4 py-2 bg-green-900/20 border border-green-700/50 rounded-lg text-green-300 text-sm mb-10">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        Built-in auto-update -- new versions are pushed automatically, no manual downloads needed
+      </div>
+
+      <!-- macOS installation instructions -->
+      <div class="max-w-2xl mx-auto text-left">
+        <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+          <h3 class="text-lg font-semibold mb-4 flex items-center gap-2">
+            <svg class="w-5 h-5 text-slate-400" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+            macOS Installation Guide
+          </h3>
+          <div class="space-y-4">
+            <div class="install-step">
+              <div class="install-step-num">1</div>
+              <p class="text-slate-300 text-sm">Download the <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono text-green-400">.dmg</code> file, open it and drag the app into the Applications folder.</p>
+            </div>
+            <div class="install-step">
+              <div class="install-step-num">2</div>
+              <p class="text-slate-300 text-sm">If you see "cannot verify the developer" on first launch, <strong class="text-slate-100">right-click the app</strong> and select <strong class="text-slate-100">"Open"</strong>.</p>
+            </div>
+            <div class="install-step">
+              <div class="install-step-num">3</div>
+              <p class="text-slate-300 text-sm">If it still won't open, go to <strong class="text-slate-100">System Settings &rarr; Privacy &amp; Security</strong>, find the prompt at the bottom and click <strong class="text-slate-100">"Open Anyway"</strong>.</p>
+            </div>
+            <div class="install-step">
+              <div class="install-step-num">4</div>
+              <div class="text-slate-300 text-sm">
+                <p>If none of the above works, open Terminal and run:</p>
+                <code class="block mt-2 bg-slate-950 px-3 py-2 rounded text-xs font-mono text-blue-400">xattr -cr "/Applications/Worktree Manager.app"</code>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pain Points -->
+  <section class="py-16">
+    <div class="max-w-5xl mx-auto px-4">
+      <h2 class="text-3xl font-bold mb-3">Sound familiar?</h2>
+      <p class="text-slate-400 mb-10 text-lg">Productivity black holes every developer has experienced</p>
+      <div class="space-y-4">
+
+        <!-- Scenario 1: Production on fire -->
+        <div class="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+          <div class="p-6">
+            <div class="font-semibold mb-3 text-lg flex items-center gap-2 text-red-400">&#x1F525; Production is on fire, but your work isn't committed yet</div>
+            <div class="text-slate-300 text-sm leading-relaxed space-y-2">
+              <p>You're on <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">feature/checkout-v2</code> refactoring the checkout flow, with a dozen files changed and <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">npm run dev</code> hot-reloading. Slack fires off an alert: <strong>payment callback is returning 500 in production.</strong></p>
+              <p>The traditional approach: <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">git stash</code> &rarr; switch to <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">hotfix</code> &rarr; <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">npm install</code> (dependency versions differ, need to reinstall) &rarr; fix and push &rarr; switch back &rarr; <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">git stash pop</code> &rarr; pray there are no conflicts &rarr; restart dev server and wait for build cache to rebuild. At least 15 minutes, while production is still down.</p>
+            </div>
+            <div class="workflow-compare">
+              <div class="workflow-col workflow-old">
+                <h4>Traditional Approach</h4>
+                <div class="workflow-steps">
+                  <span class="wf-step">git stash</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">checkout hotfix</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">npm install</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">fix bug</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">push</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">checkout back</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">stash pop</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">npm install</span>
+                </div>
+                <div class="wf-result">8 steps &middot; 15+ minutes &middot; possible conflicts</div>
+              </div>
+              <div class="workflow-col workflow-new">
+                <h4>Worktree Manager</h4>
+                <div class="workflow-steps">
+                  <span class="wf-step">Click "+" to create hotfix</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">fix bug</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">push</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">archive</span>
+                </div>
+                <div class="wf-result">4 steps &middot; 30-second switch &middot; zero impact on original branch</div>
+              </div>
+            </div>
+            <div class="p-3 bg-green-900/20 border border-green-700/50 rounded-lg">
+              <p class="text-green-300 text-sm"><strong>node_modules automatically shared via symlink</strong>, ready in seconds. Your feature branch dev server keeps running, and your in-progress code stays untouched.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Scenario 2: Frontend-backend misalignment -->
+        <div class="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+          <div class="p-6">
+            <div class="font-semibold mb-3 text-lg flex items-center gap-2 text-amber-400">&#x1F4A5; Frontend-backend alignment breaks during debugging</div>
+            <div class="text-slate-300 text-sm leading-relaxed space-y-2">
+              <p>Your project has separate repos: <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">web</code> and <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">api</code>. Working on the "membership" feature, both repos need to be on <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">feature/membership</code>. But a colleague asks you to check their <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">feature/search</code> issue&mdash;you switch the frontend but forget the backend. White screen, 404 errors, 30 minutes of debugging before realizing the branches are misaligned.</p>
+            </div>
+            <div class="workflow-compare">
+              <div class="workflow-col workflow-old">
+                <h4>Traditional: manually align two repos</h4>
+                <div class="workflow-steps">
+                  <span class="wf-step">cd web && git checkout</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">cd api && git checkout</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">forgot one?</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">404 / white screen</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">debug 30 min</span>
+                </div>
+                <div class="wf-result">Multi-repo alignment by memory &middot; bound to fail</div>
+              </div>
+              <div class="workflow-col workflow-new">
+                <h4>Worktree Manager: one worktree = one environment</h4>
+                <div class="workflow-steps">
+                  <span class="wf-step">Create membership worktree</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">web + api auto checkout</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">develop</span>
+                </div>
+                <div class="wf-result">Switch worktree = switch entire work environment</div>
+              </div>
+            </div>
+            <div class="p-3 bg-green-900/20 border border-green-700/50 rounded-lg">
+              <p class="text-green-300 text-sm"><strong>One worktree binds multiple project repos</strong>. When created, all repos check out to the corresponding branch simultaneously. No more "only switched half" problems.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Scenario 3: Merge to test -->
+        <div class="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+          <div class="p-6">
+            <div class="font-semibold mb-3 text-lg flex items-center gap-2 text-purple-400">&#x1F504; Merge to test branch through muscle memory</div>
+            <div class="text-slate-300 text-sm leading-relaxed space-y-2">
+              <p>Feature is done, time to merge into <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">test</code> for QA. Every time: <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">git checkout test</code> &rarr; <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">git pull</code> &rarr; <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">git merge feature/xxx</code> &rarr; resolve conflicts &rarr; <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">git push</code> &rarr; <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">git checkout feature/xxx</code> back. With 3-4 features a day, this becomes mind-numbing repetition, and sometimes you forget to switch back and keep developing on <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">test</code>.</p>
+            </div>
+            <div class="workflow-compare">
+              <div class="workflow-col workflow-old">
+                <h4>Traditional Approach</h4>
+                <div class="workflow-steps">
+                  <span class="wf-step">checkout test</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">git pull</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">git merge</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">resolve conflicts</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">git push</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">checkout back</span>
+                </div>
+                <div class="wf-result">6 steps &middot; repeat for every merge &middot; easy to forget switching back</div>
+              </div>
+              <div class="workflow-col workflow-new">
+                <h4>Worktree Manager</h4>
+                <div class="workflow-steps">
+                  <span class="wf-step">Click "Merge to test"</span>
+                </div>
+                <div class="wf-result">1 step &middot; stay on current branch &middot; real-time status visible</div>
+              </div>
+            </div>
+            <div class="p-3 bg-green-900/20 border border-green-700/50 rounded-lg">
+              <p class="text-green-300 text-sm">Each project card has <strong>"Merge to test", "Sync base", and "Push"</strong> buttons right below. Branch status (commits ahead/behind, whether merged to test) updates in real-time at a glance.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Scenario 4: Remote access -->
+        <div class="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
+          <div class="p-6">
+            <div class="font-semibold mb-3 text-lg flex items-center gap-2 text-cyan-400">&#x1F310; Away from office, want to check code on your work machine</div>
+            <div class="text-slate-300 text-sm leading-relaxed space-y-2">
+              <p>Your dev machine is on the office network. While traveling, you want to check code status or run a few terminal commands. Traditional solutions mean either SSH tunnels (tedious setup) or VPN + remote desktop (laggy).</p>
+            </div>
+            <div class="workflow-compare">
+              <div class="workflow-col workflow-old">
+                <h4>Traditional Approach</h4>
+                <div class="workflow-steps">
+                  <span class="wf-step">configure VPN</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">remote desktop</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">lag &amp; latency</span>
+                </div>
+                <div class="wf-result">Complex setup &middot; laggy display &middot; depends on company network</div>
+              </div>
+              <div class="workflow-col workflow-new">
+                <h4>Worktree Manager</h4>
+                <div class="workflow-steps">
+                  <span class="wf-step">Click "Share"</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">Send link</span><span class="wf-arrow">&rarr;</span>
+                  <span class="wf-step">Open in browser</span>
+                </div>
+                <div class="wf-result">3 steps &middot; no installation needed &middot; WMS tunnel / ngrok for public access</div>
+              </div>
+            </div>
+            <div class="p-3 bg-green-900/20 border border-green-700/50 rounded-lg">
+              <p class="text-green-300 text-sm">Enable sharing for LAN access, or use the <strong>WMS built-in tunnel or ngrok for public internet access</strong>. Open in any browser, authenticate with a password, and view workspace status or use the built-in terminal&mdash;no client installation needed.</p>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- Solution -->
+  <section class="py-16 bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900">
+    <div class="max-w-5xl mx-auto px-4 text-center">
+      <h2 class="text-3xl font-bold mb-3">How Git Worktree Manager solves these problems?</h2>
+      <p class="text-slate-400 text-lg max-w-2xl mx-auto mt-3">
+        Built on Git's native <a href="https://git-scm.com/docs/git-worktree" class="text-blue-400 hover:underline">worktree</a> capability, it checks out multiple branches into <strong class="text-slate-300">independent directories</strong> within the <strong class="text-slate-300">same repository</strong>, sharing the <code class="bg-slate-950 px-2 py-0.5 rounded text-sm font-mono">.git</code> data. Combined with automatic symlinking of <code class="bg-slate-950 px-2 py-0.5 rounded text-sm font-mono">node_modules</code> and other large folders, it enables <strong class="text-slate-300">zero-cost switching</strong> with <strong class="text-slate-300">zero extra disk usage</strong>.
+      </p>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="py-20 bg-slate-900">
+    <div class="max-w-6xl mx-auto px-4">
+      <h2 class="text-3xl md:text-4xl font-bold mb-3 text-center">Core Features</h2>
+      <p class="text-slate-400 text-lg mb-12 text-center">Built for multi-branch development</p>
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div class="feature-card">
+          <div class="feature-icon">&#x1F500;</div>
+          <h3>Multi-Branch Parallel Work</h3>
+          <p>Work on multiple branches simultaneously in one project, without interference. No stashing, no cloning multiple copies.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#x1F517;</div>
+          <h3>Smart Folder Linking</h3>
+          <p>Automatically links node_modules, .next, vendor and other build artifacts to avoid redundant dependency installations. Supports custom paths.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#x1F4C2;</div>
+          <h3>Global File Sharing</h3>
+          <p>Files like .claude, CLAUDE.md, requirement-docs can be configured as global links, shared across all worktrees.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#x1F4CA;</div>
+          <h3>Branch Status Monitoring</h3>
+          <p>Real-time display of commit counts, uncommitted changes, test branch merge status, and more at a glance.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#x1F680;</div>
+          <h3>Quick IDE Launch</h3>
+          <p>Open any worktree with VS Code, Cursor, IntelliJ IDEA and more in one click. Supports dropdown quick-switch between editors.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#x1F4BB;</div>
+          <h3>Built-in Terminal</h3>
+          <p>Each worktree has independent terminal sessions with multi-tab, tab duplication, and fullscreen support. Terminal state auto-saves when switching worktrees.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#x1F4E6;</div>
+          <h3>Safe Archiving</h3>
+          <p>Automatically checks for uncommitted and unpushed code before archiving to prevent data loss. Supports one-click restore.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#x1F50C;</div>
+          <h3>Multiple Clone Methods</h3>
+          <p>Add projects via GitHub shorthand, SSH, or HTTPS.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#x1FA9F;</div>
+          <h3>Multi-Window Support</h3>
+          <p>Each workspace can open in an independent window, allowing simultaneous operation of multiple workspaces without interference.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#x1F50D;</div>
+          <h3>Smart Folder Scan</h3>
+          <p>Automatically scans for large folders in your project that can be linked (like node_modules, .next, dist), and adds them to link configuration with one click.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#x2328;&#xFE0F;</div>
+          <h3>Keyboard Shortcuts</h3>
+          <p>Escape to exit fullscreen or close menus, terminal fullscreen mode, and more for efficient operation.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#x1F504;</div>
+          <h3>Auto Update</h3>
+          <p>Built-in auto-update pushes new version notifications and upgrades to the latest version with one click.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#x26A1;</div>
+          <h3>Background Remote Sync</h3>
+          <p>Git remote status refreshes in the background while local data loads instantly. Branch switching stays smooth, action buttons disable as needed, and sync progress is visible in real-time.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#x1F399;&#xFE0F;</div>
+          <h3>Voice Input <span style="font-size: 0.6em; vertical-align: middle; background: #334155; padding: 2px 8px; border-radius: 4px; font-weight: normal; color: #94a3b8;">macOS</span></h3>
+          <p>Speak into the microphone and voice is automatically transcribed to text in the terminal. Supports voice commands (enter, delete, clear, etc.), 2-second silence auto-stop, fully local processing.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#x1F6F0;&#xFE0F;</div>
+          <h3>WMS Built-in Tunnel <span class="badge-new">NEW</span></h3>
+          <p>Zero-config public internet access via the WMS tunnel server. No third-party tools needed&mdash;just click share and get a public URL with automatic subdomain assignment and WebSocket relay.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#x1F9E0;</div>
+          <h3>AI Voice Refinement <span class="badge-new">NEW</span></h3>
+          <p>AI-powered post-processing for voice input. Automatically corrects recognition errors, normalizes command syntax, and intelligently interprets developer intent for more accurate terminal input.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">&#x1F4F1;</div>
+          <h3>QR Code Sharing <span class="badge-new">NEW</span></h3>
+          <p>Generate a QR code for instant mobile access to your shared workspace. Scan and connect from any device&mdash;perfect for quick demos and on-the-go collaboration.</p>
+        </div>
+        <div class="feature-card" style="border-color: rgba(59, 130, 246, 0.3); background: linear-gradient(135deg, #1e293b 0%, #172554 100%);">
+          <div class="feature-icon">&#x1F310;</div>
+          <h3>Remote Sharing &amp; Collaboration</h3>
+          <p>Share your workspace with one click. Colleagues access it through a browser. Supports LAN direct, WMS tunnel, and ngrok tunneling, with built-in password protection and browser terminal.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Remote Sharing Highlight -->
+  <section class="py-20 bg-gradient-to-b from-slate-900 via-blue-950/30 to-slate-900">
+    <div class="max-w-5xl mx-auto px-4">
+      <div class="text-center mb-12">
+        <h2 class="text-3xl md:text-4xl font-bold mb-3">Remote Sharing &amp; Real-time Collaboration</h2>
+        <p class="text-slate-400 text-lg">No installation needed, open in browser</p>
+      </div>
+      <div class="grid md:grid-cols-3 gap-6">
+        <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-6 text-center">
+          <div class="text-4xl mb-4">&#x1F4E1;</div>
+          <h3 class="text-lg font-semibold mb-2 text-slate-100">LAN Direct</h3>
+          <p class="text-slate-400 text-sm">Click "Share" on the desktop app to generate a password-protected link. Colleagues on the same network can open it in their browser to see your workspace&mdash;no software installation required.</p>
+        </div>
+        <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-6 text-center">
+          <div class="text-4xl mb-4">&#x1F6F0;&#xFE0F;</div>
+          <h3 class="text-lg font-semibold mb-2 text-slate-100">WMS Built-in Tunnel</h3>
+          <p class="text-slate-400 text-sm">Zero-configuration public internet access via the WMS tunnel server. No ngrok token needed&mdash;get a public URL instantly with automatic subdomain and WebSocket relay.</p>
+        </div>
+        <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-6 text-center">
+          <div class="text-4xl mb-4">&#x1F30D;</div>
+          <h3 class="text-lg font-semibold mb-2 text-slate-100">ngrok Tunnel</h3>
+          <p class="text-slate-400 text-sm">Not on the same network? Configure an ngrok token and enable internet tunneling with one click to generate a public address for remote access anytime, anywhere.</p>
+        </div>
+        <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-6 text-center">
+          <div class="text-4xl mb-4">&#x1F4F1;</div>
+          <h3 class="text-lg font-semibold mb-2 text-slate-100">QR Code Sharing</h3>
+          <p class="text-slate-400 text-sm">Generate a QR code for any sharing link. Scan with your phone or tablet for instant access&mdash;perfect for demos, quick checks, and cross-device collaboration.</p>
+        </div>
+        <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-6 text-center">
+          <div class="text-4xl mb-4">&#x1F511;</div>
+          <h3 class="text-lg font-semibold mb-2 text-slate-100">Password-embedded Links</h3>
+          <p class="text-slate-400 text-sm">Share links with the password embedded in the URL hash. Recipients connect instantly without manual password entry&mdash;secure and frictionless.</p>
+        </div>
+        <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-6 text-center">
+          <div class="text-4xl mb-4">&#x1F469;&#x200D;&#x1F4BB;</div>
+          <h3 class="text-lg font-semibold mb-2 text-slate-100">Client Management</h3>
+          <p class="text-slate-400 text-sm">Monitor connected clients in real-time, view session details, and kick users when needed. Full control over who accesses your shared workspace with built-in browser terminal.</p>
+        </div>
+      </div>
+      <div class="mt-8 text-center">
+        <a href="guide.html#remote-sharing" class="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition">
+          View Remote Sharing Guide
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section class="py-20 bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900">
+    <div class="container">
+      <h2>Three Steps to Start</h2>
+      <p>Get started with multi-branch parallel development in minutes</p>
+      <div class="steps">
+        <div class="step">
+          <div class="step-number">1</div>
+          <div>
+            <h3>Create a Workspace</h3>
+            <p>After launching the app, click the "New Workspace" button in the top-left corner and select a directory as the workspace root. The app will automatically initialize the directory structure and detect Git projects within it.</p>
+            <ul>
+              <li><strong>New workspace</strong>: Select an empty directory, and the app will automatically create <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">projects/</code> and <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">worktrees/</code> directories</li>
+              <li><strong>Import existing projects</strong>: Select a directory containing Git projects, and the app will auto-detect and import them</li>
+              <li>You can also add new projects via GitHub shorthand (e.g., <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">owner/repo</code>), SSH, or HTTPS URLs</li>
+            </ul>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-number">2</div>
+          <div>
+            <h3>Create a Worktree (Working Branch)</h3>
+            <p>Click the "+" button in the sidebar to open the dialog and configure:</p>
+            <ul>
+              <li>Enter a branch name (e.g., <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">feature/login</code>), supporting <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">feature/</code>, <code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">hotfix/</code> naming conventions</li>
+              <li>Select which projects to include (multi-select)</li>
+              <li>Choose a base branch (defaults to main)</li>
+              <li><code class="bg-slate-950 px-2 py-0.5 rounded text-xs font-mono">node_modules</code> and other configured folders are automatically linked from the main repo&mdash;no need to reinstall dependencies</li>
+            </ul>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-number">3</div>
+          <div>
+            <h3>Start Developing</h3>
+            <p>Click to switch between worktrees in the list, and open any with your favorite IDE in one click. Each branch's code, dependencies, and terminal are fully isolated.</p>
+            <ul>
+              <li>Click the IDE button to quickly open projects in VS Code, Cursor, IDEA, etc.</li>
+              <li>Use the built-in terminal to run commands without switching windows</li>
+              <li>Monitor branch status in real-time: commit counts, unpushed changes, test branch merge status</li>
+              <li>Archive worktrees when done to keep your workspace tidy</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Directory Tree -->
+      <div class="tree-section">
+        <h3>Workspace Directory Structure</h3>
+        <div class="tree">
+<pre>
+<span class="dir">workspace/</span>
+&#x251C;&#x2500;&#x2500; .worktree-manager.json        <span class="comment"># Workspace configuration</span>
+&#x251C;&#x2500;&#x2500; <span class="dir">projects/</span>                     <span class="comment"># Main repos (main branch)</span>
+&#x2502;   &#x251C;&#x2500;&#x2500; <span class="dir">frontend/</span>
+&#x2502;   &#x2514;&#x2500;&#x2500; <span class="dir">backend/</span>
+&#x251C;&#x2500;&#x2500; <span class="dir">worktrees/</span>                    <span class="comment"># Worktree directory (auto-created)</span>
+&#x2502;   &#x251C;&#x2500;&#x2500; <span class="dir">feature-login/</span>
+&#x2502;   &#x2502;   &#x251C;&#x2500;&#x2500; <span class="dir">projects/</span>
+&#x2502;   &#x2502;   &#x2502;   &#x251C;&#x2500;&#x2500; <span class="dir">frontend/</span>         <span class="comment"># Independent branch working directory</span>
+&#x2502;   &#x2502;   &#x2502;   &#x2514;&#x2500;&#x2500; <span class="dir">backend/</span>
+&#x2502;   &#x2502;   &#x251C;&#x2500;&#x2500; <span class="link">.claude &rarr; ../../.claude</span>   <span class="comment"># Auto-linked</span>
+&#x2502;   &#x2502;   &#x2514;&#x2500;&#x2500; <span class="link">CLAUDE.md &rarr; ../../CLAUDE.md</span>
+&#x2502;   &#x2514;&#x2500;&#x2500; <span class="dir">hotfix-bug/</span>
+&#x2502;       &#x2514;&#x2500;&#x2500; ...
+&#x251C;&#x2500;&#x2500; <span class="dir">.claude/</span>
+&#x2514;&#x2500;&#x2500; CLAUDE.md</pre>
+        </div>
+      </div>
+
+      <!-- Build from source (collapsible) -->
+      <details class="build-source mt-8 bg-slate-800/50 border border-slate-700 rounded-xl p-6">
+        <summary class="font-semibold text-slate-300 text-base cursor-pointer hover:text-blue-400 transition">
+          &#x1F6E0;&#xFE0F; Build from Source (for developers)
+        </summary>
+        <div class="code-block mt-4" style="margin-top: 1rem;">
+<span class="code-comment"># Requirements: Node.js 20+, Rust 1.70+, Git 2.0+</span>
+
+<span class="code-comment"># Clone the project</span>
+<span class="code-cmd">git clone https://github.com/guoyongchang/worktree-manager.git</span>
+<span class="code-cmd">cd worktree-manager</span>
+
+<span class="code-comment"># Install dependencies</span>
+<span class="code-cmd">npm install</span>
+
+<span class="code-comment"># Run in development mode</span>
+<span class="code-cmd">npm run tauri dev</span>
+
+<span class="code-comment"># Build for production</span>
+<span class="code-cmd">npm run tauri build</span>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <!-- Tech Stack -->
+  <section class="py-20 bg-slate-900">
+    <div class="container">
+      <h2>Tech Stack</h2>
+      <p>Built with modern technology</p>
+      <div class="tech-grid">
+        <div class="tech-item">
+          <span class="tech-label">Framework</span>
+          <span class="tech-value">Tauri 2</span>
+        </div>
+        <div class="tech-item">
+          <span class="tech-label">Frontend</span>
+          <span class="tech-value">React 19</span>
+        </div>
+        <div class="tech-item">
+          <span class="tech-label">Languages</span>
+          <span class="tech-value">TypeScript + Rust</span>
+        </div>
+        <div class="tech-item">
+          <span class="tech-label">Styling</span>
+          <span class="tech-value">Tailwind CSS 4</span>
+        </div>
+        <div class="tech-item">
+          <span class="tech-label">UI Components</span>
+          <span class="tech-value">Radix UI</span>
+        </div>
+        <div class="tech-item">
+          <span class="tech-label">Build Tool</span>
+          <span class="tech-value">Vite 7</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="text-center py-12 px-4 border-t border-slate-700">
+    <div class="max-w-5xl mx-auto">
+      <p class="text-slate-400">
+        <a href="https://github.com/guoyongchang/worktree-manager" class="text-blue-400 hover:text-blue-300">GitHub</a>
+        <span class="mx-2">&middot;</span>
+        <a href="https://github.com/guoyongchang/worktree-manager/issues" class="text-blue-400 hover:text-blue-300">Report Issues</a>
+        <span class="mx-2">&middot;</span>
+        <a href="guide.html" class="text-blue-400 hover:text-blue-300">User Guide</a>
+        <span class="mx-2">&middot;</span>
+        <span>MIT License</span>
+      </p>
+      <p class="mt-4 text-slate-500">Made with &#x2764;&#xFE0F; using Tauri + React + Rust</p>
+      <p class="mt-2 text-xs text-slate-600">&copy; 2025-2026 Worktree Manager Team</p>
+    </div>
+  </footer>
+
+  <script>
+    function toggleMobileMenu() {
+      const menu = document.getElementById('mobile-menu');
+      menu.classList.toggle('hidden');
+    }
+  </script>
+
+</body>
+</html>
