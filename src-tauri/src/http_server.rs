@@ -12,6 +12,7 @@ use serde::{Deserialize, Deserializer};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
 use tokio::sync::Mutex as TokioMutex;
@@ -28,6 +29,8 @@ mod middleware;
 mod routing;
 
 use crate::{
+    // Project management
+    add_existing_project_impl,
     add_project_to_worktree_impl,
     archive_worktree_impl,
     check_worktree_status_impl,
@@ -44,18 +47,16 @@ use crate::{
     get_workspace_config_impl,
     git_ops,
     list_worktrees_impl,
-    // Project management
-    add_existing_project_impl,
-    scan_existing_projects_impl,
-    remove_project_from_config_impl,
     // WMS config & tunnel
     load_global_config,
     load_workspace_config,
     lock_worktree_impl,
     normalize_path,
+    remove_project_from_config_impl,
     restore_worktree_impl,
     save_global_config_internal,
     save_workspace_config_impl,
+    scan_existing_projects_impl,
     set_window_workspace_impl,
     start_wms_tunnel_internal,
     stop_wms_tunnel_internal,
@@ -336,13 +337,31 @@ async fn h_scan_existing_projects(headers: HeaderMap) -> Response {
 async fn h_add_existing_project(headers: HeaderMap, Json(args): Json<Value>) -> Response {
     let sid = session_id(&headers);
     let name = args["name"].as_str().unwrap_or("").to_string();
-    let base_branch = args.get("baseBranch").or_else(|| args.get("base_branch"))
-        .and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let test_branch = args.get("testBranch").or_else(|| args.get("test_branch"))
-        .and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let merge_strategy = args.get("mergeStrategy").or_else(|| args.get("merge_strategy"))
-        .and_then(|v| v.as_str()).unwrap_or("merge").to_string();
-    result_ok(add_existing_project_impl(&sid, name, base_branch, test_branch, merge_strategy))
+    let base_branch = args
+        .get("baseBranch")
+        .or_else(|| args.get("base_branch"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let test_branch = args
+        .get("testBranch")
+        .or_else(|| args.get("test_branch"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let merge_strategy = args
+        .get("mergeStrategy")
+        .or_else(|| args.get("merge_strategy"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("merge")
+        .to_string();
+    result_ok(add_existing_project_impl(
+        &sid,
+        name,
+        base_branch,
+        test_branch,
+        merge_strategy,
+    ))
 }
 
 async fn h_remove_project_from_config(headers: HeaderMap, Json(args): Json<Value>) -> Response {
@@ -2180,4 +2199,41 @@ pub async fn start_server(
             }
         }
     }
+}
+
+// MCP config management
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct McpConfig {
+    pub version: String,
+    pub http_port: u16,
+    pub installed_at: String,
+    pub capability_level: String,
+}
+
+pub fn get_mcp_config_path() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_default();
+    PathBuf::from(home)
+        .join(".config")
+        .join("worktree-manager")
+        .join("mcp.json")
+}
+
+pub fn load_mcp_config() -> Option<McpConfig> {
+    let path = get_mcp_config_path();
+    if path.exists() {
+        let content = std::fs::read_to_string(&path).ok()?;
+        serde_json::from_str(&content).ok()
+    } else {
+        None
+    }
+}
+
+pub fn save_mcp_config(config: &McpConfig) -> Result<(), String> {
+    let path = get_mcp_config_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let content = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
+    std::fs::write(&path, content).map_err(|e| e.to_string())?;
+    Ok(())
 }
