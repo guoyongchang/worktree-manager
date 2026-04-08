@@ -1,7 +1,11 @@
 {
   "name": "@worktree-manager/mcp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "MCP server for Worktree Manager",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/guoyongchang/worktree-manager"
+  },
   "type": "module",
   "bin": {
     "worktree-manager-mcp": "./dist/index.js"
