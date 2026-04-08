@@ -44,6 +44,7 @@ pub use commands::worktree::{
 };
 
 use commands::git::*;
+use commands::mcp::*;
 use commands::pty::*;
 use commands::sharing::*;
 use commands::system::*;
@@ -243,10 +244,21 @@ pub fn run() {
             download_update_via_mirror,
             // DevTools
             open_devtools,
+            // MCP server
+            start_mcp_server,
         ])
         .setup(|app| {
             // Initialize APP_HANDLE for use in WebSocket handlers
             *APP_HANDLE.lock().unwrap() = Some(app.handle().clone());
+
+            // Start MCP server on port 42819 in background
+            let mcp_port = 42819;
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = http_server::start_mcp_server(mcp_port).await {
+                    log::error!("[MCP] Server failed: {}", e);
+                }
+            });
+
             Ok(())
         })
         .run(tauri::generate_context!())

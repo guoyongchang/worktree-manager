@@ -1,14 +1,14 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/index.js';
-import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
+import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { Transport } from '../transport/http.js';
 
 export function registerDetailsTools(
-  server: McpServer,
+  server: Server,
   transport: Transport
 ): void {
   server.setRequestHandler(
-    { method: 'tools/call' },
-    async (request: CallToolRequest) => {
+    CallToolRequestSchema,
+    async (request) => {
       const { name, arguments: args } = request.params;
 
       if (name === 'project_get_branches') {
@@ -45,7 +45,10 @@ export function registerDetailsTools(
         };
       }
 
-      return null;
+      return {
+        content: [{ type: 'text', text: `Unknown tool: ${name}` }],
+        isError: true,
+      };
     }
   );
 }

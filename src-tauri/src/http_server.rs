@@ -5,7 +5,7 @@ use axum::{
     },
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    Extension, Router,
+    serve, Extension, Router,
 };
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Deserializer};
@@ -15,6 +15,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
+use tokio::net::TcpListener;
 use tokio::sync::Mutex as TokioMutex;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::services::{ServeDir, ServeFile};
@@ -2235,5 +2236,34 @@ pub fn save_mcp_config(config: &McpConfig) -> Result<(), String> {
     }
     let content = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
     std::fs::write(&path, content).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Start the MCP HTTP server on the specified port.
+/// This runs as a background task.
+pub async fn start_mcp_server(port: u16) -> Result<(), String> {
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+
+    // Save MCP config
+    let config = McpConfig {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        http_port: port,
+        installed_at: chrono::Utc::now().to_rfc3339(),
+        capability_level: "core".to_string(),
+    };
+    save_mcp_config(&config)?;
+
+    log::info!("[MCP] Starting HTTP server on {}", addr);
+
+    let router = build_api_router(None);
+
+    let listener = TcpListener::bind(addr)
+        .await
+        .map_err(|e| format!("Failed to bind MCP server: {}", e))?;
+
+    serve(listener, router)
+        .await
+        .map_err(|e| format!("MCP server error: {}", e))?;
+
     Ok(())
 }

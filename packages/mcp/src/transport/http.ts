@@ -1,9 +1,12 @@
 import axios, { AxiosInstance } from 'axios';
 import type { TransportMode } from '../types.js';
+import type { Transport } from './config.js';
 
 const DEFAULT_PORT = 42819;
 
-export class HttpTransport {
+export { Transport } from './config.js';
+
+export class HttpTransport implements Transport {
   private client: AxiosInstance;
   private port: number;
   private baseUrl: string;

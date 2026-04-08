@@ -1,5 +1,6 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { HttpTransport } from './transport/http.js';
 import { ConfigTransport } from './transport/config.js';
 import { registerCoreTools, CORE_TOOLS } from './tools/core.js';
@@ -51,31 +52,39 @@ export class WorktreeMcpServer {
   private registerTools(): void {
     if (!this.server || !this.transport) return;
 
-    const transport = this.transport as HttpTransport;
+    const transport = this.transport;
 
     // Core tools always registered
     registerCoreTools(this.server, transport);
 
-    // Details tools
+    // Details tools - only available with HTTP transport
     if (this.capabilityLevel === 'details' || this.capabilityLevel === 'advanced') {
-      registerDetailsTools(this.server, transport);
+      if (transport instanceof HttpTransport) {
+        registerDetailsTools(this.server, transport);
+      }
     }
 
-    // Advanced tools
+    // Advanced tools - only available with HTTP transport
     if (this.capabilityLevel === 'advanced') {
-      registerAdvancedTools(this.server, transport);
+      if (transport instanceof HttpTransport) {
+        registerAdvancedTools(this.server, transport);
+      }
     }
 
     // Set tool list handler
     this.server.setRequestHandler(
-      { method: 'tools/list' },
+      ListToolsRequestSchema,
       async () => {
-        let tools = [...CORE_TOOLS];
+        let tools: any[] = [...CORE_TOOLS];
         if (this.capabilityLevel === 'details' || this.capabilityLevel === 'advanced') {
-          tools = tools.concat(DETAILS_TOOLS);
+          if (transport instanceof HttpTransport) {
+            tools = tools.concat(DETAILS_TOOLS);
+          }
         }
         if (this.capabilityLevel === 'advanced') {
-          tools = tools.concat(ADVANCED_TOOLS);
+          if (transport instanceof HttpTransport) {
+            tools = tools.concat(ADVANCED_TOOLS);
+          }
         }
         return { tools };
       }

@@ -1,11 +1,11 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/index.js';
-import type { CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
-import type { Transport } from '../transport/http.js';
+import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import type { BaseTransport } from '../transport/config.js';
 
-export function registerCoreTools(server: McpServer, transport: Transport): void {
+export function registerCoreTools(server: Server, transport: BaseTransport): void {
   server.setRequestHandler(
-    { method: 'tools/call' },
-    async (request: CallToolRequest) => {
+    CallToolRequestSchema,
+    async (request) => {
       const { name, arguments: args } = request.params;
 
       if (name === 'workspace_list') {
@@ -48,7 +48,10 @@ export function registerCoreTools(server: McpServer, transport: Transport): void
         };
       }
 
-      return null;
+      return {
+        content: [{ type: 'text', text: `Unknown tool: ${name}` }],
+        isError: true,
+      };
     }
   );
 }
