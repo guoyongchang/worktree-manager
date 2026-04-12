@@ -190,19 +190,7 @@ export interface ShareState {
   active: boolean;
   urls: string[];
   ngrok_url?: string;
-  wms_url?: string;
-  wms_connected: boolean;
-  wms_reconnecting: boolean;
-  wms_reconnect_attempt: number;
-  wms_next_retry_secs: number;
   workspace_path?: string;
-}
-
-export interface WmsConfig {
-  server_url: string | null;
-  token: string | null;
-  subdomain: string | null;
-  jwt: string | null;
 }
 
 export interface ShareInfo {
@@ -249,67 +237,6 @@ export async function getNgrokToken(): Promise<string | null> {
 /** Set the ngrok token. */
 export async function setNgrokToken(token: string): Promise<void> {
   return callBackend<void>('set_ngrok_token', { token });
-}
-
-// ---------------------------------------------------------------------------
-// WMS Tunnel API
-// ---------------------------------------------------------------------------
-
-export async function getWmsConfig(): Promise<WmsConfig> {
-  return callBackend<WmsConfig>('get_wms_config');
-}
-
-export async function setWmsConfig(serverUrl: string, token: string, subdomain: string): Promise<void> {
-  return callBackend<void>('set_wms_config', { serverUrl, token, subdomain });
-}
-
-export async function autoRegisterTunnel(): Promise<WmsConfig> {
-  return callBackend<WmsConfig>('auto_register_tunnel');
-}
-
-export async function startWmsTunnel(): Promise<string> {
-  return callBackend<string>('start_wms_tunnel');
-}
-
-export async function stopWmsTunnel(): Promise<void> {
-  return callBackend<void>('stop_wms_tunnel');
-}
-
-/** Trigger a manual WMS tunnel reconnect (skips backoff wait). */
-export async function wmsManualReconnect(): Promise<void> {
-  return callBackend<void>('wms_manual_reconnect');
-}
-
-/** WMS Login: authenticate → destroy current device → re-register under logged-in user. */
-export async function wmsLogin(username: string, password: string): Promise<WmsConfig> {
-  return callBackend<WmsConfig>('wms_login', { username, password });
-}
-
-/** WMS Logout: clear JWT → destroy current device → re-register as anonymous. */
-export async function wmsLogout(): Promise<WmsConfig> {
-  return callBackend<WmsConfig>('wms_logout');
-}
-
-/** WMS Browser Login: open browser to WMS admin page, wait for OAuth callback. */
-export async function wmsBrowserLogin(): Promise<string> {
-  return callBackend<string>('wms_browser_login');
-}
-
-/** Cancel a pending WMS browser login. */
-export async function cancelWmsBrowserLogin(): Promise<void> {
-  return callBackend<void>('cancel_wms_browser_login');
-}
-
-export interface WmsUser {
-  username: string | null;
-  email: string | null;
-  display_name: string | null;
-  avatar_url: string | null;
-}
-
-/** Fetch WMS user info using stored JWT. */
-export async function getWmsUser(): Promise<WmsUser> {
-  return callBackend<WmsUser>('get_wms_user');
 }
 
 /** Get the last used share port. */

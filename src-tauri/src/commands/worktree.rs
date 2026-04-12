@@ -10,10 +10,9 @@ use crate::config::{
 use crate::git_ops::{get_branch_status, get_worktree_info_for_branches};
 use crate::state::PTY_MANAGER;
 use crate::types::{
-    AddProjectToWorktreeRequest, CreateProjectRequest, CreateWorktreeRequest,
-    DeployProjectError, DeployToMainResult, MainProjectStatus, MainWorkspaceOccupation,
-    MainWorkspaceStatus, ProjectConfig, ProjectStatus, ScannedFolder, WorktreeArchiveStatus,
-    WorktreeListItem,
+    AddProjectToWorktreeRequest, CreateProjectRequest, CreateWorktreeRequest, DeployProjectError,
+    DeployToMainResult, MainProjectStatus, MainWorkspaceOccupation, MainWorkspaceStatus,
+    ProjectConfig, ProjectStatus, ScannedFolder, WorktreeArchiveStatus, WorktreeListItem,
 };
 use crate::utils::{
     git_command, normalize_path, run_git_command_with_timeout, scan_dir_for_linkable_folders,
@@ -511,10 +510,7 @@ pub fn create_worktree_impl(
     if request.folder_name.is_some() {
         let mapping_path = root.join(&config.worktrees_dir).join("mapping.json");
         let mut mapping = load_worktree_mapping(&mapping_path);
-        mapping.insert(
-            actual_folder_name.to_string(),
-            request.name.clone(),
-        );
+        mapping.insert(actual_folder_name.to_string(), request.name.clone());
         save_worktree_mapping(&mapping_path, &mapping);
         log::info!(
             "[worktree] Saved folder alias mapping: '{}' → '{}'",
@@ -1000,7 +996,10 @@ pub fn delete_archived_worktree_impl(window_label: &str, name: String) -> Result
     // Check mapping for the actual branch name (may differ from folder name if aliased)
     let mapping_path = root.join(&config.worktrees_dir).join("mapping.json");
     let mapping = load_worktree_mapping(&mapping_path);
-    let branch_name = mapping.get(folder_key).map(|s| s.as_str()).unwrap_or(folder_key);
+    let branch_name = mapping
+        .get(folder_key)
+        .map(|s| s.as_str())
+        .unwrap_or(folder_key);
     log::info!(
         "[worktree] Deleting archived worktree '{}' (branch: {}) in workspace '{}'",
         name,
@@ -1381,7 +1380,7 @@ pub fn deploy_to_main_impl(
     let main_projects_path = root.join("projects");
     let mut original_branches: HashMap<String, String> = HashMap::new();
 
-    for (proj_name, _) in &wt_branches {
+    for proj_name in wt_branches.keys() {
         let main_proj_path = main_projects_path.join(proj_name);
         if !main_proj_path.exists() {
             continue;
@@ -1553,7 +1552,7 @@ pub fn exit_main_occupation_impl(window_label: &str, force: bool) -> Result<(), 
 
     // If not force, check for uncommitted changes in main workspace
     if !force {
-        for (proj_name, _) in &occupation.original_branches {
+        for proj_name in occupation.original_branches.keys() {
             let main_proj_path = main_projects_path.join(proj_name);
             if !main_proj_path.exists() {
                 continue;
@@ -1624,7 +1623,7 @@ pub fn exit_main_occupation_impl(window_label: &str, force: bool) -> Result<(), 
     }
 
     // Re-attach worktree project branches
-    for (proj_name, _) in &occupation.original_branches {
+    for proj_name in occupation.original_branches.keys() {
         let wt_proj_path = wt_projects_path.join(proj_name);
         if !wt_proj_path.exists() {
             continue;

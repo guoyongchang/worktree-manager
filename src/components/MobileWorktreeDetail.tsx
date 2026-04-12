@@ -213,7 +213,7 @@ export const MobileWorktreeDetail: FC<MobileWorktreeDetailProps> = ({
 
                         {/* Projects */}
                         <div className="px-3 pt-3 space-y-2">
-                            {selectedWorktree.projects.map(project => (
+                            {selectedWorktree.projects.map((project, index) => (
                                 <div
                                     key={project.name}
                                     className={`bg-slate-800/50 border border-slate-700/30 rounded-xl overflow-hidden border-l-2 ${getProjectStatusColor(project)}`}
@@ -293,6 +293,7 @@ export const MobileWorktreeDetail: FC<MobileWorktreeDetailProps> = ({
                                                 testBranch={project.test_branch || ''}
                                                 currentBranch={project.current_branch}
                                                 onRefresh={onRefresh}
+                                                autoRefreshSlot={selectedWorktree.is_archived ? undefined : index}
                                             />
 
                                             {/* Open terminal for this project */}

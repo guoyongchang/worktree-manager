@@ -1,7 +1,6 @@
 import type { MouseEvent } from 'react';
 
 import type { UpdaterState } from '../../hooks/useUpdater';
-import type { ConnectedClient } from '../../lib/backend';
 import type {
   MainWorkspaceOccupation,
   MainWorkspaceStatus,
@@ -43,19 +42,10 @@ export interface WorktreeSidebarProps {
   onUpdateSharePassword?: (password: string) => void;
   ngrokLoading?: boolean;
   onToggleNgrok?: () => void;
-  shareWmsUrl?: string | null;
-  wmsConnected?: boolean;
-  wmsReconnecting?: boolean;
-  wmsReconnectAttempt?: number;
-  wmsNextRetrySecs?: number;
-  wmsLoading?: boolean;
-  onToggleWms?: () => void;
-  onWmsManualReconnect?: () => void;
-  connectedClients?: ConnectedClient[];
+  connectedClients?: import('../../lib/backend').ConnectedClient[];
   onKickClient?: (sessionId: string) => void;
   hasLastConfig?: boolean;
   onQuickShare?: () => void;
   occupation?: MainWorkspaceOccupation | null;
   hasNgrokToken?: boolean;
-  wmsUserName?: string | null;
 }

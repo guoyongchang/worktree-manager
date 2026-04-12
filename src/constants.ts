@@ -12,7 +12,8 @@ export const EDITORS: EditorConfig[] = [
 export const TERMINAL = {
   DEFAULT_HEIGHT: 280,
   MIN_HEIGHT: 100,
-  MAX_HEIGHT: 600,
+  MAX_HEIGHT: 1200,
+  MAX_VIEWPORT_MARGIN: 140,
   POLL_INTERVAL_MS: 100,
   SCROLLBACK_LINES: 5000,
   // Terminal state broadcast settings
@@ -22,3 +23,13 @@ export const TERMINAL = {
   RESIZE_DELAY_MS: 50,
 } as const;
 
+export function getTerminalMaxHeight(viewportHeight: number): number {
+  return Math.max(
+    TERMINAL.MIN_HEIGHT,
+    Math.min(TERMINAL.MAX_HEIGHT, viewportHeight - TERMINAL.MAX_VIEWPORT_MARGIN),
+  );
+}
+
+export function clampTerminalHeight(height: number, viewportHeight: number): number {
+  return Math.max(TERMINAL.MIN_HEIGHT, Math.min(getTerminalMaxHeight(viewportHeight), height));
+}

@@ -39,21 +39,12 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
   onUpdateSharePassword,
   ngrokLoading = false,
   onToggleNgrok,
-  shareWmsUrl,
-  wmsConnected = true,
-  wmsReconnecting = false,
-  wmsReconnectAttempt = 0,
-  wmsNextRetrySecs = 0,
-  wmsLoading = false,
-  onToggleWms,
-  onWmsManualReconnect,
   connectedClients = [],
   onKickClient,
   hasLastConfig = false,
   onQuickShare,
   occupation,
   hasNgrokToken = false,
-  wmsUserName,
   refreshing = false,
 }) => {
   const _isTauri = isTauri();
@@ -137,31 +128,22 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
       onToggleArchived={onToggleArchived}
       onToggleCollapsed={onToggleCollapsed}
       onToggleNgrok={onToggleNgrok}
-      onToggleWms={onToggleWms}
       onTouchEnd={handleTouchEnd}
       onTouchMove={handleTouchMove}
       onTouchStart={handleTouchStart}
       onUpdateSharePassword={onUpdateSharePassword}
-      onWmsManualReconnect={onWmsManualReconnect}
       refreshing={refreshing}
       selectedWorktree={selectedWorktree}
       shareActive={shareActive}
       shareNgrokUrl={shareNgrokUrl}
       sharePassword={sharePassword}
       shareUrls={shareUrls}
-      shareWmsUrl={shareWmsUrl}
       showArchived={showArchived}
       showWorkspaceMenu={showWorkspaceMenu}
       sidebarWidth={sidebarWidth}
       setSidebarWidth={setSidebarWidth}
       switchingWorkspace={switchingWorkspace}
       updaterState={updaterState}
-      wmsConnected={wmsConnected}
-      wmsLoading={wmsLoading}
-      wmsNextRetrySecs={wmsNextRetrySecs}
-      wmsReconnectAttempt={wmsReconnectAttempt}
-      wmsReconnecting={wmsReconnecting}
-      wmsUserName={wmsUserName}
       workspaces={workspaces}
     />
   );

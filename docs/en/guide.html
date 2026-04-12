@@ -138,7 +138,7 @@
           <a href="#voice-input" class="block hover:text-blue-400 transition">7. Voice Input</a>
           <a href="#ide-integration" class="block hover:text-blue-400 transition">8. IDE Integration</a>
           <a href="#smart-scan" class="block hover:text-blue-400 transition">9. Smart Folder Scan</a>
-          <a href="#remote-sharing" class="block hover:text-blue-400 transition">10. Remote Sharing &amp; Collaboration</a>
+          <a href="#remote-sharing" class="block hover:text-blue-400 transition">10. Browser Sharing (LAN / ngrok)</a>
           <a href="#configuration" class="block hover:text-blue-400 transition">11. Configuration</a>
           <a href="#keyboard-shortcuts" class="block hover:text-blue-400 transition">12. Keyboard Shortcuts</a>
           <a href="#best-practices" class="block hover:text-blue-400 transition">13. Best Practices</a>
@@ -747,27 +747,27 @@ npm run tauri build</code></pre>
           </div>
         </section>
 
-        <!-- 10. Remote Sharing -->
+        <!-- 10. Browser Sharing -->
         <section id="remote-sharing">
           <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
             <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">10</span>
-            Remote Sharing &amp; Collaboration
+            Browser Sharing (LAN / ngrok)
           </h2>
 
           <div class="space-y-6">
             <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
               <h3 class="text-xl font-semibold mb-4">Overview</h3>
-              <p class="text-slate-300 mb-4">Remote sharing lets you share your current workspace via browser with colleagues. They don't need to install anything -- just open the link to view your Worktrees, use the terminal, and even collaborate on development.</p>
+              <p class="text-slate-300 mb-4">Browser sharing lets you share your current workspace with colleagues over a browser. They do not need to install anything: open the link, enter the sharing password, then view your Worktrees and use the browser terminal.</p>
               <div class="bg-blue-900/20 border border-blue-700 rounded-lg p-4 mb-4">
                 <p class="text-blue-200 text-sm"><strong>Use Cases:</strong></p>
                 <ul class="list-disc list-inside space-y-1 text-blue-200 text-sm mt-2">
-                  <li>Pair programming -- remote colleagues join your terminal via browser for real-time collaboration</li>
+                  <li>Pair debugging -- colleagues inspect your terminal and workspace state through the browser</li>
                   <li>Code demos -- let PMs or QA view your branch status in the browser</li>
-                  <li>Remote assistance -- help colleagues troubleshoot by operating directly in their shared terminal</li>
+                  <li>Remote assistance -- hand over a LAN or ngrok link for quick troubleshooting access</li>
                   <li>Mobile access -- check workspace status from a tablet or phone browser on the go</li>
                 </ul>
               </div>
-              <p class="text-slate-300 text-sm">Sharing supports three modes: <strong>LAN direct connection</strong> (same Wi-Fi / intranet), <strong>WMS built-in tunnel</strong> (no extra tools needed), and <strong>ngrok tunneling</strong> (using the ngrok service).</p>
+              <p class="text-slate-300 text-sm">Sharing supports two modes: <strong>LAN direct connection</strong> (same Wi-Fi / intranet) and <strong>ngrok tunneling</strong> (using the ngrok service). Both modes use the same browser password gate.</p>
             </div>
 
             <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
@@ -794,7 +794,7 @@ npm run tauri build</code></pre>
                 <li>The browser shows a <strong>password entry page</strong> -- enter the password you set to gain access</li>
                 <li>Once inside, they see the same interface as the desktop app, including the Worktree list and branch status</li>
                 <li>They can use the <strong>built-in terminal</strong> (streamed in real time via WebSocket)</li>
-                <li>They can <strong>join collaboration</strong> and share terminal sessions with the desktop user</li>
+                <li>They can <strong>use the browser terminal</strong> and share the same terminal session as the desktop user</li>
                 <li>All operations sync in real time via WebSocket with minimal latency</li>
               </ol>
               <div class="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4 mt-4">
@@ -835,26 +835,12 @@ npm run tauri build</code></pre>
             </div>
 
             <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
-              <h3 class="text-xl font-semibold mb-4">WMS Built-in Tunnel</h3>
-              <p class="text-slate-300 mb-4">In addition to ngrok, Worktree Manager includes a built-in WMS tunnel service that enables public access without installing any extra tools:</p>
-              <ol class="list-decimal list-inside space-y-3 text-slate-300">
-                <li>First enable <strong>LAN sharing</strong> as described above</li>
-                <li>In the sharing panel, click the <strong>"WMS Tunnel"</strong> button</li>
-                <li>The system will automatically connect to <code>tunnel.kirov-opensource.com</code> and assign a unique subdomain</li>
-                <li>The generated public URL (e.g. <code>https://your-name.tunnel.kirov-opensource.com</code>) can be shared with anyone</li>
-              </ol>
-              <div class="bg-green-900/20 border border-green-700/50 rounded-lg p-3 mt-4">
-                <p class="text-green-300 text-sm"><strong>Advantages:</strong> No third-party account registration needed, no extra software to install. Supports automatic reconnection on disconnect with a retry countdown display.</p>
-              </div>
-            </div>
-
-            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
               <h3 class="text-xl font-semibold mb-4">QR Code Sharing</h3>
               <p class="text-slate-300 mb-4">Once sharing is enabled, the sharing panel automatically generates a QR code for the current share URL:</p>
               <ul class="list-disc list-inside space-y-2 text-slate-300">
                 <li><strong>Scan to Access</strong>: Scan the QR code with your phone/tablet to open the workspace directly in a mobile browser</li>
                 <li><strong>Embedded Password</strong>: The QR code link can embed the access password (via URL fragment), so scanning auto-authenticates without manual password entry</li>
-                <li><strong>All Modes Supported</strong>: LAN, WMS tunnel, and ngrok modes all support QR code generation</li>
+                <li><strong>All Modes Supported</strong>: LAN and ngrok modes both support QR code generation</li>
               </ul>
             </div>
 
@@ -922,7 +908,7 @@ npm run tauri build</code></pre>
                       <li>Confirm both parties are on the same LAN / Wi-Fi</li>
                       <li>Check if the firewall allows the port (macOS may show a firewall prompt -- click "Allow")</li>
                       <li>Try testing connectivity with <code>curl http://your-ip:port/api/get_share_info</code></li>
-                      <li>If using a corporate VPN, network isolation may be the issue -- try ngrok internet mode instead</li>
+                      <li>If using a corporate VPN, network isolation may be the issue -- try an ngrok share URL instead</li>
                     </ul>
                   </div>
                 </details>

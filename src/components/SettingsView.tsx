@@ -17,11 +17,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { RefreshCw, Search, Mic, Eye, EyeOff, Settings, Globe, Info, Trash2, User, Wrench } from 'lucide-react';
+import { RefreshCw, Search, Mic, Eye, EyeOff, Settings, Globe, Info, Trash2, Wrench } from 'lucide-react';
 import { BackIcon, PlusIcon, TrashIcon } from './Icons';
 import { BranchCombobox } from './BranchCombobox';
 import type { WorkspaceRef, WorkspaceConfig, ProjectConfig, ScannedFolder } from '../types';
-import { getAppVersion, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, voiceStart, voiceStop, isTauri, getRemoteBranches, openLink, callBackend, loadWorkspaceConfigByPath, saveWorkspaceConfigByPath, wmsLogout } from '../lib/backend';
+import { getAppVersion, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, voiceStart, voiceStop, isTauri, getRemoteBranches, openLink, callBackend, loadWorkspaceConfigByPath, saveWorkspaceConfigByPath } from '../lib/backend';
 
 interface SettingsViewProps {
   workspaceConfig: WorkspaceConfig;
@@ -35,12 +35,9 @@ interface SettingsViewProps {
   workspaces?: WorkspaceRef[];
   currentWorkspace?: WorkspaceRef | null;
   onRemoveWorkspace?: (path: string) => void;
-  wmsUserName?: string | null;
-  wmsLoggedIn?: boolean;
-  onWmsLogout?: () => void;
 }
 
-type SettingsSection = 'workspaces' | 'tools' | 'share' | 'account' | 'voice' | 'about';
+type SettingsSection = 'workspaces' | 'tools' | 'share' | 'voice' | 'about';
 
 export const SettingsView: FC<SettingsViewProps> = ({
   workspaceConfig,
@@ -54,9 +51,6 @@ export const SettingsView: FC<SettingsViewProps> = ({
   workspaces = [],
   currentWorkspace = null,
   onRemoveWorkspace,
-  wmsUserName,
-  wmsLoggedIn = false,
-  onWmsLogout,
 }) => {
   const { t, i18n } = useTranslation();
 
@@ -414,7 +408,6 @@ export const SettingsView: FC<SettingsViewProps> = ({
     { id: 'workspaces' as SettingsSection, label: t('settings.workspaceConfig'), icon: <Settings className="w-3.5 h-3.5" /> },
     { id: 'tools' as SettingsSection, label: t('settings.toolsNav', '工具'), icon: <Wrench className="w-3.5 h-3.5" /> },
     ...(isTauri() ? [{ id: 'share' as SettingsSection, label: t('settings.externalShareNav', '外网分享'), icon: <Globe className="w-3.5 h-3.5" /> }] : []),
-    ...(isTauri() ? [{ id: 'account' as SettingsSection, label: t('settings.accountNav', '账户'), icon: <User className="w-3.5 h-3.5" /> }] : []),
     { id: 'voice' as SettingsSection, label: t('settings.voiceNav'), icon: <Mic className="w-3.5 h-3.5" /> },
     { id: 'about' as SettingsSection, label: t('settings.about'), icon: <Info className="w-3.5 h-3.5" /> },
   ];
@@ -1025,46 +1018,6 @@ export const SettingsView: FC<SettingsViewProps> = ({
                 </div>
 
 
-              </div>
-            )}
-
-            {/* ==================== Account ==================== */}
-            {activeSection === 'account' && isTauri() && (
-              <div>
-                <h2 className="text-base font-semibold text-slate-100 mb-4">{t('settings.accountTitle', '账户')}</h2>
-
-                {/* WMS Account */}
-                <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 space-y-3">
-                  <h3 className="text-sm font-medium text-slate-300">{t('settings.wmsAccount', 'WMS Account')}</h3>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <User className="w-4 h-4 text-slate-400 shrink-0" />
-                      <span className={`text-sm truncate ${wmsUserName || wmsLoggedIn ? 'text-slate-300' : 'text-slate-500'}`}>
-                        {wmsUserName || (wmsLoggedIn ? t('app.wmsLoggedIn', 'Logged in') : t('app.wmsNotLoggedIn', 'Not logged in'))}
-                      </span>
-                    </div>
-                    {wmsLoggedIn && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-red-400/70 hover:text-red-300 hover:bg-red-900/20 text-xs gap-1.5 shrink-0"
-                        onClick={async () => {
-                          try {
-                            await wmsLogout();
-                            if (onWmsLogout) onWmsLogout();
-                          } catch (e) {
-                            console.error('WMS logout failed:', e);
-                          }
-                        }}
-                      >
-                        {t('settings.wmsLogout', 'Logout')}
-                      </Button>
-                    )}
-                  </div>
-                  <p className="text-xs text-slate-500">
-                    {t('settings.wmsAccountHint', '此账户用于外网分享功能，通过 WMS 平台进行公网隧道共享。')}
-                  </p>
-                </div>
               </div>
             )}
 

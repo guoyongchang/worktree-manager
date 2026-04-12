@@ -135,7 +135,7 @@
           <a href="#voice-input" class="block hover:text-blue-400 transition">7. 语音输入</a>
           <a href="#ide-integration" class="block hover:text-blue-400 transition">8. IDE 集成</a>
           <a href="#smart-scan" class="block hover:text-blue-400 transition">9. 智能文件夹扫描</a>
-          <a href="#remote-sharing" class="block hover:text-blue-400 transition">10. 远程分享与协作</a>
+          <a href="#remote-sharing" class="block hover:text-blue-400 transition">10. 浏览器分享（LAN / ngrok）</a>
           <a href="#configuration" class="block hover:text-blue-400 transition">11. 配置详解</a>
           <a href="#keyboard-shortcuts" class="block hover:text-blue-400 transition">12. 快捷键</a>
           <a href="#best-practices" class="block hover:text-blue-400 transition">13. 最佳实践</a>
@@ -744,27 +744,27 @@ npm run tauri build</code></pre>
           </div>
         </section>
 
-        <!-- 10. Remote Sharing -->
+        <!-- 10. Browser Sharing -->
         <section id="remote-sharing">
           <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
             <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">10</span>
-            远程分享与协作
+            浏览器分享（LAN / ngrok）
           </h2>
 
           <div class="space-y-6">
             <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
               <h3 class="text-xl font-semibold mb-4">功能概述</h3>
-              <p class="text-slate-300 mb-4">远程分享功能允许你将当前工作区通过浏览器分享给同事，对方无需安装任何软件，只需打开链接即可查看你的 Worktree、使用终端，甚至进行协作开发。</p>
+              <p class="text-slate-300 mb-4">浏览器分享功能允许你将当前工作区通过浏览器分享给同事。对方无需安装任何软件，只需打开链接并输入分享密码，即可查看你的 Worktree 和使用浏览器终端。</p>
               <div class="bg-blue-900/20 border border-blue-700 rounded-lg p-4 mb-4">
                 <p class="text-blue-200 text-sm"><strong>适用场景：</strong></p>
                 <ul class="list-disc list-inside space-y-1 text-blue-200 text-sm mt-2">
-                  <li>结对编程 -- 远程同事通过浏览器加入你的终端，实时协作</li>
+                  <li>结对排查 -- 同事通过浏览器查看你的终端和工作区状态</li>
                   <li>代码演示 -- 让 PM 或测试人员在浏览器中查看你的分支状态</li>
-                  <li>远程协助 -- 帮同事排查问题，直接在他分享的终端里操作</li>
+                  <li>远程协助 -- 通过 LAN 或 ngrok 链接快速进入浏览器端进行排查</li>
                   <li>移动办公 -- 在平板或手机浏览器上临时查看工作区状态</li>
                 </ul>
               </div>
-              <p class="text-slate-300 text-sm">分享功能支持三种模式：<strong>局域网直连</strong>（同一 Wi-Fi / 内网）、<strong>WMS 内置隧道</strong>（无需安装额外工具）和<strong>ngrok 穿透</strong>（使用 ngrok 服务）。</p>
+              <p class="text-slate-300 text-sm">分享功能支持两种模式：<strong>局域网直连</strong>（同一 Wi-Fi / 内网）和 <strong>ngrok 穿透</strong>（使用 ngrok 服务）。两种方式都通过同一套分享密码保护浏览器访问。</p>
             </div>
 
             <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
@@ -791,7 +791,7 @@ npm run tauri build</code></pre>
                 <li>浏览器会显示一个<strong>密码输入页面</strong>，输入你设置的密码即可进入</li>
                 <li>进入后看到与桌面端相同的界面，包括 Worktree 列表、分支状态等</li>
                 <li>可以使用<strong>内置终端</strong>（通过 WebSocket 实时传输）</li>
-                <li>可以<strong>加入协作</strong>，与桌面端用户共享终端会话</li>
+                <li>可以<strong>使用浏览器终端</strong>，与桌面端共享同一个终端会话</li>
                 <li>所有操作通过 WebSocket 实时同步，延迟极低</li>
               </ol>
               <div class="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4 mt-4">
@@ -832,26 +832,12 @@ npm run tauri build</code></pre>
             </div>
 
             <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
-              <h3 class="text-xl font-semibold mb-4">WMS 内置隧道</h3>
-              <p class="text-slate-300 mb-4">除了 ngrok，Worktree Manager 还内置了 WMS 隧道服务，无需安装任何额外工具即可实现公网访问：</p>
-              <ol class="list-decimal list-inside space-y-3 text-slate-300">
-                <li>先按上述步骤开启<strong>局域网分享</strong></li>
-                <li>在分享面板中点击<strong>"WMS 隧道"</strong>按钮</li>
-                <li>系统会自动连接 <code>tunnel.kirov-opensource.com</code> 并分配唯一子域名</li>
-                <li>生成的公网地址（如 <code>https://your-name.tunnel.kirov-opensource.com</code>）即可分享给任何人</li>
-              </ol>
-              <div class="bg-green-900/20 border border-green-700/50 rounded-lg p-3 mt-4">
-                <p class="text-green-300 text-sm"><strong>优势：</strong>无需注册第三方账号，无需安装额外软件。支持断线自动重连，连接断开时会显示重试倒计时。</p>
-              </div>
-            </div>
-
-            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
               <h3 class="text-xl font-semibold mb-4">QR 码分享</h3>
               <p class="text-slate-300 mb-4">开启分享后，分享面板会自动生成当前分享地址的二维码：</p>
               <ul class="list-disc list-inside space-y-2 text-slate-300">
                 <li><strong>扫码访问</strong>：用手机/平板扫描二维码，直接在移动浏览器中打开工作区</li>
                 <li><strong>密码内嵌</strong>：二维码链接中可以内嵌访问密码（通过 URL fragment），扫码后自动完成认证，无需手动输入密码</li>
-                <li><strong>多种模式</strong>：局域网、WMS 隧道和 ngrok 三种模式均支持 QR 码</li>
+                <li><strong>多种模式</strong>：局域网和 ngrok 两种模式均支持 QR 码</li>
               </ul>
             </div>
 
@@ -919,7 +905,7 @@ npm run tauri build</code></pre>
                       <li>确认双方在同一局域网 / Wi-Fi 下</li>
                       <li>检查防火墙是否放行了对应端口（macOS 可能会弹出防火墙提示，点击"允许"）</li>
                       <li>尝试用 <code>curl http://你的IP:端口/api/get_share_info</code> 测试连通性</li>
-                      <li>如果用的是公司 VPN，有可能网络隔离，建议使用 ngrok 外网模式</li>
+                      <li>如果用的是公司 VPN，有可能网络隔离，建议改用 ngrok 分享链接</li>
                     </ul>
                   </div>
                 </details>

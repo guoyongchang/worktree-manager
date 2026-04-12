@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Git Worktree Manager - Multi-Branch Parallel Development Tool</title>
-  <meta name="description" content="An elegant Git Worktree visual management tool for efficient multi-branch parallel development. Supports smart folder linking, built-in terminal, and remote sharing.">
+  <meta name="description" content="An elegant Git Worktree visual management tool for efficient multi-branch parallel development. Supports smart folder linking, a built-in terminal, and browser sharing over LAN or ngrok.">
   <meta name="keywords" content="Git Worktree, Git branch management, multi-branch development, Tauri, React, developer tools">
   <meta name="author" content="Worktree Manager Team">
 
@@ -451,7 +451,7 @@
   <header class="pt-32 pb-20 px-4 text-center bg-gradient-to-b from-slate-800 to-slate-900">
     <img src="../icons/app-icon.svg" alt="Worktree Manager" class="w-24 h-24 mx-auto mb-6">
     <h1 class="text-4xl md:text-5xl font-bold mb-4">Git Worktree Manager</h1>
-    <p class="text-xl text-slate-400 max-w-2xl mx-auto mb-8">An elegant Git Worktree visual management tool for efficient multi-branch parallel development. Supports remote sharing and real-time collaboration.</p>
+    <p class="text-xl text-slate-400 max-w-2xl mx-auto mb-8">An elegant Git Worktree visual management tool for efficient multi-branch parallel development. Supports secure browser sharing over LAN or ngrok.</p>
     <div class="flex gap-3 justify-center flex-wrap">
       <a href="https://github.com/guoyongchang/worktree-manager/releases/latest" class="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
@@ -674,11 +674,11 @@
                   <span class="wf-step">Send link</span><span class="wf-arrow">&rarr;</span>
                   <span class="wf-step">Open in browser</span>
                 </div>
-                <div class="wf-result">3 steps &middot; no installation needed &middot; WMS tunnel / ngrok for public access</div>
+                <div class="wf-result">3 steps &middot; LAN or ngrok access &middot; password protected</div>
               </div>
             </div>
             <div class="p-3 bg-green-900/20 border border-green-700/50 rounded-lg">
-              <p class="text-green-300 text-sm">Enable sharing for LAN access, or use the <strong>WMS built-in tunnel or ngrok for public internet access</strong>. Open in any browser, authenticate with a password, and view workspace status or use the built-in terminal&mdash;no client installation needed.</p>
+              <p class="text-green-300 text-sm">Enable sharing for LAN access, or use <strong>ngrok for public internet access</strong>. Open in any browser, authenticate with the share password, and view workspace status or use the built-in terminal&mdash;no client installation needed.</p>
             </div>
           </div>
         </div>
@@ -774,11 +774,6 @@
           <p>Speak into the microphone and voice is automatically transcribed to text in the terminal. Supports voice commands (enter, delete, clear, etc.), 2-second silence auto-stop, fully local processing.</p>
         </div>
         <div class="feature-card">
-          <div class="feature-icon">&#x1F6F0;&#xFE0F;</div>
-          <h3>WMS Built-in Tunnel <span class="badge-new">NEW</span></h3>
-          <p>Zero-config public internet access via the WMS tunnel server. No third-party tools needed&mdash;just click share and get a public URL with automatic subdomain assignment and WebSocket relay.</p>
-        </div>
-        <div class="feature-card">
           <div class="feature-icon">&#x1F9E0;</div>
           <h3>AI Voice Refinement <span class="badge-new">NEW</span></h3>
           <p>AI-powered post-processing for voice input. Automatically corrects recognition errors, normalizes command syntax, and intelligently interprets developer intent for more accurate terminal input.</p>
@@ -790,30 +785,25 @@
         </div>
         <div class="feature-card" style="border-color: rgba(59, 130, 246, 0.3); background: linear-gradient(135deg, #1e293b 0%, #172554 100%);">
           <div class="feature-icon">&#x1F310;</div>
-          <h3>Remote Sharing &amp; Collaboration</h3>
-          <p>Share your workspace with one click. Colleagues access it through a browser. Supports LAN direct, WMS tunnel, and ngrok tunneling, with built-in password protection and browser terminal.</p>
+          <h3>Browser Sharing</h3>
+          <p>Share your workspace with one click. Colleagues access it through a browser. Supports LAN direct and ngrok tunneling, with password protection and a browser terminal.</p>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- Remote Sharing Highlight -->
+  <!-- Browser Sharing Highlight -->
   <section class="py-20 bg-gradient-to-b from-slate-900 via-blue-950/30 to-slate-900">
     <div class="max-w-5xl mx-auto px-4">
       <div class="text-center mb-12">
-        <h2 class="text-3xl md:text-4xl font-bold mb-3">Remote Sharing &amp; Real-time Collaboration</h2>
-        <p class="text-slate-400 text-lg">No installation needed, open in browser</p>
+        <h2 class="text-3xl md:text-4xl font-bold mb-3">Browser Sharing (LAN / ngrok)</h2>
+        <p class="text-slate-400 text-lg">No installation needed, just open the shared workspace in a browser</p>
       </div>
       <div class="grid md:grid-cols-3 gap-6">
         <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-6 text-center">
           <div class="text-4xl mb-4">&#x1F4E1;</div>
           <h3 class="text-lg font-semibold mb-2 text-slate-100">LAN Direct</h3>
           <p class="text-slate-400 text-sm">Click "Share" on the desktop app to generate a password-protected link. Colleagues on the same network can open it in their browser to see your workspace&mdash;no software installation required.</p>
-        </div>
-        <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-6 text-center">
-          <div class="text-4xl mb-4">&#x1F6F0;&#xFE0F;</div>
-          <h3 class="text-lg font-semibold mb-2 text-slate-100">WMS Built-in Tunnel</h3>
-          <p class="text-slate-400 text-sm">Zero-configuration public internet access via the WMS tunnel server. No ngrok token needed&mdash;get a public URL instantly with automatic subdomain and WebSocket relay.</p>
         </div>
         <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-6 text-center">
           <div class="text-4xl mb-4">&#x1F30D;</div>
@@ -838,7 +828,7 @@
       </div>
       <div class="mt-8 text-center">
         <a href="guide.html#remote-sharing" class="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition">
-          View Remote Sharing Guide
+          View Browser Sharing Guide
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>
         </a>
       </div>

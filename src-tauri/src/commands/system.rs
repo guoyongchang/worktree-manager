@@ -479,7 +479,11 @@ fn extract_macos_app_icon(app_path: &str) -> Option<String> {
     // Step 1: Read CFBundleIconFile from Info.plist
     let plist_output = Command::new("/usr/bin/defaults")
         .arg("read")
-        .arg(app.join("Contents/Info.plist").to_string_lossy().to_string())
+        .arg(
+            app.join("Contents/Info.plist")
+                .to_string_lossy()
+                .to_string(),
+        )
         .arg("CFBundleIconFile")
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
@@ -490,7 +494,9 @@ fn extract_macos_app_icon(app_path: &str) -> Option<String> {
         return None;
     }
 
-    let mut icon_file = String::from_utf8_lossy(&plist_output.stdout).trim().to_string();
+    let mut icon_file = String::from_utf8_lossy(&plist_output.stdout)
+        .trim()
+        .to_string();
     if icon_file.is_empty() {
         return None;
     }
@@ -506,7 +512,10 @@ fn extract_macos_app_icon(app_path: &str) -> Option<String> {
     }
 
     // Step 2: Convert .icns to 32x32 PNG using sips
-    let tmp_png = format!("/tmp/wm_icon_{}.png", app.file_name()?.to_string_lossy().replace(' ', "_"));
+    let tmp_png = format!(
+        "/tmp/wm_icon_{}.png",
+        app.file_name()?.to_string_lossy().replace(' ', "_")
+    );
     let sips_output = Command::new("/usr/bin/sips")
         .args(["-s", "format", "png"])
         .arg(icns_path.to_string_lossy().to_string())
@@ -535,9 +544,7 @@ fn extract_macos_app_icon(app_path: &str) -> Option<String> {
 /// Batch-extract icons from multiple Windows .exe files in a single PowerShell process.
 /// Returns a map of exe_path → base64 PNG data URL.
 #[cfg(target_os = "windows")]
-fn extract_windows_exe_icons_batch(
-    paths: &[String],
-) -> std::collections::HashMap<String, String> {
+fn extract_windows_exe_icons_batch(paths: &[String]) -> std::collections::HashMap<String, String> {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -799,7 +806,7 @@ fn detect_terminals() -> Vec<DetectedTool> {
                     id: cmd.to_string(),
                     name: name.to_string(),
                     path,
-                icon: None,
+                    icon: None,
                 });
             }
         }
@@ -941,16 +948,28 @@ fn detect_editors() -> Vec<DetectedTool> {
         let mac_apps: &[(&str, &str, &str)] = &[
             // VS Code family
             ("/Applications/Visual Studio Code.app", "vscode", "VS Code"),
-            ("/Applications/Visual Studio Code - Insiders.app", "vscode-insiders", "VS Code Insiders"),
+            (
+                "/Applications/Visual Studio Code - Insiders.app",
+                "vscode-insiders",
+                "VS Code Insiders",
+            ),
             ("/Applications/VSCodium.app", "vscodium", "VSCodium"),
             // AI-powered editors
             ("/Applications/Cursor.app", "cursor", "Cursor"),
-            ("/Applications/Antigravity.app", "antigravity", "Antigravity"),
+            (
+                "/Applications/Antigravity.app",
+                "antigravity",
+                "Antigravity",
+            ),
             ("/Applications/Windsurf.app", "windsurf", "Windsurf"),
             ("/Applications/Trae.app", "trae", "Trae"),
             // JetBrains family
             ("/Applications/IntelliJ IDEA.app", "idea", "IntelliJ IDEA"),
-            ("/Applications/IntelliJ IDEA CE.app", "idea-ce", "IntelliJ IDEA CE"),
+            (
+                "/Applications/IntelliJ IDEA CE.app",
+                "idea-ce",
+                "IntelliJ IDEA CE",
+            ),
             ("/Applications/WebStorm.app", "webstorm", "WebStorm"),
             ("/Applications/PyCharm.app", "pycharm", "PyCharm"),
             ("/Applications/PyCharm CE.app", "pycharm-ce", "PyCharm CE"),
@@ -965,7 +984,11 @@ fn detect_editors() -> Vec<DetectedTool> {
             // Apple
             ("/Applications/Xcode.app", "xcode", "Xcode"),
             // Google
-            ("/Applications/Android Studio.app", "android-studio", "Android Studio"),
+            (
+                "/Applications/Android Studio.app",
+                "android-studio",
+                "Android Studio",
+            ),
             // Other editors
             ("/Applications/Zed.app", "zed", "Zed"),
             ("/Applications/Sublime Text.app", "sublime", "Sublime Text"),
@@ -987,9 +1010,8 @@ fn detect_editors() -> Vec<DetectedTool> {
             }
         }
         // Backfill icons for CLI-detected editors using known .app paths
-        let app_lookup: std::collections::HashMap<&str, &str> = mac_apps.iter()
-            .map(|(path, id, _)| (*id, *path))
-            .collect();
+        let app_lookup: std::collections::HashMap<&str, &str> =
+            mac_apps.iter().map(|(path, id, _)| (*id, *path)).collect();
         for tool in results.iter_mut() {
             if tool.icon.is_none() {
                 if let Some(app_path) = app_lookup.get(tool.id.as_str()) {
@@ -1102,7 +1124,7 @@ fn detect_shells() -> Vec<DetectedTool> {
                     id: cmd.to_string(),
                     name: name.to_string(),
                     path,
-                icon: None,
+                    icon: None,
                 });
             }
         }

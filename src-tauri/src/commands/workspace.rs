@@ -119,8 +119,10 @@ pub(crate) fn add_workspace(name: String, path: String) -> Result<(), String> {
             "[workspace] Creating default workspace config at {:?}",
             ws_config_path
         );
-        let mut default_ws_config = WorkspaceConfig::default();
-        default_ws_config.name = name.clone();
+        let default_ws_config = WorkspaceConfig {
+            name: name.clone(),
+            ..WorkspaceConfig::default()
+        };
         save_workspace_config_internal(&path, &default_ws_config)?;
     }
 
@@ -274,8 +276,10 @@ pub fn add_workspace_internal(name: &str, path: &str) -> Result<(), String> {
     save_global_config_internal(&global)?;
     let ws_config_path = get_workspace_config_path(path);
     if !ws_config_path.exists() {
-        let mut default_ws_config = WorkspaceConfig::default();
-        default_ws_config.name = name.to_string();
+        let default_ws_config = WorkspaceConfig {
+            name: name.to_string(),
+            ..WorkspaceConfig::default()
+        };
         save_workspace_config_internal(path, &default_ws_config)?;
     }
     Ok(())
@@ -284,7 +288,7 @@ pub fn add_workspace_internal(name: &str, path: &str) -> Result<(), String> {
 pub fn remove_workspace_internal(path: &str) -> Result<(), String> {
     let mut global = load_global_config();
     global.workspaces.retain(|w| w.path != path);
-    if global.current_workspace.as_ref().map(|s| s.as_str()) == Some(path) {
+    if global.current_workspace.as_deref() == Some(path) {
         global.current_workspace = global.workspaces.first().map(|w| w.path.clone());
     }
     save_global_config_internal(&global)?;
