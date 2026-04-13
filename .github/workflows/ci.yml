@@ -46,6 +46,9 @@ jobs:
       - name: Run frontend tests
         run: npm test
 
+      - name: Build frontend assets
+        run: npm run build
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
