@@ -616,6 +616,8 @@
   "sidebar.occupiedTooltip": "此 Worktree 正在被另一个窗口使用",
   "sidebar.uncommittedTip": "{{name}}: {{count}} 个未提交",
   "sidebar.active": "活动",
+  "sidebar.searchWorktrees": "搜索 Worktree",
+  "sidebar.noSearchResults": "没有匹配的 Worktree",
   "sidebar.noWorktrees": "暂无 Worktree",
   "sidebar.noWorktreesHint": "点击上方 + 按钮创建",
   "sidebar.archive": "归档",

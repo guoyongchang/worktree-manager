@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 
 import { openLink } from '@/lib/backend';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Dialog,
   DialogContent,
@@ -521,6 +522,7 @@ const WorktreeList: FC<{
   showArchived,
 }) => {
   const { t } = useTranslation();
+  const [activeSearchQuery, setActiveSearchQuery] = useState('');
 
   // Sort active worktrees by display_name (or name) alphabetically
   const sortedActiveWorktrees = useMemo(() => {
@@ -530,6 +532,18 @@ const WorktreeList: FC<{
       return nameA.localeCompare(nameB, undefined, { sensitivity: 'base' });
     });
   }, [activeWorktrees]);
+
+  const filteredActiveWorktrees = useMemo(() => {
+    const query = activeSearchQuery.trim().toLocaleLowerCase();
+    if (!query) return sortedActiveWorktrees;
+
+    return sortedActiveWorktrees.filter((worktree) => {
+      const displayName = (worktree.display_name || '').toLocaleLowerCase();
+      const rawName = worktree.name.toLocaleLowerCase();
+
+      return displayName.includes(query) || rawName.includes(query);
+    });
+  }, [activeSearchQuery, sortedActiveWorktrees]);
 
   // Sort archived worktrees by display_name (or name) alphabetically
   const sortedArchivedWorktrees = useMemo(() => {
@@ -543,9 +557,18 @@ const WorktreeList: FC<{
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="px-4 py-2">
-        <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
-          {t('sidebar.active')} ({activeWorktrees.length})
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="shrink-0 text-[11px] font-medium text-slate-500 uppercase tracking-wider">
+            {t('sidebar.active')} ({activeWorktrees.length})
+          </span>
+          <Input
+            value={activeSearchQuery}
+            onChange={(event) => setActiveSearchQuery(event.target.value)}
+            placeholder={t('sidebar.searchWorktrees')}
+            aria-label={t('sidebar.searchWorktrees')}
+            className="h-7 min-w-0 max-w-[180px] text-xs"
+          />
+        </div>
       </div>
       {sortedActiveWorktrees.length === 0 ? (
         <div className="px-4 py-8 text-center">
@@ -555,8 +578,15 @@ const WorktreeList: FC<{
           <p className="text-slate-500 text-sm">{t('sidebar.noWorktrees')}</p>
           <p className="text-slate-600 text-xs mt-1">{t('sidebar.noWorktreesHint')}</p>
         </div>
+      ) : filteredActiveWorktrees.length === 0 ? (
+        <div className="px-4 py-8 text-center">
+          <div className="flex justify-center mb-3">
+            <FolderIcon className="w-10 h-10 text-slate-600" />
+          </div>
+          <p className="text-slate-500 text-sm">{t('sidebar.noSearchResults')}</p>
+        </div>
       ) : (
-        sortedActiveWorktrees.map((worktree) => {
+        filteredActiveWorktrees.map((worktree) => {
           const lockedBy = lockedWorktrees[worktree.name];
           const isLockedByOther = lockedBy && lockedBy !== currentWindowLabel;
           const isDeployed = worktree.name === occupation?.worktree_name;

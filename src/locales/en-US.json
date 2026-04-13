@@ -625,6 +625,8 @@
   "sidebar.occupiedTooltip": "This Worktree is being used by another window",
   "sidebar.uncommittedTip": "{{name}}: {{count}} uncommitted",
   "sidebar.active": "Active",
+  "sidebar.searchWorktrees": "Search worktrees",
+  "sidebar.noSearchResults": "No matching worktrees",
   "sidebar.noWorktrees": "No Worktrees",
   "sidebar.noWorktreesHint": "Click the + button above to create one",
   "sidebar.archive": "Archived",
