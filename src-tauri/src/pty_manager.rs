@@ -135,6 +135,22 @@ fn resolve_shell_from_id(id: &str) -> String {
     }
 }
 
+fn shell_program_name(shell_path: &str) -> String {
+    std::path::Path::new(shell_path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(shell_path)
+        .trim_end_matches(".exe")
+        .to_ascii_lowercase()
+}
+
+fn shell_startup_args(shell_path: &str) -> &'static [&'static str] {
+    match shell_program_name(shell_path).as_str() {
+        "zsh" | "bash" | "sh" => &["-i"],
+        _ => &[],
+    }
+}
+
 /// Split raw bytes into valid UTF-8 text + incomplete trailing bytes.
 ///
 /// Invalid bytes in the middle are replaced with U+FFFD (same as `from_utf8_lossy`).
@@ -363,6 +379,7 @@ impl PtyManager {
         log::info!("PTY session '{}' using shell: {}", id, shell_path);
 
         let mut cmd = CommandBuilder::new(&shell_path);
+        cmd.args(shell_startup_args(&shell_path));
         cmd.cwd(cwd);
 
         // Set environment variables for better terminal support
@@ -631,7 +648,7 @@ impl Default for PtyManager {
 
 #[cfg(test)]
 mod tests {
-    use super::bytes_to_utf8_with_pending;
+    use super::{bytes_to_utf8_with_pending, shell_startup_args};
 
     #[test]
     fn empty_input() {
@@ -723,5 +740,20 @@ mod tests {
         let (text, pending) = bytes_to_utf8_with_pending(&[0xE4]);
         assert_eq!(text, "");
         assert_eq!(pending, vec![0xE4]);
+    }
+
+    #[test]
+    fn zsh_uses_interactive_startup() {
+        assert_eq!(shell_startup_args("/bin/zsh"), &["-i"]);
+    }
+
+    #[test]
+    fn bash_uses_interactive_startup() {
+        assert_eq!(shell_startup_args("/bin/bash"), &["-i"]);
+    }
+
+    #[test]
+    fn pwsh_uses_default_startup_args() {
+        assert_eq!(shell_startup_args("pwsh"), &[] as &[&str]);
     }
 }
