@@ -1,7 +1,6 @@
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::time::Instant;
 
 use crate::pty_manager::PtyManager;
 use crate::types::{
@@ -34,28 +33,6 @@ pub(crate) static AUTHENTICATED_SESSIONS: Lazy<Mutex<std::collections::HashSet<S
 // 已连接的客户端追踪
 pub(crate) static CONNECTED_CLIENTS: Lazy<Mutex<HashMap<String, ConnectedClient>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
-
-// Shared secret used to mark requests that were re-forwarded locally by the
-// trusted WMS tunnel bridge, so they can be distinguished from genuine local UI traffic.
-pub(crate) static REMOTE_PROXY_AUTH_TOKEN: Lazy<String> =
-    Lazy::new(|| uuid::Uuid::new_v4().to_string());
-
-#[derive(Clone, Debug)]
-pub(crate) struct PendingWmsBrowserLogin {
-    pub state: String,
-    pub created_at: Instant,
-}
-
-// Pending one-time browser-login callback state for localhost WMS auth flows.
-pub(crate) static PENDING_WMS_BROWSER_LOGIN: Lazy<Mutex<Option<PendingWmsBrowserLogin>>> =
-    Lazy::new(|| Mutex::new(None));
-
-/// Cancellation channel for the WMS browser login flow.
-/// Sending `true` causes the waiting TCP listener to abort immediately.
-pub(crate) static WMS_BROWSER_LOGIN_CANCEL: Lazy<(
-    tokio::sync::watch::Sender<bool>,
-    tokio::sync::watch::Receiver<bool>,
-)> = Lazy::new(|| tokio::sync::watch::channel(false));
 
 pub(crate) static TOKIO_RT: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
     tokio::runtime::Runtime::new().expect("Failed to create tokio runtime for sharing")

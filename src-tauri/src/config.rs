@@ -69,7 +69,6 @@ pub fn load_global_config() -> GlobalConfig {
         default_config
     };
 
-
     {
         let mut cache = GLOBAL_CONFIG_CACHE.lock().unwrap();
         *cache = Some(config.clone());
@@ -98,7 +97,6 @@ pub fn save_global_config_internal(config: &GlobalConfig) -> Result<(), String> 
 
     Ok(())
 }
-
 
 // ==================== Workspace 配置加载/保存 ====================
 
@@ -201,9 +199,7 @@ mod tests {
         let config = GlobalConfig {
             current_workspace: Some("/tmp/workspace".to_string()),
             ngrok_token: Some(" my-ngrok ".to_string()),
-            wms_token: None,
             dashscope_api_key: Some("my-dashscope".to_string()),
-            wms_jwt: Some("my-jwt".to_string()),
             ..GlobalConfig::default()
         };
 
@@ -223,11 +219,11 @@ mod tests {
             object.get("dashscope_api_key"),
             Some(&Value::String("my-dashscope".to_string()))
         );
-        assert_eq!(
-            object.get("wms_jwt"),
-            Some(&Value::String("my-jwt".to_string()))
-        );
-        assert_eq!(object.get("wms_token"), Some(&Value::Null));
+        assert!(!object.contains_key("wms_server_url"));
+        assert!(!object.contains_key("wms_token"));
+        assert!(!object.contains_key("wms_subdomain"));
+        assert!(!object.contains_key("wms_jwt"));
+        assert!(!object.contains_key("device_id"));
     }
 }
 

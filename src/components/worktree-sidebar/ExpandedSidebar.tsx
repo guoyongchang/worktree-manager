@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 
 import { openLink } from '@/lib/backend';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Dialog,
   DialogContent,
@@ -87,31 +88,22 @@ export const ExpandedSidebar: FC<ExpandedSidebarProps> = ({
   onToggleArchived,
   onToggleCollapsed,
   onToggleNgrok,
-  onToggleWms,
   onTouchEnd,
   onTouchMove,
   onTouchStart,
   onUpdateSharePassword,
-  onWmsManualReconnect,
   refreshing = false,
   selectedWorktree,
   shareActive = false,
   shareNgrokUrl,
   sharePassword = '',
   shareUrls = [],
-  shareWmsUrl,
   showArchived,
   showWorkspaceMenu,
   sidebarWidth,
   setSidebarWidth,
   switchingWorkspace = false,
   updaterState,
-  wmsConnected = true,
-  wmsLoading = false,
-  wmsNextRetrySecs = 0,
-  wmsReconnectAttempt = 0,
-  wmsReconnecting = false,
-  wmsUserName,
   workspaces,
   connectedClients = [],
 }) => {
@@ -232,16 +224,6 @@ export const ExpandedSidebar: FC<ExpandedSidebarProps> = ({
               </TooltipProvider>
             )}
           </div>
-          {isTauri && (
-            <div className="flex items-center gap-1.5 mt-2 px-0.5">
-              <svg className="w-3 h-3 text-slate-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
-              </svg>
-              <span className={`text-[11px] truncate ${wmsUserName ? 'text-slate-400' : 'text-slate-600'}`} title={wmsUserName || undefined}>
-                {wmsUserName || t('app.wmsNotLoggedIn', 'Not logged in')}
-              </span>
-            </div>
-          )}
         </div>
 
         <div className="px-4 py-3 border-b border-slate-700/50">
@@ -308,18 +290,10 @@ export const ExpandedSidebar: FC<ExpandedSidebarProps> = ({
             active={shareActive}
             urls={shareUrls}
             ngrokUrl={shareNgrokUrl || null}
-            wmsUrl={shareWmsUrl || null}
-            wmsConnected={wmsConnected}
-            wmsReconnecting={wmsReconnecting}
-            wmsReconnectAttempt={wmsReconnectAttempt}
-            wmsNextRetrySecs={wmsNextRetrySecs}
             password={sharePassword}
             ngrokLoading={ngrokLoading}
-            wmsLoading={wmsLoading}
             connectedClients={connectedClients}
             onToggleNgrok={onToggleNgrok}
-            onToggleWms={onToggleWms}
-            onWmsManualReconnect={onWmsManualReconnect}
             onStart={onStartShare}
             onStop={onStopShare}
             onUpdatePassword={onUpdateSharePassword}
@@ -548,6 +522,7 @@ const WorktreeList: FC<{
   showArchived,
 }) => {
   const { t } = useTranslation();
+  const [activeSearchQuery, setActiveSearchQuery] = useState('');
 
   // Sort active worktrees by display_name (or name) alphabetically
   const sortedActiveWorktrees = useMemo(() => {
@@ -557,6 +532,18 @@ const WorktreeList: FC<{
       return nameA.localeCompare(nameB, undefined, { sensitivity: 'base' });
     });
   }, [activeWorktrees]);
+
+  const filteredActiveWorktrees = useMemo(() => {
+    const query = activeSearchQuery.trim().toLocaleLowerCase();
+    if (!query) return sortedActiveWorktrees;
+
+    return sortedActiveWorktrees.filter((worktree) => {
+      const displayName = (worktree.display_name || '').toLocaleLowerCase();
+      const rawName = worktree.name.toLocaleLowerCase();
+
+      return displayName.includes(query) || rawName.includes(query);
+    });
+  }, [activeSearchQuery, sortedActiveWorktrees]);
 
   // Sort archived worktrees by display_name (or name) alphabetically
   const sortedArchivedWorktrees = useMemo(() => {
@@ -570,9 +557,18 @@ const WorktreeList: FC<{
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="px-4 py-2">
-        <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider">
-          {t('sidebar.active')} ({activeWorktrees.length})
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="shrink-0 text-[11px] font-medium text-slate-500 uppercase tracking-wider">
+            {t('sidebar.active')} ({activeWorktrees.length})
+          </span>
+          <Input
+            value={activeSearchQuery}
+            onChange={(event) => setActiveSearchQuery(event.target.value)}
+            placeholder={t('sidebar.searchWorktrees')}
+            aria-label={t('sidebar.searchWorktrees')}
+            className="h-7 min-w-0 max-w-[180px] text-xs"
+          />
+        </div>
       </div>
       {sortedActiveWorktrees.length === 0 ? (
         <div className="px-4 py-8 text-center">
@@ -582,8 +578,15 @@ const WorktreeList: FC<{
           <p className="text-slate-500 text-sm">{t('sidebar.noWorktrees')}</p>
           <p className="text-slate-600 text-xs mt-1">{t('sidebar.noWorktreesHint')}</p>
         </div>
+      ) : filteredActiveWorktrees.length === 0 ? (
+        <div className="px-4 py-8 text-center">
+          <div className="flex justify-center mb-3">
+            <FolderIcon className="w-10 h-10 text-slate-600" />
+          </div>
+          <p className="text-slate-500 text-sm">{t('sidebar.noSearchResults')}</p>
+        </div>
       ) : (
-        sortedActiveWorktrees.map((worktree) => {
+        filteredActiveWorktrees.map((worktree) => {
           const lockedBy = lockedWorktrees[worktree.name];
           const isLockedByOther = lockedBy && lockedBy !== currentWindowLabel;
           const isDeployed = worktree.name === occupation?.worktree_name;
