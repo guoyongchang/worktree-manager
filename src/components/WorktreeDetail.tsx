@@ -199,7 +199,7 @@ const TerminalIconButton: FC<TerminalIconButtonProps> = ({
           if (e.button !== 2) return;
           e.preventDefault();
           e.stopPropagation();
-          if (terminals.length > 1) {
+          if (terminals.length > 0) {
             setAnchorRect(buttonRef.current?.getBoundingClientRect() ?? null);
           }
         }}

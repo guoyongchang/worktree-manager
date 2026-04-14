@@ -155,20 +155,22 @@ export function useWorkspaceActions(
     return (localStorage.getItem('preferred_editor') as EditorType) || 'vscode';
   });
 
-  // Auto-detect tools on mount only if no editors cached yet
+  // Auto-detect tools on mount only if no editors/terminals cached yet
   useEffect(() => {
-    const existing = localStorage.getItem('detected_editors');
-    if (existing) {
+    const existingEditors = localStorage.getItem('detected_editors');
+    const existingTerminals = localStorage.getItem('detected_terminals');
+    if (existingEditors && existingTerminals) {
       try {
-        const parsed = JSON.parse(existing);
+        const parsed = JSON.parse(existingEditors);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          // Already have cached editors, just notify components
+          // Both editors and terminals already cached — just notify components
           window.dispatchEvent(new Event('editors-detected'));
+          window.dispatchEvent(new Event('terminals-detected'));
           return;
         }
       } catch { /* ignore */ }
     }
-    // No cached editors — run detection
+    // Missing editors or terminals — run detection
     callBackend('detect_tools').then((tools: any) => {
       if (tools?.editors) {
         const editorIcons: Record<string, string> = {};
