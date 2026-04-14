@@ -159,18 +159,19 @@ export function useWorkspaceActions(
   useEffect(() => {
     const existingEditors = localStorage.getItem('detected_editors');
     const existingTerminals = localStorage.getItem('detected_terminals');
-    if (existingEditors && existingTerminals) {
+    const existingTerminalIcons = localStorage.getItem('terminal_icons');
+    if (existingEditors && existingTerminals && existingTerminalIcons) {
       try {
         const parsed = JSON.parse(existingEditors);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          // Both editors and terminals already cached — just notify components
+          // Editors, terminals, and terminal icons all cached — just notify components
           window.dispatchEvent(new Event('editors-detected'));
           window.dispatchEvent(new Event('terminals-detected'));
           return;
         }
       } catch { /* ignore */ }
     }
-    // Missing editors or terminals — run detection
+    // Missing editors, terminals, or terminal icons — run detection
     callBackend('detect_tools').then((tools: any) => {
       if (tools?.editors) {
         const editorIcons: Record<string, string> = {};

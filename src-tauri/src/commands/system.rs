@@ -812,6 +812,35 @@ fn detect_terminals() -> Vec<DetectedTool> {
         }
     }
 
+    // Extract icons — same pattern as detect_editors()
+    #[cfg(target_os = "macos")]
+    for tool in results.iter_mut() {
+        if tool.icon.is_none() && tool.path.ends_with(".app") {
+            tool.icon = extract_macos_app_icon(&tool.path);
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let exe_paths: Vec<String> = results
+            .iter()
+            .filter(|t| t.icon.is_none() && t.path.to_ascii_lowercase().ends_with(".exe"))
+            .map(|t| t.path.clone())
+            .collect();
+        if !exe_paths.is_empty() {
+            let icon_map = extract_windows_exe_icons_batch(&exe_paths);
+            for tool in results.iter_mut() {
+                if tool.icon.is_none() {
+                    if let Some(b64) = icon_map.get(&tool.path) {
+                        if !b64.is_empty() {
+                            tool.icon = Some(format!("data:image/png;base64,{}", b64));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     results
 }
 
