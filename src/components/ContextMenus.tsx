@@ -1,7 +1,7 @@
 import { type FC, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { ArchiveIcon } from './Icons';
+import { ArchiveIcon, EditorIcon } from './Icons';
 import { isTauri } from '@/lib/backend';
 
 interface ContextMenuProps {
@@ -115,30 +115,29 @@ export const TerminalTabContextMenu: FC<TerminalTabContextMenuProps> = ({
 };
 
 interface IdePickerContextMenuProps {
-  x: number;
-  y: number;
+  anchorRect: DOMRect;
   editors: Array<{ id: string; name: string }>;
   onSelect: (editorId: string) => void;
   onClose: () => void;
 }
 
 export const IdePickerContextMenu: FC<IdePickerContextMenuProps> = ({
-  x,
-  y,
+  anchorRect,
   editors,
   onSelect,
   onClose,
 }) => {
-  const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
-  const menuHeight = editors.length * 36 + 40;
+  // Each icon ~32px + 4px gap, plus 8px total padding
+  const popoverWidth = editors.length * 36 + 8;
+  const left = Math.min(anchorRect.left, window.innerWidth - popoverWidth - 8);
+  const spaceBelow = window.innerHeight - anchorRect.bottom;
+  const top = spaceBelow >= 52 ? anchorRect.bottom + 4 : anchorRect.top - 48;
 
   useEffect(() => {
-    // Defer listener registration by one frame so the right-click mousedown
-    // that opened the menu doesn't immediately trigger a close.
     let removeListener: (() => void) | undefined;
     const timer = setTimeout(() => {
       const handle = (e: MouseEvent) => {
@@ -158,26 +157,21 @@ export const IdePickerContextMenu: FC<IdePickerContextMenuProps> = ({
   return createPortal(
     <div
       ref={menuRef}
-      className="fixed z-[9999] bg-slate-800 border border-slate-600 rounded-lg shadow-xl py-1 min-w-[160px]"
-      style={{
-        left: Math.min(x, window.innerWidth - 180),
-        top: Math.min(y, window.innerHeight - menuHeight),
-      }}
+      className="fixed z-[9999] flex gap-1 p-1 bg-slate-800 border border-slate-700 rounded-lg shadow-xl"
+      style={{ left, top }}
       onContextMenu={(e) => e.preventDefault()}
     >
-      <div className="px-3 py-1 text-xs text-slate-500 font-medium uppercase tracking-wider">
-        {t('contextMenu.openInEditorPicker')}
-      </div>
       {editors.map((editor) => (
         <button
           key={editor.id}
+          title={editor.name}
           onClick={() => {
             onSelect(editor.id);
             onCloseRef.current();
           }}
-          className="w-full px-4 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 flex items-center gap-2"
+          className="p-1.5 rounded text-slate-400 hover:text-slate-100 hover:bg-slate-700 transition-colors"
         >
-          {editor.name}
+          <EditorIcon editorId={editor.id} className="w-5 h-5" />
         </button>
       ))}
     </div>,

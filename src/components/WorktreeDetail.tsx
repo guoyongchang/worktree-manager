@@ -1,4 +1,4 @@
-import { useState, useEffect, type FC, useCallback } from 'react';
+import { useState, useEffect, useRef, type FC, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import {
@@ -130,19 +130,21 @@ const IdeIconButton: FC<IdeIconButtonProps> = ({
   onOpen,
 }) => {
   const { t } = useTranslation();
-  const [ideMenu, setIdeMenu] = useState<{ x: number; y: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
   const currentEditor = editors.find((e) => e.id === defaultEditorId);
 
   return (
     <>
       <Button
+        ref={buttonRef}
         variant="ghost"
         size="icon"
         onClick={() => onOpen(projectPath, defaultEditorId)}
         onContextMenu={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          setIdeMenu({ x: e.clientX, y: e.clientY });
+          setAnchorRect(buttonRef.current?.getBoundingClientRect() ?? null);
         }}
         title={t('detail.openInEditorLabel', { editor: currentEditor?.name ?? defaultEditorId })}
         aria-label={t('detail.openInEditorProject', {
@@ -153,13 +155,12 @@ const IdeIconButton: FC<IdeIconButtonProps> = ({
       >
         <EditorIcon editorId={defaultEditorId} className="w-4.5 h-4.5" />
       </Button>
-      {ideMenu && (
+      {anchorRect && (
         <IdePickerContextMenu
-          x={ideMenu.x}
-          y={ideMenu.y}
+          anchorRect={anchorRect}
           editors={editors}
           onSelect={(editorId) => onOpen(projectPath, editorId)}
-          onClose={() => setIdeMenu(null)}
+          onClose={() => setAnchorRect(null)}
         />
       )}
     </>
