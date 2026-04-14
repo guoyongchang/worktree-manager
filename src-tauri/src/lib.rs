@@ -40,7 +40,6 @@ pub use commands::worktree::{
 };
 
 use commands::git::*;
-use commands::mcp::*;
 use commands::pty::*;
 use commands::sharing::*;
 use commands::system::*;
@@ -223,8 +222,6 @@ pub fn run() {
             download_update_via_mirror,
             // DevTools
             open_devtools,
-            // MCP server
-            start_mcp_server,
         ])
         .setup(|app| {
             // Initialize APP_HANDLE for use in WebSocket handlers
