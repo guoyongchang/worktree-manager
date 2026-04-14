@@ -242,19 +242,19 @@ export const SettingsView: FC<SettingsViewProps> = ({
   interface DetectedToolsResult { git: DetectedTool[]; terminals: DetectedTool[]; editors: DetectedTool[]; shells: DetectedTool[] }
   const [detectedTools, setDetectedTools] = useState<DetectedToolsResult | null>(() => {
     try {
-      const editors = JSON.parse(localStorage.getItem('detected_editors') || '[]');
-      if (editors.length > 0) {
-        // Merge in cached icons from editor_icons localStorage
-        const cachedIcons: Record<string, string> = JSON.parse(localStorage.getItem('editor_icons') || '{}');
-        const editorsWithIcons = editors.map((e: any) => ({
-          ...e,
-          icon: e.icon || cachedIcons[e.id] || undefined,
-        }));
-        // Only use cache if at least some icons are present
-        const hasAnyIcon = editorsWithIcons.some((e: any) => e.icon);
-        if (hasAnyIcon) {
-          return { git: [], terminals: [], editors: editorsWithIcons, shells: [] } as DetectedToolsResult;
-        }
+      const editors: DetectedTool[] = JSON.parse(localStorage.getItem('detected_editors') || '[]');
+      const terminals: DetectedTool[] = JSON.parse(localStorage.getItem('detected_terminals') || '[]');
+      const shells: DetectedTool[] = JSON.parse(localStorage.getItem('detected_shells') || '[]');
+      const git: DetectedTool[] = JSON.parse(localStorage.getItem('detected_git') || '[]');
+      if (editors.length > 0 || terminals.length > 0 || shells.length > 0 || git.length > 0) {
+        const editorIcons: Record<string, string> = JSON.parse(localStorage.getItem('editor_icons') || '{}');
+        const terminalIcons: Record<string, string> = JSON.parse(localStorage.getItem('terminal_icons') || '{}');
+        return {
+          git,
+          editors: editors.map((e) => ({ ...e, icon: e.icon || editorIcons[e.id] || undefined })),
+          terminals: terminals.map((t) => ({ ...t, icon: t.icon || terminalIcons[t.id] || undefined })),
+          shells,
+        } as DetectedToolsResult;
       }
     } catch { /* ignore */ }
     return null;
@@ -280,7 +280,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
       console.log('[detect_tools] editors received:', tools.editors.map(e => ({ id: e.id, hasIcon: !!e.icon, iconLen: e.icon?.length || 0 })));
       setDetectedTools(tools);
 
-      // Store editor icons and list in localStorage for cross-component access
+      // Store all tool data in localStorage for cross-component access and state restoration
       const editorIcons: Record<string, string> = {};
       const editorList: Array<{ id: string; name: string; icon?: string }> = [];
       for (const editor of tools.editors) {
@@ -289,7 +289,16 @@ export const SettingsView: FC<SettingsViewProps> = ({
       }
       localStorage.setItem('editor_icons', JSON.stringify(editorIcons));
       localStorage.setItem('detected_editors', JSON.stringify(editorList));
+      const terminalIcons: Record<string, string> = {};
+      for (const term of tools.terminals) {
+        if (term.icon) terminalIcons[term.id] = term.icon;
+      }
+      localStorage.setItem('terminal_icons', JSON.stringify(terminalIcons));
+      localStorage.setItem('detected_terminals', JSON.stringify(tools.terminals.map((t) => ({ id: t.id, name: t.name, path: t.path }))));
+      localStorage.setItem('detected_shells', JSON.stringify(tools.shells));
+      localStorage.setItem('detected_git', JSON.stringify(tools.git));
       window.dispatchEvent(new Event('editors-detected'));
+      window.dispatchEvent(new Event('terminals-detected'));
       setToolPaths(prev => {
         const updated = { ...prev };
         if (!updated.git && tools.git.length > 0) updated.git = tools.git[0].path;
