@@ -854,212 +854,137 @@ export const SettingsView: FC<SettingsViewProps> = ({
                   </div>
                 </div>
 
-                {/* Editor/IDE — dynamic detected list with visibility toggles */}
+                {/* Unified Editor/IDE list */}
                 <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 space-y-3">
                   <h3 className="text-sm font-medium text-slate-300">{t('settings.editorTitle', '编辑器 / IDE')}</h3>
-                  <p className="text-[10px] text-slate-600">{t('settings.editorConfigHint', '点击眼睛图标可隐藏/显示编辑器。仅显示系统中已安装的 IDE。')}</p>
-                  {(() => {
-                    const hiddenIds: string[] = JSON.parse(localStorage.getItem('hidden_editors') || '[]');
-                    const editorList = detectedTools?.editors || [];
-                    return editorList.map((editor) => {
-                      const pathKey = `editor_${editor.id}`;
-                      const isHidden = hiddenIds.includes(editor.id);
-                      return (
-                        <div key={editor.id} className={`flex items-center gap-3 py-1.5 border-t border-slate-700/20 first:border-0 first:pt-0 ${isHidden ? 'opacity-40' : ''}`}>
-                          {/* Visibility toggle */}
-                          <button
-                            type="button"
-                            className="text-slate-500 hover:text-slate-300 transition-colors shrink-0"
-                            title={isHidden ? '显示此编辑器' : '隐藏此编辑器'}
-                            onClick={() => {
-                              const updated = isHidden
-                                ? hiddenIds.filter(id => id !== editor.id)
-                                : [...hiddenIds, editor.id];
-                              localStorage.setItem('hidden_editors', JSON.stringify(updated));
-                              window.dispatchEvent(new Event('editors-detected'));
-                              // Force re-render
-                              setDetectedTools(prev => prev ? { ...prev } : prev);
-                            }}
-                          >
-                            {isHidden ? (
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L21 21" /></svg>
-                            ) : (
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                            )}
-                          </button>
-                          {/* Icon */}
-                          {editor.icon ? (
-                            <img src={editor.icon} width={20} height={20} alt="" className="shrink-0 rounded" style={{ imageRendering: 'auto' }} />
-                          ) : (
-                            <span className="w-5 h-5 shrink-0 flex items-center justify-center text-slate-500 text-[10px]">⌘</span>
-                          )}
-                          <div className="w-28 shrink-0">
-                            <span className="text-xs text-slate-300">{editor.name}</span>
-                          </div>
-                          <Input type="text" value={toolPaths[pathKey] || ''} placeholder={editor.path || 'auto'}
-                            onChange={(e) => saveToolPaths({ ...toolPaths, [pathKey]: e.target.value })}
-                            className="h-7 text-xs font-mono flex-1"
-                          />
-                          {/* Delete */}
-                          <button
-                            type="button"
-                            className="text-slate-500 hover:text-red-400 transition-colors shrink-0"
-                            title={t('common.delete', '删除')}
-                            onClick={() => {
-                              const cached: Array<{ id: string; name: string; icon?: string }> = JSON.parse(localStorage.getItem('detected_editors') || '[]');
-                              localStorage.setItem('detected_editors', JSON.stringify(cached.filter(e => e.id !== editor.id)));
-                              const icons: Record<string, string> = JSON.parse(localStorage.getItem('editor_icons') || '{}');
-                              delete icons[editor.id];
-                              localStorage.setItem('editor_icons', JSON.stringify(icons));
-                              const tp = { ...toolPaths };
-                              delete tp[pathKey];
-                              saveToolPaths(tp);
-                              setDetectedTools(prev => prev ? { ...prev, editors: prev.editors.filter(e => e.id !== editor.id) } : prev);
-                              window.dispatchEvent(new Event('editors-detected'));
-                            }}
-                          >
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                          </button>
-                        </div>
-                      );
-                    });
-                  })()}
-                </div>
-
-                {/* Custom Editors */}
-                <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 space-y-3">
-                  <h3 className="text-sm font-medium text-slate-300">{t('settings.customEditorsTitle', '自定义编辑器')}</h3>
-                  <p className="text-[10px] text-slate-600">{t('settings.customEditorsHint', '添加系统未自动检测到的编辑器或自定义工具。')}</p>
-                  {(() => {
-                    const customEditors: Array<{ id: string; name: string; path: string }> = JSON.parse(localStorage.getItem('custom_editors') || '[]');
-                    const editorIcons: Record<string, string> = JSON.parse(localStorage.getItem('editor_icons') || '{}');
+                  {(detectedTools?.editors || []).map((editor) => {
+                    const pathKey = `editor_${editor.id}`;
                     return (
-                      <>
-                        {customEditors.map((ce) => (
-                          <div key={ce.id} className="flex items-center gap-3 py-1.5 border-t border-slate-700/20 first:border-0 first:pt-0">
-                            {editorIcons[ce.id] ? (
-                              <img src={editorIcons[ce.id]} className="w-5 h-5 shrink-0 rounded-sm object-contain" alt={ce.name} />
-                            ) : (
-                              <span className="w-5 h-5 shrink-0 flex items-center justify-center text-slate-500 text-[10px]">⌘</span>
-                            )}
-                            <div className="w-24 shrink-0">
-                              <span className="text-xs text-slate-300">{ce.name}</span>
-                            </div>
-                            <Input type="text" value={ce.path} readOnly className="h-7 text-xs font-mono flex-1 opacity-60" />
-                            <button
-                              type="button"
-                              className="text-slate-500 hover:text-red-400 transition-colors shrink-0"
-                              title={t('common.delete', '删除')}
-                              onClick={() => {
-                                const updated = customEditors.filter(e => e.id !== ce.id);
-                                localStorage.setItem('custom_editors', JSON.stringify(updated));
-                                // Also remove from detected_editors and tool_paths
-                                const detected: Array<{ id: string; name: string; icon?: string }> = JSON.parse(localStorage.getItem('detected_editors') || '[]');
-                                localStorage.setItem('detected_editors', JSON.stringify(detected.filter(e => e.id !== ce.id)));
-                                const tp = JSON.parse(localStorage.getItem('tool_paths') || '{}');
-                                delete tp[`editor_${ce.id}`];
-                                localStorage.setItem('tool_paths', JSON.stringify(tp));
-                                const icons: Record<string, string> = JSON.parse(localStorage.getItem('editor_icons') || '{}');
-                                delete icons[ce.id];
-                                localStorage.setItem('editor_icons', JSON.stringify(icons));
-                                window.dispatchEvent(new Event('editors-detected'));
-                                setDetectedTools(prev => prev ? { ...prev } : prev);
-                              }}
-                            >
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                            </button>
-                          </div>
-                        ))}
-                        <div className="flex items-center gap-2 pt-2 border-t border-slate-700/30">
-                          <Input
-                            type="text"
-                            placeholder={t('settings.customEditorName', '名称')}
-                            id="custom-editor-name"
-                            className="h-7 text-xs flex-none w-28"
-                          />
-                          <div className="flex flex-1 gap-1">
-                            <Input
-                              type="text"
-                              placeholder={t('settings.customEditorPath', '可执行文件路径 / .app 路径')}
-                              id="custom-editor-path"
-                              className="h-7 text-xs font-mono flex-1"
-                            />
-                            {isTauri() && (
-                              <button
-                                type="button"
-                                className="h-7 px-2 text-slate-400 hover:text-blue-400 transition-colors shrink-0 flex items-center border border-slate-700 rounded-md"
-                                title={t('settings.browseForApp', '选择应用')}
-                                onClick={async () => {
-                                  const { open } = await import('@tauri-apps/plugin-dialog');
-                                  const isWindows = navigator.platform.toLowerCase().includes('win');
-                                  const selected = await open({
-                                    multiple: false,
-                                    filters: isWindows
-                                      ? [{ name: 'Executable', extensions: ['exe'] }]
-                                      : [{ name: 'Application', extensions: ['app'] }],
-                                  }).catch(() => null);
-                                  if (!selected || typeof selected !== 'string') return;
-                                  const pathInput = document.getElementById('custom-editor-path') as HTMLInputElement;
-                                  if (pathInput) pathInput.value = selected;
-                                  // Auto-fill name from file basename if empty
-                                  const nameInput = document.getElementById('custom-editor-name') as HTMLInputElement;
-                                  if (nameInput && !nameInput.value.trim()) {
-                                    const basename = selected.split(/[/\\]/).pop()?.replace(/\.(app|exe)$/i, '') ?? '';
-                                    nameInput.value = basename;
-                                  }
-                                  // Extract icon and stash on element for use when adding
-                                  const icon = await getAppIcon(selected).catch(() => null);
-                                  if (pathInput && icon) {
-                                    pathInput.dataset.pendingIcon = icon;
-                                  }
-                                }}
-                              >
-                                <FolderOpen className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </div>
-                          <button
-                            type="button"
-                            className="text-slate-400 hover:text-green-400 transition-colors shrink-0"
-                            title={t('settings.addCustomEditor', '添加')}
-                            onClick={() => {
-                              const nameInput = document.getElementById('custom-editor-name') as HTMLInputElement;
-                              const pathInput = document.getElementById('custom-editor-path') as HTMLInputElement;
-                              const name = nameInput?.value?.trim();
-                              const path = pathInput?.value?.trim();
-                              if (!name || !path) return;
-                              const id = `custom-${name.toLowerCase().replace(/\s+/g, '-')}`;
-                              const customs: Array<{ id: string; name: string; path: string }> = JSON.parse(localStorage.getItem('custom_editors') || '[]');
-                              if (customs.some(c => c.id === id)) return;
-                              customs.push({ id, name, path });
-                              localStorage.setItem('custom_editors', JSON.stringify(customs));
-                              // Save icon if available
-                              const pendingIcon = pathInput?.dataset?.pendingIcon;
-                              if (pendingIcon) {
-                                const icons: Record<string, string> = JSON.parse(localStorage.getItem('editor_icons') || '{}');
-                                icons[id] = pendingIcon;
-                                localStorage.setItem('editor_icons', JSON.stringify(icons));
-                                delete pathInput.dataset.pendingIcon;
-                              }
-                              // Also add to detected_editors and tool_paths
-                              const detected: Array<{ id: string; name: string; icon?: string }> = JSON.parse(localStorage.getItem('detected_editors') || '[]');
-                              detected.push({ id, name, icon: pendingIcon });
-                              localStorage.setItem('detected_editors', JSON.stringify(detected));
-                              const tp = JSON.parse(localStorage.getItem('tool_paths') || '{}');
-                              tp[`editor_${id}`] = path;
-                              localStorage.setItem('tool_paths', JSON.stringify(tp));
-                              window.dispatchEvent(new Event('editors-detected'));
-                              setDetectedTools(prev => prev ? { ...prev } : prev);
-                              nameInput.value = '';
-                              pathInput.value = '';
-                            }}
-                          >
-                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
-                          </button>
+                      <div key={editor.id} className="flex items-center gap-3 py-1.5 border-t border-slate-700/20 first:border-0 first:pt-0">
+                        {editor.icon ? (
+                          <img src={editor.icon} width={20} height={20} alt="" className="shrink-0 rounded" style={{ imageRendering: 'auto' }} />
+                        ) : (
+                          <span className="w-5 h-5 shrink-0 flex items-center justify-center text-slate-500 text-[10px]">⌘</span>
+                        )}
+                        <div className="w-28 shrink-0">
+                          <span className="text-xs text-slate-300">{editor.name}</span>
                         </div>
-                      </>
+                        <Input
+                          type="text"
+                          value={toolPaths[pathKey] || ''}
+                          placeholder={editor.path || 'auto'}
+                          onChange={(e) => saveToolPaths({ ...toolPaths, [pathKey]: e.target.value })}
+                          className="h-7 text-xs font-mono flex-1"
+                        />
+                        <button
+                          type="button"
+                          className="text-slate-500 hover:text-red-400 transition-colors shrink-0"
+                          title={t('common.delete', '删除')}
+                          onClick={() => {
+                            const cached: Array<{ id: string; name: string; icon?: string }> = JSON.parse(localStorage.getItem('detected_editors') || '[]');
+                            localStorage.setItem('detected_editors', JSON.stringify(cached.filter(e => e.id !== editor.id)));
+                            const customs: Array<{ id: string; name: string; path: string }> = JSON.parse(localStorage.getItem('custom_editors') || '[]');
+                            localStorage.setItem('custom_editors', JSON.stringify(customs.filter(e => e.id !== editor.id)));
+                            const icons: Record<string, string> = JSON.parse(localStorage.getItem('editor_icons') || '{}');
+                            delete icons[editor.id];
+                            localStorage.setItem('editor_icons', JSON.stringify(icons));
+                            const tp = { ...toolPaths };
+                            delete tp[pathKey];
+                            saveToolPaths(tp);
+                            setDetectedTools(prev => prev ? { ...prev, editors: prev.editors.filter(e => e.id !== editor.id) } : prev);
+                            window.dispatchEvent(new Event('editors-detected'));
+                          }}
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                        </button>
+                      </div>
                     );
-                  })()}
+                  })}
+                  {/* Add custom editor */}
+                  <div className="flex items-center gap-2 pt-2 border-t border-slate-700/30">
+                    <Input
+                      type="text"
+                      placeholder={t('settings.customEditorName', '名称')}
+                      id="custom-editor-name"
+                      className="h-7 text-xs flex-none w-28"
+                    />
+                    <div className="flex flex-1 gap-1">
+                      <Input
+                        type="text"
+                        placeholder={t('settings.customEditorPath', '可执行文件路径 / .app 路径')}
+                        id="custom-editor-path"
+                        className="h-7 text-xs font-mono flex-1"
+                      />
+                      {isTauri() && (
+                        <button
+                          type="button"
+                          className="h-7 px-2 text-slate-400 hover:text-blue-400 transition-colors shrink-0 flex items-center border border-slate-700 rounded-md"
+                          title={t('settings.browseForApp', '选择应用')}
+                          onClick={async () => {
+                            const { open } = await import('@tauri-apps/plugin-dialog');
+                            const isWindows = navigator.platform.toLowerCase().includes('win');
+                            const selected = await open({
+                              multiple: false,
+                              filters: isWindows
+                                ? [{ name: 'Executable', extensions: ['exe'] }]
+                                : [{ name: 'Application', extensions: ['app'] }],
+                            }).catch(() => null);
+                            if (!selected || typeof selected !== 'string') return;
+                            const pathInput = document.getElementById('custom-editor-path') as HTMLInputElement;
+                            if (pathInput) pathInput.value = selected;
+                            const nameInput = document.getElementById('custom-editor-name') as HTMLInputElement;
+                            if (nameInput && !nameInput.value.trim()) {
+                              const basename = selected.split(/[/\\]/).pop()?.replace(/\.(app|exe)$/i, '') ?? '';
+                              nameInput.value = basename;
+                            }
+                            const icon = await getAppIcon(selected).catch(() => null);
+                            if (pathInput && icon) pathInput.dataset.pendingIcon = icon;
+                          }}
+                        >
+                          <FolderOpen className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      className="text-slate-400 hover:text-green-400 transition-colors shrink-0"
+                      title={t('settings.addCustomEditor', '添加')}
+                      onClick={() => {
+                        const nameInput = document.getElementById('custom-editor-name') as HTMLInputElement;
+                        const pathInput = document.getElementById('custom-editor-path') as HTMLInputElement;
+                        const name = nameInput?.value?.trim();
+                        const path = pathInput?.value?.trim();
+                        if (!name || !path) return;
+                        const id = `custom-${name.toLowerCase().replace(/\s+/g, '-')}`;
+                        const customs: Array<{ id: string; name: string; path: string }> = JSON.parse(localStorage.getItem('custom_editors') || '[]');
+                        if (customs.some(c => c.id === id)) return;
+                        customs.push({ id, name, path });
+                        localStorage.setItem('custom_editors', JSON.stringify(customs));
+                        const pendingIcon = pathInput?.dataset?.pendingIcon;
+                        if (pendingIcon) {
+                          const icons: Record<string, string> = JSON.parse(localStorage.getItem('editor_icons') || '{}');
+                          icons[id] = pendingIcon;
+                          localStorage.setItem('editor_icons', JSON.stringify(icons));
+                          delete pathInput.dataset.pendingIcon;
+                        }
+                        const detected: Array<{ id: string; name: string; icon?: string }> = JSON.parse(localStorage.getItem('detected_editors') || '[]');
+                        detected.push({ id, name, icon: pendingIcon });
+                        localStorage.setItem('detected_editors', JSON.stringify(detected));
+                        const tp = JSON.parse(localStorage.getItem('tool_paths') || '{}');
+                        tp[`editor_${id}`] = path;
+                        localStorage.setItem('tool_paths', JSON.stringify(tp));
+                        window.dispatchEvent(new Event('editors-detected'));
+                        setDetectedTools(prev => prev
+                          ? { ...prev, editors: [...prev.editors, { id, name, path, icon: pendingIcon || undefined }] }
+                          : { git: [], terminals: [], shells: [], editors: [{ id, name, path, icon: pendingIcon || undefined }] }
+                        );
+                        nameInput.value = '';
+                        pathInput.value = '';
+                      }}
+                    >
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
