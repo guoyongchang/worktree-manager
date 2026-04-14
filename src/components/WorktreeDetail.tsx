@@ -33,6 +33,7 @@ import {
 } from './Icons';
 import { Badge } from '@/components/ui/badge';
 import { GitOperations } from './GitOperations';
+import { IdePickerContextMenu } from './ContextMenus';
 import { EDITORS } from '../constants';
 import { isTauri, openLink } from '@/lib/backend';
 import type {
@@ -96,6 +97,59 @@ interface WorktreeDetailProps {
   onExitOccupation?: (force?: boolean) => Promise<any>;
   onRefreshAfterDeploy?: () => void;
 }
+
+// --- IdeIconButton ---
+
+interface IdeIconButtonProps {
+  projectPath: string;
+  projectName: string;
+  editors: Array<{ id: string; name: string }>;
+  defaultEditorId: string;
+  onOpen: (path: string, editorId: string) => void;
+}
+
+const IdeIconButton: FC<IdeIconButtonProps> = ({
+  projectPath,
+  projectName,
+  editors,
+  defaultEditorId,
+  onOpen,
+}) => {
+  const { t } = useTranslation();
+  const [ideMenu, setIdeMenu] = useState<{ x: number; y: number } | null>(null);
+  const currentEditor = editors.find((e) => e.id === defaultEditorId);
+
+  return (
+    <>
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={() => onOpen(projectPath, defaultEditorId)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setIdeMenu({ x: e.clientX, y: e.clientY });
+        }}
+        title={t('detail.openInEditorLabel', { editor: currentEditor?.name ?? defaultEditorId })}
+        aria-label={t('detail.openInEditorProject', {
+          editor: currentEditor?.name ?? defaultEditorId,
+          name: projectName,
+        })}
+        className="h-7 w-7"
+      >
+        <EditorIcon editorId={defaultEditorId} className="w-4.5 h-4.5" />
+      </Button>
+      {ideMenu && (
+        <IdePickerContextMenu
+          x={ideMenu.x}
+          y={ideMenu.y}
+          editors={editors}
+          onSelect={(editorId) => onOpen(projectPath, editorId)}
+          onClose={() => setIdeMenu(null)}
+        />
+      )}
+    </>
+  );
+};
 
 function getProjectStatus(project: ProjectStatus): 'success' | 'warning' | 'info' | 'sync' {
   if (project.has_uncommitted) return 'warning';
@@ -482,16 +536,13 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                             </div>
                             {isTauri() && (
                               <div className="flex items-center gap-1 text-slate-500 hover:text-slate-200">
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => onOpenInEditor(projectPath, getProjectEditor(proj.name) as any)}
-                                  title={t('detail.openInEditorLabel', { editor: detectedEditors.find(e => e.id === getProjectEditor(proj.name))?.name || selectedEditorName })}
-                                  aria-label={t('detail.openInEditorProject', { editor: selectedEditorName, name: proj.name })}
-                                  className="h-7 w-7"
-                                >
-                                  <EditorIcon editorId={getProjectEditor(proj.name)} className="w-4.5 h-4.5" />
-                                </Button>
+                                <IdeIconButton
+                                  projectPath={projectPath}
+                                  projectName={proj.name}
+                                  editors={detectedEditors}
+                                  defaultEditorId={getProjectEditor(proj.name)}
+                                  onOpen={(path, editorId) => onOpenInEditor(path, editorId as any)}
+                                />
                                 <Button
                                   variant="ghost"
                                   size="icon"
@@ -550,6 +601,15 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                             >
                               <FolderIcon className="w-3.5 h-3.5" />
                             </button>
+                          )}
+                          {isTauri() && (
+                            <IdeIconButton
+                              projectPath={projectPath}
+                              projectName={proj.name}
+                              editors={detectedEditors}
+                              defaultEditorId={getProjectEditor(proj.name)}
+                              onOpen={(path, editorId) => onOpenInEditor(path, editorId as any)}
+                            />
                           )}
                           {onRemoveProject && (
                             <button
@@ -812,16 +872,13 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                     </div>
                     {isTauri() && (
                       <div className="flex items-center gap-1 text-slate-500 hover:text-slate-200">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => onOpenInEditor(proj.path, getProjectEditor(proj.name) as any)}
-                          title={t('detail.openInEditorLabel', { editor: detectedEditors.find(e => e.id === getProjectEditor(proj.name))?.name || selectedEditorName })}
-                          aria-label={t('detail.openInEditorProject', { editor: selectedEditorName, name: proj.name })}
-                          className="h-7 w-7"
-                        >
-                          <EditorIcon editorId={getProjectEditor(proj.name)} className="w-4.5 h-4.5" />
-                        </Button>
+                        <IdeIconButton
+                          projectPath={proj.path}
+                          projectName={proj.name}
+                          editors={detectedEditors}
+                          defaultEditorId={getProjectEditor(proj.name)}
+                          onOpen={(path, editorId) => onOpenInEditor(path, editorId as any)}
+                        />
                         <Button
                           variant="ghost"
                           size="icon"
