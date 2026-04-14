@@ -246,21 +246,21 @@ const TerminalSplitButton: FC<{
       <div className="flex items-center">
         <Button
           variant="secondary"
-          className={`h-8 px-2.5 gap-1.5${terminals.length > 0 ? ' rounded-r-none border-r-0' : ''}`}
+          className={`px-2.5 gap-1.5${terminals.length > 0 ? ' rounded-r-none border-r-0' : ''}`}
           onClick={() => onOpen(path)}
           title={t('detail.externalTerminal')}
         >
-          <TerminalAppIcon terminalId={defaultTerminalId ?? ''} className="w-4 h-4" />
+          <TerminalAppIcon terminalId={defaultTerminalId ?? ''} className="w-5 h-5" />
         </Button>
         {terminals.length > 0 && (
           <Button
             ref={chevronRef}
             variant="secondary"
-            className="h-8 px-1.5 rounded-l-none"
+            className="px-1.5 rounded-l-none"
             onClick={() => setAnchorRect(chevronRef.current?.getBoundingClientRect() ?? null)}
             title={t('detail.selectTerminal', 'Select terminal')}
           >
-            <ChevronDownIcon className="w-3 h-3" />
+            <ChevronDownIcon className="w-3.5 h-3.5" />
           </Button>
         )}
       </div>
