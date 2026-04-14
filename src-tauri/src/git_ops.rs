@@ -1015,6 +1015,55 @@ pub enum GitPlatform {
     Unknown,
 }
 
+fn get_remote_origin_url(path: &Path) -> Result<String, String> {
+    let output = git_command()
+        .arg("-C")
+        .arg(path)
+        .arg("remote")
+        .arg("get-url")
+        .arg("origin")
+        .output()
+        .map_err(|e| format!("Failed to get remote URL: {}", e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "Failed to get remote URL: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn remote_url_to_web_url(remote_url: &str) -> Option<String> {
+    let url = remote_url.trim();
+    if let Some(rest) = url.strip_prefix("git@") {
+        let parts: Vec<&str> = rest.splitn(2, ':').collect();
+        if parts.len() == 2 {
+            let host = parts[0];
+            let path = parts[1].trim_end_matches(".git");
+            return Some(format!("https://{}/{}", host, path));
+        }
+    }
+    if url.starts_with("https://") || url.starts_with("http://") {
+        return Some(url.trim_end_matches(".git").to_string());
+    }
+    None
+}
+
+fn get_current_branch_inner(path: &Path) -> Result<String, String> {
+    let output = git_command()
+        .arg("-C")
+        .arg(path)
+        .arg("rev-parse")
+        .arg("--abbrev-ref")
+        .arg("HEAD")
+        .output()
+        .map_err(|e| format!("Failed to get current branch: {}", e))?;
+    if !output.status.success() {
+        return Err("Failed to get current branch".to_string());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
 pub fn detect_git_platform(path: &Path) -> Result<GitPlatform, String> {
     let remote_output = git_command()
         .arg("-C")
@@ -1066,19 +1115,40 @@ pub fn create_pull_request(
 
     match platform {
         GitPlatform::GitHub => {
+            // Helper: build compare URL for browser-based PR creation
+            let build_compare_url = || -> Option<String> {
+                let remote_url = get_remote_origin_url(path).ok()?;
+                let web_url = remote_url_to_web_url(&remote_url)?;
+                let head = get_current_branch_inner(path).ok()?;
+                Some(format!(
+                    "{}/compare/{}...{}?expand=1&title={}&body={}",
+                    web_url,
+                    urlencoding::encode(base_branch),
+                    urlencoding::encode(&head),
+                    urlencoding::encode(title),
+                    urlencoding::encode(body)
+                ))
+            };
+
             // Check if gh CLI is available
             log::info!("[git] Checking gh CLI availability");
-            let gh_check = std::process::Command::new("gh")
+            let gh_available = std::process::Command::new("gh")
                 .arg("--version")
                 .output()
-                .map_err(|_| {
-                    "gh CLI is not installed. Please install it from https://cli.github.com/"
-                        .to_string()
-                })?;
+                .map(|o| o.status.success())
+                .unwrap_or(false);
 
-            if !gh_check.status.success() {
-                log::error!("[git] gh CLI is not available");
-                return Err("gh CLI is not available".to_string());
+            if !gh_available {
+                log::info!("[git] gh CLI not available, falling back to browser URL");
+                return if let Some(url) = build_compare_url() {
+                    log::info!("[git] Browser PR URL: {}", url);
+                    Ok(url)
+                } else {
+                    Err(
+                        "gh CLI is not installed. Please install it from https://cli.github.com/"
+                            .to_string(),
+                    )
+                };
             }
 
             // Create PR using gh CLI
@@ -1103,6 +1173,11 @@ pub fn create_pull_request(
             if !pr_output.status.success() {
                 let stderr = String::from_utf8_lossy(&pr_output.stderr);
                 log::error!("[git] gh pr create failed: {}", stderr);
+                // Fall back to browser URL (e.g. branch not yet pushed, auth issue)
+                if let Some(url) = build_compare_url() {
+                    log::info!("[git] Falling back to browser PR URL: {}", url);
+                    return Ok(url);
+                }
                 return Err(format!("Failed to create PR: {}", stderr));
             }
 
@@ -1113,28 +1188,24 @@ pub fn create_pull_request(
             Ok(pr_url)
         }
         GitPlatform::GitLab => {
-            log::info!("[git] Creating GitLab MR via push options");
-            // Get current branch
-            let branch_output = git_command()
-                .arg("-C")
-                .arg(path)
-                .arg("rev-parse")
-                .arg("--abbrev-ref")
-                .arg("HEAD")
-                .output()
-                .map_err(|e| format!("Failed to get current branch: {}", e))?;
+            log::info!("[git] Creating GitLab MR");
+            let current_branch = get_current_branch_inner(path)?;
 
-            if !branch_output.status.success() {
-                log::error!("[git] Failed to get current branch");
-                return Err("Failed to get current branch".to_string());
-            }
+            // Helper: build browser URL for GitLab MR creation
+            let build_mr_browser_url = || -> Option<String> {
+                let remote_url = get_remote_origin_url(path).ok()?;
+                let web_url = remote_url_to_web_url(&remote_url)?;
+                Some(format!(
+                    "{}/-/merge_requests/new?merge_request[source_branch]={}&merge_request[target_branch]={}&merge_request[title]={}&merge_request[description]={}",
+                    web_url,
+                    urlencoding::encode(&current_branch),
+                    urlencoding::encode(base_branch),
+                    urlencoding::encode(title),
+                    urlencoding::encode(body)
+                ))
+            };
 
-            let current_branch = String::from_utf8_lossy(&branch_output.stdout)
-                .trim()
-                .to_string();
-
-            // Push with merge request creation options
-            // GitLab supports creating MR via git push options
+            // Try: push with merge request creation options (GitLab push options)
             log::info!(
                 "[git] Running: git push -u origin {} with MR options (target={})",
                 current_branch,
@@ -1160,38 +1231,46 @@ pub fn create_pull_request(
 
             if !push_output.status.success() {
                 let stderr = String::from_utf8_lossy(&push_output.stderr);
-                log::error!("[git] GitLab MR creation failed: {}", stderr);
+                log::error!("[git] GitLab push+MR failed: {}", stderr);
+                // Fall back to browser URL
+                if let Some(url) = build_mr_browser_url() {
+                    log::info!("[git] Falling back to browser MR URL: {}", url);
+                    return Ok(url);
+                }
                 return Err(format!("Failed to create MR: {}", stderr));
             }
 
-            // Extract MR URL from output
+            // Extract MR URL from push stderr output
             let output_str = String::from_utf8_lossy(&push_output.stderr);
-
-            // GitLab outputs the MR URL in stderr, look for it
             for line in output_str.lines() {
                 if line.contains("merge_request") || line.contains("/merge_requests/") {
-                    // Try to extract URL
                     if let Some(url_start) = line.find("http") {
                         let url_part = &line[url_start..];
-                        if let Some(url_end) = url_part.find(char::is_whitespace) {
-                            return Ok(url_part[..url_end].to_string());
+                        let url = if let Some(url_end) = url_part.find(char::is_whitespace) {
+                            url_part[..url_end].to_string()
                         } else {
-                            return Ok(url_part.to_string());
-                        }
+                            url_part.to_string()
+                        };
+                        log::info!("[git] GitLab MR URL extracted: {}", url);
+                        return Ok(url);
                     }
                 }
             }
 
-            // If we can't find the URL, return a success message
+            // URL not in push output - return browser URL for user to open
             log::info!(
-                "[git] GitLab MR created for branch {} -> {} (URL not extracted from output)",
+                "[git] GitLab MR created for branch {} -> {} (URL not extracted, using browser fallback)",
                 current_branch,
                 base_branch
             );
-            Ok(format!(
-                "MR created successfully for branch {} -> {}",
-                current_branch, base_branch
-            ))
+            if let Some(url) = build_mr_browser_url() {
+                Ok(url)
+            } else {
+                Ok(format!(
+                    "MR created successfully for branch {} -> {}",
+                    current_branch, base_branch
+                ))
+            }
         }
         GitPlatform::Unknown => {
             log::error!("[git] Unknown git platform, cannot create PR");

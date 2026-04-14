@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { createPullRequest } from '@/lib/backend';
+import { createPullRequest, openLink } from '@/lib/backend';
 import { useToast } from './Toast';
 
 interface CreatePRModalProps {
@@ -45,6 +45,9 @@ export const CreatePRModal: FC<CreatePRModalProps> = ({
       const prUrl = await createPullRequest(projectPath, baseBranch, title.trim(), body.trim());
       addLog(projectPath, { level: 'success', operation: 'pr', message: `PR created: ${prUrl}`, detail: prUrl });
       toast('success', t('createPR.success', { url: prUrl }));
+      if (prUrl.startsWith('http')) {
+        openLink(prUrl).catch(() => {});
+      }
       onOpenChange(false);
       setTitle('');
       setBody('');
