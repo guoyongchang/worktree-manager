@@ -1,5 +1,6 @@
 import { useState, type FC } from 'react';
 import { useTranslation } from 'react-i18next';
+import { addLog } from '@/lib/operationLog';
 import {
   Dialog,
   DialogContent,
@@ -39,15 +40,19 @@ export const CreatePRModal: FC<CreatePRModalProps> = ({
   const handleSubmit = async () => {
     if (!title.trim()) return;
     setSubmitting(true);
+    addLog(projectPath, { level: 'info', operation: 'pr', message: `Creating PR: ${title.trim()} → ${baseBranch}` });
     try {
       const prUrl = await createPullRequest(projectPath, baseBranch, title.trim(), body.trim());
+      addLog(projectPath, { level: 'success', operation: 'pr', message: `PR created: ${prUrl}`, detail: prUrl });
       toast('success', t('createPR.success', { url: prUrl }));
       onOpenChange(false);
       setTitle('');
       setBody('');
       onSuccess?.();
     } catch (err) {
-      toast('error', err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      addLog(projectPath, { level: 'error', operation: 'pr', message: 'PR creation failed', detail: msg });
+      toast('error', msg);
     } finally {
       setSubmitting(false);
     }

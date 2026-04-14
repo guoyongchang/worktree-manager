@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
+import { addLog } from '@/lib/operationLog';
 import type { UseWorkspaceReturn } from './useWorkspace';
 import type { UseModalsReturn } from './useModals';
 // Only need the cleanup function from terminal hook, not the full return type
@@ -474,7 +475,9 @@ export function useWorkspaceActions(
 
   // Editor
   const handleOpenInEditor = useCallback((path: string, editor?: EditorType) => {
-    workspace.openInEditor(path, editor || selectedEditor);
+    const editorId = editor || selectedEditor;
+    addLog(path, { level: 'info', operation: 'open_ide', message: `Opened in ${editorId}` });
+    workspace.openInEditor(path, editorId);
   }, [workspace, selectedEditor]);
 
   // Other

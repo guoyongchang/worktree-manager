@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, type FC } from 'react';
 import { useTranslation } from 'react-i18next';
+import { addLog } from '@/lib/operationLog';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -218,12 +219,17 @@ export const GitOperations: FC<GitOperationsProps> = ({
     setActiveAction(action);
     setErrorMsg(null);
     setSuccessWithAutoDismiss(null);
+    const actionName = action ?? 'unknown';
+    addLog(projectPath, { level: 'info', operation: actionName, message: `Starting ${actionName}...` });
     try {
-      setSuccessWithAutoDismiss(await operation());
+      const result = await operation();
+      setSuccessWithAutoDismiss(result);
+      addLog(projectPath, { level: 'success', operation: actionName, message: result || `${actionName} completed` });
       await loadStats();
       onRefresh?.();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      addLog(projectPath, { level: 'error', operation: actionName, message: msg, detail: msg });
       // Conflict errors are persistent (no auto-dismiss)
       setErrorMsg(msg, isConflictError(msg));
     } finally {
@@ -232,8 +238,15 @@ export const GitOperations: FC<GitOperationsProps> = ({
   };
 
   const handleRefresh = async () => {
-    await syncRemoteState();
-    onRefresh?.();
+    try {
+      await syncRemoteState();
+      addLog(projectPath, { level: 'success', operation: 'refresh', message: 'Remote state synced' });
+      onRefresh?.();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      addLog(projectPath, { level: 'error', operation: 'refresh', message: msg, detail: msg });
+      throw err;
+    }
   };
 
   const handleMergeBaseClick = () => {
