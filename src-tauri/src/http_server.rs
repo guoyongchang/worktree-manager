@@ -8,7 +8,7 @@ use axum::{
     serve, Extension, Router,
 };
 use futures_util::{SinkExt, StreamExt};
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -48,19 +48,14 @@ use crate::{
     get_workspace_config_impl,
     git_ops,
     list_worktrees_impl,
-    // WMS config & tunnel
-    load_global_config,
     load_workspace_config,
     lock_worktree_impl,
     normalize_path,
     remove_project_from_config_impl,
     restore_worktree_impl,
-    save_global_config_internal,
     save_workspace_config_impl,
     scan_existing_projects_impl,
     set_window_workspace_impl,
-    start_wms_tunnel_internal,
-    stop_wms_tunnel_internal,
     switch_workspace_impl,
     unlock_worktree_impl,
     unregister_window_impl,
@@ -70,7 +65,6 @@ use crate::{
     CreateWorktreeRequest,
     OpenEditorRequest,
     SwitchBranchRequest,
-    WmsConfig,
     // Direct functions (no window context)
     WorkspaceConfig,
     AUTHENTICATED_SESSIONS,
@@ -83,7 +77,7 @@ use crate::{
     TERMINAL_STATE_BROADCAST,
 };
 use middleware::{
-    auth_middleware, is_loopback_request, localhost_only_middleware, no_cache_html_middleware,
+    auth_middleware, localhost_only_middleware, no_cache_html_middleware,
     security_headers_middleware, session_id,
 };
 use routing::{build_api_router, build_cors_layer, resolve_dist_path};
@@ -982,80 +976,6 @@ async fn h_stop_ngrok_tunnel() -> Response {
     }
 }
 
-// -- WMS config & tunnel --
-
-async fn h_get_wms_config() -> Response {
-    let config = load_global_config();
-    Json(json!(WmsConfig {
-        server_url: config.wms_server_url,
-        token: config.wms_token,
-        subdomain: config.wms_subdomain,
-        jwt: config.wms_jwt,
-    }))
-    .into_response()
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SetWmsConfigReq {
-    #[serde(default, deserialize_with = "deserialize_patch_string_field")]
-    server_url: Option<Option<String>>,
-    #[serde(default, deserialize_with = "deserialize_patch_string_field")]
-    token: Option<Option<String>>,
-    #[serde(default, deserialize_with = "deserialize_patch_string_field")]
-    subdomain: Option<Option<String>>,
-}
-
-fn deserialize_patch_string_field<'de, D>(
-    deserializer: D,
-) -> Result<Option<Option<String>>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    Option::<String>::deserialize(deserializer).map(Some)
-}
-
-async fn h_set_wms_config(Json(body): Json<SetWmsConfigReq>) -> Response {
-    let mut config = load_global_config();
-    if let Some(server_url) = body.server_url {
-        config.wms_server_url = server_url
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty());
-    }
-    if let Some(subdomain) = body.subdomain {
-        config.wms_subdomain = subdomain
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty());
-    }
-    if let Some(token) = body.token {
-        config.wms_token = token
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty());
-    }
-    result_ok(save_global_config_internal(&config))
-}
-
-async fn h_start_wms_tunnel() -> Response {
-    match start_wms_tunnel_internal(None).await {
-        Ok(url) => Json(json!(url)).into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
-    }
-}
-
-async fn h_stop_wms_tunnel() -> Response {
-    match stop_wms_tunnel_internal().await {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
-    }
-}
-
-async fn h_wms_manual_reconnect() -> Response {
-    match crate::wms_manual_reconnect_internal() {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
-    }
-}
-
 // -- Share info --
 
 async fn h_get_share_info() -> Response {
@@ -1139,36 +1059,6 @@ async fn h_get_last_share_port() -> Response {
 
 async fn h_get_last_share_password() -> Response {
     result_json(crate::commands::sharing::get_last_share_password().await)
-}
-
-async fn h_auto_register_tunnel() -> Response {
-    result_json(crate::commands::sharing::auto_register_tunnel().await)
-}
-
-async fn h_wms_login(Json(args): Json<Value>) -> Response {
-    let username = args["username"].as_str().unwrap_or("").to_string();
-    let password = args["password"].as_str().unwrap_or("").to_string();
-    result_json(crate::commands::sharing::wms_login(username, password).await)
-}
-
-async fn h_wms_browser_login() -> Response {
-    let app = match current_app_handle() {
-        Ok(app) => app,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
-    };
-    result_json(crate::commands::sharing::wms_browser_login(app).await)
-}
-
-async fn h_cancel_wms_browser_login() -> Response {
-    result_ok(crate::commands::sharing::cancel_wms_browser_login().await)
-}
-
-async fn h_get_wms_user() -> Response {
-    result_json(crate::commands::sharing::get_wms_user().await)
-}
-
-async fn h_wms_logout() -> Response {
-    result_json(crate::commands::sharing::wms_logout().await)
 }
 
 // -- Misc --
@@ -1890,74 +1780,6 @@ async fn h_cert_pem(Extension(cert_pem): Extension<Arc<String>>) -> Response {
         .into_response()
 }
 
-// -- WMS Browser Auth Callback --
-
-#[derive(Deserialize)]
-struct WmsCallbackQuery {
-    token: String,
-    state: String,
-}
-
-/// Handle WMS browser-based login callback.
-/// The WMS admin page redirects here with ?state=...&token=JWT after successful login.
-async fn h_wms_auth_callback(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    Query(q): Query<WmsCallbackQuery>,
-) -> Response {
-    if !is_loopback_request(&addr) {
-        log::warn!(
-            "[wms-auth] Rejected non-loopback callback attempt from {}",
-            addr.ip()
-        );
-        return (
-            StatusCode::FORBIDDEN,
-            "This callback is only available from localhost",
-        )
-            .into_response();
-    }
-
-    if let Err(e) = crate::commands::sharing::validate_pending_wms_browser_login_state(&q.state) {
-        log::warn!("[wms-auth] Rejected callback with invalid state: {}", e);
-        return (
-            StatusCode::UNAUTHORIZED,
-            "Invalid or expired browser login state",
-        )
-            .into_response();
-    }
-
-    log::info!(
-        "[wms-auth] Received browser auth callback, token_len={}",
-        q.token.len()
-    );
-
-    if let Err(e) =
-        crate::commands::sharing::complete_wms_browser_login(current_app_handle().ok(), q.token)
-            .await
-    {
-        log::error!("[wms-auth] Failed to complete browser login: {}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Browser login failed: {}", e),
-        )
-            .into_response();
-    }
-
-    // Return success HTML page
-    let html = r#"<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Login Successful</title>
-<style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
-.card{text-align:center;padding:3rem;border-radius:1rem;background:#1e293b;border:1px solid #334155;max-width:400px}
-.icon{font-size:3rem;margin-bottom:1rem}h1{font-size:1.25rem;margin:0 0 0.5rem}p{color:#94a3b8;font-size:0.875rem;margin:0}</style>
-</head><body><div class="card"><div class="icon">✅</div><h1>Login Successful!</h1><p>You may close this tab and return to Worktree Manager.</p></div></body></html>"#;
-
-    (
-        StatusCode::OK,
-        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-        html,
-    )
-        .into_response()
-}
-
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -1987,8 +1809,154 @@ fn is_allowed_origin(origin: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::create_router;
     use super::is_allowed_origin;
-    use crate::SHARE_STATE;
+    use crate::{
+        AUTHENTICATED_SESSIONS, AUTH_RATE_LIMITER, CONNECTED_CLIENTS, NONCE_CACHE, SHARE_STATE,
+    };
+    use axum::body::{to_bytes, Body};
+    use axum::http::{header, Method, Request, StatusCode};
+    use axum::response::Response;
+    use once_cell::sync::Lazy;
+    use serde_json::{json, Value};
+    use std::collections::{HashMap, HashSet};
+    use std::net::SocketAddr;
+    use std::sync::{Mutex, MutexGuard};
+    use tower::ServiceExt;
+
+    static TEST_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+    fn lock_test_mutex() -> MutexGuard<'static, ()> {
+        TEST_MUTEX.lock().unwrap_or_else(|err| err.into_inner())
+    }
+
+    struct ShareStateTestGuard {
+        prev_share_state: crate::ShareState,
+        prev_sessions: HashSet<String>,
+        prev_clients: HashMap<String, crate::ConnectedClient>,
+        prev_rate_limiter: crate::AuthRateLimiter,
+        prev_nonce_cache: crate::NonceCache,
+    }
+
+    impl ShareStateTestGuard {
+        fn with_auth_enabled() -> Self {
+            let guard = Self::capture();
+            {
+                let mut state = SHARE_STATE.lock().unwrap();
+                state.active = true;
+                state.auth_key = Some(b"test-auth-key".to_vec());
+                state.auth_salt = Some(b"test-auth-salt".to_vec());
+                state.workspace_path = Some("/tmp/test-workspace".to_string());
+            }
+            guard
+        }
+
+        fn without_password() -> Self {
+            let guard = Self::capture();
+            {
+                let mut state = SHARE_STATE.lock().unwrap();
+                state.active = false;
+                state.auth_key = None;
+                state.auth_salt = None;
+                state.workspace_path = None;
+            }
+            guard
+        }
+
+        fn capture() -> Self {
+            let prev_share_state = {
+                let mut state = SHARE_STATE.lock().unwrap();
+                std::mem::take(&mut *state)
+            };
+            let prev_sessions = {
+                let mut sessions = AUTHENTICATED_SESSIONS.lock().unwrap();
+                std::mem::take(&mut *sessions)
+            };
+            let prev_clients = {
+                let mut clients = CONNECTED_CLIENTS.lock().unwrap();
+                std::mem::take(&mut *clients)
+            };
+            let prev_rate_limiter = {
+                let mut limiter = AUTH_RATE_LIMITER.lock().unwrap();
+                std::mem::replace(&mut *limiter, crate::AuthRateLimiter::new())
+            };
+            let prev_nonce_cache = {
+                let mut cache = NONCE_CACHE.lock().unwrap();
+                std::mem::replace(&mut *cache, crate::NonceCache::new())
+            };
+
+            Self {
+                prev_share_state,
+                prev_sessions,
+                prev_clients,
+                prev_rate_limiter,
+                prev_nonce_cache,
+            }
+        }
+    }
+
+    impl Drop for ShareStateTestGuard {
+        fn drop(&mut self) {
+            *SHARE_STATE.lock().unwrap() = std::mem::take(&mut self.prev_share_state);
+            *AUTHENTICATED_SESSIONS.lock().unwrap() = std::mem::take(&mut self.prev_sessions);
+            *CONNECTED_CLIENTS.lock().unwrap() = std::mem::take(&mut self.prev_clients);
+            *AUTH_RATE_LIMITER.lock().unwrap() =
+                std::mem::replace(&mut self.prev_rate_limiter, crate::AuthRateLimiter::new());
+            *NONCE_CACHE.lock().unwrap() =
+                std::mem::replace(&mut self.prev_nonce_cache, crate::NonceCache::new());
+        }
+    }
+
+    async fn request_with_addr(addr: SocketAddr, request: Request<Body>) -> Response {
+        let make_svc = create_router(Some("dummy-cert-pem".to_string()))
+            .into_make_service_with_connect_info::<SocketAddr>();
+        let svc = make_svc.oneshot(addr).await.unwrap();
+        svc.oneshot(request).await.unwrap()
+    }
+
+    async fn response_json(response: Response) -> Value {
+        let status = response.status();
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        match serde_json::from_slice(&bytes) {
+            Ok(value) => value,
+            Err(err) => {
+                eprintln!(
+                    "response_json parse failed (status {}). raw body: {:?}",
+                    status,
+                    String::from_utf8_lossy(&bytes)
+                );
+                panic!("{}", err);
+            }
+        }
+    }
+
+    async fn request_json(
+        addr: SocketAddr,
+        path: &str,
+        payload: Value,
+        user_agent: Option<&str>,
+    ) -> (StatusCode, Value) {
+        let mut builder = Request::builder()
+            .method(Method::POST)
+            .uri(path)
+            .header(header::CONTENT_TYPE, "application/json");
+
+        if let Some(agent) = user_agent {
+            builder = builder.header(header::USER_AGENT, agent);
+        }
+
+        let response =
+            request_with_addr(addr, builder.body(Body::from(payload.to_string())).unwrap()).await;
+        let status = response.status();
+        let body = response_json(response).await;
+        (status, body)
+    }
+
+    fn build_proof_hex(auth_key: &[u8], nonce_hex: &str) -> String {
+        let nonce_bytes = hex::decode(nonce_hex).unwrap();
+        let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, auth_key);
+        hex::encode(ring::hmac::sign(&key, &nonce_bytes).as_ref())
+    }
 
     #[test]
     fn allows_exact_loopback_and_private_lan_origins_only() {
@@ -2007,6 +1975,7 @@ mod tests {
 
     #[test]
     fn only_allows_exact_active_ngrok_origin() {
+        let _serial = lock_test_mutex();
         let previous = {
             let mut state = SHARE_STATE.lock().unwrap();
             let previous = state.ngrok_url.clone();
@@ -2023,6 +1992,403 @@ mod tests {
 
         let mut state = SHARE_STATE.lock().unwrap();
         state.ngrok_url = previous;
+    }
+
+    fn extract_api_routes_from_routing_source() -> Vec<(Method, String)> {
+        // Keep this in sync with routing behavior without hand-maintaining a list.
+        // We parse `.route(...)` calls in `routing.rs` and extract (method, path).
+        let src = include_str!("http_server/routing.rs");
+        let mut routes = Vec::new();
+
+        let mut i = 0usize;
+        while let Some(found) = src[i..].find(".route(") {
+            let start = i + found + ".route(".len();
+            let bytes = src.as_bytes();
+            let mut depth = 1i32;
+            let mut j = start;
+            while j < bytes.len() && depth > 0 {
+                match bytes[j] as char {
+                    '(' => depth += 1,
+                    ')' => depth -= 1,
+                    _ => {}
+                }
+                j += 1;
+            }
+            if depth != 0 {
+                break;
+            }
+
+            // `.route(<call>)` contents:
+            let call = &src[start..(j - 1)];
+
+            // Extract first string literal as the path.
+            let q1 = match call.find('"') {
+                Some(x) => x,
+                None => {
+                    i = j;
+                    continue;
+                }
+            };
+            let q2 = match call[q1 + 1..].find('"') {
+                Some(x) => q1 + 1 + x,
+                None => {
+                    i = j;
+                    continue;
+                }
+            };
+            let path = call[q1 + 1..q2].to_string();
+
+            // Determine HTTP method by looking for `get(` / `post(` inside the call.
+            let method = if call.contains("get(") {
+                Method::GET
+            } else if call.contains("post(") {
+                Method::POST
+            } else {
+                i = j;
+                continue;
+            };
+
+            if path.starts_with("/api/") {
+                routes.push((method, path));
+            }
+
+            i = j;
+        }
+
+        // Stable order makes failures easier to read.
+        routes.sort_by(|a, b| a.1.cmp(&b.1));
+        routes
+    }
+
+    #[tokio::test]
+    async fn auth_middleware_rejects_unauthenticated_protected_route() {
+        let _serial = lock_test_mutex();
+        let _guard = ShareStateTestGuard::with_auth_enabled();
+
+        let response = request_with_addr(
+            SocketAddr::from(([127, 0, 0, 1], 31001)),
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/get_share_state")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("x-session-id", "unauth-session")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn auth_middleware_allows_authenticated_protected_route() {
+        let _serial = lock_test_mutex();
+        let _guard = ShareStateTestGuard::with_auth_enabled();
+        AUTHENTICATED_SESSIONS
+            .lock()
+            .unwrap()
+            .insert("auth-session".to_string());
+
+        let response = request_with_addr(
+            SocketAddr::from(([127, 0, 0, 1], 31002)),
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/get_share_state")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("x-session-id", "auth-session")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn localhost_only_middleware_blocks_remote_clients() {
+        let _serial = lock_test_mutex();
+        let _guard = ShareStateTestGuard::without_password();
+
+        let response = request_with_addr(
+            SocketAddr::from(([203, 0, 113, 9], 32001)),
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/get_ngrok_token")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn localhost_only_middleware_blocks_forwarded_loopback_clients() {
+        let _serial = lock_test_mutex();
+        let _guard = ShareStateTestGuard::without_password();
+
+        let response = request_with_addr(
+            SocketAddr::from(([127, 0, 0, 1], 32003)),
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/get_ngrok_token")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("x-forwarded-for", "203.0.113.9")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn localhost_only_middleware_allows_loopback_clients() {
+        let _serial = lock_test_mutex();
+        let _guard = ShareStateTestGuard::without_password();
+
+        let response = request_with_addr(
+            SocketAddr::from(([127, 0, 0, 1], 32002)),
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/get_ngrok_token")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn auth_challenge_requires_configured_salt() {
+        let _serial = lock_test_mutex();
+        let _guard = ShareStateTestGuard::without_password();
+
+        {
+            let mut state = SHARE_STATE.lock().unwrap();
+            state.active = true;
+            state.auth_key = Some(b"test-auth-key".to_vec());
+            state.auth_salt = None;
+        }
+
+        let response = request_with_addr(
+            SocketAddr::from(([127, 0, 0, 1], 33001)),
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/auth/challenge")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn auth_challenge_rate_limits_after_five_attempts() {
+        let _serial = lock_test_mutex();
+        let _guard = ShareStateTestGuard::with_auth_enabled();
+
+        for attempt in 1..=6 {
+            let response = request_with_addr(
+                SocketAddr::from(([127, 0, 0, 1], 33002)),
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/auth/challenge")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await;
+
+            let expected = if attempt < 6 {
+                StatusCode::OK
+            } else {
+                StatusCode::TOO_MANY_REQUESTS
+            };
+            assert_eq!(response.status(), expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn auth_verify_accepts_valid_proof_and_rejects_nonce_reuse() {
+        let _serial = lock_test_mutex();
+        let _guard = ShareStateTestGuard::with_auth_enabled();
+
+        let (_status, challenge) = request_json(
+            SocketAddr::from(([127, 0, 0, 1], 33003)),
+            "/api/auth/challenge",
+            json!({}),
+            None,
+        )
+        .await;
+
+        let nonce = challenge["nonce"].as_str().unwrap().to_string();
+        let proof = build_proof_hex(b"test-auth-key", &nonce);
+
+        let verify_response = request_json(
+            SocketAddr::from(([127, 0, 0, 1], 33003)),
+            "/api/auth/verify",
+            json!({ "nonce": nonce, "proof": proof }),
+            Some("test-agent/1.0"),
+        )
+        .await;
+        assert_eq!(verify_response.0, StatusCode::OK);
+
+        let second_response = request_with_addr(
+            SocketAddr::from(([127, 0, 0, 1], 33003)),
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/auth/verify")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "nonce": nonce, "proof": proof }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(second_response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn auth_verify_rejects_bad_proof() {
+        let _serial = lock_test_mutex();
+        let _guard = ShareStateTestGuard::with_auth_enabled();
+
+        let (_status, challenge) = request_json(
+            SocketAddr::from(([127, 0, 0, 1], 33005)),
+            "/api/auth/challenge",
+            json!({}),
+            None,
+        )
+        .await;
+        let nonce = challenge["nonce"].as_str().unwrap().to_string();
+
+        let response = request_with_addr(
+            SocketAddr::from(([127, 0, 0, 1], 33005)),
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/auth/verify")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "nonce": nonce, "proof": "00" }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn auth_verify_replaces_stale_sessions_from_same_ip() {
+        let _serial = lock_test_mutex();
+        let _guard = ShareStateTestGuard::with_auth_enabled();
+
+        CONNECTED_CLIENTS.lock().unwrap().insert(
+            "stale-session".to_string(),
+            crate::ConnectedClient {
+                session_id: "stale-session".to_string(),
+                ip: "127.0.0.1".to_string(),
+                user_agent: "old".to_string(),
+                authenticated_at: "2026-04-12T00:00:00Z".to_string(),
+                last_active: "2026-04-12T00:00:00Z".to_string(),
+                ws_connected: false,
+            },
+        );
+        AUTHENTICATED_SESSIONS
+            .lock()
+            .unwrap()
+            .insert("stale-session".to_string());
+
+        let (_status, challenge) = request_json(
+            SocketAddr::from(([127, 0, 0, 1], 33004)),
+            "/api/auth/challenge",
+            json!({}),
+            None,
+        )
+        .await;
+        let nonce = challenge["nonce"].as_str().unwrap().to_string();
+        let proof = build_proof_hex(b"test-auth-key", &nonce);
+
+        let (status, body) = request_json(
+            SocketAddr::from(([127, 0, 0, 1], 33004)),
+            "/api/auth/verify",
+            json!({ "nonce": nonce, "proof": proof }),
+            Some("test-agent/1.0"),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        let new_session = body["sessionId"].as_str().unwrap();
+        assert!(!AUTHENTICATED_SESSIONS
+            .lock()
+            .unwrap()
+            .contains("stale-session"));
+        assert!(AUTHENTICATED_SESSIONS.lock().unwrap().contains(new_session));
+    }
+
+    #[tokio::test]
+    async fn api_router_smoke_all_routes_exist_and_do_not_500() {
+        let _serial = lock_test_mutex();
+        // Turn on auth so most `/api/*` endpoints short-circuit at middleware and don't
+        // execute handler logic (avoids IO/network side effects while still proving routing).
+        let _guard = ShareStateTestGuard::with_auth_enabled();
+
+        let routes = extract_api_routes_from_routing_source();
+        assert!(
+            !routes.is_empty(),
+            "expected to extract /api routes from routing.rs"
+        );
+
+        let addr = SocketAddr::from(([127, 0, 0, 1], 12345));
+
+        for (method, path) in routes {
+            // Build router with cert enabled so `/api/cert.pem` exists.
+            let make_svc = create_router(Some("dummy-cert-pem".to_string()))
+                .into_make_service_with_connect_info::<SocketAddr>();
+
+            let svc = make_svc
+                .oneshot(addr)
+                .await
+                .expect("make_service should succeed");
+
+            let mut builder = Request::builder()
+                .method(method.clone())
+                .uri(&path)
+                .header("x-session-id", "test-session");
+
+            // For POST routes, send an empty JSON body so Json extractors fail fast where present.
+            let req = if method == Method::POST {
+                builder = builder.header(header::CONTENT_TYPE, "application/json");
+                builder.body(Body::empty()).unwrap()
+            } else {
+                builder.body(Body::empty()).unwrap()
+            };
+
+            let resp = svc.oneshot(req).await.expect("request should succeed");
+            let status = resp.status();
+
+            assert_ne!(
+                status,
+                StatusCode::NOT_FOUND,
+                "route missing: {} {}",
+                method,
+                path
+            );
+            assert_ne!(
+                status,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "route crashed (500): {} {}",
+                method,
+                path
+            );
+        }
     }
 }
 

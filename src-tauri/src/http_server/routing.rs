@@ -8,39 +8,35 @@ use tower_http::cors::CorsLayer;
 
 use super::{
     h_add_existing_project, h_add_project_to_worktree, h_add_workspace, h_archive_worktree,
-    h_auth_challenge, h_auth_verify, h_auto_register_tunnel, h_broadcast_terminal_state,
-    h_cancel_wms_browser_login, h_cert_pem, h_check_mirror_update, h_check_remote_branch_exists,
-    h_check_worktree_status, h_clone_project, h_commit_all, h_create_pull_request,
-    h_create_workspace, h_create_worktree, h_delete_archived_worktree, h_deploy_to_main,
-    h_detect_tools, h_download_update_via_mirror, h_exit_main_occupation, h_fetch_project_remote,
-    h_generate_commit_message, h_get_app_version, h_get_branch_diff_stats, h_get_changed_files,
-    h_get_config_path_info, h_get_connected_clients, h_get_current_workspace,
+    h_auth_challenge, h_auth_verify, h_broadcast_terminal_state, h_cert_pem, h_check_mirror_update,
+    h_check_remote_branch_exists, h_check_worktree_status, h_clone_project, h_commit_all,
+    h_create_pull_request, h_create_workspace, h_create_worktree, h_delete_archived_worktree,
+    h_deploy_to_main, h_detect_tools, h_download_update_via_mirror, h_exit_main_occupation,
+    h_fetch_project_remote, h_generate_commit_message, h_get_app_version, h_get_branch_diff_stats,
+    h_get_changed_files, h_get_config_path_info, h_get_connected_clients, h_get_current_workspace,
     h_get_dashscope_api_key, h_get_dashscope_base_url, h_get_file_diff, h_get_git_diff,
     h_get_last_share_password, h_get_last_share_port, h_get_locked_worktrees,
     h_get_main_occupation, h_get_main_workspace_status, h_get_ngrok_token, h_get_opened_workspaces,
     h_get_remote_branches, h_get_share_info, h_get_share_state, h_get_terminal_state,
-    h_get_voice_refine_enabled, h_get_wms_config, h_get_wms_user, h_get_workspace_config,
-    h_kick_client, h_list_workspaces, h_list_worktrees, h_load_workspace_config_by_path,
-    h_lock_worktree, h_merge_to_base_branch, h_merge_to_test_branch, h_open_devtools,
-    h_open_in_editor, h_open_in_terminal, h_open_log_dir, h_open_workspace_window, h_pty_close,
-    h_pty_close_by_path, h_pty_create, h_pty_exists, h_pty_read, h_pty_resize, h_pty_write,
-    h_push_to_remote, h_remove_project_from_config, h_remove_workspace, h_restore_worktree,
-    h_reveal_in_finder, h_save_workspace_config, h_save_workspace_config_by_path,
-    h_scan_existing_projects, h_scan_linked_folders, h_set_dashscope_api_key,
-    h_set_dashscope_base_url, h_set_git_path, h_set_ngrok_token, h_set_voice_refine_enabled,
-    h_set_window_workspace, h_set_wms_config, h_start_ngrok_tunnel, h_start_sharing,
-    h_start_wms_tunnel, h_stop_ngrok_tunnel, h_stop_sharing, h_stop_wms_tunnel, h_switch_branch,
-    h_switch_workspace, h_sync_with_base_branch, h_unlock_worktree, h_unregister_window,
-    h_update_share_password, h_voice_is_active, h_voice_refine_text, h_voice_send_audio,
-    h_voice_start, h_voice_stop, h_wms_auth_callback, h_wms_browser_login, h_wms_login,
-    h_wms_logout, h_wms_manual_reconnect, h_ws_upgrade, is_allowed_origin, load_mcp_config,
-    save_mcp_config, McpConfig,
+    h_get_voice_refine_enabled, h_get_workspace_config, h_kick_client, h_list_workspaces,
+    h_list_worktrees, h_load_workspace_config_by_path, h_lock_worktree, h_merge_to_base_branch,
+    h_merge_to_test_branch, h_open_devtools, h_open_in_editor, h_open_in_terminal, h_open_log_dir,
+    h_open_workspace_window, h_pty_close, h_pty_close_by_path, h_pty_create, h_pty_exists,
+    h_pty_read, h_pty_resize, h_pty_write, h_push_to_remote, h_remove_project_from_config,
+    h_remove_workspace, h_restore_worktree, h_reveal_in_finder, h_save_workspace_config,
+    h_save_workspace_config_by_path, h_scan_existing_projects, h_scan_linked_folders,
+    h_set_dashscope_api_key, h_set_dashscope_base_url, h_set_git_path, h_set_ngrok_token,
+    h_set_voice_refine_enabled, h_set_window_workspace, h_start_ngrok_tunnel, h_start_sharing,
+    h_stop_ngrok_tunnel, h_stop_sharing, h_switch_branch, h_switch_workspace,
+    h_sync_with_base_branch, h_unlock_worktree, h_unregister_window, h_update_share_password,
+    h_voice_is_active, h_voice_refine_text, h_voice_send_audio, h_voice_start, h_voice_stop,
+    h_ws_upgrade, is_allowed_origin, load_mcp_config, save_mcp_config, McpConfig,
 };
 
 pub(super) fn build_cors_layer() -> CorsLayer {
     CorsLayer::new()
         .allow_origin(tower_http::cors::AllowOrigin::predicate(
-            |origin: &HeaderValue, _| origin.to_str().map_or(false, is_allowed_origin),
+            |origin: &HeaderValue, _| origin.to_str().is_ok_and(is_allowed_origin),
         ))
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
         .allow_headers([
@@ -239,20 +235,6 @@ pub(super) fn build_api_router(cert_pem: Option<String>) -> Router {
         )
         .route("/api/start_ngrok_tunnel", post(h_start_ngrok_tunnel))
         .route("/api/stop_ngrok_tunnel", post(h_stop_ngrok_tunnel))
-        .route("/api/get_wms_config", post(h_get_wms_config))
-        .route("/api/set_wms_config", post(h_set_wms_config))
-        .route("/api/auto_register_tunnel", post(h_auto_register_tunnel))
-        .route("/api/wms_login", post(h_wms_login))
-        .route("/api/wms_browser_login", post(h_wms_browser_login))
-        .route(
-            "/api/cancel_wms_browser_login",
-            post(h_cancel_wms_browser_login),
-        )
-        .route("/api/get_wms_user", post(h_get_wms_user))
-        .route("/api/wms_logout", post(h_wms_logout))
-        .route("/api/start_wms_tunnel", post(h_start_wms_tunnel))
-        .route("/api/stop_wms_tunnel", post(h_stop_wms_tunnel))
-        .route("/api/wms_manual_reconnect", post(h_wms_manual_reconnect))
         .route("/api/voice_start", post(h_voice_start))
         .route("/api/voice_send_audio", post(h_voice_send_audio))
         .route("/api/voice_stop", post(h_voice_stop))
@@ -285,8 +267,7 @@ pub(super) fn build_api_router(cert_pem: Option<String>) -> Router {
         .route("/api/open_devtools", post(h_open_devtools))
         .route("/api/mcp/config", post(h_mcp_config))
         .route("/api/mcp/set_capability", post(h_set_mcp_capability))
-        .route("/ws", get(h_ws_upgrade))
-        .route("/auth/wms-callback", get(h_wms_auth_callback));
+        .route("/ws", get(h_ws_upgrade));
 
     if let Some(pem) = cert_pem {
         router = router

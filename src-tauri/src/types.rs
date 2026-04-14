@@ -1,11 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 // ==================== 分享状态 ====================
 
+#[derive(Default)]
 pub struct ShareState {
     pub active: bool,
     pub workspace_path: Option<String>,
@@ -15,41 +14,6 @@ pub struct ShareState {
     pub shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
     pub ngrok_url: Option<String>,
     pub ngrok_task: Option<tokio::task::JoinHandle<()>>,
-    pub wms_url: Option<String>,
-    pub wms_task: Option<tokio::task::JoinHandle<()>>,
-    /// Signal to gracefully shut down the WMS tunnel (sends WebSocket Close frame).
-    pub wms_shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
-    /// Real-time WMS tunnel connection status (true = connected, false = disconnected/reconnecting).
-    pub wms_connected: Option<Arc<AtomicBool>>,
-    /// Detailed reconnection state for the WMS tunnel (attempt count, next retry countdown).
-    pub wms_reconnect_state:
-        Option<Arc<std::sync::Mutex<crate::wms_tunnel::WmsTunnelReconnectState>>>,
-    /// Channel to trigger a manual reconnect (skips backoff wait).
-    pub wms_manual_reconnect_tx: Option<tokio::sync::mpsc::UnboundedSender<()>>,
-    /// Whether LAN sharing was auto-started by WMS tunnel (should auto-stop when WMS stops).
-    pub wms_auto_started_lan: bool,
-}
-
-impl Default for ShareState {
-    fn default() -> Self {
-        Self {
-            active: false,
-            workspace_path: None,
-            port: 0,
-            auth_key: None,
-            auth_salt: None,
-            shutdown_tx: None,
-            ngrok_url: None,
-            ngrok_task: None,
-            wms_url: None,
-            wms_task: None,
-            wms_shutdown_tx: None,
-            wms_connected: None,
-            wms_reconnect_state: None,
-            wms_manual_reconnect_tx: None,
-            wms_auto_started_lan: false,
-        }
-    }
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -75,11 +39,6 @@ pub struct ShareStateInfo {
     pub active: bool,
     pub urls: Vec<String>,
     pub ngrok_url: Option<String>,
-    pub wms_url: Option<String>,
-    pub wms_connected: bool,
-    pub wms_reconnecting: bool,
-    pub wms_reconnect_attempt: u32,
-    pub wms_next_retry_secs: u32,
     pub workspace_path: Option<String>,
     pub current_workspace_name: Option<String>,
 }
@@ -87,6 +46,12 @@ pub struct ShareStateInfo {
 // Auth rate limiter: per-IP sliding window (max 5 attempts per 60 seconds)
 pub struct AuthRateLimiter {
     attempts: HashMap<String, Vec<Instant>>,
+}
+
+impl Default for AuthRateLimiter {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AuthRateLimiter {
@@ -127,6 +92,12 @@ impl AuthRateLimiter {
 // Nonce cache for challenge-response authentication (one-time use, 60s TTL)
 pub struct NonceCache {
     entries: HashMap<String, (Instant, Vec<u8>)>, // nonce_hex -> (created_at, nonce_bytes)
+}
+
+impl Default for NonceCache {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl NonceCache {
@@ -175,21 +146,11 @@ pub struct GlobalConfig {
     #[serde(default)]
     pub last_share_port: Option<u16>, // 上次使用的分享端口
     #[serde(default)]
-    pub wms_server_url: Option<String>,
-    #[serde(default)]
-    pub wms_token: Option<String>,
-    #[serde(default)]
-    pub wms_subdomain: Option<String>,
-    #[serde(default)]
     pub dashscope_api_key: Option<String>,
     #[serde(default)]
     pub dashscope_base_url: Option<String>,
     #[serde(default = "default_true")]
     pub voice_refine_enabled: bool,
-    #[serde(default)]
-    pub wms_jwt: Option<String>,
-    #[serde(default)]
-    pub device_id: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -209,14 +170,9 @@ impl Default for GlobalConfig {
             current_workspace: None,
             ngrok_token: None,
             last_share_port: None,
-            wms_server_url: None,
-            wms_token: None,
-            wms_subdomain: None,
             dashscope_api_key: None,
             dashscope_base_url: None,
             voice_refine_enabled: true,
-            wms_jwt: None,
-            device_id: None,
         }
     }
 }
@@ -417,4 +373,35 @@ pub struct DeployToMainResult {
 pub struct DeployProjectError {
     pub project_name: String,
     pub error: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AuthRateLimiter, NonceCache};
+
+    #[test]
+    fn auth_rate_limiter_allows_first_five_attempts_and_blocks_sixth() {
+        let mut limiter = AuthRateLimiter::new();
+
+        for attempt in 1..=6 {
+            let allowed = limiter.check_and_record("127.0.0.1");
+            assert_eq!(
+                allowed,
+                attempt < 6,
+                "unexpected result at attempt {attempt}"
+            );
+        }
+    }
+
+    #[test]
+    fn nonce_cache_consumes_nonce_only_once() {
+        let mut cache = NonceCache::new();
+        let nonce = cache.generate().unwrap();
+
+        let first = cache.consume(&nonce);
+        let second = cache.consume(&nonce);
+
+        assert!(first.is_some());
+        assert!(second.is_none());
+    }
 }

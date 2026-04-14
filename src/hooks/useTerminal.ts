@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import i18next from 'i18next';
 import type { TerminalTab, MainWorkspaceStatus, WorktreeListItem } from '../types';
-import { TERMINAL } from '../constants';
+import { TERMINAL, clampTerminalHeight } from '../constants';
 import { callBackend, closePtySessionsByPath, isTauri, broadcastTerminalState as broadcastTerminalStateBackend, getTerminalState } from '../lib/backend';
 import { getWebSocketManager } from '../lib/websocket';
 import { listen } from '@tauri-apps/api/event';
@@ -39,7 +39,10 @@ export function useTerminal(
   workspacePathParam?: string
 ): UseTerminalReturn {
   const [terminalVisible, setTerminalVisible] = useState(false);
-  const [terminalHeight, setTerminalHeight] = useState<number>(TERMINAL.DEFAULT_HEIGHT);
+  const [terminalHeight, setTerminalHeightState] = useState<number>(() => {
+    const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : TERMINAL.MAX_HEIGHT;
+    return clampTerminalHeight(TERMINAL.DEFAULT_HEIGHT, viewportHeight);
+  });
   const [isResizing, setIsResizing] = useState(false);
   const [activatedTerminals, setActivatedTerminals] = useState<Set<string>>(new Set());
   const [activeTerminalTab, setActiveTerminalTab] = useState<string | null>(null);
@@ -86,6 +89,14 @@ export function useTerminal(
   activeTerminalTabRef.current = activeTerminalTab;
   const terminalVisibleRef = useRef(terminalVisible);
   terminalVisibleRef.current = terminalVisible;
+
+  const setTerminalHeight = useCallback((next: number | ((prev: number) => number)) => {
+    setTerminalHeightState((prev) => {
+      const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : TERMINAL.MAX_HEIGHT;
+      const resolved = typeof next === 'function' ? next(prev) : next;
+      return clampTerminalHeight(resolved, viewportHeight);
+    });
+  }, []);
 
   const currentProjects: Array<{ name: string; path: string }> = selectedWorktree?.projects ||
     (mainWorkspace ? mainWorkspace.projects.map(p => ({
@@ -298,13 +309,13 @@ export function useTerminal(
 
     const handleMouseMove = (e: MouseEvent) => {
       const newHeight = window.innerHeight - e.clientY;
-      setTerminalHeight(Math.max(TERMINAL.MIN_HEIGHT, Math.min(TERMINAL.MAX_HEIGHT, newHeight)));
+      setTerminalHeight(newHeight);
     };
 
     const handleTouchMove = (e: TouchEvent) => {
       e.preventDefault();
       const newHeight = window.innerHeight - e.touches[0].clientY;
-      setTerminalHeight(Math.max(TERMINAL.MIN_HEIGHT, Math.min(TERMINAL.MAX_HEIGHT, newHeight)));
+      setTerminalHeight(newHeight);
     };
 
     const handleEnd = () => {
@@ -329,6 +340,15 @@ export function useTerminal(
       document.body.style.userSelect = '';
     };
   }, [isResizing]);
+
+  useEffect(() => {
+    const handleWindowResize = () => {
+      setTerminalHeight((prev) => prev);
+    };
+
+    window.addEventListener('resize', handleWindowResize);
+    return () => window.removeEventListener('resize', handleWindowResize);
+  }, [setTerminalHeight]);
 
   const handleTerminalTabClick = useCallback((projectPath: string) => {
     if (!terminalVisibleRef.current) setTerminalVisible(true);

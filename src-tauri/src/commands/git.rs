@@ -340,13 +340,13 @@ pub(crate) async fn add_existing_project(
     merge_strategy: String,
 ) -> Result<(), String> {
     let label = window.label().to_string();
-    blocking(move || add_existing_project_impl(&label, name, base_branch, test_branch, merge_strategy)).await
+    blocking(move || {
+        add_existing_project_impl(&label, name, base_branch, test_branch, merge_strategy)
+    })
+    .await
 }
 
-pub fn remove_project_from_config_impl(
-    window_label: &str,
-    name: String,
-) -> Result<(), String> {
+pub fn remove_project_from_config_impl(window_label: &str, name: String) -> Result<(), String> {
     let (workspace_path, mut config) =
         get_window_workspace_config(window_label).ok_or("No workspace selected")?;
 

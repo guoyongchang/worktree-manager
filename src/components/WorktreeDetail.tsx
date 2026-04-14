@@ -33,7 +33,6 @@ import {
 } from './Icons';
 import { Badge } from '@/components/ui/badge';
 import { GitOperations } from './GitOperations';
-import { ChangedFilesPanel } from './ChangedFilesPanel';
 import { EDITORS } from '../constants';
 import { isTauri, openLink } from '@/lib/backend';
 import type {
@@ -44,10 +43,10 @@ import type {
   EditorType,
 } from '../types';
 
-const StatusBadges: FC<{ project: ProjectStatus; onClickUncommitted?: () => void }> = ({ project, onClickUncommitted }) => {
+const StatusBadges: FC<{ project: ProjectStatus }> = ({ project }) => {
   const { t } = useTranslation();
-  const badges: { label: string; variant: 'warning' | 'success' | 'default' | 'error'; onClick?: () => void }[] = [];
-  if (project.has_uncommitted) badges.push({ label: t('detail.uncommitted', { count: project.uncommitted_count }), variant: 'warning', onClick: onClickUncommitted });
+  const badges: { label: string; variant: 'warning' | 'success' | 'default' | 'error' }[] = [];
+  if (project.has_uncommitted) badges.push({ label: t('detail.uncommitted', { count: project.uncommitted_count }), variant: 'warning' });
   if (project.unpushed_commits > 0) badges.push({ label: t('detail.unpushedCommits', { count: project.unpushed_commits }), variant: 'warning' });
   if (project.ahead_of_base > 0) badges.push({ label: t('detail.notMergedToBase', { branch: project.base_branch, count: project.ahead_of_base }), variant: 'default' });
   if (project.ahead_of_test > 0) badges.push({ label: t('detail.notMergedToTest', { branch: project.test_branch, count: project.ahead_of_test }), variant: 'default' });
@@ -59,8 +58,6 @@ const StatusBadges: FC<{ project: ProjectStatus; onClickUncommitted?: () => void
         <Badge
           key={i}
           variant={b.variant === 'error' ? 'warning' : b.variant}
-          className={b.onClick ? 'cursor-pointer hover:opacity-80' : ''}
-          onClick={b.onClick ? (e) => { e.stopPropagation(); b.onClick!(); } : undefined}
         >
           {b.label}
         </Badge>
@@ -280,15 +277,8 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
   const [switchingBranch, setSwitchingBranch] = useState<string | null>(null);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [exitError, setExitError] = useState<string | null>(null);
-  const [detailView, setDetailView] = useState<'projects' | 'changedFiles'>('projects');
-  const [focusProject, setFocusProject] = useState<string | null>(null);
   const [removingProject, setRemovingProject] = useState<string | null>(null);
   const [confirmRemoveProject, setConfirmRemoveProject] = useState<string | null>(null);
-
-  const handleNavigateToChangedFiles = useCallback((projectName: string) => {
-    setFocusProject(projectName);
-    setDetailView('changedFiles');
-  }, []);
 
   const handleDeploy = useCallback(async (name: string) => {
     try {
@@ -448,70 +438,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
           )}
         </div>
 
-        {/* Tab switcher */}
-        {(() => {
-          const totalChanges = mainWorkspace.projects.reduce((sum, p) => sum + p.uncommitted_count, 0);
-          return (
-            <div className="flex items-center gap-1 mb-3 border-b border-slate-700/50 pb-1">
-              <button
-                className={`px-3 py-1.5 text-sm rounded-t transition-colors ${detailView === 'projects'
-                  ? 'text-blue-400 border-b-2 border-blue-400 font-medium'
-                  : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                onClick={() => {
-                  setFocusProject(null);
-                  setDetailView('projects');
-                }}
-              >
-                {t('detail.projects', 'Projects')}
-              </button>
-              <button
-                className={`px-3 py-1.5 text-sm rounded-t transition-colors flex items-center gap-1.5 ${detailView === 'changedFiles'
-                  ? 'text-blue-400 border-b-2 border-blue-400 font-medium'
-                  : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                onClick={() => {
-                  setFocusProject(null);
-                  setDetailView('changedFiles');
-                }}
-                disabled={totalChanges === 0}
-              >
-                {t('detail.changedFilesReview', 'Changed Files Review')}
-                {totalChanges > 0 && (
-                  <span className="text-[10px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-full leading-none">
-                    {totalChanges}
-                  </span>
-                )}
-              </button>
-            </div>
-          );
-        })()}
-
-        {detailView === 'changedFiles' ? (
-          <div style={{ height: 'calc(100vh - 200px)', minHeight: '400px' }}>
-            <ChangedFilesPanel
-              reviewKey={`main:${mainWorkspace.path}`}
-              projects={mainWorkspace.projects.map(p => ({
-                name: p.name,
-                path: p.path,
-                current_branch: p.current_branch,
-                base_branch: p.base_branch,
-                test_branch: p.test_branch,
-                has_uncommitted: p.has_uncommitted,
-                uncommitted_count: p.uncommitted_count,
-                is_merged_to_test: p.is_merged_to_test,
-                is_merged_to_base: p.is_merged_to_base,
-                ahead_of_base: p.ahead_of_base,
-                behind_base: p.behind_base,
-                ahead_of_test: p.ahead_of_test,
-                unpushed_commits: p.unpushed_commits,
-                remote_url: '',
-              }))}
-              focusProject={focusProject}
-            />
-          </div>
-        ) : (
-          <>
+        <>
             {occupation ? (
               /* Deployed state: show only deployed projects in worktree-style cards */
               <div className="space-y-2">
@@ -550,7 +477,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                           </div>
                           <div className="flex items-center gap-3">
                             <div className="text-right">
-                              <StatusBadges project={projAsStatus} onClickUncommitted={() => handleNavigateToChangedFiles(proj.name)} />
+                              <StatusBadges project={projAsStatus} />
                               <div className="text-xs text-slate-500 mt-0.5 select-text">{t('detail.branchInfo', { base: proj.base_branch, test: proj.test_branch })}</div>
                             </div>
                             {isTauri() && (
@@ -693,7 +620,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                           ahead_of_test: 0,
                           unpushed_commits: proj.unpushed_commits,
                           remote_url: '',
-                        }} onClickUncommitted={() => handleNavigateToChangedFiles(proj.name)} />
+                        }} />
                       </div>
                       {/* Git operations */}
                       <div className="mt-3 pt-3 border-t border-slate-700/50">
@@ -758,7 +685,6 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
             )}
 
           </>
-        )}
       </div>
     );
   }
@@ -866,56 +792,8 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
           </div>
         </div>
 
-        {/* Tab switcher */}
-        {(() => {
-          const totalChanges = selectedWorktree.projects.reduce((sum: number, p: any) => sum + (p.uncommitted_count || 0), 0);
-          return (
-            <div className="flex items-center gap-1 mb-3 border-b border-slate-700/50 pb-1">
-              <button
-                className={`px-3 py-1.5 text-sm rounded-t transition-colors ${detailView === 'projects'
-                  ? 'text-blue-400 border-b-2 border-blue-400 font-medium'
-                  : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                onClick={() => {
-                  setFocusProject(null);
-                  setDetailView('projects');
-                }}
-              >
-                {t('detail.projects', 'Projects')}
-              </button>
-              <button
-                className={`px-3 py-1.5 text-sm rounded-t transition-colors flex items-center gap-1.5 ${detailView === 'changedFiles'
-                  ? 'text-blue-400 border-b-2 border-blue-400 font-medium'
-                  : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                onClick={() => {
-                  setFocusProject(null);
-                  setDetailView('changedFiles');
-                }}
-                disabled={totalChanges === 0}
-              >
-                {t('detail.changedFilesReview', 'Changed Files Review')}
-                {totalChanges > 0 && (
-                  <span className="text-[10px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-full leading-none">
-                    {totalChanges}
-                  </span>
-                )}
-              </button>
-            </div>
-          );
-        })()}
-
-        {detailView === 'changedFiles' ? (
-          <div style={{ height: 'calc(100vh - 200px)', minHeight: '400px' }}>
-            <ChangedFilesPanel
-              reviewKey={`worktree:${selectedWorktree.path}`}
-              projects={selectedWorktree.projects}
-              focusProject={focusProject}
-            />
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {selectedWorktree.projects.map(proj => (
+        <div className="space-y-2">
+            {selectedWorktree.projects.map((proj, index) => (
               <div key={proj.name} className={`bg-slate-800/50 border border-slate-700/50 border-l-2 ${statusBorderColor[getProjectStatus(proj)]} rounded-lg p-4 group hover:border-t-slate-600 hover:border-r-slate-600 hover:border-b-slate-600 hover:shadow-md hover:shadow-black/10 hover:-translate-y-px transition-all duration-150`}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -929,7 +807,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="text-right">
-                      <StatusBadges project={proj} onClickUncommitted={() => handleNavigateToChangedFiles(proj.name)} />
+                      <StatusBadges project={proj} />
                       <div className="text-xs text-slate-500 mt-0.5 select-text">{t('detail.branchInfo', { base: proj.base_branch, test: proj.test_branch })}</div>
                     </div>
                     {isTauri() && (
@@ -989,6 +867,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                     currentBranch={proj.current_branch}
                     onRefresh={onRefresh}
                     onOpenTerminal={onOpenTerminalPanel}
+                    autoRefreshSlot={selectedWorktree.is_archived ? undefined : index}
                   />
                 </div>
               </div>
@@ -1003,7 +882,6 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
               </button>
             )}
           </div>
-        )}
       </div>
     );
   }

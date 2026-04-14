@@ -7,7 +7,6 @@ pub mod state;
 pub(crate) mod tls;
 pub mod types;
 pub mod utils;
-pub(crate) mod wms_tunnel;
 
 // Re-exports used by http_server and other modules
 pub use config::*;
@@ -20,10 +19,7 @@ pub use commands::git::{
     add_existing_project_impl, clone_project_impl, remove_project_from_config_impl,
     scan_existing_projects_impl, switch_branch_internal,
 };
-pub use commands::sharing::{
-    auto_register_tunnel_internal, kick_client_internal, start_ngrok_tunnel_internal,
-    start_wms_tunnel_internal, stop_wms_tunnel_internal, wms_manual_reconnect_internal, WmsConfig,
-};
+pub use commands::sharing::{kick_client_internal, start_ngrok_tunnel_internal};
 pub use commands::system::{
     detect_tools_internal, open_in_editor_internal, open_in_terminal_internal,
     open_log_dir_internal, reveal_in_finder_internal, set_git_path_internal,
@@ -102,11 +98,6 @@ pub fn run() {
                             // Stop ngrok tunnel
                             if let Err(e) = stop_ngrok_tunnel().await {
                                 log::warn!("Failed to stop ngrok tunnel on close: {}", e);
-                            }
-
-                            // Stop WMS tunnel
-                            if let Err(e) = stop_wms_tunnel().await {
-                                log::warn!("Failed to stop WMS tunnel on close: {}", e);
                             }
 
                             // Stop sharing
@@ -215,18 +206,6 @@ pub fn run() {
             get_last_share_password,
             start_ngrok_tunnel,
             stop_ngrok_tunnel,
-            // WMS 隧道
-            get_wms_config,
-            set_wms_config,
-            auto_register_tunnel,
-            wms_login,
-            wms_browser_login,
-            cancel_wms_browser_login,
-            get_wms_user,
-            wms_logout,
-            start_wms_tunnel,
-            stop_wms_tunnel,
-            wms_manual_reconnect,
             // 语音识别 (Dashscope)
             get_dashscope_api_key,
             set_dashscope_api_key,

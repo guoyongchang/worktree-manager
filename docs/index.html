@@ -421,7 +421,7 @@
   <header class="pt-32 pb-20 px-4 text-center bg-gradient-to-b from-slate-800 to-slate-900">
     <img src="icons/app-icon.svg" alt="Worktree Manager" class="w-24 h-24 mx-auto mb-6">
     <h1 class="text-4xl md:text-5xl font-bold mb-4">Git Worktree Manager</h1>
-    <p class="text-xl text-slate-400 max-w-2xl mx-auto mb-8">一个优雅的 Git Worktree 可视化管理工具，让多分支并行开发变得简单高效。支持远程分享与实时协作。</p>
+    <p class="text-xl text-slate-400 max-w-2xl mx-auto mb-8">一个优雅的 Git Worktree 可视化管理工具，让多分支并行开发变得简单高效。支持通过局域网或 ngrok 在浏览器中安全分享工作区。</p>
     <div class="flex gap-3 justify-center flex-wrap">
       <a href="https://github.com/guoyongchang/worktree-manager/releases/latest" class="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
@@ -645,11 +645,11 @@
                   <span class="wf-step">发送链接</span><span class="wf-arrow">&rarr;</span>
                   <span class="wf-step">浏览器打开</span>
                 </div>
-                <div class="wf-result">4 步 &middot; 内置隧道无需安装 &middot; 支持公网/局域网</div>
+                <div class="wf-result">4 步 &middot; 支持局域网和 ngrok 公网访问</div>
               </div>
             </div>
             <div class="p-3 bg-green-900/20 border border-green-700/50 rounded-lg">
-              <p class="text-green-300 text-sm">开启分享功能，支持三种模式：<strong>局域网直连</strong>、<strong>WMS 内置隧道</strong>和 <strong>ngrok 外网穿透</strong>。WMS 隧道无需安装额外工具，一键开启公网访问。在任意浏览器中打开，密码验证后即可查看工作区状态、使用内置终端。</p>
+              <p class="text-green-300 text-sm">开启分享功能后，可通过<strong>局域网直连</strong>或 <strong>ngrok 外网穿透</strong>访问当前工作区。在任意浏览器中打开后，仍需通过分享密码验证，随后即可查看工作区状态并使用内置终端。</p>
             </div>
           </div>
         </div>
@@ -745,11 +745,6 @@
           <p>对着麦克风说话，语音自动转写为文字注入终端。支持语音命令（回车、删除、清空等），2秒静默自动停止，完全本地处理。</p>
         </div>
         <div class="feature-card">
-          <div class="feature-icon">&#x1F687;</div>
-          <h3>WMS 内置隧道</h3>
-          <p>内置 WMS 公网隧道服务，无需安装 ngrok。一键开启，自动分配 tunnel.kirov-opensource.com 子域名，支持断线自动重连。</p>
-        </div>
-        <div class="feature-card">
           <div class="feature-icon">&#x2728;</div>
           <h3>AI 语音精炼</h3>
           <p>集成 Qwen 大模型自动优化语音转写结果。去除口语化填充词，修正语法，保持原始语义不变。</p>
@@ -761,30 +756,25 @@
         </div>
         <div class="feature-card" style="border-color: rgba(59, 130, 246, 0.3); background: linear-gradient(135deg, #1e293b 0%, #172554 100%);">
           <div class="feature-icon">&#x1F310;</div>
-          <h3>远程分享与协作</h3>
-          <p>一键分享工作区，同事通过浏览器即可访问。支持局域网直连和 ngrok 外网穿透，内置密码保护和浏览器终端。</p>
+          <h3>浏览器分享</h3>
+          <p>一键分享工作区，同事通过浏览器即可访问。支持局域网直连和 ngrok 外网穿透，保留分享密码保护和浏览器终端。</p>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- Remote Sharing Highlight -->
+  <!-- Browser Sharing Highlight -->
   <section class="py-20 bg-gradient-to-b from-slate-900 via-blue-950/30 to-slate-900">
     <div class="max-w-5xl mx-auto px-4">
       <div class="text-center mb-12">
-        <h2 class="text-3xl md:text-4xl font-bold mb-3">远程分享 &amp; 实时协作</h2>
-        <p class="text-slate-400 text-lg">无需安装，浏览器打开即用</p>
+        <h2 class="text-3xl md:text-4xl font-bold mb-3">浏览器分享（LAN / ngrok）</h2>
+        <p class="text-slate-400 text-lg">无需安装，浏览器打开即可访问分享中的工作区</p>
       </div>
       <div class="grid md:grid-cols-3 gap-6">
         <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-6 text-center">
           <div class="text-4xl mb-4">&#x1F4E1;</div>
           <h3 class="text-lg font-semibold mb-2 text-slate-100">局域网直连</h3>
           <p class="text-slate-400 text-sm">同一网络内直接分享，最低延迟。设置端口和密码，分享给局域网内的同事即可。</p>
-        </div>
-        <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-6 text-center">
-          <div class="text-4xl mb-4">&#x1F687;</div>
-          <h3 class="text-lg font-semibold mb-2 text-slate-100">WMS 内置隧道</h3>
-          <p class="text-slate-400 text-sm">无需安装额外工具，内置公网隧道。自动分配 tunnel.kirov-opensource.com 子域名，支持断线自动重连和重试倒计时。</p>
         </div>
         <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-6 text-center">
           <div class="text-4xl mb-4">&#x1F30D;</div>
@@ -811,7 +801,7 @@
       </div>
       <div class="mt-8 text-center">
         <a href="guide.html#remote-sharing" class="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition">
-          查看远程分享指南
+          查看浏览器分享指南
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>
         </a>
       </div>

@@ -35,6 +35,10 @@ import {
 } from '@/lib/backend';
 import { CreatePRModal } from './CreatePRModal';
 
+const AUTO_REFRESH_INTERVAL_MS = 60_000;
+const AUTO_REFRESH_STAGGER_MS = 15_000;
+const AUTO_REFRESH_SLOTS = 4;
+
 // Heuristic: detect merge conflict errors from git output
 function isConflictError(msg: string): boolean {
   const lower = msg.toLowerCase();
@@ -48,6 +52,7 @@ interface GitOperationsProps {
   currentBranch: string;
   onRefresh?: () => void;
   onOpenTerminal?: (path: string) => void;
+  autoRefreshSlot?: number;
 }
 
 export const GitOperations: FC<GitOperationsProps> = ({
@@ -57,6 +62,7 @@ export const GitOperations: FC<GitOperationsProps> = ({
   currentBranch,
   onRefresh,
   onOpenTerminal,
+  autoRefreshSlot,
 }) => {
   const { t } = useTranslation();
   const [stats, setStats] = useState<BranchDiffStats | null>(null);
@@ -77,6 +83,17 @@ export const GitOperations: FC<GitOperationsProps> = ({
   const [committing, setCommitting] = useState(false);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const fetchingSyncingRef = useRef(fetchingSyncing);
+  const activeActionRef = useRef(activeAction);
+  const autoRefreshInFlightRef = useRef(false);
+
+  useEffect(() => {
+    fetchingSyncingRef.current = fetchingSyncing;
+  }, [fetchingSyncing]);
+
+  useEffect(() => {
+    activeActionRef.current = activeAction;
+  }, [activeAction]);
 
   const setErrorMsg = useCallback((msg: string | null, persistent = false) => {
     clearTimeout(errorTimerRef.current);
@@ -160,6 +177,39 @@ export const GitOperations: FC<GitOperationsProps> = ({
       clearTimeout(successTimerRef.current);
     };
   }, [loadLocalState]);
+
+  useEffect(() => {
+    if (autoRefreshSlot == null) return;
+
+    const normalizedSlot = ((autoRefreshSlot % AUTO_REFRESH_SLOTS) + AUTO_REFRESH_SLOTS) % AUTO_REFRESH_SLOTS;
+    const staggerDelay = normalizedSlot * AUTO_REFRESH_STAGGER_MS;
+    const initialDelay = staggerDelay === 0 ? AUTO_REFRESH_INTERVAL_MS : staggerDelay;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    const runAutoRefresh = async () => {
+      if (document.visibilityState === 'hidden') return;
+      if (autoRefreshInFlightRef.current || fetchingSyncingRef.current || activeActionRef.current) return;
+
+      autoRefreshInFlightRef.current = true;
+      try {
+        await syncRemoteState();
+      } finally {
+        autoRefreshInFlightRef.current = false;
+      }
+    };
+
+    const timeoutId = setTimeout(() => {
+      void runAutoRefresh();
+      intervalId = setInterval(() => {
+        void runAutoRefresh();
+      }, AUTO_REFRESH_INTERVAL_MS);
+    }, initialDelay);
+
+    return () => {
+      clearTimeout(timeoutId);
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [autoRefreshSlot, syncRemoteState]);
 
   const runGitAction = async (
     action: typeof activeAction,

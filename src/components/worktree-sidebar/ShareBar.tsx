@@ -35,18 +35,10 @@ interface ShareBarProps {
   active: boolean;
   urls: string[];
   ngrokUrl: string | null;
-  wmsUrl: string | null;
-  wmsConnected?: boolean;
-  wmsReconnecting?: boolean;
-  wmsReconnectAttempt?: number;
-  wmsNextRetrySecs?: number;
   password: string;
   ngrokLoading: boolean;
-  wmsLoading: boolean;
   connectedClients?: ConnectedClient[];
   onToggleNgrok?: () => void;
-  onToggleWms?: () => void;
-  onWmsManualReconnect?: () => void;
   onStart?: (port: number) => void | Promise<void>;
   onStop?: () => void;
   onUpdatePassword?: (password: string) => void;
@@ -60,18 +52,10 @@ export const ShareBar: FC<ShareBarProps> = ({
   active,
   urls,
   ngrokUrl,
-  wmsUrl,
-  wmsConnected = true,
-  wmsReconnecting = false,
-  wmsReconnectAttempt = 0,
-  wmsNextRetrySecs = 0,
   password,
   ngrokLoading,
-  wmsLoading,
   connectedClients = [],
   onToggleNgrok,
-  onToggleWms,
-  onWmsManualReconnect,
   onStart,
   onStop,
   onUpdatePassword,
@@ -228,22 +212,6 @@ export const ShareBar: FC<ShareBarProps> = ({
             onCopyLabel={t('share.copyExternalLink')}
           />
         )}
-        <ExternalShareRow
-          badge={hasNgrokToken ? null : t('share.wan')}
-          label={t('share.remoteLabel')}
-          url={wmsUrl}
-          password={editingPassword}
-          loading={wmsLoading}
-          activeColorClass="bg-purple-500"
-          inactiveText={t('share.ngrokNotStarted')}
-          onToggle={onToggleWms}
-          onCopyLabel={t('share.copyExternalLink')}
-          connected={wmsConnected}
-          reconnecting={wmsReconnecting}
-          reconnectAttempt={wmsReconnectAttempt}
-          nextRetrySecs={wmsNextRetrySecs}
-          onManualReconnect={onWmsManualReconnect}
-        />
       </div>
 
       {urls.length > 0 ? (
@@ -414,11 +382,6 @@ const ExternalShareRow: FC<{
   inactiveText: string;
   onToggle?: () => void;
   onCopyLabel: string;
-  connected?: boolean;
-  reconnecting?: boolean;
-  reconnectAttempt?: number;
-  nextRetrySecs?: number;
-  onManualReconnect?: () => void;
 }> = ({
   badge,
   label,
@@ -429,68 +392,30 @@ const ExternalShareRow: FC<{
   inactiveText,
   onToggle,
   onCopyLabel,
-  connected = true,
-  reconnecting = false,
-  reconnectAttempt = 0,
-  nextRetrySecs = 0,
-  onManualReconnect,
 }) => {
-  const { t } = useTranslation();
-  const isRemote = activeColorClass.includes('purple');
-
-  const renderStatus = () => {
-    if (!url) {
-      return <span className="flex-1 text-xs text-slate-500">{inactiveText}</span>;
-    }
-
-    if (!isRemote) {
-      return (
-        <>
-          <span className="flex-1 text-xs text-blue-400 truncate min-w-0 select-all" title={url}>
-            {url.replace(/^https?:\/\//, '')}
-          </span>
-          <QrActions url={url} password={password} copyLabel={onCopyLabel} />
-        </>
-      );
-    }
-
-    if (connected) {
-      return (
-        <>
-          <span className="flex-1 text-xs text-purple-400 truncate min-w-0 select-all flex items-center gap-1" title={url}>
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
-            {url.replace(/^https?:\/\//, '')}
-          </span>
-          <QrActions url={url} password={password} copyLabel={onCopyLabel} />
-        </>
-      );
-    }
-
-    if (reconnecting) {
-      return (
-        <>
-          <span className="flex-1 text-xs text-yellow-400 truncate min-w-0 flex items-center gap-1">
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse shrink-0" />
-            {nextRetrySecs > 0 ? t('share.wmsRetryIn', { seconds: nextRetrySecs }) : t('share.wmsReconnecting')}
-            {reconnectAttempt > 0 && (
-              <span className="text-[10px] text-yellow-500/70">#{reconnectAttempt}</span>
-            )}
-          </span>
-          <ManualReconnectButton reconnecting={reconnecting} onManualReconnect={onManualReconnect} />
-        </>
-      );
-    }
-
+  if (!url) {
     return (
-      <>
-        <span className="flex-1 text-xs text-red-400 truncate min-w-0 flex items-center gap-1">
-          <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" />
-          {t('share.wmsDisconnected')}
-        </span>
-        <ManualReconnectButton reconnecting={reconnecting} onManualReconnect={onManualReconnect} />
-      </>
+      <div className="flex items-center gap-2 min-h-[24px]">
+        {badge ? (
+          <span className="text-[11px] font-bold px-1.5 py-0.5 rounded shrink-0 bg-slate-600/30 text-slate-500 w-[52px] text-center">
+            {badge}
+          </span>
+        ) : (
+          <span className="shrink-0 w-[52px]" />
+        )}
+        <span className="text-[11px] font-medium text-slate-500 shrink-0">{label}</span>
+        <span className="flex-1 text-xs text-slate-500">{inactiveText}</span>
+        <button
+          type="button"
+          onClick={onToggle}
+          disabled={loading}
+          className={`relative inline-flex h-4 w-7 items-center rounded-full shrink-0 transition-colors ${loading ? 'opacity-50 cursor-wait' : 'cursor-pointer'} bg-slate-600`}
+        >
+          <span className="inline-block h-3 w-3 rounded-full bg-white transition-transform translate-x-0.5" />
+        </button>
+      </div>
     );
-  };
+  }
 
   return (
     <div className="flex items-center gap-2 min-h-[24px]">
@@ -502,7 +427,10 @@ const ExternalShareRow: FC<{
         <span className="shrink-0 w-[52px]" />
       )}
       <span className="text-[11px] font-medium text-slate-500 shrink-0">{label}</span>
-      {renderStatus()}
+      <span className="flex-1 text-xs text-blue-400 truncate min-w-0 select-all" title={url}>
+        {url.replace(/^https?:\/\//, '')}
+      </span>
+      <QrActions url={url} password={password} copyLabel={onCopyLabel} />
       <button
         type="button"
         onClick={onToggle}
@@ -512,31 +440,6 @@ const ExternalShareRow: FC<{
         <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${url ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
       </button>
     </div>
-  );
-};
-
-const ManualReconnectButton: FC<{
-  reconnecting: boolean;
-  onManualReconnect?: () => void;
-}> = ({ reconnecting, onManualReconnect }) => {
-  const { t } = useTranslation();
-
-  return (
-    <TooltipProvider delayDuration={300}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onManualReconnect}
-            className="h-5 w-5 shrink-0"
-          >
-            <RefreshIcon className={`w-3 h-3 ${reconnecting ? 'animate-spin' : ''}`} />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="top">{t('share.wmsManualReconnect')}</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
   );
 };
 

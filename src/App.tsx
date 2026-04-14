@@ -212,9 +212,6 @@ function App() {
                   workspaces={workspace.workspaces}
                   currentWorkspace={workspace.currentWorkspace}
                   onRemoveWorkspace={workspace.removeWorkspace}
-                  wmsUserName={share.wmsUser?.display_name || share.wmsUser?.username || share.wmsUser?.email || null}
-                  wmsLoggedIn={share.wmsLoggedIn}
-                  onWmsLogout={share.handleWmsLogout}
                 />
               )}
             </div>
@@ -259,21 +256,12 @@ function App() {
                   onUpdateSharePassword={share.handleUpdateSharePassword}
                   ngrokLoading={share.ngrokLoading}
                   onToggleNgrok={share.handleToggleNgrok}
-                  shareWmsUrl={share.shareWmsUrl}
-                  wmsConnected={share.wmsConnected}
-                  wmsReconnecting={share.wmsReconnecting}
-                  wmsReconnectAttempt={share.wmsReconnectAttempt}
-                  wmsNextRetrySecs={share.wmsNextRetrySecs}
-                  wmsLoading={share.wmsLoading}
-                  onToggleWms={share.handleToggleWms}
-                  onWmsManualReconnect={share.handleWmsManualReconnect}
                   connectedClients={share.connectedClients}
                   onKickClient={share.handleKickClient}
                   hasLastConfig={share.hasLastConfig}
                   onQuickShare={share.handleQuickShare}
                   hasNgrokToken={share.hasNgrokToken}
                   occupation={mainOccupation.occupation}
-                  wmsUserName={share.wmsUser?.display_name || share.wmsUser?.username || share.wmsUser?.email || null}
                 />
               )}
 

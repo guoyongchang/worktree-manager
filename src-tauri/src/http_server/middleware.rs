@@ -12,30 +12,16 @@ pub(super) fn is_loopback_request(addr: &SocketAddr) -> bool {
     addr.ip().is_loopback()
 }
 
-pub(super) fn has_trusted_remote_proxy_marker(headers: &HeaderMap) -> bool {
-    headers
-        .get(crate::wms_tunnel::REMOTE_PROXY_AUTH_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .map(|value| value == crate::state::REMOTE_PROXY_AUTH_TOKEN.as_str())
-        .unwrap_or(false)
-}
-
 fn is_forwarded_remote_request(headers: &HeaderMap) -> bool {
-    has_trusted_remote_proxy_marker(headers)
-        || headers.contains_key("x-forwarded-for")
+    headers.contains_key("x-forwarded-for")
         || headers.contains_key("forwarded")
         || headers.contains_key("x-real-ip")
-}
-
-fn is_tunnel_proxied_remote_request(request: &Request) -> bool {
-    is_forwarded_remote_request(request.headers())
 }
 
 fn is_localhost_only_path(path: &str) -> bool {
     matches!(
         path,
-        "/auth/wms-callback"
-            | "/api/get_config_path_info"
+        "/api/get_config_path_info"
             | "/api/load_workspace_config_by_path"
             | "/api/save_workspace_config_by_path"
             | "/api/open_in_terminal"
@@ -48,16 +34,6 @@ fn is_localhost_only_path(path: &str) -> bool {
             | "/api/set_ngrok_token"
             | "/api/start_ngrok_tunnel"
             | "/api/stop_ngrok_tunnel"
-            | "/api/get_wms_config"
-            | "/api/set_wms_config"
-            | "/api/auto_register_tunnel"
-            | "/api/wms_login"
-            | "/api/wms_browser_login"
-            | "/api/get_wms_user"
-            | "/api/wms_logout"
-            | "/api/start_wms_tunnel"
-            | "/api/stop_wms_tunnel"
-            | "/api/wms_manual_reconnect"
             | "/api/get_dashscope_api_key"
             | "/api/set_dashscope_api_key"
             | "/api/get_dashscope_base_url"
@@ -96,7 +72,7 @@ pub(super) async fn localhost_only_middleware(
     let path = request.uri().path().to_string();
 
     if is_localhost_only_path(path.as_str())
-        && (!is_loopback_request(&addr) || is_tunnel_proxied_remote_request(&request))
+        && (!is_loopback_request(&addr) || is_forwarded_remote_request(request.headers()))
     {
         return (
             StatusCode::FORBIDDEN,
