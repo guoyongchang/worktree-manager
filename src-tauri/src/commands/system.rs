@@ -577,21 +577,58 @@ fn extract_windows_exe_icons_batch(paths: &[String]) -> std::collections::HashMa
         .collect::<Vec<_>>()
         .join(",");
 
+    // Uses WPF's CreateBitmapSourceFromHIcon to correctly preserve alpha channel.
+    // Plain GDI+ ToBitmap() loses alpha on transparent icons, producing white blocks.
     let ps_script = format!(
         r#"
 Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName PresentationCore
+Add-Type -AssemblyName WindowsBase
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class IconHelper {{
+    [DllImport("Shell32.dll", CharSet=CharSet.Auto)]
+    public static extern IntPtr SHGetFileInfo(string path, uint attr, ref SHFILEINFO info, uint sz, uint flags);
+    [DllImport("user32.dll")]
+    public static extern bool DestroyIcon(IntPtr h);
+    [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Auto)]
+    public struct SHFILEINFO {{ public IntPtr hIcon; public int iIcon; public uint dwAttributes; [MarshalAs(UnmanagedType.ByValTStr,SizeConst=260)] public string szDisplayName; [MarshalAs(UnmanagedType.ByValTStr,SizeConst=80)] public string szTypeName; }}
+    public const uint SHGFI_ICON=0x100; public const uint SHGFI_LARGEICON=0x0; public const uint SHGFI_SMALLICON=0x1;
+}}
+'@
+function Get-IconBase64($path) {{
+    # Try large shell icon (48x48) first
+    $fi = New-Object IconHelper+SHFILEINFO
+    $hr = [IconHelper]::SHGetFileInfo($path, 0, [ref]$fi, [System.Runtime.InteropServices.Marshal]::SizeOf($fi), [IconHelper]::SHGFI_ICON -bor [IconHelper]::SHGFI_LARGEICON)
+    if ($fi.hIcon -ne [IntPtr]::Zero) {{
+        try {{
+            $bmpSrc = [System.Windows.Interop.Imaging]::CreateBitmapSourceFromHIcon($fi.hIcon, [System.Windows.Int32Rect]::Empty, [System.Windows.Media.Imaging.BitmapSizeOptions]::FromEmptyOptions())
+            $enc = New-Object System.Windows.Media.Imaging.PngBitmapEncoder
+            $enc.Frames.Add([System.Windows.Media.Imaging.BitmapFrame]::Create($bmpSrc))
+            $ms = New-Object System.IO.MemoryStream; $enc.Save($ms)
+            return [Convert]::ToBase64String($ms.ToArray())
+        }} finally {{ [IconHelper]::DestroyIcon($fi.hIcon) }}
+    }}
+    # Fallback: ExtractAssociatedIcon + WPF encode
+    $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($path)
+    if ($icon -ne $null) {{
+        try {{
+            $bmpSrc = [System.Windows.Interop.Imaging]::CreateBitmapSourceFromHIcon($icon.Handle, [System.Windows.Int32Rect]::Empty, [System.Windows.Media.Imaging.BitmapSizeOptions]::FromEmptyOptions())
+            $enc = New-Object System.Windows.Media.Imaging.PngBitmapEncoder
+            $enc.Frames.Add([System.Windows.Media.Imaging.BitmapFrame]::Create($bmpSrc))
+            $ms = New-Object System.IO.MemoryStream; $enc.Save($ms)
+            return [Convert]::ToBase64String($ms.ToArray())
+        }} finally {{ $icon.Dispose() }}
+    }}
+    return $null
+}}
 $paths = @({})
 $result = @{{}}
 foreach ($p in $paths) {{
     try {{
-        $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($p)
-        if ($icon) {{
-            $bmp = $icon.ToBitmap()
-            $ms = New-Object System.IO.MemoryStream
-            $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
-            $result[$p] = [Convert]::ToBase64String($ms.ToArray())
-            $ms.Dispose(); $bmp.Dispose(); $icon.Dispose()
-        }}
+        $b64 = Get-IconBase64 $p
+        if ($b64) {{ $result[$p] = $b64 }}
     }} catch {{}}
 }}
 if ($result.Count -gt 0) {{ ConvertTo-Json -InputObject $result -Compress }} else {{ Write-Output '{{}}' }}
