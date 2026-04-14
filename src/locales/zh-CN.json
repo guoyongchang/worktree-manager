@@ -646,5 +646,10 @@
   "detail.removeProjectLabel": "移除项目 {{name}}",
   "detail.confirmRemoveProject": "确定要从配置中移除项目「{{name}}」吗？\n（只会从配置中移除，不会删除 projects/ 下的文件）",
   "detail.removing": "移除中...",
-  "detail.confirmRemove": "确认移除"
+  "detail.confirmRemove": "确认移除",
+  "logs.button": "日志",
+  "logs.title": "日志 — {{name}}",
+  "logs.clear": "清空",
+  "logs.empty": "暂无日志",
+  "contextMenu.openInEditorPicker": "选择 IDE"
 }

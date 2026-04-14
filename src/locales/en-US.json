@@ -655,5 +655,10 @@
   "detail.removeProjectLabel": "Remove project {{name}}",
   "detail.confirmRemoveProject": "Remove project \"{{name}}\" from configuration?\n(Only removes from config, does not delete files in projects/)",
   "detail.removing": "Removing...",
-  "detail.confirmRemove": "Remove"
+  "detail.confirmRemove": "Remove",
+  "logs.button": "Logs",
+  "logs.title": "Logs — {{name}}",
+  "logs.clear": "Clear",
+  "logs.empty": "No logs yet.",
+  "contextMenu.openInEditorPicker": "Choose IDE"
 }
