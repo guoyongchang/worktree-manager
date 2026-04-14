@@ -900,6 +900,26 @@ export const SettingsView: FC<SettingsViewProps> = ({
                             onChange={(e) => saveToolPaths({ ...toolPaths, [pathKey]: e.target.value })}
                             className="h-7 text-xs font-mono flex-1"
                           />
+                          {/* Delete */}
+                          <button
+                            type="button"
+                            className="text-slate-500 hover:text-red-400 transition-colors shrink-0"
+                            title={t('common.delete', '删除')}
+                            onClick={() => {
+                              const cached: Array<{ id: string; name: string; icon?: string }> = JSON.parse(localStorage.getItem('detected_editors') || '[]');
+                              localStorage.setItem('detected_editors', JSON.stringify(cached.filter(e => e.id !== editor.id)));
+                              const icons: Record<string, string> = JSON.parse(localStorage.getItem('editor_icons') || '{}');
+                              delete icons[editor.id];
+                              localStorage.setItem('editor_icons', JSON.stringify(icons));
+                              const tp = { ...toolPaths };
+                              delete tp[pathKey];
+                              saveToolPaths(tp);
+                              setDetectedTools(prev => prev ? { ...prev, editors: prev.editors.filter(e => e.id !== editor.id) } : prev);
+                              window.dispatchEvent(new Event('editors-detected'));
+                            }}
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                          </button>
                         </div>
                       );
                     });
