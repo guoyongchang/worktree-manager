@@ -12,10 +12,10 @@ use super::{
     h_check_remote_branch_exists, h_check_worktree_status, h_clone_project, h_commit_all,
     h_create_pull_request, h_create_workspace, h_create_worktree, h_delete_archived_worktree,
     h_deploy_to_main, h_detect_tools, h_download_update_via_mirror, h_exit_main_occupation,
-    h_fetch_project_remote, h_generate_commit_message, h_get_app_version, h_get_branch_diff_stats,
-    h_get_changed_files, h_get_config_path_info, h_get_connected_clients, h_get_current_workspace,
-    h_get_dashscope_api_key, h_get_dashscope_base_url, h_get_file_diff, h_get_git_diff,
-    h_get_last_share_password, h_get_last_share_port, h_get_locked_worktrees,
+    h_fetch_project_remote, h_generate_commit_message, h_get_app_icon, h_get_app_version,
+    h_get_branch_diff_stats, h_get_changed_files, h_get_config_path_info, h_get_connected_clients,
+    h_get_current_workspace, h_get_dashscope_api_key, h_get_dashscope_base_url, h_get_file_diff,
+    h_get_git_diff, h_get_last_share_password, h_get_last_share_port, h_get_locked_worktrees,
     h_get_main_occupation, h_get_main_workspace_status, h_get_ngrok_token, h_get_opened_workspaces,
     h_get_remote_branches, h_get_share_info, h_get_share_state, h_get_terminal_state,
     h_get_voice_refine_enabled, h_get_workspace_config, h_kick_client, h_list_workspaces,
@@ -259,6 +259,7 @@ pub(super) fn build_api_router(cert_pem: Option<String>) -> Router {
             post(h_set_voice_refine_enabled),
         )
         .route("/api/get_app_version", post(h_get_app_version))
+        .route("/api/get_app_icon", post(h_get_app_icon))
         .route("/api/check_mirror_update", post(h_check_mirror_update))
         .route(
             "/api/download_update_via_mirror",

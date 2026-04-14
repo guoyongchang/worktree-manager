@@ -17,11 +17,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { RefreshCw, Search, Mic, Eye, EyeOff, Settings, Globe, Info, Trash2, Wrench } from 'lucide-react';
+import { RefreshCw, Search, Mic, Eye, EyeOff, Settings, Globe, Info, Trash2, Wrench, FolderOpen } from 'lucide-react';
 import { BackIcon, PlusIcon, TrashIcon } from './Icons';
 import { BranchCombobox } from './BranchCombobox';
 import type { WorkspaceRef, WorkspaceConfig, ProjectConfig, ScannedFolder } from '../types';
-import { getAppVersion, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, voiceStart, voiceStop, isTauri, getRemoteBranches, openLink, callBackend, loadWorkspaceConfigByPath, saveWorkspaceConfigByPath } from '../lib/backend';
+import { getAppVersion, getAppIcon, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, voiceStart, voiceStop, isTauri, getRemoteBranches, openLink, callBackend, loadWorkspaceConfigByPath, saveWorkspaceConfigByPath } from '../lib/backend';
 
 interface SettingsViewProps {
   workspaceConfig: WorkspaceConfig;
@@ -903,11 +903,16 @@ export const SettingsView: FC<SettingsViewProps> = ({
                   <p className="text-[10px] text-slate-600">{t('settings.customEditorsHint', '添加系统未自动检测到的编辑器或自定义工具。')}</p>
                   {(() => {
                     const customEditors: Array<{ id: string; name: string; path: string }> = JSON.parse(localStorage.getItem('custom_editors') || '[]');
+                    const editorIcons: Record<string, string> = JSON.parse(localStorage.getItem('editor_icons') || '{}');
                     return (
                       <>
                         {customEditors.map((ce) => (
                           <div key={ce.id} className="flex items-center gap-3 py-1.5 border-t border-slate-700/20 first:border-0 first:pt-0">
-                            <span className="w-5 h-5 shrink-0 flex items-center justify-center text-slate-500 text-[10px]">⌘</span>
+                            {editorIcons[ce.id] ? (
+                              <img src={editorIcons[ce.id]} className="w-5 h-5 shrink-0 rounded-sm object-contain" alt={ce.name} />
+                            ) : (
+                              <span className="w-5 h-5 shrink-0 flex items-center justify-center text-slate-500 text-[10px]">⌘</span>
+                            )}
                             <div className="w-24 shrink-0">
                               <span className="text-xs text-slate-300">{ce.name}</span>
                             </div>
@@ -925,6 +930,9 @@ export const SettingsView: FC<SettingsViewProps> = ({
                                 const tp = JSON.parse(localStorage.getItem('tool_paths') || '{}');
                                 delete tp[`editor_${ce.id}`];
                                 localStorage.setItem('tool_paths', JSON.stringify(tp));
+                                const icons: Record<string, string> = JSON.parse(localStorage.getItem('editor_icons') || '{}');
+                                delete icons[ce.id];
+                                localStorage.setItem('editor_icons', JSON.stringify(icons));
                                 window.dispatchEvent(new Event('editors-detected'));
                                 setDetectedTools(prev => prev ? { ...prev } : prev);
                               }}
@@ -940,12 +948,47 @@ export const SettingsView: FC<SettingsViewProps> = ({
                             id="custom-editor-name"
                             className="h-7 text-xs flex-none w-28"
                           />
-                          <Input
-                            type="text"
-                            placeholder={t('settings.customEditorPath', '可执行文件路径 / .app 路径')}
-                            id="custom-editor-path"
-                            className="h-7 text-xs font-mono flex-1"
-                          />
+                          <div className="flex flex-1 gap-1">
+                            <Input
+                              type="text"
+                              placeholder={t('settings.customEditorPath', '可执行文件路径 / .app 路径')}
+                              id="custom-editor-path"
+                              className="h-7 text-xs font-mono flex-1"
+                            />
+                            {isTauri() && (
+                              <button
+                                type="button"
+                                className="h-7 px-2 text-slate-400 hover:text-blue-400 transition-colors shrink-0 flex items-center border border-slate-700 rounded-md"
+                                title={t('settings.browseForApp', '选择应用')}
+                                onClick={async () => {
+                                  const { open } = await import('@tauri-apps/plugin-dialog');
+                                  const isWindows = navigator.platform.toLowerCase().includes('win');
+                                  const selected = await open({
+                                    multiple: false,
+                                    filters: isWindows
+                                      ? [{ name: 'Executable', extensions: ['exe'] }]
+                                      : [{ name: 'Application', extensions: ['app'] }],
+                                  }).catch(() => null);
+                                  if (!selected || typeof selected !== 'string') return;
+                                  const pathInput = document.getElementById('custom-editor-path') as HTMLInputElement;
+                                  if (pathInput) pathInput.value = selected;
+                                  // Auto-fill name from file basename if empty
+                                  const nameInput = document.getElementById('custom-editor-name') as HTMLInputElement;
+                                  if (nameInput && !nameInput.value.trim()) {
+                                    const basename = selected.split(/[/\\]/).pop()?.replace(/\.(app|exe)$/i, '') ?? '';
+                                    nameInput.value = basename;
+                                  }
+                                  // Extract icon and stash on element for use when adding
+                                  const icon = await getAppIcon(selected).catch(() => null);
+                                  if (pathInput && icon) {
+                                    pathInput.dataset.pendingIcon = icon;
+                                  }
+                                }}
+                              >
+                                <FolderOpen className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
                           <button
                             type="button"
                             className="text-slate-400 hover:text-green-400 transition-colors shrink-0"
@@ -961,9 +1004,17 @@ export const SettingsView: FC<SettingsViewProps> = ({
                               if (customs.some(c => c.id === id)) return;
                               customs.push({ id, name, path });
                               localStorage.setItem('custom_editors', JSON.stringify(customs));
+                              // Save icon if available
+                              const pendingIcon = pathInput?.dataset?.pendingIcon;
+                              if (pendingIcon) {
+                                const icons: Record<string, string> = JSON.parse(localStorage.getItem('editor_icons') || '{}');
+                                icons[id] = pendingIcon;
+                                localStorage.setItem('editor_icons', JSON.stringify(icons));
+                                delete pathInput.dataset.pendingIcon;
+                              }
                               // Also add to detected_editors and tool_paths
                               const detected: Array<{ id: string; name: string; icon?: string }> = JSON.parse(localStorage.getItem('detected_editors') || '[]');
-                              detected.push({ id, name });
+                              detected.push({ id, name, icon: pendingIcon });
                               localStorage.setItem('detected_editors', JSON.stringify(detected));
                               const tp = JSON.parse(localStorage.getItem('tool_paths') || '{}');
                               tp[`editor_${id}`] = path;

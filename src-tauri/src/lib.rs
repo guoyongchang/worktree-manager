@@ -21,8 +21,9 @@ pub use commands::git::{
 };
 pub use commands::sharing::{kick_client_internal, start_ngrok_tunnel_internal};
 pub use commands::system::{
-    detect_tools_internal, open_in_editor_internal, open_in_terminal_internal,
-    open_log_dir_internal, reveal_in_finder_internal, set_git_path_internal,
+    detect_tools_internal, get_app_icon_internal, open_in_editor_internal,
+    open_in_terminal_internal, open_log_dir_internal, reveal_in_finder_internal,
+    set_git_path_internal,
 };
 pub use commands::window::{
     lock_worktree_impl, set_window_workspace_impl, unlock_worktree_impl, unregister_window_impl,
@@ -170,6 +171,7 @@ pub fn run() {
             reveal_in_finder,
             detect_tools,
             set_git_path,
+            get_app_icon,
             get_app_version,
             // 多窗口管理
             set_window_workspace,

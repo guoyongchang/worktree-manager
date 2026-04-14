@@ -433,6 +433,25 @@ pub(crate) fn open_log_dir() -> Result<(), String> {
     Ok(())
 }
 
+/// Extract the icon of an app/exe as a base64 data URL.
+#[tauri::command]
+pub(crate) fn get_app_icon(path: String) -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        return extract_macos_app_icon(&path);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let icon_map = extract_windows_exe_icons_batch(&[path.clone()]);
+        return icon_map
+            .get(&path)
+            .filter(|s| !s.is_empty())
+            .map(|b64| format!("data:image/png;base64,{}", b64));
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
 /// Get the platform-appropriate log directory.
 fn get_platform_log_dir() -> Result<PathBuf, String> {
     #[cfg(target_os = "macos")]
@@ -1484,4 +1503,8 @@ pub fn reveal_in_finder_internal(path: &str) -> Result<(), String> {
 
 pub fn open_log_dir_internal() -> Result<(), String> {
     open_log_dir()
+}
+
+pub fn get_app_icon_internal(path: &str) -> Option<String> {
+    get_app_icon(path.to_string())
 }

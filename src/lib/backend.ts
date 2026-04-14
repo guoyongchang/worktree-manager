@@ -172,6 +172,11 @@ export async function getAppVersion(): Promise<string> {
   }
 }
 
+/** Extract the icon of an app / exe as a base64 data URL. Returns null if not available. */
+export async function getAppIcon(path: string): Promise<string | null> {
+  return callBackend<string | null>('get_app_icon', { path });
+}
+
 /** Check if this is the "main" window. */
 export async function isMainWindow(): Promise<boolean> {
   if (isTauri()) {

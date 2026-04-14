@@ -572,6 +572,11 @@ async fn h_open_log_dir() -> Response {
     result_ok(crate::open_log_dir_internal())
 }
 
+async fn h_get_app_icon(Json(args): Json<Value>) -> Response {
+    let path = args["path"].as_str().unwrap_or("").to_string();
+    Json(json!(crate::get_app_icon_internal(&path))).into_response()
+}
+
 // -- Multi-window management --
 
 async fn h_get_opened_workspaces() -> Response {
