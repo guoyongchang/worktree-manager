@@ -141,11 +141,13 @@ const IdeIconButton: FC<IdeIconButtonProps> = ({
         variant="ghost"
         size="icon"
         onClick={() => onOpen(projectPath, defaultEditorId)}
-        onContextMenu={(e) => {
+        onMouseDown={(e) => {
+          if (e.button !== 2) return;
           e.preventDefault();
           e.stopPropagation();
           setAnchorRect(buttonRef.current?.getBoundingClientRect() ?? null);
         }}
+        onContextMenu={(e) => e.preventDefault()}
         title={t('detail.openInEditorLabel', { editor: currentEditor?.name ?? defaultEditorId })}
         aria-label={t('detail.openInEditorProject', {
           editor: currentEditor?.name ?? defaultEditorId,
@@ -193,13 +195,15 @@ const TerminalIconButton: FC<TerminalIconButtonProps> = ({
         variant="ghost"
         size="icon"
         onClick={() => onOpen(projectPath)}
-        onContextMenu={(e) => {
+        onMouseDown={(e) => {
+          if (e.button !== 2) return;
           e.preventDefault();
           e.stopPropagation();
           if (terminals.length > 1) {
             setAnchorRect(buttonRef.current?.getBoundingClientRect() ?? null);
           }
         }}
+        onContextMenu={(e) => e.preventDefault()}
         title={t('detail.openExternalTerminal')}
         aria-label={t('detail.openExternalTerminalProject', { name: projectName })}
         className="h-7 w-7"
