@@ -43,7 +43,7 @@ export interface UseWorkspaceReturn {
   deleteArchivedWorktree: (name: string) => Promise<void>;
   checkWorktreeStatus: (name: string) => Promise<WorktreeArchiveStatus>;
   openInEditor: (path: string, editor: EditorType) => Promise<void>;
-  openInTerminal: (path: string) => Promise<void>;
+  openInTerminal: (path: string, terminal?: string) => Promise<void>;
   revealInFinder: (path: string) => Promise<void>;
   switchBranch: (projectPath: string, branch: string) => Promise<void>;
   saveConfig: (config: WorkspaceConfig) => Promise<void>;
@@ -255,10 +255,10 @@ export function useWorkspace(ready = true): UseWorkspaceReturn {
     }
   }, []);
 
-  const openInTerminal = useCallback(async (path: string) => {
+  const openInTerminal = useCallback(async (path: string, terminal?: string) => {
     try {
-      const terminal = localStorage.getItem('preferred_terminal') || 'auto';
-      await callBackend("open_in_terminal", { path, terminal });
+      const term = terminal || localStorage.getItem('preferred_terminal') || 'auto';
+      await callBackend("open_in_terminal", { path, terminal: term });
     } catch (e) {
       console.error("Failed to open in Terminal:", e);
     }

@@ -47,7 +47,7 @@ import {
 } from '@/lib/operationLog';
 import type { LogEntry } from '@/lib/operationLog';
 import { GitOperations } from './GitOperations';
-import { IdePickerContextMenu } from './ContextMenus';
+import { IdePickerContextMenu, TerminalPickerPopover } from './ContextMenus';
 import { EDITORS } from '../constants';
 import { isTauri, openLink } from '@/lib/backend';
 import type {
@@ -89,7 +89,7 @@ interface WorktreeDetailProps {
   onShowEditorMenu: (show: boolean) => void;
   onSelectEditor: (editor: EditorType) => void;
   onOpenInEditor: (path: string, editor?: EditorType) => void;
-  onOpenInTerminal: (path: string) => void;
+  onOpenInTerminal: (path: string, terminal?: string) => void;
   onRevealInFinder: (path: string) => void;
   onSwitchBranch: (projectPath: string, branch: string) => void;
   onArchive: () => void;
@@ -160,6 +160,57 @@ const IdeIconButton: FC<IdeIconButtonProps> = ({
           anchorRect={anchorRect}
           editors={editors}
           onSelect={(editorId) => onOpen(projectPath, editorId)}
+          onClose={() => setAnchorRect(null)}
+        />
+      )}
+    </>
+  );
+};
+
+// --- TerminalIconButton ---
+
+interface TerminalIconButtonProps {
+  projectPath: string;
+  projectName: string;
+  terminals: Array<{ id: string; name: string }>;
+  onOpen: (path: string, terminalId?: string) => void;
+}
+
+const TerminalIconButton: FC<TerminalIconButtonProps> = ({
+  projectPath,
+  projectName,
+  terminals,
+  onOpen,
+}) => {
+  const { t } = useTranslation();
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
+
+  return (
+    <>
+      <Button
+        ref={buttonRef}
+        variant="ghost"
+        size="icon"
+        onClick={() => onOpen(projectPath)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (terminals.length > 1) {
+            setAnchorRect(buttonRef.current?.getBoundingClientRect() ?? null);
+          }
+        }}
+        title={t('detail.openExternalTerminal')}
+        aria-label={t('detail.openExternalTerminalProject', { name: projectName })}
+        className="h-7 w-7"
+      >
+        <TerminalIcon className="w-4.5 h-4.5" />
+      </Button>
+      {anchorRect && (
+        <TerminalPickerPopover
+          anchorRect={anchorRect}
+          terminals={terminals}
+          onSelect={(terminalId) => onOpen(projectPath, terminalId)}
           onClose={() => setAnchorRect(null)}
         />
       )}
@@ -401,6 +452,22 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
     window.addEventListener('editors-detected', handleDetected);
     return () => window.removeEventListener('editors-detected', handleDetected);
   }, [readDetectedEditors]);
+
+  const readDetectedTerminals = useCallback((): Array<{ id: string; name: string }> => {
+    try {
+      const stored = localStorage.getItem('detected_terminals');
+      if (stored) return JSON.parse(stored) as Array<{ id: string; name: string }>;
+    } catch { /* ignore */ }
+    return [];
+  }, []);
+
+  const [detectedTerminals, setDetectedTerminals] = useState(readDetectedTerminals);
+
+  useEffect(() => {
+    const handleDetected = () => setDetectedTerminals(readDetectedTerminals());
+    window.addEventListener('terminals-detected', handleDetected);
+    return () => window.removeEventListener('terminals-detected', handleDetected);
+  }, [readDetectedTerminals]);
 
   const selectedEditorName = detectedEditors.find((e: { id: string; name: string }) => e.id === selectedEditor)?.name || selectedEditor;
 
@@ -667,16 +734,12 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                                   defaultEditorId={getProjectEditor(proj.name)}
                                   onOpen={(path, editorId) => onOpenInEditor(path, editorId as any)}
                                 />
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => onOpenInTerminal(projectPath)}
-                                  title={t('detail.openExternalTerminal')}
-                                  aria-label={t('detail.openExternalTerminalProject', { name: proj.name })}
-                                  className="h-7 w-7"
-                                >
-                                  <TerminalIcon className="w-4.5 h-4.5" />
-                                </Button>
+                                <TerminalIconButton
+                                  projectPath={projectPath}
+                                  projectName={proj.name}
+                                  terminals={detectedTerminals}
+                                  onOpen={(path, terminalId) => onOpenInTerminal(path, terminalId)}
+                                />
                               </div>
                             )}
                           </div>
@@ -1055,16 +1118,12 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                             </Button>
                           ) : null;
                         })()}
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => onOpenInTerminal(proj.path)}
-                          title={t('detail.openExternalTerminal')}
-                          aria-label={t('detail.openExternalTerminalProject', { name: proj.name })}
-                          className="h-7 w-7"
-                        >
-                          <TerminalIcon className="w-4.5 h-4.5" />
-                        </Button>
+                        <TerminalIconButton
+                          projectPath={proj.path}
+                          projectName={proj.name}
+                          terminals={detectedTerminals}
+                          onOpen={(path, terminalId) => onOpenInTerminal(path, terminalId)}
+                        />
                       </div>
                     )}
                   </div>

@@ -1,7 +1,7 @@
-import { type FC, useEffect, useRef } from 'react';
+import { type FC, type ReactNode, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { ArchiveIcon, EditorIcon } from './Icons';
+import { ArchiveIcon, EditorIcon, TerminalAppIcon } from './Icons';
 import { isTauri } from '@/lib/backend';
 
 interface ContextMenuProps {
@@ -114,28 +114,26 @@ export const TerminalTabContextMenu: FC<TerminalTabContextMenuProps> = ({
   );
 };
 
-interface IdePickerContextMenuProps {
+// Shared popover used by both IDE and Terminal pickers
+interface AppPickerPopoverProps {
   anchorRect: DOMRect;
-  editors: Array<{ id: string; name: string }>;
-  onSelect: (editorId: string) => void;
+  items: Array<{ id: string; name: string }>;
+  onSelect: (id: string) => void;
   onClose: () => void;
+  renderIcon: (id: string) => ReactNode;
 }
 
-export const IdePickerContextMenu: FC<IdePickerContextMenuProps> = ({
-  anchorRect,
-  editors,
-  onSelect,
-  onClose,
-}) => {
+const AppPickerPopover: FC<AppPickerPopoverProps> = ({ anchorRect, items, onSelect, onClose, renderIcon }) => {
   const menuRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
-  // 3 cols × 32px icon + 2 gaps × 4px + 8px padding = ~112px wide
+  // 3 cols × 32px icon + 2 gaps × 4px + 8px padding ≈ 112px
   const popoverWidth = 116;
-  const rows = Math.ceil(editors.length / 3);
+  const rows = Math.ceil(items.length / 3);
   const popoverHeight = rows * 36 + 8;
-  const left = Math.min(anchorRect.left, window.innerWidth - popoverWidth - 8);
+  // Right-align: popover's right edge = button's right edge
+  const left = Math.max(8, anchorRect.right - popoverWidth);
   const spaceBelow = window.innerHeight - anchorRect.bottom;
   const top = spaceBelow >= popoverHeight + 8 ? anchorRect.bottom + 4 : anchorRect.top - popoverHeight - 4;
 
@@ -163,20 +161,51 @@ export const IdePickerContextMenu: FC<IdePickerContextMenuProps> = ({
       style={{ left, top }}
       onContextMenu={(e) => e.preventDefault()}
     >
-      {editors.map((editor) => (
+      {items.map((item) => (
         <button
-          key={editor.id}
-          title={editor.name}
-          onClick={() => {
-            onSelect(editor.id);
-            onCloseRef.current();
-          }}
+          key={item.id}
+          title={item.name}
+          onClick={() => { onSelect(item.id); onCloseRef.current(); }}
           className="p-1.5 rounded text-slate-400 hover:text-slate-100 hover:bg-slate-700 transition-colors"
         >
-          <EditorIcon editorId={editor.id} className="w-5 h-5" />
+          {renderIcon(item.id)}
         </button>
       ))}
     </div>,
     document.body,
   );
 };
+
+interface IdePickerContextMenuProps {
+  anchorRect: DOMRect;
+  editors: Array<{ id: string; name: string }>;
+  onSelect: (editorId: string) => void;
+  onClose: () => void;
+}
+
+export const IdePickerContextMenu: FC<IdePickerContextMenuProps> = ({ anchorRect, editors, onSelect, onClose }) => (
+  <AppPickerPopover
+    anchorRect={anchorRect}
+    items={editors}
+    onSelect={onSelect}
+    onClose={onClose}
+    renderIcon={(id) => <EditorIcon editorId={id} className="w-5 h-5" />}
+  />
+);
+
+interface TerminalPickerPopoverProps {
+  anchorRect: DOMRect;
+  terminals: Array<{ id: string; name: string }>;
+  onSelect: (terminalId: string) => void;
+  onClose: () => void;
+}
+
+export const TerminalPickerPopover: FC<TerminalPickerPopoverProps> = ({ anchorRect, terminals, onSelect, onClose }) => (
+  <AppPickerPopover
+    anchorRect={anchorRect}
+    items={terminals}
+    onSelect={onSelect}
+    onClose={onClose}
+    renderIcon={(id) => <TerminalAppIcon terminalId={id} className="w-5 h-5" />}
+  />
+);

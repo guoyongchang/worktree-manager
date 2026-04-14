@@ -229,4 +229,20 @@ export const EditorIcon: FC<{ editorId: string; className?: string }> = ({ edito
   return <Code className={className} />;
 };
 
+/** Terminal-app icon: uses system-extracted app icon if available, falls back to TerminalIcon. */
+export const TerminalAppIcon: FC<{ terminalId: string; className?: string }> = ({ terminalId, className = "w-4 h-4" }) => {
+  const sizeMatch = className.match(/w-(\d+\.?\d*)/);
+  const size = sizeMatch ? parseFloat(sizeMatch[1]) * 4 : 16;
+  try {
+    const iconsJson = localStorage.getItem('terminal_icons');
+    if (iconsJson) {
+      const icons = JSON.parse(iconsJson);
+      if (icons[terminalId]) {
+        return <img src={icons[terminalId]} width={size} height={size} alt={terminalId} style={{ flexShrink: 0, borderRadius: 3 }} />;
+      }
+    }
+  } catch { /* ignore */ }
+  return <Terminal className={className} />;
+};
+
 

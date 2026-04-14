@@ -185,6 +185,17 @@ export function useWorkspaceActions(
         localStorage.setItem('tool_paths', JSON.stringify(toolPaths));
         window.dispatchEvent(new Event('editors-detected'));
       }
+      if (tools?.terminals) {
+        const terminalIcons: Record<string, string> = {};
+        const terminalList: Array<{ id: string; name: string }> = [];
+        for (const term of tools.terminals) {
+          if (term.icon) terminalIcons[term.id] = term.icon;
+          terminalList.push({ id: term.id, name: term.name });
+        }
+        localStorage.setItem('terminal_icons', JSON.stringify(terminalIcons));
+        localStorage.setItem('detected_terminals', JSON.stringify(terminalList));
+        window.dispatchEvent(new Event('terminals-detected'));
+      }
     }).catch(() => { /* ignore detect errors */ });
   }, []);
 
