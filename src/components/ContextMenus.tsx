@@ -112,3 +112,50 @@ export const TerminalTabContextMenu: FC<TerminalTabContextMenuProps> = ({
     </div>
   );
 };
+
+interface IdePickerContextMenuProps {
+  x: number;
+  y: number;
+  editors: Array<{ id: string; name: string }>;
+  onSelect: (editorId: string) => void;
+  onClose: () => void;
+}
+
+export const IdePickerContextMenu: FC<IdePickerContextMenuProps> = ({
+  x,
+  y,
+  editors,
+  onSelect,
+  onClose,
+}) => {
+  const { t } = useTranslation();
+  const menuHeight = editors.length * 36 + 40;
+  return (
+    <div className="fixed inset-0 z-50" onClick={onClose}>
+      <div
+        className="absolute bg-slate-800 border border-slate-600 rounded-lg shadow-xl py-1 min-w-[160px]"
+        style={{
+          left: Math.min(x, window.innerWidth - 180),
+          top: Math.min(y, window.innerHeight - menuHeight),
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-3 py-1 text-xs text-slate-500 font-medium uppercase tracking-wider">
+          {t('contextMenu.openInEditorPicker')}
+        </div>
+        {editors.map((editor) => (
+          <button
+            key={editor.id}
+            onClick={() => {
+              onSelect(editor.id);
+              onClose();
+            }}
+            className="w-full px-4 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 flex items-center gap-2"
+          >
+            {editor.name}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
