@@ -1,4 +1,5 @@
-import type { FC } from 'react';
+import { type FC, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { ArchiveIcon } from './Icons';
 import { isTauri } from '@/lib/backend';
@@ -129,37 +130,57 @@ export const IdePickerContextMenu: FC<IdePickerContextMenuProps> = ({
   onClose,
 }) => {
   const { t } = useTranslation();
+  const menuRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   const menuHeight = editors.length * 36 + 40;
-  return (
+
+  useEffect(() => {
+    // Defer listener registration by one frame so the right-click mousedown
+    // that opened the menu doesn't immediately trigger a close.
+    let removeListener: (() => void) | undefined;
+    const timer = setTimeout(() => {
+      const handle = (e: MouseEvent) => {
+        if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+          onCloseRef.current();
+        }
+      };
+      document.addEventListener('mousedown', handle, true);
+      removeListener = () => document.removeEventListener('mousedown', handle, true);
+    }, 0);
+    return () => {
+      clearTimeout(timer);
+      removeListener?.();
+    };
+  }, []);
+
+  return createPortal(
     <div
-      className="fixed inset-0 z-50"
-      onMouseDown={(e) => { if (e.button === 0) onClose(); }}
+      ref={menuRef}
+      className="fixed z-[9999] bg-slate-800 border border-slate-600 rounded-lg shadow-xl py-1 min-w-[160px]"
+      style={{
+        left: Math.min(x, window.innerWidth - 180),
+        top: Math.min(y, window.innerHeight - menuHeight),
+      }}
       onContextMenu={(e) => e.preventDefault()}
     >
-      <div
-        className="absolute bg-slate-800 border border-slate-600 rounded-lg shadow-xl py-1 min-w-[160px]"
-        style={{
-          left: Math.min(x, window.innerWidth - 180),
-          top: Math.min(y, window.innerHeight - menuHeight),
-        }}
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <div className="px-3 py-1 text-xs text-slate-500 font-medium uppercase tracking-wider">
-          {t('contextMenu.openInEditorPicker')}
-        </div>
-        {editors.map((editor) => (
-          <button
-            key={editor.id}
-            onClick={() => {
-              onSelect(editor.id);
-              onClose();
-            }}
-            className="w-full px-4 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 flex items-center gap-2"
-          >
-            {editor.name}
-          </button>
-        ))}
+      <div className="px-3 py-1 text-xs text-slate-500 font-medium uppercase tracking-wider">
+        {t('contextMenu.openInEditorPicker')}
       </div>
-    </div>
+      {editors.map((editor) => (
+        <button
+          key={editor.id}
+          onClick={() => {
+            onSelect(editor.id);
+            onCloseRef.current();
+          }}
+          className="w-full px-4 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 flex items-center gap-2"
+        >
+          {editor.name}
+        </button>
+      ))}
+    </div>,
+    document.body,
   );
 };
