@@ -32,6 +32,20 @@ import {
   EditorIcon,
 } from './Icons';
 import { Badge } from '@/components/ui/badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import Editor from '@monaco-editor/react';
+import {
+  clearLogs,
+  getLogs,
+  getUnreadErrorCount,
+  markAsRead,
+} from '@/lib/operationLog';
+import type { LogEntry } from '@/lib/operationLog';
 import { GitOperations } from './GitOperations';
 import { IdePickerContextMenu } from './ContextMenus';
 import { EDITORS } from '../constants';
@@ -148,6 +162,83 @@ const IdeIconButton: FC<IdeIconButtonProps> = ({
         />
       )}
     </>
+  );
+};
+
+// --- LogsDialog ---
+
+const LogsDialog: FC<{
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  projectPaths: string[];
+  title: string;
+}> = ({ open, onOpenChange, projectPaths, title }) => {
+  const { t } = useTranslation();
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+
+  useEffect(() => {
+    if (open) {
+      const allLogs = projectPaths
+        .flatMap((path) => getLogs(path))
+        .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+      setLogs(allLogs);
+      projectPaths.forEach((path) => markAsRead(path));
+    }
+  }, [open, projectPaths]);
+
+  const content =
+    logs.length === 0
+      ? t('logs.empty')
+      : logs
+          .map((entry) => {
+            const time = entry.timestamp.toLocaleTimeString('en-US', { hour12: false });
+            const level = `[${entry.level.toUpperCase()}]`.padEnd(9);
+            const op = entry.operation.padEnd(12);
+            const line = `[${time}] ${level} ${op} ${entry.message}`;
+            return entry.detail
+              ? `${line}\n${' '.repeat(32)}${entry.detail.replace(/\n/g, `\n${' '.repeat(32)}`)}`
+              : line;
+          })
+          .join('\n');
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-4xl p-0 gap-0">
+        <DialogHeader className="px-4 py-3 border-b border-slate-700/50">
+          <div className="flex items-center justify-between">
+            <DialogTitle className="text-sm font-medium">
+              {title}
+            </DialogTitle>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs text-slate-400 hover:text-red-400"
+              onClick={() => {
+                projectPaths.forEach((path) => clearLogs(path));
+                setLogs([]);
+                onOpenChange(false);
+              }}
+            >
+              {t('logs.clear')}
+            </Button>
+          </div>
+        </DialogHeader>
+        <div style={{ height: '60vh' }}>
+          <Editor
+            value={content}
+            theme="vs-dark"
+            options={{
+              readOnly: true,
+              minimap: { enabled: false },
+              wordWrap: 'on',
+              fontSize: 12,
+              scrollBeyondLastLine: false,
+              lineNumbers: 'off',
+            }}
+          />
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 };
 
@@ -333,6 +424,8 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
   const [exitError, setExitError] = useState<string | null>(null);
   const [removingProject, setRemovingProject] = useState<string | null>(null);
   const [confirmRemoveProject, setConfirmRemoveProject] = useState<string | null>(null);
+  const [showWorktreeLogs, setShowWorktreeLogs] = useState(false);
+  const [showMainLogs, setShowMainLogs] = useState(false);
 
   const handleDeploy = useCallback(async (name: string) => {
     try {
@@ -428,6 +521,35 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
           </div>
           {isTauri() && (
             <div className="flex gap-2 items-center shrink-0 ml-3">
+              {(() => {
+                const count = (mainWorkspace.projects ?? []).reduce(
+                  (acc, p) => acc + getUnreadErrorCount(p.path),
+                  0,
+                );
+                return (
+                  <div className="relative">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 text-xs"
+                      onClick={() => setShowMainLogs(true)}
+                    >
+                      {t('logs.button')}
+                    </Button>
+                    {count > 0 && (
+                      <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center leading-none">
+                        {count > 9 ? '9+' : count}
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
+              <LogsDialog
+                open={showMainLogs}
+                onOpenChange={setShowMainLogs}
+                projectPaths={(mainWorkspace.projects ?? []).map((p) => p.path)}
+                title={t('logs.title', { name: mainWorkspace.name })}
+              />
               {onAddProject && (
                 <Button onClick={onAddProject} variant="default">
                   <PlusIcon className="w-4 h-4 mr-1.5" />
@@ -781,6 +903,35 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
               <>
                 {isTauri() && (
                   <>
+                    {(() => {
+                      const count = (selectedWorktree.projects ?? []).reduce(
+                        (acc, p) => acc + getUnreadErrorCount(p.path),
+                        0,
+                      );
+                      return (
+                        <div className="relative">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 text-xs"
+                            onClick={() => setShowWorktreeLogs(true)}
+                          >
+                            {t('logs.button')}
+                          </Button>
+                          {count > 0 && (
+                            <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center leading-none">
+                              {count > 9 ? '9+' : count}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })()}
+                    <LogsDialog
+                      open={showWorktreeLogs}
+                      onOpenChange={setShowWorktreeLogs}
+                      projectPaths={(selectedWorktree.projects ?? []).map((p) => p.path)}
+                      title={t('logs.title', { name: selectedWorktree.display_name || selectedWorktree.name })}
+                    />
                     <div className="inline-flex rounded-md">
                       <Button
                         className="rounded-r-none border-r border-blue-700/50 px-2.5"
