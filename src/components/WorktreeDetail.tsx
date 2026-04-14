@@ -141,6 +141,7 @@ const IdeIconButton: FC<IdeIconButtonProps> = ({
         onClick={() => onOpen(projectPath, defaultEditorId)}
         onContextMenu={(e) => {
           e.preventDefault();
+          e.stopPropagation();
           setIdeMenu({ x: e.clientX, y: e.clientY });
         }}
         title={t('detail.openInEditorLabel', { editor: currentEditor?.name ?? defaultEditorId })}

@@ -131,14 +131,18 @@ export const IdePickerContextMenu: FC<IdePickerContextMenuProps> = ({
   const { t } = useTranslation();
   const menuHeight = editors.length * 36 + 40;
   return (
-    <div className="fixed inset-0 z-50" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50"
+      onMouseDown={(e) => { if (e.button === 0) onClose(); }}
+      onContextMenu={(e) => e.preventDefault()}
+    >
       <div
         className="absolute bg-slate-800 border border-slate-600 rounded-lg shadow-xl py-1 min-w-[160px]"
         style={{
           left: Math.min(x, window.innerWidth - 180),
           top: Math.min(y, window.innerHeight - menuHeight),
         }}
-        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="px-3 py-1 text-xs text-slate-500 font-medium uppercase tracking-wider">
           {t('contextMenu.openInEditorPicker')}
