@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState, type FC, type MutableRefObject, type TouchEvent } from 'react';
+import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { pinyin } from 'pinyin-pro';
 
 import { openLink } from '@/lib/backend';
 import { Button } from '@/components/ui/button';
@@ -44,6 +46,62 @@ import {
 } from '../Icons';
 import type { WorktreeSidebarProps } from './types';
 import { ShareBar } from './ShareBar';
+
+// --- Search utilities ---
+
+type MatchResult =
+  | { matched: false }
+  | { matched: true; type: 'substring'; index: number; length: number }
+  | { matched: true; type: 'pinyin' };
+
+export function matchWorktreeName(name: string, query: string): MatchResult {
+  if (!query) return { matched: false };
+  const lowerName = name.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+
+  // 1. English substring
+  const idx = lowerName.indexOf(lowerQuery);
+  if (idx !== -1) {
+    return { matched: true, type: 'substring', index: idx, length: lowerQuery.length };
+  }
+
+  // 2. Full pinyin
+  try {
+    const fullPy = pinyin(name, { toneType: 'none', type: 'array' }).join('').toLowerCase();
+    if (fullPy.includes(lowerQuery)) {
+      return { matched: true, type: 'pinyin' };
+    }
+    // 3. Initials
+    const initials = pinyin(name, { pattern: 'initial', type: 'array' }).join('').toLowerCase();
+    if (initials.includes(lowerQuery)) {
+      return { matched: true, type: 'pinyin' };
+    }
+  } catch {
+    // pinyin conversion failed for non-Chinese text, skip
+  }
+
+  return { matched: false };
+}
+
+export function highlightWorktreeName(name: string, result: MatchResult): ReactNode {
+  if (!result.matched) return name;
+  if (result.type === 'pinyin') {
+    return (
+      <span className="text-blue-300 bg-blue-900/40 rounded-sm px-px">{name}</span>
+    );
+  }
+  // substring
+  const { index, length } = result;
+  return (
+    <>
+      {name.slice(0, index)}
+      <span className="text-blue-300 bg-blue-900/40 rounded-sm px-px">
+        {name.slice(index, index + length)}
+      </span>
+      {name.slice(index + length)}
+    </>
+  );
+}
 
 interface ExpandedSidebarProps extends Omit<WorktreeSidebarProps, 'worktrees'> {
   activeWorktrees: WorktreeListItem[];
@@ -523,6 +581,12 @@ const WorktreeList: FC<{
 }) => {
   const { t } = useTranslation();
   const [activeSearchQuery, setActiveSearchQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(activeSearchQuery.trim()), 100);
+    return () => clearTimeout(timer);
+  }, [activeSearchQuery]);
 
   // Sort active worktrees by display_name (or name) alphabetically
   const sortedActiveWorktrees = useMemo(() => {
@@ -533,17 +597,13 @@ const WorktreeList: FC<{
     });
   }, [activeWorktrees]);
 
-  const filteredActiveWorktrees = useMemo(() => {
-    const query = activeSearchQuery.trim().toLocaleLowerCase();
-    if (!query) return sortedActiveWorktrees;
-
-    return sortedActiveWorktrees.filter((worktree) => {
-      const displayName = (worktree.display_name || '').toLocaleLowerCase();
-      const rawName = worktree.name.toLocaleLowerCase();
-
-      return displayName.includes(query) || rawName.includes(query);
+  const worktreesWithMatch = useMemo(() => {
+    return sortedActiveWorktrees.map((wt) => {
+      const displayName = wt.display_name || wt.name;
+      const result = matchWorktreeName(displayName, debouncedQuery);
+      return { wt, matchResult: result };
     });
-  }, [activeSearchQuery, sortedActiveWorktrees]);
+  }, [debouncedQuery, sortedActiveWorktrees]);
 
   // Sort archived worktrees by display_name (or name) alphabetically
   const sortedArchivedWorktrees = useMemo(() => {
@@ -557,7 +617,7 @@ const WorktreeList: FC<{
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="px-4 py-2">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between">
           <span className="shrink-0 text-[11px] font-medium text-slate-500 uppercase tracking-wider">
             {t('sidebar.active')} ({activeWorktrees.length})
           </span>
@@ -566,7 +626,7 @@ const WorktreeList: FC<{
             onChange={(event) => setActiveSearchQuery(event.target.value)}
             placeholder={t('sidebar.searchWorktrees')}
             aria-label={t('sidebar.searchWorktrees')}
-            className="h-7 min-w-0 max-w-[180px] text-xs"
+            className="h-7 w-[160px] text-xs"
           />
         </div>
       </div>
@@ -578,15 +638,8 @@ const WorktreeList: FC<{
           <p className="text-slate-500 text-sm">{t('sidebar.noWorktrees')}</p>
           <p className="text-slate-600 text-xs mt-1">{t('sidebar.noWorktreesHint')}</p>
         </div>
-      ) : filteredActiveWorktrees.length === 0 ? (
-        <div className="px-4 py-8 text-center">
-          <div className="flex justify-center mb-3">
-            <FolderIcon className="w-10 h-10 text-slate-600" />
-          </div>
-          <p className="text-slate-500 text-sm">{t('sidebar.noSearchResults')}</p>
-        </div>
       ) : (
-        filteredActiveWorktrees.map((worktree) => {
+        worktreesWithMatch.map(({ wt: worktree, matchResult }) => {
           const lockedBy = lockedWorktrees[worktree.name];
           const isLockedByOther = lockedBy && lockedBy !== currentWindowLabel;
           const isDeployed = worktree.name === occupation?.worktree_name;
@@ -617,7 +670,7 @@ const WorktreeList: FC<{
                 <TooltipProvider delayDuration={300}>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <span className="font-medium text-sm line-clamp-2 break-words flex-1">{worktree.display_name || worktree.name}</span>
+                      <span className="font-medium text-sm line-clamp-2 break-words flex-1">{highlightWorktreeName(worktree.display_name || worktree.name, matchResult)}</span>
                     </TooltipTrigger>
                     <TooltipContent side="right">{worktree.display_name ? `${worktree.display_name} (${worktree.name})` : worktree.name}</TooltipContent>
                   </Tooltip>

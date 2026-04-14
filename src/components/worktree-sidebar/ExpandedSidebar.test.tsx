@@ -1,7 +1,7 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { ExpandedSidebar } from './ExpandedSidebar';
+import { ExpandedSidebar, highlightWorktreeName, matchWorktreeName } from './ExpandedSidebar';
 import type { MainWorkspaceStatus, WorktreeListItem, WorkspaceRef } from '../../types';
 
 vi.mock('react-i18next', () => ({
@@ -112,7 +112,8 @@ function renderSidebar(activeWorktrees: WorktreeListItem[]) {
 }
 
 describe('ExpandedSidebar worktree search', () => {
-  it('filters active worktrees by fuzzy display_name and name matches', () => {
+  it('shows all active worktrees when there is no query (highlight-instead-of-filter)', async () => {
+    vi.useFakeTimers();
     renderSidebar([
       makeWorktree({
         name: 'feature/alpha-shell',
@@ -125,18 +126,14 @@ describe('ExpandedSidebar worktree search', () => {
       }),
     ]);
 
-    const searchInput = screen.getByPlaceholderText('sidebar.searchWorktrees');
-
-    fireEvent.change(searchInput, { target: { value: 'shell' } });
+    // Both items are visible without any search query
     expect(screen.getByText('Alpha Shell')).toBeInTheDocument();
-    expect(screen.queryByText('Gamma Workspace')).not.toBeInTheDocument();
-
-    fireEvent.change(searchInput, { target: { value: 'fallback' } });
     expect(screen.getByText('Gamma Workspace')).toBeInTheDocument();
-    expect(screen.queryByText('Alpha Shell')).not.toBeInTheDocument();
+    vi.useRealTimers();
   });
 
-  it('shows a dedicated empty state when the search has no matches', () => {
+  it('shows all worktrees even when query does not match (highlight-instead-of-filter)', async () => {
+    vi.useFakeTimers();
     renderSidebar([
       makeWorktree({
         name: 'feature/alpha-shell',
@@ -144,12 +141,50 @@ describe('ExpandedSidebar worktree search', () => {
       }),
     ]);
 
-    fireEvent.change(screen.getByPlaceholderText('sidebar.searchWorktrees'), {
-      target: { value: 'missing' },
+    const searchInput = screen.getByPlaceholderText('sidebar.searchWorktrees');
+    fireEvent.change(searchInput, { target: { value: 'missing' } });
+
+    // Advance debounce timer
+    await act(async () => {
+      vi.advanceTimersByTime(150);
     });
 
-    expect(screen.getByText('sidebar.noSearchResults')).toBeInTheDocument();
-    expect(screen.queryByText('Alpha Shell')).not.toBeInTheDocument();
-    expect(screen.queryByText('sidebar.noWorktrees')).not.toBeInTheDocument();
+    // Item still visible — no filtering, only highlighting
+    expect(screen.getByText('Alpha Shell')).toBeInTheDocument();
+    // No "noSearchResults" empty state
+    expect(screen.queryByText('sidebar.noSearchResults')).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it('shows noWorktrees empty state when activeWorktrees is empty', () => {
+    renderSidebar([]);
+    expect(screen.getByText('sidebar.noWorktrees')).toBeInTheDocument();
+  });
+});
+
+describe('matchWorktreeName', () => {
+  it('returns matched=false for empty query', () => {
+    expect(matchWorktreeName('feature-foo', '')).toEqual({ matched: false });
+  });
+
+  it('matches English substring', () => {
+    const result = matchWorktreeName('feature-foo', 'foo');
+    expect(result).toMatchObject({ matched: true, type: 'substring', index: 8, length: 3 });
+  });
+
+  it('matches case-insensitively', () => {
+    const result = matchWorktreeName('FeatureFoo', 'feature');
+    expect(result).toMatchObject({ matched: true, type: 'substring' });
+  });
+
+  it('returns matched=false when no match', () => {
+    expect(matchWorktreeName('feature-foo', 'xyz')).toEqual({ matched: false });
+  });
+});
+
+describe('highlightWorktreeName', () => {
+  it('returns plain string when not matched', () => {
+    const node = highlightWorktreeName('feature-foo', { matched: false });
+    expect(node).toBe('feature-foo');
   });
 });
