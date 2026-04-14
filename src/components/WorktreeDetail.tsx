@@ -315,22 +315,23 @@ const LogsDialog: FC<{
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl p-0 gap-0">
-        <DialogHeader className="px-4 py-3 border-b border-slate-700/50">
+        <DialogHeader className="px-4 py-3 pr-12 border-b border-slate-700/50">
           <div className="flex items-center justify-between">
             <DialogTitle className="text-sm font-medium">
               {title}
             </DialogTitle>
             <Button
               variant="ghost"
-              size="sm"
-              className="h-7 text-xs text-slate-400 hover:text-red-400"
+              size="icon"
+              className="h-7 w-7 text-slate-300 hover:text-red-400 hover:bg-transparent"
+              title={t('logs.clear')}
               onClick={() => {
                 projectPaths.forEach((path) => clearLogs(path));
                 setLogs([]);
                 onOpenChange(false);
               }}
             >
-              {t('logs.clear')}
+              <TrashIcon className="w-3.5 h-3.5" />
             </Button>
           </div>
         </DialogHeader>
