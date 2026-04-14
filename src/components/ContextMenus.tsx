@@ -131,11 +131,13 @@ export const IdePickerContextMenu: FC<IdePickerContextMenuProps> = ({
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
-  // Each icon ~32px + 4px gap, plus 8px total padding
-  const popoverWidth = editors.length * 36 + 8;
+  // 3 cols × 32px icon + 2 gaps × 4px + 8px padding = ~112px wide
+  const popoverWidth = 116;
+  const rows = Math.ceil(editors.length / 3);
+  const popoverHeight = rows * 36 + 8;
   const left = Math.min(anchorRect.left, window.innerWidth - popoverWidth - 8);
   const spaceBelow = window.innerHeight - anchorRect.bottom;
-  const top = spaceBelow >= 52 ? anchorRect.bottom + 4 : anchorRect.top - 48;
+  const top = spaceBelow >= popoverHeight + 8 ? anchorRect.bottom + 4 : anchorRect.top - popoverHeight - 4;
 
   useEffect(() => {
     let removeListener: (() => void) | undefined;
@@ -157,7 +159,7 @@ export const IdePickerContextMenu: FC<IdePickerContextMenuProps> = ({
   return createPortal(
     <div
       ref={menuRef}
-      className="fixed z-[9999] flex gap-1 p-1 bg-slate-800 border border-slate-700 rounded-lg shadow-xl"
+      className="fixed z-[9999] grid grid-cols-3 gap-1 p-1 bg-slate-800 border border-slate-700 rounded-lg shadow-xl"
       style={{ left, top }}
       onContextMenu={(e) => e.preventDefault()}
     >
