@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type FC, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo, type FC, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import {
@@ -19,7 +19,7 @@ import {
   ArchiveIcon,
   WarningIcon,
   GitBranchIcon,
-  TerminalIcon,
+  TerminalAppIcon,
   ChevronDownIcon,
   RefreshIcon,
   PlusIcon,
@@ -187,6 +187,10 @@ const TerminalIconButton: FC<TerminalIconButtonProps> = ({
   const { t } = useTranslation();
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
+  const defaultTerminalId = useMemo(() => {
+    try { return (JSON.parse(localStorage.getItem('tool_paths') || '{}') as Record<string, string>).terminal; }
+    catch { return undefined; }
+  }, []);
 
   return (
     <>
@@ -208,13 +212,63 @@ const TerminalIconButton: FC<TerminalIconButtonProps> = ({
         aria-label={t('detail.openExternalTerminalProject', { name: projectName })}
         className="h-7 w-7"
       >
-        <TerminalIcon className="w-4.5 h-4.5" />
+        <TerminalAppIcon terminalId={defaultTerminalId ?? ''} className="w-4.5 h-4.5" />
       </Button>
       {anchorRect && (
         <TerminalPickerPopover
           anchorRect={anchorRect}
           terminals={terminals}
           onSelect={(terminalId) => onOpen(projectPath, terminalId)}
+          onClose={() => setAnchorRect(null)}
+        />
+      )}
+    </>
+  );
+};
+
+// --- TerminalSplitButton (top-level action bar) ---
+
+const TerminalSplitButton: FC<{
+  path: string;
+  terminals: Array<{ id: string; name: string }>;
+  onOpen: (path: string, terminalId?: string) => void;
+}> = ({ path, terminals, onOpen }) => {
+  const { t } = useTranslation();
+  const defaultTerminalId = useMemo(() => {
+    try { return (JSON.parse(localStorage.getItem('tool_paths') || '{}') as Record<string, string>).terminal; }
+    catch { return undefined; }
+  }, []);
+  const chevronRef = useRef<HTMLButtonElement>(null);
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
+
+  return (
+    <>
+      <div className="flex items-center">
+        <Button
+          variant="secondary"
+          className={`h-8 px-2.5 gap-1.5${terminals.length > 0 ? ' rounded-r-none border-r-0' : ''}`}
+          onClick={() => onOpen(path)}
+          title={t('detail.externalTerminal')}
+        >
+          <TerminalAppIcon terminalId={defaultTerminalId ?? ''} className="w-4 h-4" />
+        </Button>
+        {terminals.length > 0 && (
+          <Button
+            ref={chevronRef}
+            variant="secondary"
+            className="h-8 px-1.5 rounded-l-none"
+            onClick={() => setAnchorRect(chevronRef.current?.getBoundingClientRect() ?? null)}
+            title={t('detail.selectTerminal', 'Select terminal')}
+          >
+            <ChevronDownIcon className="w-3 h-3" />
+          </Button>
+        )}
+      </div>
+      {anchorRect && (
+        <TerminalPickerPopover
+          anchorRect={anchorRect}
+          terminals={terminals}
+          onSelect={(terminalId) => onOpen(path, terminalId)}
           onClose={() => setAnchorRect(null)}
         />
       )}
@@ -682,7 +736,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
-              <Button variant="secondary" onClick={() => onOpenInTerminal(mainWorkspace.path)}>{t('detail.externalTerminal')}</Button>
+              <TerminalSplitButton path={mainWorkspace.path} terminals={detectedTerminals} onOpen={onOpenInTerminal} />
             </div>
           )}
         </div>
@@ -800,6 +854,14 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                               editors={detectedEditors}
                               defaultEditorId={getProjectEditor(proj.name)}
                               onOpen={(path, editorId) => onOpenInEditor(path, editorId as any)}
+                            />
+                          )}
+                          {isTauri() && (
+                            <TerminalIconButton
+                              projectPath={projectPath}
+                              projectName={proj.name}
+                              terminals={detectedTerminals}
+                              onOpen={(path, terminalId) => onOpenInTerminal(path, terminalId)}
                             />
                           )}
                           {onRemoveProject && (
@@ -1054,7 +1116,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
-                    <Button variant="secondary" onClick={() => onOpenInTerminal(selectedWorktree.path)}>{t('detail.externalTerminal')}</Button>
+                    <TerminalSplitButton path={selectedWorktree.path} terminals={detectedTerminals} onOpen={onOpenInTerminal} />
                     {onDeployToMain && !occupation && (
                       <Button
                         variant="secondary"
