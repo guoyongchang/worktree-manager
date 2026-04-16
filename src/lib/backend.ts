@@ -583,3 +583,31 @@ export async function getChangedFiles(path: string): Promise<import('../types').
 export async function getFileDiff(path: string, filePath: string): Promise<import('../types').FileDiff> {
   return callBackend<import('../types').FileDiff>('get_file_diff', { path, filePath });
 }
+
+// ── Memory Queue API ──────────────────────────
+
+import type { QueueItemSummary, MemoryQueueItem, MemorySettings } from '../types';
+
+export async function getMemoryQueue(): Promise<QueueItemSummary[]> {
+  return callBackend<QueueItemSummary[]>("memory_queue_list");
+}
+
+export async function getMemoryQueueItem(id: string): Promise<MemoryQueueItem> {
+  return callBackend<MemoryQueueItem>("memory_queue_get", { id });
+}
+
+export async function deleteMemoryQueueItem(id: string): Promise<void> {
+  return callBackend<void>("memory_queue_delete", { id });
+}
+
+export async function runMemoryArchive(id: string): Promise<void> {
+  return callBackend<void>("memory_queue_run", { id });
+}
+
+export async function getMemorySettings(): Promise<MemorySettings> {
+  return callBackend<MemorySettings>("get_memory_settings");
+}
+
+export async function saveMemorySettings(settings: MemorySettings): Promise<void> {
+  return callBackend<void>("save_memory_settings", settings as unknown as Record<string, unknown>);
+}
