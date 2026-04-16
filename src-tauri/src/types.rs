@@ -151,6 +151,8 @@ pub struct GlobalConfig {
     pub dashscope_base_url: Option<String>,
     #[serde(default = "default_true")]
     pub voice_refine_enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory: Option<crate::memory::types::MemorySettings>,
 }
 
 fn default_true() -> bool {
@@ -173,6 +175,7 @@ impl Default for GlobalConfig {
             dashscope_api_key: None,
             dashscope_base_url: None,
             voice_refine_enabled: true,
+            memory: None,
         }
     }
 }

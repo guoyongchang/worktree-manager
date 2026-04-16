@@ -89,3 +89,11 @@ pub(crate) static GLOBAL_CONFIG_CACHE: Lazy<Mutex<Option<GlobalConfig>>> =
     Lazy::new(|| Mutex::new(None));
 pub(crate) static WORKSPACE_CONFIG_CACHE: Lazy<Mutex<Option<(String, WorkspaceConfig)>>> =
     Lazy::new(|| Mutex::new(None));
+
+// ==================== Memory Queue ====================
+
+pub static MEMORY_QUEUE: Lazy<Mutex<Vec<crate::memory::types::MemoryQueueItem>>> =
+    Lazy::new(|| Mutex::new(Vec::new()));
+
+pub static MEMORY_QUEUE_BROADCAST: Lazy<tokio::sync::broadcast::Sender<String>> =
+    Lazy::new(|| tokio::sync::broadcast::channel(64).0);

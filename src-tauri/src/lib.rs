@@ -2,6 +2,7 @@ mod commands;
 pub mod config;
 mod git_ops;
 pub mod http_server;
+pub mod memory;
 mod pty_manager;
 pub mod state;
 pub(crate) mod tls;

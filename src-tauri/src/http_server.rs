@@ -1113,6 +1113,129 @@ async fn h_open_devtools() -> Response {
 }
 
 // ---------------------------------------------------------------------------
+// Memory Queue Handlers
+// ---------------------------------------------------------------------------
+
+pub async fn h_memory_queue_submit(
+    axum::extract::Json(payload): axum::extract::Json<crate::memory::types::QueueSubmitPayload>,
+) -> axum::response::Response {
+    let vault_path = payload.worktree.vault_path.clone().unwrap_or_default();
+    match crate::memory::queue::submit(payload, &vault_path) {
+        Ok(id) => {
+            let body = serde_json::json!({ "id": id });
+            axum::response::Response::builder()
+                .status(202)
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(serde_json::to_string(&body).unwrap()))
+                .unwrap()
+        }
+        Err(e) => axum::response::Response::builder()
+            .status(500)
+            .body(axum::body::Body::from(e))
+            .unwrap(),
+    }
+}
+
+pub async fn h_memory_queue_list() -> axum::response::Response {
+    result_json(crate::memory::queue::list_summaries())
+}
+
+pub async fn h_memory_queue_get(
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> axum::response::Response {
+    match crate::memory::queue::get_item(&id) {
+        Ok(Some(item)) => result_json(Ok(item)),
+        Ok(None) => axum::response::Response::builder()
+            .status(404)
+            .body(axum::body::Body::from("Not found"))
+            .unwrap(),
+        Err(e) => result_json::<()>(Err(e)),
+    }
+}
+
+pub async fn h_memory_queue_delete(
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> axum::response::Response {
+    match crate::memory::queue::get_item(&id) {
+        Ok(Some(item)) => {
+            let vault_path = item.worktree.vault_path.unwrap_or_default();
+            result_ok(crate::memory::queue::delete_item(&id, &vault_path))
+        }
+        Ok(None) => axum::response::Response::builder()
+            .status(404)
+            .body(axum::body::Body::from("Not found"))
+            .unwrap(),
+        Err(e) => result_ok(Err(e)),
+    }
+}
+
+pub async fn h_memory_queue_run(
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> axum::response::Response {
+    tokio::spawn(async move {
+        if let Err(e) = crate::memory::executor::run_archive(&id).await {
+            log::error!("[Memory] Archive failed for {}: {}", id, e);
+        }
+    });
+
+    let body = serde_json::json!({ "status": "started" });
+    axum::response::Response::builder()
+        .status(202)
+        .header("content-type", "application/json")
+        .body(axum::body::Body::from(serde_json::to_string(&body).unwrap()))
+        .unwrap()
+}
+
+pub async fn h_memory_queue_result(
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> axum::response::Response {
+    match crate::memory::queue::get_item(&id) {
+        Ok(Some(item)) => result_json(Ok(item.result)),
+        Ok(None) => axum::response::Response::builder()
+            .status(404)
+            .body(axum::body::Body::from("Not found"))
+            .unwrap(),
+        Err(e) => result_json::<()>(Err(e)),
+    }
+}
+
+// Body-based wrappers for callBackend compatibility
+pub async fn h_memory_queue_get_by_body(
+    axum::extract::Json(body): axum::extract::Json<serde_json::Value>,
+) -> axum::response::Response {
+    let id = body["id"].as_str().unwrap_or_default().to_string();
+    h_memory_queue_get(axum::extract::Path(id)).await
+}
+
+pub async fn h_memory_queue_delete_by_body(
+    axum::extract::Json(body): axum::extract::Json<serde_json::Value>,
+) -> axum::response::Response {
+    let id = body["id"].as_str().unwrap_or_default().to_string();
+    h_memory_queue_delete(axum::extract::Path(id)).await
+}
+
+pub async fn h_memory_queue_run_by_body(
+    axum::extract::Json(body): axum::extract::Json<serde_json::Value>,
+) -> axum::response::Response {
+    let id = body["id"].as_str().unwrap_or_default().to_string();
+    h_memory_queue_run(axum::extract::Path(id)).await
+}
+
+pub async fn h_get_memory_settings() -> axum::response::Response {
+    let config = crate::config::load_global_config();
+    let settings = config.memory.unwrap_or_default();
+    result_json(Ok(settings))
+}
+
+pub async fn h_save_memory_settings(
+    axum::extract::Json(settings): axum::extract::Json<crate::memory::types::MemorySettings>,
+) -> axum::response::Response {
+    let mut config = crate::config::load_global_config();
+    config.memory = Some(settings);
+    result_ok(crate::config::save_global_config_internal(&config))
+}
+
+// ---------------------------------------------------------------------------
 // WebSocket
 // ---------------------------------------------------------------------------
 
