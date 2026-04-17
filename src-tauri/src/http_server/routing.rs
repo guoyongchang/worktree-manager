@@ -42,7 +42,7 @@ pub(super) fn build_cors_layer() -> CorsLayer {
         .allow_origin(tower_http::cors::AllowOrigin::predicate(
             |origin: &HeaderValue, _| origin.to_str().is_ok_and(is_allowed_origin),
         ))
-        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
         .allow_headers([
             header::CONTENT_TYPE,
             header::HeaderName::from_static("x-session-id"),

@@ -61,11 +61,11 @@ export function StatusBar({
                     </div>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
-                    {item.status === "pending" && (
+                    {(item.status === "pending" || item.status === "failed") && (
                       <button
                         onClick={() => onRunArchive(item.id)}
                         className="p-1 hover:bg-accent rounded"
-                        title="Run archive"
+                        title={item.status === "failed" ? "Retry archive" : "Run archive"}
                       >
                         <Play className="w-3 h-3" />
                       </button>
