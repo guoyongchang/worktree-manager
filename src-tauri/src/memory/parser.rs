@@ -19,8 +19,8 @@ pub fn parse_archive_output(stdout: &str) -> ArchiveResult {
     ArchiveResult {
         files_created: vec![],
         files_updated: vec![],
-        summary: if stdout.len() > 500 {
-            format!("{}...", &stdout[..500])
+        summary: if stdout.chars().count() > 500 {
+            format!("{}...", stdout.chars().take(500).collect::<String>())
         } else {
             stdout.to_string()
         },

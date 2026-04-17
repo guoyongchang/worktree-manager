@@ -35,9 +35,11 @@ pub async fn run_archive(id: &str) -> Result<(), String> {
     std::fs::write(&prompt_path, &full_prompt)
         .map_err(|e| format!("Failed to write prompt file: {}", e))?;
 
+    let workspace_root = prompt::find_workspace_root(&item.worktree.cwd);
+
     let result = match settings.agent.cli {
-        AgentCli::Claude => run_claude(&settings.agent, &prompt_path).await,
-        AgentCli::Codex => run_codex(&settings.agent, &prompt_path).await,
+        AgentCli::Claude => run_claude(&settings.agent, &prompt_path, &workspace_root).await,
+        AgentCli::Codex => run_codex(&settings.agent, &prompt_path, &workspace_root).await,
     };
 
     let _ = std::fs::remove_file(&prompt_path);
@@ -45,12 +47,9 @@ pub async fn run_archive(id: &str) -> Result<(), String> {
     match result {
         Ok(stdout) => {
             let archive_result = parser::parse_archive_output(&stdout);
-            let status = if archive_result.error.is_some() {
-                QueueStatus::Failed
-            } else {
-                QueueStatus::Completed
-            };
-            queue::update_status(id, status, Some(archive_result), &vault_path)?;
+            // CLI succeeded — always mark as Completed
+            // The archive_result.error field indicates missing structured output, not failure
+            queue::update_status(id, QueueStatus::Completed, Some(archive_result), &vault_path)?;
         }
         Err(e) => {
             let archive_result = ArchiveResult {
@@ -67,7 +66,7 @@ pub async fn run_archive(id: &str) -> Result<(), String> {
     Ok(())
 }
 
-async fn run_claude(config: &AgentConfig, prompt_path: &std::path::Path) -> Result<String, String> {
+async fn run_claude(config: &AgentConfig, prompt_path: &std::path::Path, workspace_root: &str) -> Result<String, String> {
     let mut cmd = Command::new("claude");
     cmd.arg("--print");
     cmd.arg("--dangerously-skip-permissions");
@@ -89,13 +88,17 @@ async fn run_claude(config: &AgentConfig, prompt_path: &std::path::Path) -> Resu
         cmd.arg(arg);
     }
 
+    cmd.current_dir(workspace_root);
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
-    let output = cmd
-        .output()
-        .await
-        .map_err(|e| format!("Failed to spawn claude: {}", e))?;
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(300),
+        cmd.output(),
+    )
+    .await
+    .map_err(|_| "Agent CLI timed out after 5 minutes".to_string())?
+    .map_err(|e| format!("Failed to spawn claude: {}", e))?;
 
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -105,7 +108,7 @@ async fn run_claude(config: &AgentConfig, prompt_path: &std::path::Path) -> Resu
     }
 }
 
-async fn run_codex(config: &AgentConfig, prompt_path: &std::path::Path) -> Result<String, String> {
+async fn run_codex(config: &AgentConfig, prompt_path: &std::path::Path, workspace_root: &str) -> Result<String, String> {
     let prompt_content = std::fs::read_to_string(prompt_path)
         .map_err(|e| format!("Failed to read prompt file: {}", e))?;
 
@@ -128,13 +131,17 @@ async fn run_codex(config: &AgentConfig, prompt_path: &std::path::Path) -> Resul
         cmd.arg(arg);
     }
 
+    cmd.current_dir(workspace_root);
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
-    let output = cmd
-        .output()
-        .await
-        .map_err(|e| format!("Failed to spawn codex: {}", e))?;
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(300),
+        cmd.output(),
+    )
+    .await
+    .map_err(|_| "Agent CLI timed out after 5 minutes".to_string())?
+    .map_err(|e| format!("Failed to spawn codex: {}", e))?;
 
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())

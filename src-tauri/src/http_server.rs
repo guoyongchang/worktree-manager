@@ -1172,9 +1172,46 @@ pub async fn h_memory_queue_delete(
 pub async fn h_memory_queue_run(
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> axum::response::Response {
+    // Validate item exists and is in a runnable state
+    match crate::memory::queue::get_item(&id) {
+        Ok(Some(item)) => {
+            if item.status != crate::memory::types::QueueStatus::Pending
+                && item.status != crate::memory::types::QueueStatus::Failed
+            {
+                return axum::response::Response::builder()
+                    .status(409)
+                    .body(axum::body::Body::from(format!(
+                        "Item is {:?}, not runnable",
+                        item.status
+                    )))
+                    .unwrap();
+            }
+            // Reset to Pending if Failed (for retry)
+            if item.status == crate::memory::types::QueueStatus::Failed {
+                let vault_path = item.worktree.vault_path.clone().unwrap_or_default();
+                let _ = crate::memory::queue::update_status(
+                    &id,
+                    crate::memory::types::QueueStatus::Pending,
+                    None,
+                    &vault_path,
+                );
+            }
+        }
+        Ok(None) => {
+            return axum::response::Response::builder()
+                .status(404)
+                .body(axum::body::Body::from("Not found"))
+                .unwrap();
+        }
+        Err(e) => {
+            return result_ok(Err(e));
+        }
+    }
+
+    let id_clone = id.clone();
     tokio::spawn(async move {
-        if let Err(e) = crate::memory::executor::run_archive(&id).await {
-            log::error!("[Memory] Archive failed for {}: {}", id, e);
+        if let Err(e) = crate::memory::executor::run_archive(&id_clone).await {
+            log::error!("[Memory] Archive failed for {}: {}", id_clone, e);
         }
     });
 

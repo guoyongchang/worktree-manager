@@ -53,7 +53,7 @@ fn resolve_template(item: &MemoryQueueItem, settings: &MemorySettings) -> String
     DEFAULT_TEMPLATE.to_string()
 }
 
-fn find_workspace_root(cwd: &str) -> String {
+pub fn find_workspace_root(cwd: &str) -> String {
     let mut current = Path::new(cwd);
     while let Some(parent) = current.parent() {
         if parent.join(".worktree-manager").exists()

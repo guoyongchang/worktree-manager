@@ -9,6 +9,9 @@ fn inbox_dir(vault_path: &str) -> PathBuf {
 }
 
 fn persist_item(vault_path: &str, item: &MemoryQueueItem) -> Result<(), String> {
+    if vault_path.is_empty() {
+        return Ok(()); // Skip persistence if no vault path
+    }
     let dir = inbox_dir(vault_path);
     fs::create_dir_all(&dir).map_err(|e| format!("Failed to create inbox dir: {}", e))?;
     let path = dir.join(format!("{}.json", item.id));
@@ -19,6 +22,9 @@ fn persist_item(vault_path: &str, item: &MemoryQueueItem) -> Result<(), String> 
 }
 
 fn remove_persisted(vault_path: &str, id: &str) {
+    if vault_path.is_empty() {
+        return;
+    }
     let path = inbox_dir(vault_path).join(format!("{}.json", id));
     let _ = fs::remove_file(path);
 }
@@ -50,9 +56,21 @@ pub fn submit(payload: QueueSubmitPayload, vault_path: &str) -> Result<String, S
     let mut queue = MEMORY_QUEUE.lock().map_err(|e| e.to_string())?;
 
     // Dedup: replace existing pending item from same session
+    // Collect IDs of items being replaced
+    let removed_ids: Vec<String> = queue
+        .iter()
+        .filter(|item| item.session_id == payload.session_id && item.status == QueueStatus::Pending)
+        .map(|item| item.id.clone())
+        .collect();
+
     queue.retain(|item| {
         !(item.session_id == payload.session_id && item.status == QueueStatus::Pending)
     });
+
+    // Clean up disk files for replaced items
+    for old_id in &removed_ids {
+        remove_persisted(vault_path, old_id);
+    }
 
     let id = Uuid::new_v4().to_string();
     let item = MemoryQueueItem {
