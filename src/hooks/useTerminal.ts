@@ -5,6 +5,7 @@ import { TERMINAL, clampTerminalHeight } from '../constants';
 import { callBackend, closePtySessionsByPath, isTauri, broadcastTerminalState as broadcastTerminalStateBackend, getTerminalState } from '../lib/backend';
 import { getWebSocketManager } from '../lib/websocket';
 import { listen } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 
 export interface UseTerminalReturn {
   terminalVisible: boolean;
@@ -27,16 +28,17 @@ export interface UseTerminalReturn {
   clientId: string;
 }
 
-/** Close a single PTY session by path */
-function closePtySession(path: string): void {
-  const sessionId = `pty-${path.replace(/[/#]/g, '-')}`;
+/** Close a single PTY session by path (uses windowId to match Terminal.tsx sessionId format) */
+function closePtySession(windowId: string, path: string): void {
+  const sessionId = `pty-${windowId}-${path.replace(/[/#]/g, '-')}`;
   callBackend('pty_close', { sessionId }).catch(() => { });
 }
 
 export function useTerminal(
   selectedWorktree: WorktreeListItem | null,
   mainWorkspace: MainWorkspaceStatus | null,
-  workspacePathParam?: string
+  workspacePathParam?: string,
+  windowId?: string
 ): UseTerminalReturn {
   const [terminalVisible, setTerminalVisible] = useState(false);
   const [terminalHeight, setTerminalHeightState] = useState<number>(() => {
@@ -68,6 +70,8 @@ export function useTerminal(
   const currentWorkspaceRoot = selectedWorktree?.path || mainWorkspace?.path || '';
   const _isTauri = isTauri();
 
+  // Resolve windowId: use parameter if provided, otherwise get from Tauri API
+  const resolvedWindowId = windowId ?? (_isTauri ? getCurrentWindow().label : 'browser');
 
   const workspacePath = workspacePathParam || '';
   const worktreeName = selectedWorktree?.name || '';
@@ -378,7 +382,7 @@ export function useTerminal(
 
     // Unmount terminal and close PTY
     setMountedTerminals(prev => { const next = new Set(prev); next.delete(path); return next; });
-    closePtySession(path);
+    closePtySession(resolvedWindowId, path);
 
     let newActiveTab = activeTerminalTabRef.current;
     if (activeTerminalTabRef.current === path) {
@@ -412,7 +416,7 @@ export function useTerminal(
       for (const p of toClose) next.delete(p);
       return next;
     });
-    for (const p of toClose) closePtySession(p);
+    for (const p of toClose) closePtySession(resolvedWindowId, p);
 
     setActiveTerminalTab(keepPath);
     activatedTerminalsRef.current = newActivated;
@@ -432,7 +436,7 @@ export function useTerminal(
       for (const p of toClose) next.delete(p);
       return next;
     });
-    for (const p of toClose) closePtySession(p);
+    for (const p of toClose) closePtySession(resolvedWindowId, p);
 
     setActiveTerminalTab(null);
     activatedTerminalsRef.current = newActivated;
