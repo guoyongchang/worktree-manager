@@ -374,6 +374,44 @@ fn setup_project_worktree(
         proj_req.name
     );
 
+    // Set upstream for the branch so git push works without -u flag
+    log::info!(
+        "[worktree] Project '{}': git push -u origin {}",
+        proj_req.name,
+        worktree_name
+    );
+    let push_output = run_git_command_with_timeout(
+        &["push", "-u", "origin", worktree_name],
+        wt_proj_path.to_str().unwrap(),
+    );
+
+    match push_output {
+        Ok(output) if output.status.success() => {
+            log::info!(
+                "[worktree] Project '{}': git push -u origin {} succeeded",
+                proj_req.name,
+                worktree_name
+            );
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            log::warn!(
+                "[worktree] Project '{}': git push -u origin {} failed (worktree created successfully): {}",
+                proj_req.name,
+                worktree_name,
+                stderr
+            );
+        }
+        Err(e) => {
+            log::warn!(
+                "[worktree] Project '{}': git push -u origin {} failed to execute (worktree created successfully): {}",
+                proj_req.name,
+                worktree_name,
+                e
+            );
+        }
+    }
+
     // Link configured folders
     log::info!(
         "[worktree] Project '{}': Creating symlinks for {} linked folders",
@@ -934,6 +972,37 @@ pub fn restore_worktree_impl(window_label: &str, name: String) -> Result<(), Str
                 match output {
                     Ok(o) if o.status.success() => {
                         log::info!("Successfully re-added worktree for {}", proj_name);
+                        // Set upstream for the branch so git push works without -u flag
+                        let push_output = run_git_command_with_timeout(
+                            &["push", "-u", "origin", branch_name],
+                            wt_proj_path.to_str().unwrap(),
+                        );
+                        match push_output {
+                            Ok(p) if p.status.success() => {
+                                log::info!(
+                                    "[worktree] Project '{}': git push -u origin {} succeeded",
+                                    proj_name,
+                                    branch_name
+                                );
+                            }
+                            Ok(p) => {
+                                let stderr = String::from_utf8_lossy(&p.stderr);
+                                log::warn!(
+                                    "[worktree] Project '{}': git push -u origin {} failed (worktree restored successfully): {}",
+                                    proj_name,
+                                    branch_name,
+                                    stderr
+                                );
+                            }
+                            Err(e) => {
+                                log::warn!(
+                                    "[worktree] Project '{}': git push -u origin {} failed to execute (worktree restored successfully): {}",
+                                    proj_name,
+                                    branch_name,
+                                    e
+                                );
+                            }
+                        }
                     }
                     Ok(o) => {
                         let stderr = String::from_utf8_lossy(&o.stderr);
@@ -1272,6 +1341,38 @@ pub fn add_project_to_worktree_impl(
         "[worktree] Project '{}': git worktree add succeeded",
         request.project_name
     );
+
+    // Set upstream for the branch so git push works without -u flag
+    let push_output = run_git_command_with_timeout(
+        &["push", "-u", "origin", &request.worktree_name],
+        wt_proj_path.to_str().unwrap(),
+    );
+    match push_output {
+        Ok(p) if p.status.success() => {
+            log::info!(
+                "[worktree] Project '{}': git push -u origin {} succeeded",
+                request.project_name,
+                request.worktree_name
+            );
+        }
+        Ok(p) => {
+            let stderr = String::from_utf8_lossy(&p.stderr);
+            log::warn!(
+                "[worktree] Project '{}': git push -u origin {} failed (project added successfully): {}",
+                request.project_name,
+                request.worktree_name,
+                stderr
+            );
+        }
+        Err(e) => {
+            log::warn!(
+                "[worktree] Project '{}': git push -u origin {} failed to execute (project added successfully): {}",
+                request.project_name,
+                request.worktree_name,
+                e
+            );
+        }
+    }
 
     // Step 3: Link configured folders
     log::info!(

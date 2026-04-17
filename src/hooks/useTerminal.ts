@@ -402,7 +402,7 @@ export function useTerminal(
     activatedTerminalsRef.current = newActivated;
     activeTerminalTabRef.current = newActiveTab;
     scheduleBroadcast();
-  }, [scheduleBroadcast]);
+  }, [scheduleBroadcast, windowId]);
 
   const handleCloseOtherTerminalTabs = useCallback((keepPath: string) => {
     const toClose = Array.from(activatedTerminalsRef.current).filter(p => p !== keepPath);
@@ -422,7 +422,7 @@ export function useTerminal(
     activatedTerminalsRef.current = newActivated;
     activeTerminalTabRef.current = keepPath;
     scheduleBroadcast();
-  }, [scheduleBroadcast]);
+  }, [scheduleBroadcast, windowId]);
 
   const handleCloseAllTerminalTabs = useCallback(() => {
     const toClose = Array.from(activatedTerminalsRef.current);
@@ -442,7 +442,7 @@ export function useTerminal(
     activatedTerminalsRef.current = newActivated;
     activeTerminalTabRef.current = null;
     scheduleBroadcast();
-  }, [scheduleBroadcast]);
+  }, [scheduleBroadcast, windowId]);
 
   const handleDuplicateTerminal = useCallback((path: string) => {
     const duplicatePath = `${path}#${Date.now()}`;

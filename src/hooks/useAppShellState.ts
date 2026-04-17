@@ -14,6 +14,7 @@ import {
 } from "./index";
 import { useVoiceInput } from "./useVoiceInput";
 import { callBackend, isTauri, setWindowTitle, getShareInfo, clearSessionId } from "../lib/backend";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getWebSocketManager } from "../lib/websocket";
 import type { ViewMode, TerminalTabMenuState, WorkspaceConfig, WorktreeListItem } from "../types";
 
@@ -134,7 +135,8 @@ export function useAppShellState(t: TFunction): UseAppShellStateReturn {
       (text: string) => {
         const activeTab = terminalHook.activeTerminalTab;
         if (activeTab) {
-          const sessionId = `pty-${activeTab.replace(/\//g, "-")}`;
+          const windowLabel = isTauri() ? getCurrentWindow().label : "browser";
+          const sessionId = `pty-${windowLabel}-${activeTab.replace(/[/#]/g, "-")}`;
           callBackend("pty_write", { sessionId, data: text });
         }
       },
