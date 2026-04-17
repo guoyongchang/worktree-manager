@@ -42,6 +42,7 @@ pub use commands::worktree::{
 };
 
 use commands::git::*;
+use commands::memory::*;
 use commands::pty::*;
 use commands::sharing::*;
 use commands::system::*;
@@ -225,6 +226,13 @@ pub fn run() {
             download_update_via_mirror,
             // DevTools
             open_devtools,
+            // Memory Queue
+            memory_queue_list,
+            memory_queue_get,
+            memory_queue_delete,
+            memory_queue_run,
+            get_memory_settings,
+            save_memory_settings,
         ])
         .setup(|app| {
             // Initialize APP_HANDLE for use in WebSocket handlers
