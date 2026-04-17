@@ -372,7 +372,7 @@ interface SettingsViewProps {
   onRemoveWorkspace?: (path: string) => void;
 }
 
-type SettingsSection = 'workspaces' | 'vault' | 'tools' | 'share' | 'commit' | 'voice' | 'about';
+type SettingsSection = 'workspaces' | 'vault' | 'tools' | 'share' | 'commit' | 'voice' | 'dev' | 'about';
 
 export const SettingsView: FC<SettingsViewProps> = ({
   workspaceConfig,
@@ -592,6 +592,9 @@ export const SettingsView: FC<SettingsViewProps> = ({
   // Voice refine toggle
   const [voiceRefineEnabled, setVoiceRefineEnabled] = useState(true);
   const [voiceRefineLoaded, setVoiceRefineLoaded] = useState(false);
+
+  // DEV settings
+  const [devConsoleEnabled, setDevConsoleEnabled] = useState(() => localStorage.getItem('dev-console-enabled') === 'true');
 
   // Microphone
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
@@ -813,6 +816,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
     ...(isTauri() ? [{ id: 'share' as SettingsSection, label: t('settings.externalShareNav', '外网分享'), icon: <Globe className="w-3.5 h-3.5" /> }] : []),
     { id: 'commit' as SettingsSection, label: t('settings.commitNav', '提交设置'), icon: <FileText className="w-3.5 h-3.5" /> },
     { id: 'voice' as SettingsSection, label: t('settings.voiceNav'), icon: <Mic className="w-3.5 h-3.5" /> },
+    ...(isTauri() ? [{ id: 'dev' as SettingsSection, label: 'DEV', icon: <Wrench className="w-3.5 h-3.5" /> }] : []),
     { id: 'about' as SettingsSection, label: t('settings.about'), icon: <Info className="w-3.5 h-3.5" /> },
   ];
 
@@ -1693,6 +1697,25 @@ export const SettingsView: FC<SettingsViewProps> = ({
                     <Button variant="secondary" size="sm" onClick={handleSaveGitUser} disabled={gitUserSaving}>
                       {gitUserSaving ? t('common.saving') : t('common.save')}
                     </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ==================== DEV ==================== */}
+            {activeSection === 'dev' && isTauri() && (
+              <div>
+                <h2 className="text-lg font-medium mb-4">Developer Settings</h2>
+                <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 space-y-4">
+                  {/* Developer Console Toggle */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-sm text-slate-400">Enable Developer Console (F12)</label>
+                      <p className="text-xs text-slate-500">Press F12 to open browser developer tools</p>
+                    </div>
+                    <button type="button" onClick={() => { const newVal = !devConsoleEnabled; setDevConsoleEnabled(newVal); localStorage.setItem('dev-console-enabled', String(newVal)); }}
+                      className={`relative inline-flex h-5 w-8 items-center rounded-full transition-colors ${devConsoleEnabled ? 'bg-blue-500' : 'bg-slate-600'}`}
+                    ><span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${devConsoleEnabled ? 'translate-x-3.5' : 'translate-x-0.5'}`} /></button>
                   </div>
                 </div>
               </div>

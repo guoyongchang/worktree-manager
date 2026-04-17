@@ -22,7 +22,7 @@ import {
 } from "./components";
 import { useAppShellState } from "./hooks/useAppShellState";
 import { Input } from "@/components/ui/input";
-import { isTauri } from "./lib/backend";
+import { isTauri, callBackend } from "./lib/backend";
 import "./index.css";
 
 // Disable browser-like behaviors (only in Tauri desktop mode)
@@ -35,6 +35,14 @@ if (typeof window !== 'undefined' && isTauri()) {
     }
     if ((e.metaKey || e.ctrlKey) && e.key === 'p') {
       e.preventDefault();
+    }
+    // DEV: Open devtools on F12 if enabled in settings
+    if (e.key === 'F12') {
+      const devConsoleEnabled = localStorage.getItem('dev-console-enabled') === 'true';
+      if (devConsoleEnabled) {
+        e.preventDefault();
+        callBackend('open_devtools').catch(() => {});
+      }
     }
   });
 } else if (typeof window !== 'undefined') {
