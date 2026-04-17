@@ -17,11 +17,172 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { RefreshCw, Search, Mic, Eye, EyeOff, Settings, Globe, Info, Trash2, Wrench, FolderOpen } from 'lucide-react';
+import { RefreshCw, Search, Mic, Eye, EyeOff, Settings, Globe, Info, Trash2, Wrench, FolderOpen, Brain } from 'lucide-react';
 import { BackIcon, PlusIcon, TrashIcon } from './Icons';
 import { BranchCombobox } from './BranchCombobox';
-import type { WorkspaceRef, WorkspaceConfig, ProjectConfig, ScannedFolder } from '../types';
-import { getAppVersion, getAppIcon, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, voiceStart, voiceStop, isTauri, getRemoteBranches, openLink, callBackend, loadWorkspaceConfigByPath, saveWorkspaceConfigByPath } from '../lib/backend';
+import type { WorkspaceRef, WorkspaceConfig, ProjectConfig, ScannedFolder, MemorySettings, AgentCli } from '../types';
+import { getAppVersion, getAppIcon, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, voiceStart, voiceStop, isTauri, getRemoteBranches, openLink, callBackend, loadWorkspaceConfigByPath, saveWorkspaceConfigByPath, getMemorySettings, saveMemorySettings } from '../lib/backend';
+
+// ==================== MemorySettingsSection ====================
+const MemorySettingsSection: FC = () => {
+  const { t } = useTranslation();
+
+  const defaultSettings: MemorySettings = {
+    agent: { cli: 'claude', extra_args: [] },
+    auto_archive: true,
+    create_new_pages: true,
+  };
+
+  const [settings, setSettings] = useState<MemorySettings>(defaultSettings);
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    getMemorySettings().then(s => {
+      setSettings(s);
+      setLoaded(true);
+    }).catch(() => setLoaded(true));
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await saveMemorySettings(settings);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      setSaveError(String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!loaded) {
+    return <div className="text-xs text-slate-500 py-4">{t('common.loading', '加载中...')}</div>;
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-medium">{t('settings.memoryTitle', 'Memory 设置')}</h2>
+        <Button variant="secondary" size="sm" disabled={saving} onClick={handleSave}>
+          {saving ? t('common.saving') : saved ? t('settings.savedSuccess') : t('common.save')}
+        </Button>
+      </div>
+      {saveError && <p className="text-sm text-red-400 mb-3">{saveError}</p>}
+      <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 space-y-4">
+        {/* CLI */}
+        <div>
+          <label className="block text-sm text-slate-400 mb-1">{t('settings.memoryCli', 'CLI')}</label>
+          <Select
+            value={settings.agent.cli}
+            onValueChange={(value) =>
+              setSettings(prev => ({ ...prev, agent: { ...prev.agent, cli: value as AgentCli } }))
+            }
+          >
+            <SelectTrigger className="w-full h-8 text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="claude">claude</SelectItem>
+              <SelectItem value="codex">codex</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Model */}
+        <div>
+          <label className="block text-sm text-slate-400 mb-1">{t('settings.memoryModel', 'Model')}</label>
+          <Input
+            type="text"
+            value={settings.agent.model ?? ''}
+            onChange={(e) => setSettings(prev => ({ ...prev, agent: { ...prev.agent, model: e.target.value } }))}
+            onBlur={handleSave}
+            placeholder="e.g. haiku, gpt-4o-mini"
+            className="h-8 text-sm"
+          />
+        </div>
+
+        {/* API Key */}
+        <div>
+          <label className="block text-sm text-slate-400 mb-1">{t('settings.memoryApiKey', 'API Key')}</label>
+          <Input
+            type="password"
+            value={settings.agent.api_key ?? ''}
+            onChange={(e) => setSettings(prev => ({ ...prev, agent: { ...prev.agent, api_key: e.target.value } }))}
+            onBlur={handleSave}
+            placeholder={t('settings.memoryApiKeyPlaceholder', '留空使用环境变量')}
+            className="h-8 text-sm"
+          />
+        </div>
+
+        {/* API Endpoint */}
+        <div>
+          <label className="block text-sm text-slate-400 mb-1">{t('settings.memoryApiEndpoint', 'API Endpoint')}</label>
+          <Input
+            type="text"
+            value={settings.agent.api_endpoint ?? ''}
+            onChange={(e) => setSettings(prev => ({ ...prev, agent: { ...prev.agent, api_endpoint: e.target.value } }))}
+            onBlur={handleSave}
+            placeholder="e.g. https://api.openai.com/v1"
+            className="h-8 text-sm"
+          />
+        </div>
+
+        {/* Auto Archive */}
+        <div className="flex items-center justify-between">
+          <div>
+            <label className="text-sm text-slate-400">{t('settings.memoryAutoArchive', 'Auto Archive')}</label>
+            <p className="text-xs text-slate-500">{t('settings.memoryAutoArchiveDesc', '会话结束时自动触发归档')}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const newVal = !settings.auto_archive;
+              setSettings(prev => ({ ...prev, auto_archive: newVal }));
+              saveMemorySettings({ ...settings, auto_archive: newVal }).catch(() => { });
+            }}
+            className={`relative inline-flex h-5 w-8 items-center rounded-full transition-colors ${settings.auto_archive ? 'bg-blue-500' : 'bg-slate-600'}`}
+          >
+            <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${settings.auto_archive ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+          </button>
+        </div>
+
+        {/* Allow New Pages */}
+        <div className="flex items-center justify-between">
+          <div>
+            <label className="text-sm text-slate-400">{t('settings.memoryAllowNewPages', 'Allow New Pages')}</label>
+            <p className="text-xs text-slate-500">{t('settings.memoryAllowNewPagesDesc', '允许 Agent 在 vault 中创建新页面')}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const newVal = !settings.create_new_pages;
+              setSettings(prev => ({ ...prev, create_new_pages: newVal }));
+              saveMemorySettings({ ...settings, create_new_pages: newVal }).catch(() => { });
+            }}
+            className={`relative inline-flex h-5 w-8 items-center rounded-full transition-colors ${settings.create_new_pages ? 'bg-blue-500' : 'bg-slate-600'}`}
+          >
+            <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${settings.create_new_pages ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+          </button>
+        </div>
+
+        {/* Custom Prompt */}
+        <div>
+          <label className="block text-sm text-slate-400 mb-1">{t('settings.memoryCustomPrompt', 'Custom Prompt')}</label>
+          <textarea
+            value={settings.custom_prompt ?? ''}
+            onChange={(e) => setSettings(prev => ({ ...prev, custom_prompt: e.target.value }))}
+            onBlur={handleSave}
+            placeholder={t('settings.memoryCustomPromptPlaceholder', 'Leave empty to use default template')}
+            className="w-full h-32 bg-slate-950 border border-slate-700/50 rounded-lg p-3 text-xs text-slate-300 resize-none focus:outline-none focus:ring-1 focus:ring-blue-500/50 leading-relaxed"
+          />
+        </div>
+      </div>
+    </div>
+  );
+};
 
 interface SettingsViewProps {
   workspaceConfig: WorkspaceConfig;
@@ -37,7 +198,7 @@ interface SettingsViewProps {
   onRemoveWorkspace?: (path: string) => void;
 }
 
-type SettingsSection = 'workspaces' | 'tools' | 'share' | 'voice' | 'about';
+type SettingsSection = 'workspaces' | 'tools' | 'share' | 'voice' | 'memory' | 'about';
 
 export const SettingsView: FC<SettingsViewProps> = ({
   workspaceConfig,
@@ -418,6 +579,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
     { id: 'tools' as SettingsSection, label: t('settings.toolsNav', '工具'), icon: <Wrench className="w-3.5 h-3.5" /> },
     ...(isTauri() ? [{ id: 'share' as SettingsSection, label: t('settings.externalShareNav', '外网分享'), icon: <Globe className="w-3.5 h-3.5" /> }] : []),
     { id: 'voice' as SettingsSection, label: t('settings.voiceNav'), icon: <Mic className="w-3.5 h-3.5" /> },
+    { id: 'memory' as SettingsSection, label: t('settings.memoryNav', 'Memory'), icon: <Brain className="w-3.5 h-3.5" /> },
     { id: 'about' as SettingsSection, label: t('settings.about'), icon: <Info className="w-3.5 h-3.5" /> },
   ];
 
@@ -1128,6 +1290,11 @@ export const SettingsView: FC<SettingsViewProps> = ({
                   </p>
                 </div>
               </div>
+            )}
+
+            {/* ==================== Memory ==================== */}
+            {activeSection === 'memory' && (
+              <MemorySettingsSection />
             )}
 
             {/* ==================== About ==================== */}

@@ -238,6 +238,21 @@ pub fn run() {
                 }
             });
 
+            // Load memory queue from disk
+            {
+                use crate::memory::queue;
+                if let Some(ws_path) = crate::config::get_window_workspace_path("main") {
+                    let vault_path = format!("{}/.vault", ws_path);
+                    let items = queue::load_from_disk(&vault_path);
+                    if !items.is_empty() {
+                        log::info!("[Memory] Loaded {} queue items from disk", items.len());
+                        if let Ok(mut q) = crate::state::MEMORY_QUEUE.lock() {
+                            *q = items;
+                        }
+                    }
+                }
+            }
+
             Ok(())
         })
         .run(tauri::generate_context!())
