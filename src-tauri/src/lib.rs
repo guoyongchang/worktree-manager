@@ -2,7 +2,6 @@ mod commands;
 pub mod config;
 mod git_ops;
 pub mod http_server;
-pub mod memory;
 mod pty_manager;
 pub mod state;
 pub(crate) mod tls;
@@ -45,6 +44,7 @@ use commands::git::*;
 use commands::pty::*;
 use commands::sharing::*;
 use commands::system::*;
+use commands::vault::*;
 use commands::voice::*;
 use commands::window::*;
 use commands::workspace::*;
@@ -225,6 +225,10 @@ pub fn run() {
             download_update_via_mirror,
             // DevTools
             open_devtools,
+            // Vault
+            vault_status,
+            vault_link,
+            list_vault_item_children,
         ])
         .setup(|app| {
             // Initialize APP_HANDLE for use in WebSocket handlers
@@ -237,21 +241,6 @@ pub fn run() {
                     log::error!("[MCP] Server failed: {}", e);
                 }
             });
-
-            // Load memory queue from disk
-            {
-                use crate::memory::queue;
-                if let Some(ws_path) = crate::config::get_window_workspace_path("main") {
-                    let vault_path = format!("{}/.vault", ws_path);
-                    let items = queue::load_from_disk(&vault_path);
-                    if !items.is_empty() {
-                        log::info!("[Memory] Loaded {} queue items from disk", items.len());
-                        if let Ok(mut q) = crate::state::MEMORY_QUEUE.lock() {
-                            *q = items;
-                        }
-                    }
-                }
-            }
 
             Ok(())
         })

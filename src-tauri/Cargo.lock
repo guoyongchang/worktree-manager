@@ -6706,6 +6706,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-process",
  "tauri-plugin-updater",
+ "tempfile",
  "time",
  "tokio",
  "tokio-rustls",

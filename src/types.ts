@@ -180,55 +180,27 @@ export interface FileDiff {
   is_binary: boolean;
 }
 
-// ── Memory Queue ──────────────────────────────
+// ── Vault ────────────────────────────────────
 
-export type TriggerType = "pre-compact" | "session-end" | "manual";
-export type QueueStatus = "pending" | "processing" | "completed" | "failed";
-export type AgentCli = "claude" | "codex";
-
-export interface ArchiveResult {
-  files_created: string[];
-  files_updated: string[];
-  summary: string;
-  error?: string;
-  raw_output?: string;
+export interface SyncedItem {
+  name: string;
+  item_type: "file" | "directory";
 }
 
-export interface QueueItemSummary {
-  id: string;
-  session_id: string;
-  branch?: string;
-  project?: string;
-  requirement_id?: string;
-  trigger: TriggerType;
-  status: QueueStatus;
-  timestamp: string;
-  conversation_preview: string;
-  result?: ArchiveResult;
+export interface VaultStatus {
+  connected: boolean;
+  vault_path: string | null;
+  synced_items: SyncedItem[];
 }
 
-export interface MemoryQueueItem extends QueueItemSummary {
-  conversation: string;
-  worktree: {
-    cwd: string;
-    project?: string;
-    branch?: string;
-    requirementId?: string;
-    vaultPath?: string;
-  };
+export interface VaultLinkResponse {
+  connected: boolean;
+  synced_items: SyncedItem[];
+  error: string | null;
+  warning: string | null;
 }
 
-export interface AgentConfig {
-  cli: AgentCli;
-  model?: string;
-  api_key?: string;
-  api_endpoint?: string;
-  extra_args: string[];
-}
-
-export interface MemorySettings {
-  agent: AgentConfig;
-  auto_archive: boolean;
-  create_new_pages: boolean;
-  custom_prompt?: string;
+export interface VaultItemChild {
+  name: string;
+  item_type: 'file' | 'directory';
 }

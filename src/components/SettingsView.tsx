@@ -17,168 +17,342 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { RefreshCw, Search, Mic, Eye, EyeOff, Settings, Globe, Info, Trash2, Wrench, FolderOpen, Brain } from 'lucide-react';
+import { RefreshCw, Search, Mic, Eye, EyeOff, Settings, Globe, Info, Trash2, Wrench, FolderOpen, Link2, Folder, FileText, ChevronRight, ChevronDown } from 'lucide-react';
 import { BackIcon, PlusIcon, TrashIcon } from './Icons';
 import { BranchCombobox } from './BranchCombobox';
-import type { WorkspaceRef, WorkspaceConfig, ProjectConfig, ScannedFolder, MemorySettings, AgentCli } from '../types';
-import { getAppVersion, getAppIcon, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, voiceStart, voiceStop, isTauri, getRemoteBranches, openLink, callBackend, loadWorkspaceConfigByPath, saveWorkspaceConfigByPath, getMemorySettings, saveMemorySettings } from '../lib/backend';
+import type { WorkspaceRef, WorkspaceConfig, ProjectConfig, ScannedFolder, VaultStatus, VaultItemChild } from '../types';
+import { getAppVersion, getAppIcon, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, voiceStart, voiceStop, isTauri, getRemoteBranches, openLink, callBackend, loadWorkspaceConfigByPath, saveWorkspaceConfigByPath, getVaultStatus, vaultLink, listVaultItemChildren } from '../lib/backend';
 
-// ==================== MemorySettingsSection ====================
-const MemorySettingsSection: FC = () => {
+// ==================== VaultItemTree (recursive) ====================
+interface VaultItemTreeProps {
+  vaultPath: string;
+  relativePath: string;
+  itemName: string;
+  itemType: 'file' | 'directory';
+  depth?: number;
+}
+
+const VaultItemTree: FC<VaultItemTreeProps> = ({
+  vaultPath,
+  relativePath,
+  itemName,
+  itemType,
+  depth = 0,
+}) => {
   const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
+  const [children, setChildren] = useState<VaultItemChild[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [tooMany, setTooMany] = useState(false);
+  const isDir = itemType === 'directory';
 
-  const defaultSettings: MemorySettings = {
-    agent: { cli: 'claude', extra_args: [] },
-    auto_archive: true,
-    create_new_pages: true,
+  const handleToggle = async () => {
+    if (!isDir || tooMany) return;
+    if (expanded) {
+      setExpanded(false);
+      return;
+    }
+    if (children.length === 0 && !error) {
+      setLoading(true);
+      try {
+        const result = await listVaultItemChildren(vaultPath, relativePath);
+        setChildren(result);
+        setTooMany(false);
+      } catch (e: any) {
+        const msg = String(e?.message || e);
+        if (msg.includes('too many') || msg.includes('>99')) {
+          setTooMany(true);
+        } else {
+          setError(msg);
+        }
+      } finally {
+        setLoading(false);
+      }
+    }
+    setExpanded(true);
   };
 
-  const [settings, setSettings] = useState<MemorySettings>(defaultSettings);
-  const [loaded, setLoaded] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const indent = depth * 12;
 
-  useEffect(() => {
-    getMemorySettings().then(s => {
-      setSettings(s);
-      setLoaded(true);
-    }).catch(() => setLoaded(true));
+  return (
+    <div>
+      <div
+        className={`flex items-center gap-1 text-xs ${isDir ? 'text-slate-300 cursor-pointer hover:text-slate-100' : 'text-slate-400'}`}
+        style={{ paddingLeft: `${indent}px` }}
+        onClick={isDir ? handleToggle : undefined}
+      >
+        {isDir ? (
+          <>
+            {tooMany ? (
+              <ChevronRight className="w-3 h-3 text-slate-600 shrink-0" />
+            ) : expanded ? (
+              <ChevronDown className="w-3 h-3 text-slate-400 shrink-0" />
+            ) : (
+              <ChevronRight className="w-3 h-3 text-slate-400 shrink-0" />
+            )}
+            <Folder className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+          </>
+        ) : (
+          <>
+            <span className="w-3 inline-block" />
+            <FileText className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+          </>
+        )}
+        <span className={tooMany ? 'text-slate-500' : ''}>
+          {itemName}{isDir ? '/' : ''}
+        </span>
+        {loading && <span className="text-[10px] text-slate-600">{t('common.loading', '...')}</span>}
+        {tooMany && (
+          <span className="text-[10px] text-amber-500 ml-1">{t('settings.vaultTooManyItems', '99+')}</span>
+        )}
+      </div>
+      {error && (
+        <div className="text-[10px] text-red-400 pl-4" style={{ paddingLeft: `${indent + 16}px` }}>
+          {error}
+        </div>
+      )}
+      {expanded && !tooMany && (
+        <div className="mt-0.5 space-y-0.5">
+          {children.map((child) => (
+            <VaultItemTree
+              key={child.name}
+              vaultPath={vaultPath}
+              relativePath={`${relativePath}/${child.name}`}
+              itemName={child.name}
+              itemType={child.item_type}
+              depth={depth + 1}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ==================== VaultSettingsSection ====================
+const VaultSettingsSection: FC = () => {
+  const { t } = useTranslation();
+  const [status, setStatus] = useState<VaultStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [linking, setLinking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showItems, setShowItems] = useState(false);
+  const [inputPath, setInputPath] = useState('');
+
+  const loadStatus = useCallback(async () => {
+    try {
+      const s = await getVaultStatus();
+      setStatus(s);
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const handleSave = async () => {
-    setSaving(true);
-    setSaveError(null);
-    try {
-      await saveMemorySettings(settings);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    } catch (e) {
-      setSaveError(String(e));
-    } finally {
-      setSaving(false);
-    }
-  };
+  useEffect(() => { loadStatus(); }, [loadStatus]);
 
-  if (!loaded) {
+  const handleConnect = useCallback(async (selectedPath: string) => {
+    if (!selectedPath.trim()) return;
+    setError(null);
+    setLinking(true);
+    try {
+      const result = await vaultLink(selectedPath.trim());
+      if (result.error) {
+        setError(result.error);
+      } else {
+        setStatus({
+          connected: result.connected,
+          vault_path: selectedPath.trim(),
+          synced_items: result.synced_items,
+        });
+        setInputPath('');
+        if (result.warning) {
+          setError(result.warning);
+        }
+      }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLinking(false);
+    }
+  }, []);
+
+  const handleSelectFolder = useCallback(async () => {
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: t('settings.vaultSelectTitle', '选择 Vault Workspace 目录'),
+      });
+      if (selected) {
+        await handleConnect(selected as string);
+      }
+    } catch {
+      // Dialog not available (browser mode) — user uses input field instead
+    }
+  }, [t, handleConnect]);
+
+  const handleRefresh = useCallback(async () => {
+    if (!status?.vault_path) return;
+    setError(null);
+    setLinking(true);
+    try {
+      const result = await vaultLink(status.vault_path);
+      if (result.error) {
+        setError(result.error);
+      } else {
+        setStatus({
+          connected: result.connected,
+          vault_path: status.vault_path,
+          synced_items: result.synced_items,
+        });
+        if (result.warning) {
+          setError(result.warning);
+        }
+      }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLinking(false);
+    }
+  }, [status?.vault_path]);
+
+  const handleDisconnect = useCallback(async () => {
+    if (!window.confirm(t('settings.vaultDisconnectConfirm', '确定要断开 Vault 吗？这将移除所有软链接。'))) {
+      return;
+    }
+    setError(null);
+    setLinking(true);
+    try {
+      await vaultLink(null);
+      setStatus({ connected: false, vault_path: null, synced_items: [] });
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLinking(false);
+    }
+  }, [t]);
+
+  if (loading) {
     return <div className="text-xs text-slate-500 py-4">{t('common.loading', '加载中...')}</div>;
   }
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-medium">{t('settings.memoryTitle', 'Memory 设置')}</h2>
-        <Button variant="secondary" size="sm" disabled={saving} onClick={handleSave}>
-          {saving ? t('common.saving') : saved ? t('settings.savedSuccess') : t('common.save')}
-        </Button>
-      </div>
-      {saveError && <p className="text-sm text-red-400 mb-3">{saveError}</p>}
-      <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 space-y-4">
-        {/* CLI */}
-        <div>
-          <label className="block text-sm text-slate-400 mb-1">{t('settings.memoryCli', 'CLI')}</label>
-          <Select
-            value={settings.agent.cli}
-            onValueChange={(value) =>
-              setSettings(prev => ({ ...prev, agent: { ...prev.agent, cli: value as AgentCli } }))
-            }
-          >
-            <SelectTrigger className="w-full h-8 text-sm"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="claude">claude</SelectItem>
-              <SelectItem value="codex">codex</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+      <h2 className="text-lg font-medium mb-4">{t('settings.vaultTitle', 'Vault')}</h2>
+      {error && <p className="text-sm text-red-400 mb-3">{error}</p>}
 
-        {/* Model */}
-        <div>
-          <label className="block text-sm text-slate-400 mb-1">{t('settings.memoryModel', 'Model')}</label>
-          <Input
-            type="text"
-            value={settings.agent.model ?? ''}
-            onChange={(e) => setSettings(prev => ({ ...prev, agent: { ...prev.agent, model: e.target.value } }))}
-            onBlur={handleSave}
-            placeholder="e.g. haiku, gpt-4o-mini"
-            className="h-8 text-sm"
-          />
-        </div>
+      <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 space-y-3">
+        {status?.connected ? (
+          <>
+            {/* Connected state */}
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-emerald-400" />
+              <span className="text-sm font-medium text-slate-200">
+                {t('settings.vaultConnected', '已挂载')}
+              </span>
+            </div>
 
-        {/* API Key */}
-        <div>
-          <label className="block text-sm text-slate-400 mb-1">{t('settings.memoryApiKey', 'API Key')}</label>
-          <Input
-            type="password"
-            value={settings.agent.api_key ?? ''}
-            onChange={(e) => setSettings(prev => ({ ...prev, agent: { ...prev.agent, api_key: e.target.value } }))}
-            onBlur={handleSave}
-            placeholder={t('settings.memoryApiKeyPlaceholder', '留空使用环境变量')}
-            className="h-8 text-sm"
-          />
-        </div>
+            <div>
+              <label className="block text-xs text-slate-500 mb-1">
+                {t('settings.vaultPath', '路径')}
+              </label>
+              <button
+                className="text-sm text-slate-300 font-mono break-all text-left hover:text-blue-400 transition-colors flex items-center gap-1"
+                onClick={() => {
+                  if (status.vault_path) {
+                    callBackend('reveal_in_finder', { path: status.vault_path }).catch(() => {});
+                  }
+                }}
+                title={t('settings.vaultOpenPath', '在文件夹中打开')}
+              >
+                <FolderOpen className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                {status.vault_path}
+              </button>
+            </div>
 
-        {/* API Endpoint */}
-        <div>
-          <label className="block text-sm text-slate-400 mb-1">{t('settings.memoryApiEndpoint', 'API Endpoint')}</label>
-          <Input
-            type="text"
-            value={settings.agent.api_endpoint ?? ''}
-            onChange={(e) => setSettings(prev => ({ ...prev, agent: { ...prev.agent, api_endpoint: e.target.value } }))}
-            onBlur={handleSave}
-            placeholder="e.g. https://api.openai.com/v1"
-            className="h-8 text-sm"
-          />
-        </div>
+            {/* Synced items toggle */}
+            <div>
+              <button
+                className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-200 transition-colors"
+                onClick={() => setShowItems(!showItems)}
+              >
+                <span className="w-3 h-3 inline-flex items-center justify-center text-[10px]">
+                  {showItems ? '\u25BC' : '\u25B6'}
+                </span>
+                {t('settings.vaultSyncedItems', '已同步项')}
+                <span className="text-slate-500">({status.synced_items.length})</span>
+              </button>
+              {showItems && status.vault_path && (
+                <div className="mt-2 space-y-0.5 max-h-64 overflow-y-auto pr-1">
+                  {status.synced_items.map((item) => (
+                    <VaultItemTree
+                      key={item.name}
+                      vaultPath={status.vault_path!}
+                      relativePath={item.name}
+                      itemName={item.name}
+                      itemType={item.item_type}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
 
-        {/* Auto Archive */}
-        <div className="flex items-center justify-between">
-          <div>
-            <label className="text-sm text-slate-400">{t('settings.memoryAutoArchive', 'Auto Archive')}</label>
-            <p className="text-xs text-slate-500">{t('settings.memoryAutoArchiveDesc', '会话结束时自动触发归档')}</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              const newVal = !settings.auto_archive;
-              setSettings(prev => ({ ...prev, auto_archive: newVal }));
-              saveMemorySettings({ ...settings, auto_archive: newVal }).catch(() => { });
-            }}
-            className={`relative inline-flex h-5 w-8 items-center rounded-full transition-colors ${settings.auto_archive ? 'bg-blue-500' : 'bg-slate-600'}`}
-          >
-            <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${settings.auto_archive ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
-          </button>
-        </div>
+            {/* Actions */}
+            <div className="flex gap-2 pt-2">
+              <Button variant="secondary" size="sm" disabled={linking} onClick={handleRefresh}>
+                {t('settings.vaultRefresh', '刷新')}
+              </Button>
+              <Button variant="secondary" size="sm" disabled={linking} onClick={handleSelectFolder}>
+                {t('settings.vaultChange', '更换...')}
+              </Button>
+              <Button
+                variant="ghost" size="sm" disabled={linking}
+                onClick={handleDisconnect}
+                className="text-red-400 hover:text-red-300"
+              >
+                {t('settings.vaultDisconnect', '断开')}
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Not connected state */}
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-slate-500" />
+              <span className="text-sm text-slate-400">
+                {t('settings.vaultNotConnected', '未挂载')}
+              </span>
+            </div>
 
-        {/* Allow New Pages */}
-        <div className="flex items-center justify-between">
-          <div>
-            <label className="text-sm text-slate-400">{t('settings.memoryAllowNewPages', 'Allow New Pages')}</label>
-            <p className="text-xs text-slate-500">{t('settings.memoryAllowNewPagesDesc', '允许 Agent 在 vault 中创建新页面')}</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              const newVal = !settings.create_new_pages;
-              setSettings(prev => ({ ...prev, create_new_pages: newVal }));
-              saveMemorySettings({ ...settings, create_new_pages: newVal }).catch(() => { });
-            }}
-            className={`relative inline-flex h-5 w-8 items-center rounded-full transition-colors ${settings.create_new_pages ? 'bg-blue-500' : 'bg-slate-600'}`}
-          >
-            <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${settings.create_new_pages ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
-          </button>
-        </div>
-
-        {/* Custom Prompt */}
-        <div>
-          <label className="block text-sm text-slate-400 mb-1">{t('settings.memoryCustomPrompt', 'Custom Prompt')}</label>
-          <textarea
-            value={settings.custom_prompt ?? ''}
-            onChange={(e) => setSettings(prev => ({ ...prev, custom_prompt: e.target.value }))}
-            onBlur={handleSave}
-            placeholder={t('settings.memoryCustomPromptPlaceholder', 'Leave empty to use default template')}
-            className="w-full h-32 bg-slate-950 border border-slate-700/50 rounded-lg p-3 text-xs text-slate-300 resize-none focus:outline-none focus:ring-1 focus:ring-blue-500/50 leading-relaxed"
-          />
-        </div>
+            {/* Folder select button (Tauri) + manual input fallback (browser) */}
+            <div className="space-y-2">
+              <Button variant="secondary" size="sm" disabled={linking} onClick={handleSelectFolder}>
+                {linking ? t('common.loading', '加载中...') : t('settings.vaultSelect', '选择 Vault 目录...')}
+              </Button>
+              <div className="flex gap-2">
+                <Input
+                  type="text"
+                  value={inputPath}
+                  onChange={(e) => setInputPath(e.target.value)}
+                  placeholder={t('settings.vaultInputPlaceholder', '或粘贴 Vault 目录路径...')}
+                  className="h-8 text-sm flex-1"
+                />
+                <Button
+                  variant="secondary" size="sm"
+                  disabled={linking || !inputPath.trim()}
+                  onClick={() => handleConnect(inputPath)}
+                >
+                  {t('settings.vaultConnect', '挂载')}
+                </Button>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -198,7 +372,7 @@ interface SettingsViewProps {
   onRemoveWorkspace?: (path: string) => void;
 }
 
-type SettingsSection = 'workspaces' | 'tools' | 'share' | 'voice' | 'memory' | 'about';
+type SettingsSection = 'workspaces' | 'vault' | 'tools' | 'share' | 'voice' | 'about';
 
 export const SettingsView: FC<SettingsViewProps> = ({
   workspaceConfig,
@@ -228,6 +402,12 @@ export const SettingsView: FC<SettingsViewProps> = ({
   const [saving, setSaving] = useState(false);
   const [scanningProject, setScanningProject] = useState<string | null>(null);
   const [scanResultsMap, setScanResultsMap] = useState<Record<string, ScannedFolder[]>>({});
+  const [vaultStatus, setVaultStatus] = useState<VaultStatus | null>(null);
+
+  // Load vault status
+  useEffect(() => {
+    getVaultStatus().then(setVaultStatus).catch(() => setVaultStatus(null));
+  }, []);
 
   // Project view mode: form or json
   const [projectViewMode, setProjectViewMode] = useState<'form' | 'json'>('form');
@@ -576,10 +756,10 @@ export const SettingsView: FC<SettingsViewProps> = ({
   // ==================== Menu items ====================
   const menuItems = [
     { id: 'workspaces' as SettingsSection, label: t('settings.workspaceConfig'), icon: <Settings className="w-3.5 h-3.5" /> },
+    { id: 'vault' as SettingsSection, label: t('settings.vaultNav', 'Vault'), icon: <Link2 className="w-3.5 h-3.5" /> },
     { id: 'tools' as SettingsSection, label: t('settings.toolsNav', '工具'), icon: <Wrench className="w-3.5 h-3.5" /> },
     ...(isTauri() ? [{ id: 'share' as SettingsSection, label: t('settings.externalShareNav', '外网分享'), icon: <Globe className="w-3.5 h-3.5" /> }] : []),
     { id: 'voice' as SettingsSection, label: t('settings.voiceNav'), icon: <Mic className="w-3.5 h-3.5" /> },
-    { id: 'memory' as SettingsSection, label: t('settings.memoryNav', 'Memory'), icon: <Brain className="w-3.5 h-3.5" /> },
     { id: 'about' as SettingsSection, label: t('settings.about'), icon: <Info className="w-3.5 h-3.5" /> },
   ];
 
@@ -631,7 +811,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
         </div>
 
         {/* Right content */}
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex-1 overflow-y-auto p-4 select-text">
           <div className="max-w-2xl mx-auto">
 
             {/* ==================== Workspaces Section ==================== */}
@@ -675,12 +855,44 @@ export const SettingsView: FC<SettingsViewProps> = ({
                   <div>
                     <label className="block text-xs text-slate-500 mb-1.5">{t('settings.linkedWorktreeItems')}</label>
                     <div className="flex flex-wrap gap-1.5 mb-2">
-                      {config.linked_workspace_items.map((item, index) => (
-                        <span key={index} className="inline-flex items-center gap-1 bg-slate-700/50 border border-slate-600/50 rounded px-2 py-0.5 text-xs text-slate-300">
-                          {item}
-                          <button type="button" onClick={() => removeLinkedItem(index)} className="text-slate-500 hover:text-red-400 transition-colors ml-0.5">&times;</button>
-                        </span>
-                      ))}
+                      {/* Merge linked_workspace_items + vault synced items, deduplicated, sorted */}
+                      {(() => {
+                        const vaultMap = new Map<string, { name: string; item_type: 'file' | 'directory' }>();
+                        if (vaultStatus?.connected) {
+                          for (const si of vaultStatus.synced_items) {
+                            vaultMap.set(si.name, si);
+                          }
+                        }
+                        const allItems = [...config.linked_workspace_items];
+                        for (const [name] of vaultMap) {
+                          if (!allItems.includes(name)) allItems.push(name);
+                        }
+                        // Sort: 1) custom before vault, 2) file before dir, 3) name ASC
+                        allItems.sort((a, b) => {
+                          const aIsVault = vaultMap.has(a);
+                          const bIsVault = vaultMap.has(b);
+                          if (aIsVault !== bIsVault) return aIsVault ? 1 : -1;
+                          const aIsDir = vaultMap.get(a)?.item_type === 'directory';
+                          const bIsDir = vaultMap.get(b)?.item_type === 'directory';
+                          if (aIsDir !== bIsDir) return aIsDir ? 1 : -1;
+                          return a.localeCompare(b);
+                        });
+                        return allItems.map((item, index) => {
+                          const vaultItem = vaultMap.get(item);
+                          const isVaultManaged = vaultItem !== undefined;
+                          const isInConfig = config.linked_workspace_items.includes(item);
+                          const isDir = vaultItem?.item_type === 'directory';
+                          return (
+                            <span key={index} className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs ${isVaultManaged ? 'bg-emerald-900/30 border border-emerald-700/40 text-emerald-300' : 'bg-slate-700/50 border border-slate-600/50 text-slate-300'}`}>
+                              {isVaultManaged && <Link2 className="w-3 h-3 text-emerald-400" />}
+                              {item}{isDir ? '/' : ''}
+                              {isInConfig && !isVaultManaged && (
+                                <button type="button" onClick={() => removeLinkedItem(config.linked_workspace_items.indexOf(item))} className="text-slate-500 hover:text-red-400 transition-colors ml-0.5">&times;</button>
+                              )}
+                            </span>
+                          );
+                        });
+                      })()}
                     </div>
                     <div className="flex gap-2">
                       <Input type="text" value={newLinkedItem} onChange={(e) => setNewLinkedItem(e.target.value)}
@@ -910,6 +1122,11 @@ export const SettingsView: FC<SettingsViewProps> = ({
                   </div>
                 )}
               </div>
+            )}
+
+            {/* ==================== Vault Section ==================== */}
+            {activeSection === 'vault' && (
+              <VaultSettingsSection />
             )}
 
             {/* ==================== Tools Section ==================== */}
@@ -1290,11 +1507,6 @@ export const SettingsView: FC<SettingsViewProps> = ({
                   </p>
                 </div>
               </div>
-            )}
-
-            {/* ==================== Memory ==================== */}
-            {activeSection === 'memory' && (
-              <MemorySettingsSection />
             )}
 
             {/* ==================== About ==================== */}

@@ -151,8 +151,6 @@ pub struct GlobalConfig {
     pub dashscope_base_url: Option<String>,
     #[serde(default = "default_true")]
     pub voice_refine_enabled: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub memory: Option<crate::memory::types::MemorySettings>,
 }
 
 fn default_true() -> bool {
@@ -175,7 +173,6 @@ impl Default for GlobalConfig {
             dashscope_api_key: None,
             dashscope_base_url: None,
             voice_refine_enabled: true,
-            memory: None,
         }
     }
 }
@@ -188,6 +185,8 @@ pub struct WorkspaceConfig {
     pub projects: Vec<ProjectConfig>,
     #[serde(default = "default_linked_workspace_items")]
     pub linked_workspace_items: Vec<String>, // 要链接到每个 worktree 的全局文件/文件夹
+    #[serde(default)]
+    pub vault_linked_workspace_items: Vec<String>, // vault 挂载时自动填充，也需链接到 worktree
 }
 
 pub fn default_linked_workspace_items() -> Vec<String> {
@@ -216,6 +215,7 @@ impl Default for WorkspaceConfig {
             worktrees_dir: "worktrees".to_string(),
             projects: vec![],
             linked_workspace_items: default_linked_workspace_items(),
+            vault_linked_workspace_items: vec![],
         }
     }
 }
@@ -273,6 +273,14 @@ pub struct MainProjectStatus {
     pub base_branch: String,
     pub test_branch: String,
     pub linked_folders: Vec<String>,
+}
+
+// ==================== Vault 子项 ====================
+
+#[derive(Debug, Serialize)]
+pub struct VaultItemChild {
+    pub name: String,
+    pub item_type: String, // "file" | "directory"
 }
 
 // ==================== 智能软链接扫描 ====================
@@ -380,7 +388,7 @@ pub struct DeployProjectError {
 
 #[cfg(test)]
 mod tests {
-    use super::{AuthRateLimiter, NonceCache};
+    use super::{AuthRateLimiter, NonceCache, WorkspaceConfig};
 
     #[test]
     fn auth_rate_limiter_allows_first_five_attempts_and_blocks_sixth() {
@@ -406,5 +414,21 @@ mod tests {
 
         assert!(first.is_some());
         assert!(second.is_none());
+    }
+
+    #[test]
+    fn workspace_config_deserializes_missing_vault_linked_items_as_empty() {
+        let config: WorkspaceConfig = serde_json::from_str(
+            r#"{
+                "name": "demo",
+                "worktrees_dir": "worktrees",
+                "projects": [],
+                "linked_workspace_items": ["CLAUDE.md"]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.linked_workspace_items, vec!["CLAUDE.md"]);
+        assert!(config.vault_linked_workspace_items.is_empty());
     }
 }
