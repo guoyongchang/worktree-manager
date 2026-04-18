@@ -22,7 +22,7 @@ use crate::utils::{
 /// On Unix: uses std::os::unix::fs::symlink.
 /// On Windows: uses symlink_dir for directories, symlink_file for files.
 ///             Falls back to junction for directories if symlink fails (no admin/dev mode).
-fn create_symlink(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+pub(crate) fn create_symlink(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
         std::os::unix::fs::symlink(src, dst)
@@ -433,11 +433,18 @@ pub fn create_worktree_impl(
         .map_err(|e| format!("Failed to create worktree directory: {}", e))?;
 
     // Step 2: Create symlinks for workspace-level items (fast, sequential)
+    // Merge linked_workspace_items + vault_linked_workspace_items, deduplicated
+    let mut all_linked: Vec<String> = config.linked_workspace_items.clone();
+    for item in &config.vault_linked_workspace_items {
+        if !all_linked.contains(item) {
+            all_linked.push(item.clone());
+        }
+    }
     log::info!(
         "[worktree] Step 2: Creating workspace-level symlinks ({} items)",
-        config.linked_workspace_items.len()
+        all_linked.len()
     );
-    for name in &config.linked_workspace_items {
+    for name in &all_linked {
         let src = root.join(name);
         let dst = worktree_path.join(name);
         if src.exists() && !dst.exists() {
@@ -952,11 +959,18 @@ pub fn restore_worktree_impl(window_label: &str, name: String) -> Result<(), Str
     }
 
     // Step 3: Restore workspace-level symlinks
+    // Merge linked_workspace_items + vault_linked_workspace_items, deduplicated
+    let mut all_linked: Vec<String> = config.linked_workspace_items.clone();
+    for item in &config.vault_linked_workspace_items {
+        if !all_linked.contains(item) {
+            all_linked.push(item.clone());
+        }
+    }
     log::info!(
         "[worktree] Step 3/3: Restoring workspace-level symlinks ({} items)",
-        config.linked_workspace_items.len()
+        all_linked.len()
     );
-    for item_name in &config.linked_workspace_items {
+    for item_name in &all_linked {
         let src = root.join(item_name);
         let dst = worktree_path.join(item_name);
         if src.exists() && !dst.exists() {

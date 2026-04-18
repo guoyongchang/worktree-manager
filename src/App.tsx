@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,9 +23,6 @@ import {
 import { useAppShellState } from "./hooks/useAppShellState";
 import { Input } from "@/components/ui/input";
 import { isTauri } from "./lib/backend";
-import { StatusBar } from "./components/StatusBar";
-import { MemoryDetailPanel } from "./components/MemoryDetailPanel";
-import { useMemoryQueue } from "./hooks/useMemoryQueue";
 import "./index.css";
 
 // Disable browser-like behaviors (only in Tauri desktop mode)
@@ -80,9 +76,6 @@ function App() {
     handleSaveConfig,
     handleTerminalTabContextMenu,
   } = useAppShellState(t);
-
-  const memoryQueue = useMemoryQueue();
-  const [memoryDetailId, setMemoryDetailId] = useState<string | null>(null);
 
   // Browser mode: kicked screen
   if (!isTauri() && wasKicked) {
@@ -341,14 +334,6 @@ function App() {
                   clientId={terminalHook.clientId}
                 />
 
-                <StatusBar
-                  memoryItems={memoryQueue.items}
-                  pendingCount={memoryQueue.pendingCount}
-                  processingCount={memoryQueue.processingCount}
-                  onRunArchive={memoryQueue.runArchive}
-                  onDeleteItem={memoryQueue.deleteItem}
-                  onViewDetail={(id) => setMemoryDetailId(id)}
-                />
               </div>
             </div>
           </>
@@ -425,21 +410,6 @@ function App() {
 
             </div>
           </div>
-        )}
-
-        {memoryDetailId && (
-          <MemoryDetailPanel
-            itemId={memoryDetailId}
-            onClose={() => setMemoryDetailId(null)}
-            onRunArchive={(id) => {
-              memoryQueue.runArchive(id);
-              setMemoryDetailId(null);
-            }}
-            onDeleteItem={(id) => {
-              memoryQueue.deleteItem(id);
-              setMemoryDetailId(null);
-            }}
-          />
         )}
 
         {/* Modals */}

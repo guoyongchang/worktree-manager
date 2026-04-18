@@ -1,6 +1,6 @@
 use axum::{
     http::{header, HeaderValue, Method},
-    routing::{delete, get, post},
+    routing::{get, post},
     Extension, Router,
 };
 use std::{path::PathBuf, sync::Arc};
@@ -31,10 +31,7 @@ use super::{
     h_sync_with_base_branch, h_unlock_worktree, h_unregister_window, h_update_share_password,
     h_voice_is_active, h_voice_refine_text, h_voice_send_audio, h_voice_start, h_voice_stop,
     h_ws_upgrade, is_allowed_origin, load_mcp_config, save_mcp_config, McpConfig,
-    h_memory_queue_submit, h_memory_queue_list, h_memory_queue_get, h_memory_queue_delete,
-    h_memory_queue_run, h_memory_queue_result,
-    h_memory_queue_get_by_body, h_memory_queue_delete_by_body, h_memory_queue_run_by_body,
-    h_get_memory_settings, h_save_memory_settings,
+    h_vault_status, h_vault_link, h_list_vault_item_children,
 };
 
 pub(super) fn build_cors_layer() -> CorsLayer {
@@ -272,20 +269,10 @@ pub(super) fn build_api_router(cert_pem: Option<String>) -> Router {
         .route("/api/open_devtools", post(h_open_devtools))
         .route("/api/mcp/config", post(h_mcp_config))
         .route("/api/mcp/set_capability", post(h_set_mcp_capability))
-        // Memory queue (RESTful)
-        .route("/api/memory/queue", post(h_memory_queue_submit))
-        .route("/api/memory/queue", get(h_memory_queue_list))
-        .route("/api/memory/queue/{id}", get(h_memory_queue_get))
-        .route("/api/memory/queue/{id}", delete(h_memory_queue_delete))
-        .route("/api/memory/queue/{id}/run", post(h_memory_queue_run))
-        .route("/api/memory/queue/{id}/result", get(h_memory_queue_result))
-        // Memory queue (callBackend compatible)
-        .route("/api/memory_queue_list", post(h_memory_queue_list))
-        .route("/api/memory_queue_get", post(h_memory_queue_get_by_body))
-        .route("/api/memory_queue_delete", post(h_memory_queue_delete_by_body))
-        .route("/api/memory_queue_run", post(h_memory_queue_run_by_body))
-        .route("/api/get_memory_settings", post(h_get_memory_settings))
-        .route("/api/save_memory_settings", post(h_save_memory_settings))
+        // Vault
+        .route("/api/vault_status", post(h_vault_status))
+        .route("/api/vault_link", post(h_vault_link))
+        .route("/api/list_vault_item_children", post(h_list_vault_item_children))
         .route("/ws", get(h_ws_upgrade));
 
     if let Some(pem) = cert_pem {

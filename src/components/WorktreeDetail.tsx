@@ -49,13 +49,14 @@ import type { LogEntry } from '@/lib/operationLog';
 import { GitOperations } from './GitOperations';
 import { IdePickerContextMenu, TerminalPickerPopover } from './ContextMenus';
 import { EDITORS } from '../constants';
-import { isTauri, openLink } from '@/lib/backend';
+import { isTauri, openLink, getVaultStatus } from '@/lib/backend';
 import type {
   WorktreeListItem,
   MainWorkspaceStatus,
   MainWorkspaceOccupation,
   ProjectStatus,
   EditorType,
+  VaultStatus,
 } from '../types';
 
 const StatusBadges: FC<{ project: ProjectStatus }> = ({ project }) => {
@@ -554,6 +555,13 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
   const [confirmRemoveProject, setConfirmRemoveProject] = useState<string | null>(null);
   const [showWorktreeLogs, setShowWorktreeLogs] = useState(false);
   const [showMainLogs, setShowMainLogs] = useState(false);
+  const [vaultStatus, setVaultStatus] = useState<VaultStatus | null>(null);
+
+  useEffect(() => {
+    if (mainWorkspace) {
+      getVaultStatus().then(setVaultStatus).catch(() => setVaultStatus(null));
+    }
+  }, [mainWorkspace]);
 
   const handleDeploy = useCallback(async (name: string) => {
     try {
@@ -741,6 +749,35 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
             </div>
           )}
         </div>
+
+        {/* Vault mounted items */}
+        {vaultStatus?.connected && vaultStatus.synced_items.length > 0 && (
+          <div className="mb-4 rounded-lg bg-slate-800/40 border border-slate-700/40 p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-2 h-2 rounded-full bg-emerald-400" />
+              <span className="text-xs font-medium text-slate-300">
+                {t('detail.vaultMounted', 'Vault 已挂载')}
+              </span>
+              <span className="text-xs text-slate-500">
+                ({vaultStatus.synced_items.length})
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {vaultStatus.synced_items.map((item) => (
+                <span
+                  key={item.name}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-700/50 text-xs text-slate-400"
+                  title={item.item_type === 'directory' ? t('detail.folder', '文件夹') : t('detail.file', '文件')}
+                >
+                  <span className={item.item_type === 'directory' ? 'text-blue-400' : 'text-slate-500'}>
+                    {item.item_type === 'directory' ? '\uD83D\uDCC1' : '\uD83D\uDCC4'}
+                  </span>
+                  {item.name}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
 
         <>
             {occupation ? (

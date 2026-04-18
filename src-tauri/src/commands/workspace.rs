@@ -187,6 +187,7 @@ pub(crate) fn create_workspace(name: String, path: String) -> Result<(), String>
         worktrees_dir: "worktrees".to_string(),
         projects: vec![],
         linked_workspace_items: default_linked_workspace_items(),
+        vault_linked_workspace_items: vec![],
     };
     save_workspace_config_internal(&path, &ws_config)?;
 
@@ -306,6 +307,7 @@ pub fn create_workspace_internal(name: &str, path: &str) -> Result<(), String> {
         worktrees_dir: "worktrees".to_string(),
         projects: vec![],
         linked_workspace_items: default_linked_workspace_items(),
+        vault_linked_workspace_items: vec![],
     };
     save_workspace_config_internal(path, &ws_config)?;
     add_workspace_internal(name, path)?;
