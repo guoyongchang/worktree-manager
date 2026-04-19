@@ -133,6 +133,8 @@
   "settings.commitTitle": "提交设置",
   "settings.prefixEnabled": "启用提交前缀",
   "settings.prefixEnabledDesc": "在提交对话框中自动添加前缀",
+  "settings.skipGitHooks": "跳过 Git Hooks",
+  "settings.skipGitHooksDesc": "提交时跳过 pre-commit / commit-msg hooks",
   "settings.prefixTemplates": "前缀模板",
   "settings.setDefault": "设为默认",
   "settings.addTemplate": "添加模板",

@@ -137,6 +137,8 @@
   "settings.commitTitle": "Commit Settings",
   "settings.prefixEnabled": "Enable commit prefix",
   "settings.prefixEnabledDesc": "Automatically add prefix in commit dialog",
+  "settings.skipGitHooks": "Skip Git Hooks",
+  "settings.skipGitHooksDesc": "Skip pre-commit / commit-msg hooks when committing",
   "settings.prefixTemplates": "Prefix templates",
   "settings.setDefault": "Set as default",
   "settings.addTemplate": "Add template",
