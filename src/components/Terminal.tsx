@@ -58,7 +58,15 @@ const TOOLBAR_BUTTONS = (() => {
   ];
 })();
 
-function MobileTerminalToolbar({ sessionId, onResize }: { sessionId: string; onResize?: () => void }) {
+function MobileTerminalToolbar({
+  sessionId,
+  onResize,
+  onDebug,
+}: {
+  sessionId: string;
+  onResize?: () => void;
+  onDebug?: () => void;
+}) {
   return (
     <div className="flex items-center gap-1.5 px-2 py-1.5 bg-slate-800/95 border-t border-slate-700/50 overflow-x-auto shrink-0 scrollbar-none">
       {TOOLBAR_BUTTONS.map((btn) => (
@@ -82,6 +90,17 @@ function MobileTerminalToolbar({ sessionId, onResize }: { sessionId: string; onR
           className="shrink-0 px-2.5 py-1 rounded-full bg-blue-700/80 text-blue-200 text-xs font-medium active:bg-blue-600 select-none touch-manipulation"
         >
           Resize
+        </button>
+      )}
+      {onDebug && (
+        <button
+          onPointerDown={(e) => {
+            e.preventDefault();
+            onDebug();
+          }}
+          className="shrink-0 px-2.5 py-1 rounded-full bg-amber-700/80 text-amber-200 text-xs font-medium active:bg-amber-600 select-none touch-manipulation"
+        >
+          Debug
         </button>
       )}
     </div>
@@ -202,6 +221,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
       : 'browser';
     const cols = xtermRef.current?.cols ?? 0;
     const rows = xtermRef.current?.rows ?? 0;
+    const selection = xtermRef.current?.getSelection() ?? '';
     setDebugInfo({
       visible: true,
       data: {
@@ -215,10 +235,17 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
         'User Agent': navigator.userAgent,
         'WS Connected': isTauri() ? 'N/A (desktop)' : String(wsConnected),
         'Client ID': clientId || 'N/A',
+        'Initialized': String(initializedRef.current),
+        'Init Status': initStatus || 'none',
+        'Init Error': initError || 'none',
+        'Got First Data': String(gotFirstDataRef.current),
+        'Is Mobile': String(isMobile),
+        'Has Selection': selection ? `${selection.length} chars` : 'no',
+        'Current Time': new Date().toISOString(),
       },
     });
     handleCloseContextMenu();
-  }, [actualCwd, clientId, wsConnected, handleCloseContextMenu]);
+  }, [actualCwd, clientId, wsConnected, initStatus, initError, isMobile, handleCloseContextMenu]);
 
   const handleCloseDebugInfo = useCallback(() => {
     setDebugInfo(prev => ({ ...prev, visible: false }));
@@ -775,34 +802,34 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
               style={{ left: contextMenu.x, top: contextMenu.y }}
             >
               <button
-                className="w-full px-3 py-1.5 text-left text-sm text-slate-300 hover:bg-slate-700 transition-colors"
+                className="w-full px-3 py-1 text-left text-sm text-slate-300 hover:bg-slate-700 transition-colors"
                 onClick={handleCopy}
               >
                 Copy
               </button>
               <button
-                className="w-full px-3 py-1.5 text-left text-sm text-slate-300 hover:bg-slate-700 transition-colors"
+                className="w-full px-3 py-1 text-left text-sm text-slate-300 hover:bg-slate-700 transition-colors"
                 onClick={handlePaste}
               >
                 Paste
               </button>
-              <div className="border-t border-slate-700 my-1" />
+              <div className="border-t border-slate-700 my-0.5" />
               <button
-                className="w-full px-3 py-1.5 text-left text-sm text-slate-300 hover:bg-slate-700 transition-colors"
+                className="w-full px-3 py-1 text-left text-sm text-slate-300 hover:bg-slate-700 transition-colors"
                 onClick={handleResizeToFit}
               >
                 Resize to Fit
               </button>
-              <div className="border-t border-slate-700 my-1" />
+              <div className="border-t border-slate-700 my-0.5" />
               <button
-                className="w-full px-3 py-1.5 text-left text-sm text-slate-300 hover:bg-slate-700 transition-colors"
+                className="w-full px-3 py-1 text-left text-sm text-slate-300 hover:bg-slate-700 transition-colors"
                 onClick={handleClear}
               >
                 Clear
               </button>
-              <div className="border-t border-slate-700 my-1" />
+              <div className="border-t border-slate-700 my-0.5" />
               <button
-                className="w-full px-3 py-1.5 text-left text-sm text-amber-300 hover:bg-slate-700 transition-colors"
+                className="w-full px-3 py-1 text-left text-sm text-amber-300 hover:bg-slate-700 transition-colors"
                 onClick={handleShowDebugInfo}
               >
                 Debug Info
@@ -840,7 +867,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
           </>
         )}
       </div>
-      {isMobile && <MobileTerminalToolbar sessionId={sessionIdRef.current} onResize={handleResize} />}
+      {isMobile && <MobileTerminalToolbar sessionId={sessionIdRef.current} onResize={handleResize} onDebug={handleShowDebugInfo} />}
     </div>
   );
 });
