@@ -191,6 +191,39 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
     handleCloseContextMenu();
   }, [handleCloseContextMenu]);
 
+  const [debugInfo, setDebugInfo] = useState<{
+    visible: boolean;
+    data: Record<string, string>;
+  }>({ visible: false, data: {} });
+
+  const handleShowDebugInfo = useCallback(async () => {
+    const windowLabel = isTauri()
+      ? await import('@tauri-apps/api/window').then(m => m.getCurrentWindow().label).catch(() => 'unknown')
+      : 'browser';
+    const cols = xtermRef.current?.cols ?? 0;
+    const rows = xtermRef.current?.rows ?? 0;
+    setDebugInfo({
+      visible: true,
+      data: {
+        'Session ID': sessionIdRef.current,
+        'Working Path': actualCwd,
+        'Window Label': windowLabel,
+        'Source': isTauri() ? 'Desktop (Tauri IPC)' : 'Browser (HTTP/WebSocket)',
+        'Platform': getPlatform(),
+        'Terminal Size': `${cols} cols x ${rows} rows`,
+        'Viewport Size': `${window.innerWidth} x ${window.innerHeight}`,
+        'User Agent': navigator.userAgent,
+        'WS Connected': isTauri() ? 'N/A (desktop)' : String(wsConnected),
+        'Client ID': clientId || 'N/A',
+      },
+    });
+    handleCloseContextMenu();
+  }, [actualCwd, clientId, wsConnected, handleCloseContextMenu]);
+
+  const handleCloseDebugInfo = useCallback(() => {
+    setDebugInfo(prev => ({ ...prev, visible: false }));
+  }, []);
+
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     longPressTimer.current = setTimeout(() => {
       const touch = e.touches[0];
@@ -767,6 +800,42 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
               >
                 Clear
               </button>
+              <div className="border-t border-slate-700 my-1" />
+              <button
+                className="w-full px-3 py-1.5 text-left text-sm text-amber-300 hover:bg-slate-700 transition-colors"
+                onClick={handleShowDebugInfo}
+              >
+                Debug Info
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* Debug Info Panel */}
+        {debugInfo.visible && (
+          <>
+            <div
+              className="fixed inset-0 z-50"
+              onClick={handleCloseDebugInfo}
+            />
+            <div className="absolute z-[60] top-2 left-2 bg-slate-900/95 border border-amber-600/50 rounded-lg shadow-xl p-3 min-w-[320px] max-w-[90vw] max-h-[80vh] overflow-auto">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">Terminal Debug Info</span>
+                <button
+                  onClick={handleCloseDebugInfo}
+                  className="text-slate-400 hover:text-white text-xs px-1.5 py-0.5 rounded hover:bg-slate-700 transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+              <div className="space-y-1">
+                {Object.entries(debugInfo.data).map(([key, value]) => (
+                  <div key={key} className="text-xs">
+                    <span className="text-slate-400 font-medium">{key}:</span>
+                    <span className="text-slate-200 ml-1 break-all font-mono">{value}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           </>
         )}
