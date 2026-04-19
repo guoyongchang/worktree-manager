@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { RefreshCw, Search, Mic, Eye, EyeOff, Settings, Globe, Info, Trash2, Wrench, FolderOpen, Link2, Folder, FileText, ChevronRight, ChevronDown } from 'lucide-react';
+import { RefreshCw, Search, Mic, Eye, EyeOff, Settings, Globe, Info, Trash2, Wrench, FolderOpen, Link2, Folder, FileText, ChevronRight, ChevronDown, Star } from 'lucide-react';
 import { BackIcon, PlusIcon, TrashIcon } from './Icons';
 import { BranchCombobox } from './BranchCombobox';
 import type { WorkspaceRef, WorkspaceConfig, ProjectConfig, ScannedFolder, VaultStatus, VaultItemChild } from '../types';
@@ -1622,7 +1622,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                             className={`px-1.5 ${defaultPrefixIndex === i ? 'text-amber-400' : 'text-slate-600 hover:text-slate-400'}`}
                             title={t('settings.setDefault', '设为默认')}
                           >
-                            <span className="text-sm">{defaultPrefixIndex === i ? '⭐' : '☆'}</span>
+                            <Star className={`w-4 h-4 ${defaultPrefixIndex === i ? 'fill-amber-400' : ''}`} />
                           </Button>
                           <Input type="text" value={tpl}
                             onChange={(e) => {

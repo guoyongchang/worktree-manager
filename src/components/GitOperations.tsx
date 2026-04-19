@@ -28,7 +28,7 @@ import {
   CloseIcon,
   TerminalIcon,
 } from './Icons';
-import { Pencil } from 'lucide-react';
+import { Pencil, Star } from 'lucide-react';
 import {
   syncWithBaseBranch,
   pushToRemote,
@@ -42,6 +42,7 @@ import {
   generateCommitMessage,
   checkDashscopeApiKey,
   getCommitPrefixConfig,
+  setCommitPrefixConfig,
   getGitUserGlobalConfig,
   setGitUserConfig,
   type BranchDiffStats,
@@ -684,13 +685,48 @@ export const GitOperations: FC<GitOperationsProps> = ({
                       return (
                         <SelectItem key={idx} value={String(idx)} className="text-xs"
                         >
-                          {isDefault ? '⭐ ' : '   '}{label}
+                          <span className="flex items-center justify-between w-full gap-2"
+                          >
+                            <span className="truncate">{label}</span>
+                            <Star
+                              className={`w-3 h-3 shrink-0 ${isDefault ? 'fill-amber-400 text-amber-400' : 'text-slate-500 hover:text-amber-400'}`}
+                              onPointerDown={(e) => {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                const newConfig = { ...prefixConfig, default_index: idx };
+                                setPrefixConfig(newConfig);
+                                setCommitPrefixConfig({
+                                  templates: prefixConfig.templates,
+                                  enabled: prefixConfig.enabled,
+                                  default_index: idx,
+                                }).catch(() => {});
+                              }}
+                            />
+                          </span>
                         </SelectItem>
                       );
                     })}
                     <SelectItem value={String(prefixConfig.templates.length)} className="text-xs"
                     >
-                      {'   '}{t('git.noPrefix', '无')}
+                      <span className="flex items-center justify-between w-full gap-2"
+                      >
+                        <span>{t('git.noPrefix', '无')}</span>
+                        <Star
+                          className={`w-3 h-3 shrink-0 ${prefixConfig.default_index === prefixConfig.templates.length ? 'fill-amber-400 text-amber-400' : 'text-slate-500 hover:text-amber-400'}`}
+                          onPointerDown={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            const noPrefixIdx = prefixConfig.templates.length;
+                            const newConfig = { ...prefixConfig, default_index: noPrefixIdx };
+                            setPrefixConfig(newConfig);
+                            setCommitPrefixConfig({
+                              templates: prefixConfig.templates,
+                              enabled: prefixConfig.enabled,
+                              default_index: noPrefixIdx,
+                            }).catch(() => {});
+                          }}
+                        />
+                      </span>
                     </SelectItem>
                   </SelectContent>
                 </Select>

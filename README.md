@@ -7,6 +7,7 @@
 **一个优雅的 Git Worktree 可视化管理工具**
 
 让多分支并行开发变得简单高效
+111
 
 </div>
 
@@ -45,24 +46,31 @@
 ## 核心功能
 
 ### 多分支并行工作
+
 一个项目同时打开多个分支，互不干扰。不用 `stash`，不用 `clone` 多份。
 
 ### 智能文件夹链接
+
 创建 worktree 时自动链接 `node_modules`、`.next`、`vendor` 等构建产物，避免重复安装依赖。支持自定义链接路径。
 
 ### Workspace 全局文件共享
+
 `.claude`、`CLAUDE.md`、`requirement-docs` 等文件可以配置为全局链接，在所有 worktree 中共享。
 
 ### 分支状态一目了然
+
 实时显示每个分支的提交数、未提交更改、是否合并到测试分支等信息。
 
 ### 快速打开 IDE
+
 一键用 VS Code、Cursor 或 IntelliJ IDEA 打开任意 worktree。
 
 ### 内置终端
+
 每个 worktree 有独立的终端会话，无需在多个窗口之间切换。
 
 ### 安全归档
+
 完成开发后归档 worktree，归档前自动检查未提交和未推送的代码，防止丢失。
 
 ## 快速开始
@@ -120,12 +128,12 @@ npm run docs:contracts
 
 主工作区中点击 "添加项目"，支持三种方式：
 
-| 方式 | 格式 | 示例 |
-|------|------|------|
-| GitHub 简写 | `owner/repo` | `facebook/react` |
-| SSH | `git@host:owner/repo.git` | `git@github.com:facebook/react.git` |
+| 方式         | 格式                           | 示例                                     |
+| ------------ | ------------------------------ | ---------------------------------------- |
+| GitHub 简写  | `owner/repo`                   | `facebook/react`                         |
+| SSH          | `git@host:owner/repo.git`      | `git@github.com:facebook/react.git`      |
 | SSH (带端口) | `ssh://git@host:port/path.git` | `ssh://git@gitlab.com:1022/org/repo.git` |
-| HTTPS | `https://host/owner/repo.git` | `https://github.com/facebook/react.git` |
+| HTTPS        | `https://host/owner/repo.git`  | `https://github.com/facebook/react.git`  |
 
 添加时可以选择要链接的文件夹（如 `node_modules`、`.next`），也可以添加自定义路径。
 
@@ -135,9 +143,7 @@ npm run docs:contracts
 
 ```json
 {
-  "workspaces": [
-    { "name": "我的项目", "path": "/path/to/workspace" }
-  ],
+  "workspaces": [{ "name": "我的项目", "path": "/path/to/workspace" }],
   "current_workspace": "/path/to/workspace"
 }
 ```
@@ -184,15 +190,14 @@ workspace/
 
 ## 技术栈
 
-| 层级 | 技术 |
-|------|------|
-| 框架 | Tauri 2 |
-| 前端 | React 19 + TypeScript |
-| 样式 | Tailwind CSS 4 |
-| UI 组件 | Radix UI |
-| 构建 | Vite 7 |
-| 后端 | Rust |
-| 终端 | xterm.js + portable-pty |
+| 层级    | 技术                    |
+| ------- | ----------------------- |
+| 框架    | Tauri 2                 |
+| 前端    | React 19 + TypeScript   |
+| 样式    | Tailwind CSS 4          |
+| UI 组件 | Radix UI                |
+| 构建    | Vite 7                  |
+| 后端    | Rust                    |
+| 终端    | xterm.js + portable-pty |
 
 ## 许可证
-
