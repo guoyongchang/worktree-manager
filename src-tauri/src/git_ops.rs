@@ -1484,7 +1484,11 @@ pub fn commit_all(
     author_email: Option<&str>,
     skip_hooks: bool,
 ) -> Result<String, String> {
-    log::info!("[git] Committing all changes at: {}, skip_hooks={}", path.display(), skip_hooks);
+    log::info!(
+        "[git] Committing all changes at: {}, skip_hooks={}",
+        path.display(),
+        skip_hooks
+    );
 
     // git add -A
     let add_output = git_command()

@@ -561,98 +561,30 @@ fn extract_macos_app_icon(app_path: &str) -> Option<String> {
     Some(format!("data:image/png;base64,{}", b64))
 }
 
-/// Batch-extract icons from multiple Windows .exe files in a single PowerShell process.
-/// Returns a map of exe_path → base64 PNG data URL.
+/// Batch-extract icons from multiple Windows .exe files.
+/// Returns a map of exe_path → base64 PNG data.
 #[cfg(target_os = "windows")]
 fn extract_windows_exe_icons_batch(paths: &[String]) -> std::collections::HashMap<String, String> {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-    if paths.is_empty() {
-        return std::collections::HashMap::new();
-    }
-
-    let paths_ps = paths
-        .iter()
-        .map(|p| format!("'{}'", p.replace("'", "''")))
-        .collect::<Vec<_>>()
-        .join(",");
-
-    // Uses WPF's CreateBitmapSourceFromHIcon to correctly preserve alpha channel.
-    // Plain GDI+ ToBitmap() loses alpha on transparent icons, producing white blocks.
-    let ps_script = format!(
-        r#"
-Add-Type -AssemblyName System.Drawing
-Add-Type -AssemblyName PresentationCore
-Add-Type -AssemblyName WindowsBase
-Add-Type @'
-using System;
-using System.Runtime.InteropServices;
-public static class IconHelper {{
-    [DllImport("Shell32.dll", CharSet=CharSet.Auto)]
-    public static extern IntPtr SHGetFileInfo(string path, uint attr, ref SHFILEINFO info, uint sz, uint flags);
-    [DllImport("user32.dll")]
-    public static extern bool DestroyIcon(IntPtr h);
-    [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Auto)]
-    public struct SHFILEINFO {{ public IntPtr hIcon; public int iIcon; public uint dwAttributes; [MarshalAs(UnmanagedType.ByValTStr,SizeConst=260)] public string szDisplayName; [MarshalAs(UnmanagedType.ByValTStr,SizeConst=80)] public string szTypeName; }}
-    public const uint SHGFI_ICON=0x100; public const uint SHGFI_LARGEICON=0x0; public const uint SHGFI_SMALLICON=0x1;
-}}
-'@
-function Get-IconBase64($path) {{
-    # Try large shell icon (48x48) first
-    $fi = New-Object IconHelper+SHFILEINFO
-    $hr = [IconHelper]::SHGetFileInfo($path, 0, [ref]$fi, [System.Runtime.InteropServices.Marshal]::SizeOf($fi), [IconHelper]::SHGFI_ICON -bor [IconHelper]::SHGFI_LARGEICON)
-    if ($fi.hIcon -ne [IntPtr]::Zero) {{
-        try {{
-            $bmpSrc = [System.Windows.Interop.Imaging]::CreateBitmapSourceFromHIcon($fi.hIcon, [System.Windows.Int32Rect]::Empty, [System.Windows.Media.Imaging.BitmapSizeOptions]::FromEmptyOptions())
-            $enc = New-Object System.Windows.Media.Imaging.PngBitmapEncoder
-            $enc.Frames.Add([System.Windows.Media.Imaging.BitmapFrame]::Create($bmpSrc))
-            $ms = New-Object System.IO.MemoryStream; $enc.Save($ms)
-            return [Convert]::ToBase64String($ms.ToArray())
-        }} finally {{ [IconHelper]::DestroyIcon($fi.hIcon) }}
-    }}
-    # Fallback: ExtractAssociatedIcon + WPF encode
-    $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($path)
-    if ($icon -ne $null) {{
-        try {{
-            $bmpSrc = [System.Windows.Interop.Imaging]::CreateBitmapSourceFromHIcon($icon.Handle, [System.Windows.Int32Rect]::Empty, [System.Windows.Media.Imaging.BitmapSizeOptions]::FromEmptyOptions())
-            $enc = New-Object System.Windows.Media.Imaging.PngBitmapEncoder
-            $enc.Frames.Add([System.Windows.Media.Imaging.BitmapFrame]::Create($bmpSrc))
-            $ms = New-Object System.IO.MemoryStream; $enc.Save($ms)
-            return [Convert]::ToBase64String($ms.ToArray())
-        }} finally {{ $icon.Dispose() }}
-    }}
-    return $null
-}}
-$paths = @({})
-$result = @{{}}
-foreach ($p in $paths) {{
-    try {{
-        $b64 = Get-IconBase64 $p
-        if ($b64) {{ $result[$p] = $b64 }}
-    }} catch {{}}
-}}
-if ($result.Count -gt 0) {{ ConvertTo-Json -InputObject $result -Compress }} else {{ Write-Output '{{}}' }}
-"#,
-        paths_ps
-    );
-
-    let output = match Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &ps_script])
-        .creation_flags(CREATE_NO_WINDOW)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .output()
-    {
-        Ok(o) => o,
-        Err(e) => {
-            log::warn!("[system] Batch icon extraction failed: {}", e);
-            return std::collections::HashMap::new();
+    let mut result = std::collections::HashMap::new();
+    for path in paths {
+        match windows_icons::get_icon_base64_by_path(path) {
+            Ok(b64) if !b64.is_empty() => {
+                result.insert(path.clone(), b64);
+            }
+            Ok(_) => {
+                log::warn!("[system] Icon extraction returned empty for: {}", path);
+            }
+            Err(e) => {
+                log::warn!("[system] Icon extraction failed for {}: {}", path, e);
+            }
         }
-    };
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    serde_json::from_str(stdout.trim()).unwrap_or_default()
+    }
+    log::debug!(
+        "[system] Icon extraction succeeded for {}/{} paths",
+        result.len(),
+        paths.len()
+    );
+    result
 }
 // ==================== Tool Detection ====================
 

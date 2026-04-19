@@ -519,7 +519,10 @@ async fn h_commit_all(Json(args): Json<Value>) -> Response {
     let author_name = args["authorName"].as_str().map(|s| s.to_string());
     let author_email = args["authorEmail"].as_str().map(|s| s.to_string());
     let skip_hooks = args["skipHooks"].as_bool();
-    result_json(crate::commands::git::commit_all(path, message, author_name, author_email, skip_hooks).await)
+    result_json(
+        crate::commands::git::commit_all(path, message, author_name, author_email, skip_hooks)
+            .await,
+    )
 }
 
 async fn h_generate_commit_message(Json(args): Json<Value>) -> Response {
@@ -823,7 +826,12 @@ async fn h_pty_resize(Json(args): Json<Value>) -> Response {
     let rows = args["rows"].as_u64().unwrap_or(24) as u16;
     let _request_client_id = args["clientId"].as_str().map(|s| s.to_string());
 
-    log::info!("[http] pty_resize: session={} size={}x{}", session_id, cols, rows);
+    log::info!(
+        "[http] pty_resize: session={} size={}x{}",
+        session_id,
+        cols,
+        rows
+    );
     result_ok(with_pty_manager(move |m| m.resize_session(&session_id, cols, rows)).await)
 }
 
@@ -1474,13 +1482,19 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                 let rows = parsed["rows"].as_u64().unwrap_or(24) as u16;
                 let _request_client_id = parsed["clientId"].as_str().map(|s| s.to_string());
 
-                log::info!("[ws] pty_resize: session={} size={}x{}", pty_session_id, cols, rows);
+                log::info!(
+                    "[ws] pty_resize: session={} size={}x{}",
+                    pty_session_id,
+                    cols,
+                    rows
+                );
                 let _ = tokio::task::spawn_blocking(move || {
                     PTY_MANAGER
                         .lock()
                         .map_err(|e| format!("Lock error: {}", e))
                         .and_then(|m| m.resize_session(&pty_session_id, cols, rows))
-                }).await;
+                })
+                .await;
             }
 
             "subscribe_locks" => {

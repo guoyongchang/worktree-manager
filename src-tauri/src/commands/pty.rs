@@ -66,7 +66,12 @@ pub(crate) fn pty_resize(
     rows: u16,
     _client_id: Option<String>,
 ) -> Result<(), String> {
-    log::info!("[pty] RESIZE: session={} size={}x{}", session_id, cols, rows);
+    log::info!(
+        "[pty] RESIZE: session={} size={}x{}",
+        session_id,
+        cols,
+        rows
+    );
     let manager = PTY_MANAGER
         .lock()
         .map_err(|e| format!("Lock error: {}", e))?;

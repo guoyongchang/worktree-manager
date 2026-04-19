@@ -118,7 +118,11 @@ fn load_user_env_from_shell() -> HashMap<String, String> {
                     env.insert(key.to_string(), value.to_string());
                 }
             }
-            log::info!("[git] Loaded {} env vars from login shell {}", env.len(), shell);
+            log::info!(
+                "[git] Loaded {} env vars from login shell {}",
+                env.len(),
+                shell
+            );
         }
         Ok(out) => {
             log::warn!(

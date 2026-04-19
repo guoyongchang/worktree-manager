@@ -185,6 +185,7 @@ pub(crate) fn get_terminal_state(
 
 /// 广播终端状态变化（用于桌面端同步到网页端）
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn broadcast_terminal_state(
     app: tauri::AppHandle,
     workspace_path: String,
