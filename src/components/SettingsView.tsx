@@ -502,6 +502,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
   // Commit prefix & git user state (must be before useCallbacks that reference them)
   const [prefixTemplates, setPrefixTemplates] = useState<string[]>(['[{{worktree-name}}]']);
   const [prefixEnabled, setPrefixEnabled] = useState(true);
+  const [defaultPrefixIndex, setDefaultPrefixIndex] = useState(0);
   const [prefixSaving, setPrefixSaving] = useState(false);
   const [globalGitName, setGlobalGitName] = useState('');
   const [globalGitEmail, setGlobalGitEmail] = useState('');
@@ -513,11 +514,12 @@ export const SettingsView: FC<SettingsViewProps> = ({
       await setCommitPrefixConfig({
         templates: prefixTemplates.slice(0, 3),
         enabled: prefixEnabled,
+        default_index: defaultPrefixIndex,
       });
     } finally {
       setPrefixSaving(false);
     }
-  }, [prefixTemplates, prefixEnabled]);
+  }, [prefixTemplates, prefixEnabled, defaultPrefixIndex]);
 
   const handleSaveGitUser = useCallback(async () => {
     setGitUserSaving(true);
@@ -791,6 +793,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
       .then(cfg => {
         setPrefixTemplates(cfg.templates.length > 0 ? cfg.templates : ['[{{worktree-name}}]']);
         setPrefixEnabled(cfg.enabled);
+        setDefaultPrefixIndex(cfg.default_index ?? 0);
       })
       .catch(() => {});
 
@@ -1611,7 +1614,16 @@ export const SettingsView: FC<SettingsViewProps> = ({
                     <div className="space-y-2">
                       <label className="block text-sm text-slate-400">{t('settings.prefixTemplates', '前缀模板（最多3个）')}</label>
                       {prefixTemplates.map((tpl, i) => (
-                        <div key={i} className="flex gap-2">
+                        <div key={i} className="flex gap-2 items-center">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setDefaultPrefixIndex(i)}
+                            className={`px-1.5 ${defaultPrefixIndex === i ? 'text-amber-400' : 'text-slate-600 hover:text-slate-400'}`}
+                            title={t('settings.setDefault', '设为默认')}
+                          >
+                            <span className="text-sm">{defaultPrefixIndex === i ? '⭐' : '☆'}</span>
+                          </Button>
                           <Input type="text" value={tpl}
                             onChange={(e) => {
                               const next = [...prefixTemplates];
@@ -1623,7 +1635,15 @@ export const SettingsView: FC<SettingsViewProps> = ({
                           />
                           {prefixTemplates.length > 1 && (
                             <Button variant="ghost" size="sm"
-                              onClick={() => setPrefixTemplates(prefixTemplates.filter((_, idx) => idx !== i))}
+                              onClick={() => {
+                                const next = prefixTemplates.filter((_, idx) => idx !== i);
+                                setPrefixTemplates(next);
+                                if (defaultPrefixIndex === i) {
+                                  setDefaultPrefixIndex(0);
+                                } else if (defaultPrefixIndex > i) {
+                                  setDefaultPrefixIndex(defaultPrefixIndex - 1);
+                                }
+                              }}
                               className="text-red-400/60 hover:text-red-300"
                             >
                               <Trash2 className="w-3.5 h-3.5" />

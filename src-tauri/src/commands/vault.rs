@@ -3,8 +3,8 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::{load_workspace_config, save_workspace_config_internal};
 use crate::config::get_window_workspace_path;
+use crate::config::{load_workspace_config, save_workspace_config_internal};
 
 // ==================== Data Structures ====================
 
@@ -87,7 +87,10 @@ pub fn read_vault_path_from_overrides(workspace_root: &Path) -> Option<String> {
 /// A synced item is a symlink in workspace_root whose target lives inside
 /// the vault workspace directory (read from overrides).
 /// Returns a sorted vec. Returns empty vec if no vault is connected.
-pub fn list_synced_items(workspace_root: &Path, vault_workspace_dir: Option<&Path>) -> Vec<SyncedItem> {
+pub fn list_synced_items(
+    workspace_root: &Path,
+    vault_workspace_dir: Option<&Path>,
+) -> Vec<SyncedItem> {
     let vault_dir = match vault_workspace_dir {
         Some(d) if d.exists() => d,
         _ => return vec![],
@@ -155,7 +158,11 @@ pub fn create_vault_symlinks(
     let entries = fs::read_dir(vault_workspace_dir)
         .map_err(|e| format!("Failed to read vault workspace directory: {}", e))?;
 
-    let ignored: HashSet<&str> = BUILT_IN_BLACKLIST.iter().chain(extra_ignored.iter()).copied().collect();
+    let ignored: HashSet<&str> = BUILT_IN_BLACKLIST
+        .iter()
+        .chain(extra_ignored.iter())
+        .copied()
+        .collect();
     let mut items: Vec<SyncedItem> = Vec::new();
 
     for entry in entries {
@@ -176,7 +183,8 @@ pub fn create_vault_symlinks(
 
         // Handle existing file/dir/symlink at the link path
         if link_path.symlink_metadata().is_ok() {
-            let is_symlink = link_path.symlink_metadata()
+            let is_symlink = link_path
+                .symlink_metadata()
                 .map(|m| m.file_type().is_symlink())
                 .unwrap_or(false);
 
@@ -193,19 +201,34 @@ pub fn create_vault_symlinks(
                     // Non-vault symlink — backup by saving target as {name}.local.link
                     if let Ok(target) = fs::read_link(&link_path) {
                         let backup_path = workspace_root.join(format!("{}.local.link", file_name));
-                        fs::write(&backup_path, target.to_string_lossy().as_bytes())
-                            .map_err(|e| format!("Failed to backup symlink target for '{}': {}", file_name, e))?;
-                        log::info!("[vault] Backed up symlink {} → {}.local.link", file_name, file_name);
+                        fs::write(&backup_path, target.to_string_lossy().as_bytes()).map_err(
+                            |e| {
+                                format!(
+                                    "Failed to backup symlink target for '{}': {}",
+                                    file_name, e
+                                )
+                            },
+                        )?;
+                        log::info!(
+                            "[vault] Backed up symlink {} → {}.local.link",
+                            file_name,
+                            file_name
+                        );
                     }
                 }
 
-                fs::remove_file(&link_path)
-                    .map_err(|e| format!("Failed to remove existing symlink '{}': {}", file_name, e))?;
+                fs::remove_file(&link_path).map_err(|e| {
+                    format!("Failed to remove existing symlink '{}': {}", file_name, e)
+                })?;
             } else {
                 // Existing real file/dir — backup to {name}.local
                 let backup_path = workspace_root.join(format!("{}.local", file_name));
-                fs::rename(&link_path, &backup_path)
-                    .map_err(|e| format!("Failed to backup '{}' to '{}.local': {}", file_name, file_name, e))?;
+                fs::rename(&link_path, &backup_path).map_err(|e| {
+                    format!(
+                        "Failed to backup '{}' to '{}.local': {}",
+                        file_name, file_name, e
+                    )
+                })?;
                 log::info!("[vault] Backed up {} → {}.local", file_name, file_name);
             }
         }
@@ -301,10 +324,7 @@ fn sync_vault_to_all_worktrees(
             let dst = path.join(item);
             if src.exists() && !dst.exists() {
                 if let Err(e) = crate::commands::worktree::create_symlink(&src, &dst) {
-                    errors.push(format!(
-                        "{} in {}: {}",
-                        item, name, e
-                    ));
+                    errors.push(format!("{} in {}: {}", item, name, e));
                 } else {
                     synced_count += 1;
                 }
@@ -413,8 +433,12 @@ fn restore_local_link_backup(workspace_root: &Path, name: &str) -> Result<bool, 
         }
     }
 
-    fs::remove_file(&link_backup)
-        .map_err(|e| format!("Failed to remove symlink backup '{}.local.link': {}", name, e))?;
+    fs::remove_file(&link_backup).map_err(|e| {
+        format!(
+            "Failed to remove symlink backup '{}.local.link': {}",
+            name, e
+        )
+    })?;
     Ok(true)
 }
 
@@ -433,8 +457,7 @@ pub fn save_vault_to_overrides(
     vault_workspace_path: &str,
 ) -> Result<(), String> {
     let ai_dir = workspace_root.join(".ai");
-    fs::create_dir_all(&ai_dir)
-        .map_err(|e| format!("Failed to create .ai/ directory: {}", e))?;
+    fs::create_dir_all(&ai_dir).map_err(|e| format!("Failed to create .ai/ directory: {}", e))?;
 
     let overrides_path = ai_dir.join("local-overrides.json");
 
@@ -500,10 +523,7 @@ pub fn clear_vault_from_overrides(workspace_root: &Path) -> Result<(), String> {
 ///
 /// Sets the field to the given list of item names.
 /// Pass an empty vec to clear the field.
-pub fn update_vault_linked_items(
-    workspace_root: &Path,
-    items: &[String],
-) -> Result<(), String> {
+pub fn update_vault_linked_items(workspace_root: &Path, items: &[String]) -> Result<(), String> {
     let config_path = workspace_root.join(".worktree-manager.json");
     if !config_path.exists() {
         return Ok(()); // No workspace config — nothing to update
@@ -675,11 +695,8 @@ pub fn vault_link_impl(
             }
 
             // Sync vault items to all existing worktrees
-            let (synced_count, sync_errors) = sync_vault_to_all_worktrees(
-                workspace_root,
-                worktrees_dir,
-                &item_names,
-            )?;
+            let (synced_count, sync_errors) =
+                sync_vault_to_all_worktrees(workspace_root, worktrees_dir, &item_names)?;
             if synced_count > 0 {
                 log::info!("[vault] Synced {} items to worktrees", synced_count);
             }
@@ -765,8 +782,7 @@ pub(crate) fn list_vault_item_children(
         return Err(format!("'{}' is not a directory", relative_path));
     }
 
-    let entries = fs::read_dir(&dir)
-        .map_err(|e| format!("Failed to read directory: {}", e))?;
+    let entries = fs::read_dir(&dir).map_err(|e| format!("Failed to read directory: {}", e))?;
 
     let mut children: Vec<crate::types::VaultItemChild> = Vec::new();
     for entry in entries {
@@ -776,7 +792,11 @@ pub(crate) fn list_vault_item_children(
         if name.starts_with('.') {
             continue;
         }
-        let item_type = if entry.path().is_dir() { "directory" } else { "file" };
+        let item_type = if entry.path().is_dir() {
+            "directory"
+        } else {
+            "file"
+        };
         children.push(crate::types::VaultItemChild {
             name,
             item_type: item_type.to_string(),
@@ -789,12 +809,10 @@ pub(crate) fn list_vault_item_children(
         }
     }
 
-    children.sort_by(|a, b| {
-        match (a.item_type.as_str(), b.item_type.as_str()) {
-            ("directory", "file") => std::cmp::Ordering::Less,
-            ("file", "directory") => std::cmp::Ordering::Greater,
-            _ => a.name.cmp(&b.name),
-        }
+    children.sort_by(|a, b| match (a.item_type.as_str(), b.item_type.as_str()) {
+        ("directory", "file") => std::cmp::Ordering::Less,
+        ("file", "directory") => std::cmp::Ordering::Greater,
+        _ => a.name.cmp(&b.name),
     });
 
     Ok(children)
@@ -815,8 +833,7 @@ mod tests {
 
     #[test]
     fn test_split_vault_path_with_workspaces() {
-        let result =
-            split_vault_path("/Users/guo/Work/GuoVault/Guo/workspaces/worktree-manager");
+        let result = split_vault_path("/Users/guo/Work/GuoVault/Guo/workspaces/worktree-manager");
         assert!(result.is_some());
         let (root, ws_path) = result.unwrap();
         assert_eq!(root, "/Users/guo/Work/GuoVault/Guo");
@@ -825,8 +842,7 @@ mod tests {
 
     #[test]
     fn test_split_vault_path_with_nested_workspaces() {
-        let result =
-            split_vault_path("/vault/root/workspaces/deep/nested/project");
+        let result = split_vault_path("/vault/root/workspaces/deep/nested/project");
         assert!(result.is_some());
         let (root, ws_path) = result.unwrap();
         assert_eq!(root, "/vault/root");
@@ -928,15 +944,18 @@ mod tests {
             std::os::unix::fs::symlink(
                 vault_source.path().join("CLAUDE.md"),
                 workspace.path().join("CLAUDE.md"),
-            ).unwrap();
+            )
+            .unwrap();
             std::os::unix::fs::symlink(
                 vault_source.path().join("architecture"),
                 workspace.path().join("architecture"),
-            ).unwrap();
+            )
+            .unwrap();
             std::os::unix::fs::symlink(
                 vault_source.path().join("repos.md"),
                 workspace.path().join("repos.md"),
-            ).unwrap();
+            )
+            .unwrap();
         }
 
         // Also create a non-vault file (should not be listed)
@@ -1031,7 +1050,8 @@ mod tests {
         std::os::unix::fs::symlink(
             vault_source_1.path().join("old.md"),
             workspace.path().join("old.md"),
-        ).unwrap();
+        )
+        .unwrap();
 
         // Point overrides to vault_source_1 so remove_vault_symlinks can identify the old links
         let v1 = vault_source_1.path().to_str().unwrap();
@@ -1077,7 +1097,10 @@ mod tests {
         remove_vault_symlinks(workspace.path()).unwrap();
         assert!(!workspace.path().join("CLAUDE.md.local").exists());
         assert!(workspace.path().join("CLAUDE.md").exists());
-        assert_eq!(fs::read_to_string(workspace.path().join("CLAUDE.md")).unwrap(), "local");
+        assert_eq!(
+            fs::read_to_string(workspace.path().join("CLAUDE.md")).unwrap(),
+            "local"
+        );
     }
 
     #[test]
@@ -1112,7 +1135,10 @@ mod tests {
 
         let status = vault_status_impl(window_label).unwrap();
         assert!(status.connected);
-        assert_eq!(status.vault_path, Some(vault_source.path().to_string_lossy().to_string()));
+        assert_eq!(
+            status.vault_path,
+            Some(vault_source.path().to_string_lossy().to_string())
+        );
         assert!(status.synced_items.is_empty());
 
         {

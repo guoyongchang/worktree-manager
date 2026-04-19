@@ -555,7 +555,9 @@ pub(crate) async fn commit_all(
 }
 
 #[tauri::command]
-pub(crate) async fn get_git_user_config(path: String) -> Result<(Option<String>, Option<String>), String> {
+pub(crate) async fn get_git_user_config(
+    path: String,
+) -> Result<(Option<String>, Option<String>), String> {
     blocking(move || {
         let normalized = normalize_path(&path);
         git_ops::get_git_user_config(Path::new(&normalized))

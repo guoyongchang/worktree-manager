@@ -583,7 +583,11 @@ export async function getCommitPrefixConfig(): Promise<CommitPrefixConfig> {
 }
 
 export async function setCommitPrefixConfig(config: CommitPrefixConfig): Promise<void> {
-  return callBackend<void>('set_commit_prefix_config', { ...config });
+  return callBackend<void>('set_commit_prefix_config', {
+    templates: config.templates,
+    enabled: config.enabled,
+    default_index: config.default_index,
+  });
 }
 
 export async function getGitUserGlobalConfig(): Promise<GitUserConfig> {

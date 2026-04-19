@@ -212,6 +212,7 @@ export interface VaultItemChild {
 export interface CommitPrefixConfig {
   templates: string[];
   enabled: boolean;
+  default_index: number;
 }
 
 export interface GitUserConfig {

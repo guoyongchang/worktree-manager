@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub struct CommitPrefixConfig {
     pub templates: Vec<String>,
     pub enabled: bool,
+    pub default_index: usize,
 }
 
 #[tauri::command]
@@ -13,6 +14,7 @@ pub(crate) fn get_commit_prefix_config() -> Result<CommitPrefixConfig, String> {
     Ok(CommitPrefixConfig {
         templates: config.commit_prefix_templates,
         enabled: config.commit_prefix_enabled,
+        default_index: config.default_prefix_index,
     })
 }
 
@@ -20,10 +22,12 @@ pub(crate) fn get_commit_prefix_config() -> Result<CommitPrefixConfig, String> {
 pub(crate) fn set_commit_prefix_config(
     templates: Vec<String>,
     enabled: bool,
+    default_index: usize,
 ) -> Result<(), String> {
     let mut config = load_global_config();
     config.commit_prefix_templates = templates.into_iter().take(3).collect();
     config.commit_prefix_enabled = enabled;
+    config.default_prefix_index = default_index;
     save_global_config_internal(&config)
 }
 

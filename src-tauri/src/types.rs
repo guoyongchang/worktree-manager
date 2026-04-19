@@ -156,6 +156,8 @@ pub struct GlobalConfig {
     #[serde(default = "default_true")]
     pub commit_prefix_enabled: bool,
     #[serde(default)]
+    pub default_prefix_index: usize,
+    #[serde(default)]
     pub git_user_name: Option<String>,
     #[serde(default)]
     pub git_user_email: Option<String>,
@@ -187,6 +189,7 @@ impl Default for GlobalConfig {
             voice_refine_enabled: true,
             commit_prefix_templates: default_prefix_templates(),
             commit_prefix_enabled: true,
+            default_prefix_index: 0,
             git_user_name: None,
             git_user_email: None,
         }

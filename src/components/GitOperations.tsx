@@ -101,9 +101,10 @@ export const GitOperations: FC<GitOperationsProps> = ({
   const [showCommitDialog, setShowCommitDialog] = useState(false);
   const [generatingMessage, setGeneratingMessage] = useState(false);
   const [committing, setCommitting] = useState(false);
-  const [prefixConfig, setPrefixConfig] = useState<{ templates: string[]; enabled: boolean }>({
+  const [prefixConfig, setPrefixConfig] = useState<{ templates: string[]; enabled: boolean; default_index: number }>({
     templates: ['[{{worktree-name}}]'],
     enabled: true,
+    default_index: 0,
   });
   const [selectedPrefixIndex, setSelectedPrefixIndex] = useState(0);
   const [prefix, setPrefix] = useState('');
@@ -309,17 +310,21 @@ export const GitOperations: FC<GitOperationsProps> = ({
     setContent('');
     setGeneratingMessage(true);
     try {
-      let config: { templates: string[]; enabled: boolean };
+      let config: { templates: string[]; enabled: boolean; default_index: number };
       try {
         config = await getCommitPrefixConfig();
         setPrefixConfig(config);
       } catch {
-        config = { templates: ['[{{worktree-name}}]'], enabled: true };
+        config = { templates: ['[{{worktree-name}}]'], enabled: true, default_index: 0 };
         setPrefixConfig(config);
       }
 
       const projectConfig = workspaceConfig?.projects.find((p: { name: string }) => p.name === projectName);
-      let prefixIndex = projectConfig?.commit_prefix_index ?? 0;
+      // 优先使用 project 的 commit_prefix_index，如果没有则使用全局 default_index
+      let prefixIndex = projectConfig?.commit_prefix_index;
+      if (prefixIndex === undefined) {
+        prefixIndex = config.default_index;
+      }
       if (prefixIndex < 0 || prefixIndex > config.templates.length) prefixIndex = 0;
       setSelectedPrefixIndex(prefixIndex);
 
@@ -668,18 +673,24 @@ export const GitOperations: FC<GitOperationsProps> = ({
                     <SelectValue placeholder={t('git.selectPrefix')} />
                   </SelectTrigger>
                   <SelectContent>
-                    {prefixConfig.templates.map((tmpl, idx) => (
-                      <SelectItem key={idx} value={String(idx)} className="text-xs">
-                        {renderCommitPrefix(tmpl, {
-                          worktreeName: worktreeDisplayName || projectPath.split('/').pop() || '',
-                          projectName,
-                          branchName: currentBranch,
-                          repoName: projectPath.split('/').pop() || '',
-                        }) || t('git.emptyPrefix', '(空模板)')}
-                      </SelectItem>
-                    ))}
-                    <SelectItem value={String(prefixConfig.templates.length)} className="text-xs">
-                      {t('git.noPrefix', '无')}
+                    {prefixConfig.templates.map((tmpl, idx) => {
+                      const label = renderCommitPrefix(tmpl, {
+                        worktreeName: worktreeDisplayName || projectPath.split('/').pop() || '',
+                        projectName,
+                        branchName: currentBranch,
+                        repoName: projectPath.split('/').pop() || '',
+                      }) || t('git.emptyPrefix', '(空模板)');
+                      const isDefault = idx === prefixConfig.default_index;
+                      return (
+                        <SelectItem key={idx} value={String(idx)} className="text-xs"
+                        >
+                          {isDefault ? '⭐ ' : '   '}{label}
+                        </SelectItem>
+                      );
+                    })}
+                    <SelectItem value={String(prefixConfig.templates.length)} className="text-xs"
+                    >
+                      {'   '}{t('git.noPrefix', '无')}
                     </SelectItem>
                   </SelectContent>
                 </Select>

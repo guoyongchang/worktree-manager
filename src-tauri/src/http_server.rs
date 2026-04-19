@@ -534,10 +534,15 @@ async fn h_get_commit_prefix_config() -> Response {
 struct SetPrefixArgs {
     templates: Vec<String>,
     enabled: bool,
+    default_index: usize,
 }
 
 async fn h_set_commit_prefix_config(Json(args): Json<SetPrefixArgs>) -> Response {
-    result_ok(crate::commands::config::set_commit_prefix_config(args.templates, args.enabled))
+    result_ok(crate::commands::config::set_commit_prefix_config(
+        args.templates,
+        args.enabled,
+        args.default_index,
+    ))
 }
 
 async fn h_get_git_user_global_config() -> Response {
@@ -551,7 +556,9 @@ struct SetGitUserGlobalArgs {
 }
 
 async fn h_set_git_user_global_config(Json(args): Json<SetGitUserGlobalArgs>) -> Response {
-    result_ok(crate::commands::config::set_git_user_global_config(args.name, args.email))
+    result_ok(crate::commands::config::set_git_user_global_config(
+        args.name, args.email,
+    ))
 }
 
 async fn h_get_git_user_config(Json(args): Json<Value>) -> Response {
@@ -1197,7 +1204,11 @@ pub async fn h_vault_link(
 ) -> axum::response::Response {
     let sid = session_id(&headers);
     let path = args.get("path").and_then(|v| {
-        if v.is_null() { None } else { v.as_str().map(|s| s.to_string()) }
+        if v.is_null() {
+            None
+        } else {
+            v.as_str().map(|s| s.to_string())
+        }
     });
     result_json(crate::commands::vault::vault_link_impl(&sid, path))
 }

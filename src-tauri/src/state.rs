@@ -89,4 +89,3 @@ pub(crate) static GLOBAL_CONFIG_CACHE: Lazy<Mutex<Option<GlobalConfig>>> =
     Lazy::new(|| Mutex::new(None));
 pub(crate) static WORKSPACE_CONFIG_CACHE: Lazy<Mutex<Option<(String, WorkspaceConfig)>>> =
     Lazy::new(|| Mutex::new(None));
-

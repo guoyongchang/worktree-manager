@@ -1531,7 +1531,11 @@ pub fn get_git_user_config(path: &Path) -> Result<(Option<String>, Option<String
         .output()
         .map_err(|e| format!("Failed to get user.name: {}", e))?;
     let name = if name_output.status.success() {
-        Some(String::from_utf8_lossy(&name_output.stdout).trim().to_string())
+        Some(
+            String::from_utf8_lossy(&name_output.stdout)
+                .trim()
+                .to_string(),
+        )
     } else {
         None
     };
@@ -1543,7 +1547,11 @@ pub fn get_git_user_config(path: &Path) -> Result<(Option<String>, Option<String
         .output()
         .map_err(|e| format!("Failed to get user.email: {}", e))?;
     let email = if email_output.status.success() {
-        Some(String::from_utf8_lossy(&email_output.stdout).trim().to_string())
+        Some(
+            String::from_utf8_lossy(&email_output.stdout)
+                .trim()
+                .to_string(),
+        )
     } else {
         None
     };
