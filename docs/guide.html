@@ -136,10 +136,12 @@
           <a href="#ide-integration" class="block hover:text-blue-400 transition">8. IDE 集成</a>
           <a href="#smart-scan" class="block hover:text-blue-400 transition">9. 智能文件夹扫描</a>
           <a href="#remote-sharing" class="block hover:text-blue-400 transition">10. 浏览器分享（LAN / ngrok）</a>
-          <a href="#configuration" class="block hover:text-blue-400 transition">11. 配置详解</a>
-          <a href="#keyboard-shortcuts" class="block hover:text-blue-400 transition">12. 快捷键</a>
-          <a href="#best-practices" class="block hover:text-blue-400 transition">13. 最佳实践</a>
-          <a href="#troubleshooting" class="block hover:text-blue-400 transition">14. 常见问题</a>
+          <a href="#vault-mounting" class="block hover:text-blue-400 transition">11. Vault 挂载</a>
+          <a href="#plugins" class="block hover:text-blue-400 transition">12. 插件生态（MCP / Memory Hook）</a>
+          <a href="#configuration" class="block hover:text-blue-400 transition">13. 配置详解</a>
+          <a href="#keyboard-shortcuts" class="block hover:text-blue-400 transition">14. 快捷键</a>
+          <a href="#best-practices" class="block hover:text-blue-400 transition">15. 最佳实践</a>
+          <a href="#troubleshooting" class="block hover:text-blue-400 transition">16. 常见问题</a>
         </nav>
       </div>
 
@@ -943,10 +945,174 @@ lsof -i :49152</code></pre>
           </div>
         </section>
 
-        <!-- 11. Configuration -->
+        <!-- 11. Vault Mounting -->
+        <section id="vault-mounting">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-purple-600 rounded-lg text-xl">11</span>
+            Vault 挂载
+          </h2>
+
+          <div class="space-y-6">
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">什么是 Vault 挂载？</h3>
+              <p class="text-slate-300 mb-4">Vault 挂载功能允许你将一个 Obsidian Vault（知识库目录）以 symlink 方式挂载到工作区根目录。挂载后，Vault 中的文件/文件夹对所有子 worktree 可见，实现跨分支的知识共享。</p>
+              <div class="bg-purple-900/20 border border-purple-700 rounded-lg p-4">
+                <p class="text-purple-200 text-sm"><strong>典型用途：</strong> 将项目文档、设计稿、API 文档等放在 Vault 中，所有 worktree 都能访问，无需在每个分支中复制。</p>
+              </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">如何使用</h3>
+              <ol class="list-decimal list-inside space-y-3 text-slate-300">
+                <li>打开<strong>设置页面</strong>（齿轮图标）</li>
+                <li>在左侧菜单中选择<strong>"Vault"</strong></li>
+                <li>点击<strong>"选择 Vault"</strong>按钮，选择你的 Vault 目录</li>
+                <li>Vault 目录下的文件/文件夹会显示在列表中</li>
+                <li>勾选需要挂载的项，点击<strong>"更新挂载"</strong></li>
+              </ol>
+              <div class="bg-blue-900/20 border border-blue-700 rounded-lg p-4 mt-4">
+                <p class="text-blue-200 text-sm"><strong>&#x1F4A1; 提示：</strong>文件夹支持展开查看子目录，99+ 项的子目录会显示限制提示。Vault 挂载项在列表中以绿色背景和 Link 图标标识。</p>
+              </div>
+            </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">安全保护</h3>
+              <div class="space-y-3">
+                <div class="flex items-start gap-3">
+                  <span class="text-red-400 mt-0.5">&#x26A0;</span>
+                  <div>
+                    <p class="text-slate-200 font-medium">内置黑名单</p>
+                    <p class="text-slate-400 text-sm">.projects、worktrees、.worktree-manager.json 等关键文件/目录不允许挂载，防止破坏工作区结构。</p>
+                  </div>
+                </div>
+                <div class="flex items-start gap-3">
+                  <span class="text-amber-400 mt-0.5">&#x26A0;</span>
+                  <div>
+                    <p class="text-slate-200 font-medium">冲突检测</p>
+                    <p class="text-slate-400 text-sm">挂载前自动检查目标路径是否已存在文件或已有链接，避免覆盖。</p>
+                  </div>
+                </div>
+                <div class="flex items-start gap-3">
+                  <span class="text-green-400 mt-0.5">&#x2713;</span>
+                  <div>
+                    <p class="text-slate-200 font-medium">自动同步</p>
+                    <p class="text-slate-400 text-sm">更新挂载后，自动同步到所有子 worktree。删除 Vault 中的挂载项时，自动恢复原始文件（从 .local 备份）。</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 12. Plugins -->
+        <section id="plugins">
+          <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
+            <span class="flex items-center justify-center w-10 h-10 bg-purple-600 rounded-lg text-xl">12</span>
+            插件生态（MCP / Memory Hook）
+          </h2>
+
+          <div class="space-y-6">
+            <!-- MCP Plugin -->
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <div class="flex items-center gap-3 mb-4">
+                <div class="text-3xl">&#x1F916;</div>
+                <div>
+                  <h3 class="text-xl font-semibold">MCP 插件</h3>
+                  <p class="text-slate-500 text-sm">让 AI 助手直接操作 Worktree Manager</p>
+                </div>
+              </div>
+              <p class="text-slate-300 mb-4">通过 Model Context Protocol (MCP) 协议，Claude Code、Codex、Cursor 等 AI 助手可以直接与 Worktree Manager 交互，执行工作区查询、worktree 创建、Git 操作等任务。</p>
+
+              <div class="bg-slate-900 rounded-lg p-4 mb-4">
+                <h4 class="font-semibold text-slate-200 mb-2">安装</h4>
+                <pre class="text-sm text-slate-300 overflow-x-auto"><code>npx -y @worktree-manager/mcp install</code></pre>
+                <p class="text-slate-400 text-sm mt-2">安装后重启 Claude Code 或运行 <code class="bg-slate-950 px-1 rounded">claude mcp restart</code></p>
+              </div>
+
+              <h4 class="font-semibold text-slate-200 mb-2">可用工具</h4>
+              <div class="grid md:grid-cols-2 gap-3 text-sm">
+                <div class="bg-slate-900 rounded-lg p-3">
+                  <div class="font-medium text-slate-200">Layer 1 — 核心查询</div>
+                  <ul class="list-disc list-inside text-slate-400 mt-1 space-y-1">
+                    <li>workspace_list</li>
+                    <li>worktree_list / worktree_get_status</li>
+                    <li>workspace_get_status</li>
+                  </ul>
+                </div>
+                <div class="bg-slate-900 rounded-lg p-3">
+                  <div class="font-medium text-slate-200">Layer 2 — 详细信息</div>
+                  <ul class="list-disc list-inside text-slate-400 mt-1 space-y-1">
+                    <li>project_get_branches</li>
+                    <li>project_get_diff_stats</li>
+                    <li>project_get_changed_files</li>
+                  </ul>
+                </div>
+                <div class="bg-slate-900 rounded-lg p-3 md:col-span-2">
+                  <div class="font-medium text-slate-200">Layer 3 — 高级操作（由 Skill 包装）</div>
+                  <ul class="list-disc list-inside text-slate-400 mt-1 space-y-1">
+                    <li>worktree_create / worktree_archive</li>
+                    <li>git_commit / git_push</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <!-- Memory Hook Plugin -->
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <div class="flex items-center gap-3 mb-4">
+                <div class="text-3xl">&#x1F9E0;</div>
+                <div>
+                  <h3 class="text-xl font-semibold">Memory Hook</h3>
+                  <p class="text-slate-500 text-sm">自动注入需求上下文，归档对话知识</p>
+                </div>
+              </div>
+              <p class="text-slate-300 mb-4">Claude Code 插件，每次进入 worktree 时自动注入需求文档上下文，会话结束时自动提炼对话并归档到 Memory Wiki。</p>
+
+              <div class="bg-slate-900 rounded-lg p-4 mb-4">
+                <h4 class="font-semibold text-slate-200 mb-2">安装</h4>
+                <pre class="text-sm text-slate-300 overflow-x-auto"><code>claude plugin marketplace add guoyongchang/worktree-manager-obsidian-bridge
+claude plugin install worktree-manager-memory-hook@worktree-manager-obsidian-bridge</code></pre>
+              </div>
+
+              <h4 class="font-semibold text-slate-200 mb-2">工作流程</h4>
+              <div class="space-y-3">
+                <div class="flex items-start gap-3">
+                  <span class="flex items-center justify-center w-6 h-6 bg-blue-600 rounded-full text-xs text-white flex-shrink-0">1</span>
+                  <div>
+                    <p class="text-slate-200 font-medium">SessionStart — 注入需求上下文</p>
+                    <p class="text-slate-400 text-sm">读取 <code class="bg-slate-950 px-1 rounded">requirement-docs/{branch}/README.md</code>，注入到 Claude 的 system prompt。</p>
+                  </div>
+                </div>
+                <div class="flex items-start gap-3">
+                  <span class="flex items-center justify-center w-6 h-6 bg-blue-600 rounded-full text-xs text-white flex-shrink-0">2</span>
+                  <div>
+                    <p class="text-slate-200 font-medium">SessionEnd — 归档到 Staging</p>
+                    <p class="text-slate-400 text-sm">提取对话内容，写入 <code class="bg-slate-950 px-1 rounded">.memory-staging/session-{timestamp}-{id}.json</code>。</p>
+                  </div>
+                </div>
+                <div class="flex items-start gap-3">
+                  <span class="flex items-center justify-center w-6 h-6 bg-blue-600 rounded-full text-xs text-white flex-shrink-0">3</span>
+                  <div>
+                    <p class="text-slate-200 font-medium">Accumulate — 提炼摘要</p>
+                    <p class="text-slate-400 text-sm">运行 <code class="bg-slate-950 px-1 rounded">--accumulate</code>，用轻量模型提取关键决策、技术发现、改动、进度。</p>
+                  </div>
+                </div>
+                <div class="flex items-start gap-3">
+                  <span class="flex items-center justify-center w-6 h-6 bg-blue-600 rounded-full text-xs text-white flex-shrink-0">4</span>
+                  <div>
+                    <p class="text-slate-200 font-medium">Finalize — 归档到 Wiki</p>
+                    <p class="text-slate-400 text-sm">运行 <code class="bg-slate-950 px-1 rounded">/memory-archive</code>，用强力模型将摘要合并到 Memory Wiki。</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 13. Configuration -->
         <section id="configuration">
           <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
-            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">11</span>
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">13</span>
             配置详解
           </h2>
 
@@ -1026,10 +1192,10 @@ lsof -i :49152</code></pre>
           </div>
         </section>
 
-        <!-- 12. Keyboard Shortcuts -->
+        <!-- 14. Keyboard Shortcuts -->
         <section id="keyboard-shortcuts">
           <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
-            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">12</span>
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">14</span>
             快捷键
           </h2>
 
@@ -1073,7 +1239,7 @@ lsof -i :49152</code></pre>
         <!-- 13. Best Practices -->
         <section id="best-practices">
           <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
-            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">13</span>
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">15</span>
             最佳实践
           </h2>
 
@@ -1101,10 +1267,10 @@ lsof -i :49152</code></pre>
           </div>
         </section>
 
-        <!-- 14. Troubleshooting -->
+        <!-- 16. Troubleshooting -->
         <section id="troubleshooting">
           <h2 class="text-3xl font-bold mb-6 flex items-center gap-3">
-            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">14</span>
+            <span class="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg text-xl">16</span>
             常见问题
           </h2>
 

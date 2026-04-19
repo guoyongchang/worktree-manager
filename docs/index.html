@@ -689,6 +689,11 @@
           <h3>全局文件共享</h3>
           <p>.claude、CLAUDE.md、requirement-docs 等文件可配置为全局链接，在所有 worktree 中共享。</p>
         </div>
+        <div class="feature-card" style="border-color: rgba(168, 85, 247, 0.3); background: linear-gradient(135deg, #1e293b 0%, #2e1065 100%);">
+          <div class="feature-icon">&#x1F3DB;&#xFE0F;</div>
+          <h3>Vault 挂载</h3>
+          <p>将 Vault 知识库以 symlink 方式挂载到工作区根目录，实现跨 worktree 的文档共享。自动同步到所有子 worktree，黑名单保护关键文件。</p>
+        </div>
         <div class="feature-card">
           <div class="feature-icon">&#x1F4CA;</div>
           <h3>分支状态监控</h3>
@@ -900,6 +905,101 @@
 <span class="code-cmd">npm run tauri build</span>
         </div>
       </details>
+    </div>
+  </section>
+
+  <!-- Plugin Ecosystem -->
+  <section class="py-20 bg-gradient-to-b from-slate-900 via-purple-950/20 to-slate-900">
+    <div class="max-w-5xl mx-auto px-4">
+      <h2 class="text-3xl md:text-4xl font-bold mb-3 text-center">插件生态</h2>
+      <p class="text-slate-400 text-lg mb-12 text-center">AI 助手深度集成，知识自动归档</p>
+
+      <div class="grid md:grid-cols-2 gap-6">
+        <!-- MCP Plugin -->
+        <div class="feature-card" style="border-color: rgba(168, 85, 247, 0.3); background: linear-gradient(135deg, #1e293b 0%, #2e1065 100%);">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="text-3xl">&#x1F916;</div>
+            <h3 class="text-xl font-semibold">MCP 插件</h3>
+          </div>
+          <p class="text-slate-400 text-sm leading-relaxed mb-4">通过 Model Context Protocol (MCP) 将 Worktree Manager 暴露给 Claude Code、Codex、Cursor 等 AI 助手。AI 可以直接读取工作区状态、创建 worktree、执行 Git 操作。</p>
+          <div class="space-y-2 text-sm">
+            <div class="flex items-start gap-2">
+              <span class="text-purple-400 mt-0.5">&#x2713;</span>
+              <span class="text-slate-300">工作区 / worktree 状态查询</span>
+            </div>
+            <div class="flex items-start gap-2">
+              <span class="text-purple-400 mt-0.5">&#x2713;</span>
+              <span class="text-slate-300">创建、归档 worktree</span>
+            </div>
+            <div class="flex items-start gap-2">
+              <span class="text-purple-400 mt-0.5">&#x2713;</span>
+              <span class="text-slate-300">Git commit / push 操作</span>
+            </div>
+            <div class="flex items-start gap-2">
+              <span class="text-purple-400 mt-0.5">&#x2713;</span>
+              <span class="text-slate-300">分支差异和变更文件查看</span>
+            </div>
+          </div>
+          <div class="mt-4 pt-4 border-t border-slate-700/50">
+            <code class="text-xs font-mono text-purple-300 bg-slate-950 px-2 py-1 rounded">npx -y @worktree-manager/mcp install</code>
+          </div>
+        </div>
+
+        <!-- Memory Hook Plugin -->
+        <div class="feature-card" style="border-color: rgba(59, 130, 246, 0.3); background: linear-gradient(135deg, #1e293b 0%, #172554 100%);">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="text-3xl">&#x1F9E0;</div>
+            <h3 class="text-xl font-semibold">Memory Hook</h3>
+          </div>
+          <p class="text-slate-400 text-sm leading-relaxed mb-4">Claude Code 插件，自动注入需求上下文并归档对话知识。每次进入 worktree 时注入 requirement-docs，会话结束时自动提炼对话并归档到 Memory Wiki。</p>
+          <div class="space-y-2 text-sm">
+            <div class="flex items-start gap-2">
+              <span class="text-blue-400 mt-0.5">&#x2713;</span>
+              <span class="text-slate-300">自动注入 requirement-docs/{branch}/README.md</span>
+            </div>
+            <div class="flex items-start gap-2">
+              <span class="text-blue-400 mt-0.5">&#x2713;</span>
+              <span class="text-slate-300">SessionEnd 自动归档对话到 .memory-staging</span>
+            </div>
+            <div class="flex items-start gap-2">
+              <span class="text-blue-400 mt-0.5">&#x2713;</span>
+              <span class="text-slate-300">两阶段 LLM 提炼（accumulate + finalize）</span>
+            </div>
+            <div class="flex items-start gap-2">
+              <span class="text-blue-400 mt-0.5">&#x2713;</span>
+              <span class="text-slate-300">归档到 Memory Wiki（requirements, projects, log）</span>
+            </div>
+          </div>
+          <div class="mt-4 pt-4 border-t border-slate-700/50">
+            <code class="text-xs font-mono text-blue-300 bg-slate-950 px-2 py-1 rounded">claude plugin install worktree-manager-memory-hook</code>
+          </div>
+        </div>
+      </div>
+
+      <!-- Vault Integration -->
+      <div class="mt-8 feature-card" style="border-color: rgba(168, 85, 247, 0.3);">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="text-3xl">&#x1F3DB;&#xFE0F;</div>
+          <div>
+            <h3 class="text-xl font-semibold">Vault 知识库集成</h3>
+            <p class="text-slate-500 text-sm">连接 Vault 和 Memory Hook 的桥梁</p>
+          </div>
+        </div>
+        <div class="grid md:grid-cols-3 gap-4 text-sm">
+          <div class="bg-slate-800/50 rounded-lg p-4">
+            <div class="font-semibold text-slate-200 mb-2">1. 选择 Vault</div>
+            <p class="text-slate-400">在设置中选择 Vault 目录，Worktree Manager 自动挂载 Vault 文件到工作区根目录。</p>
+          </div>
+          <div class="bg-slate-800/50 rounded-lg p-4">
+            <div class="font-semibold text-slate-200 mb-2">2. 自动同步</div>
+            <p class="text-slate-400">Vault 挂载状态自动同步到所有子 worktree，通过 symlink 实现零拷贝共享。</p>
+          </div>
+          <div class="bg-slate-800/50 rounded-lg p-4">
+            <div class="font-semibold text-slate-200 mb-2">3. 安全保护</div>
+            <p class="text-slate-400">内置黑名单防止挂载关键文件，冲突检测避免覆盖现有文件，挂载前自动验证。</p>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 
