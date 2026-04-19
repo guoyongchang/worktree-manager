@@ -98,7 +98,6 @@ export const GitOperations: FC<GitOperationsProps> = ({
   const [dismissing, setDismissing] = useState<'error' | 'success' | null>(null);
   const [showMergeBaseConfirm, setShowMergeBaseConfirm] = useState(false);
   const [showCommitDialog, setShowCommitDialog] = useState(false);
-  const [commitMessage, setCommitMessage] = useState('');
   const [generatingMessage, setGeneratingMessage] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [prefixConfig, setPrefixConfig] = useState<{ templates: string[]; enabled: boolean }>({
@@ -106,6 +105,8 @@ export const GitOperations: FC<GitOperationsProps> = ({
     enabled: true,
   });
   const [selectedPrefixIndex, setSelectedPrefixIndex] = useState(0);
+  const [prefix, setPrefix] = useState('');
+  const [content, setContent] = useState('');
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const fetchingSyncingRef = useRef(fetchingSyncing);
@@ -298,27 +299,12 @@ export const GitOperations: FC<GitOperationsProps> = ({
     });
   }, [projectPath, projectName, currentBranch, worktreeDisplayName]);
 
-  const stripPrefix = useCallback((msg: string, config: { templates: string[]; enabled: boolean }): string => {
-    if (!config.enabled || config.templates.length === 0) return msg;
-    const repoName = projectPath.split('/').pop() || '';
-    const vars = {
-      worktreeName: worktreeDisplayName || repoName,
-      projectName,
-      branchName: currentBranch,
-      repoName,
-    };
-    for (const tmpl of config.templates) {
-      const prefix = renderCommitPrefix(tmpl, vars);
-      if (prefix && msg.startsWith(prefix)) {
-        return msg.slice(prefix.length).trimStart();
-      }
-    }
-    return msg;
-  }, [projectPath, projectName, currentBranch, worktreeDisplayName]);
+  // stripPrefix removed - now prefix and content are separate states
 
   const handleCommitClick = async () => {
     setShowCommitDialog(true);
-    setCommitMessage('');
+    setPrefix('');
+    setContent('');
     setGeneratingMessage(true);
     try {
       let config: { templates: string[]; enabled: boolean };
@@ -335,15 +321,16 @@ export const GitOperations: FC<GitOperationsProps> = ({
       if (prefixIndex < 0 || prefixIndex >= config.templates.length) prefixIndex = 0;
       setSelectedPrefixIndex(prefixIndex);
 
-      const prefix = computePrefix(config, prefixIndex);
+      const computedPrefix = computePrefix(config, prefixIndex);
+      setPrefix(computedPrefix);
 
       const hasKey = await checkDashscopeApiKey();
       if (hasKey) {
         const diff = await getGitDiff(projectPath);
         const msg = await generateCommitMessage(diff);
-        setCommitMessage(prefix + msg);
+        setContent(msg);
       } else {
-        setCommitMessage(prefix);
+        setContent('');
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -351,7 +338,8 @@ export const GitOperations: FC<GitOperationsProps> = ({
         setShowCommitDialog(false);
         setErrorMsg(t('git.noChanges'));
       } else {
-        setCommitMessage('');
+        setPrefix('');
+        setContent('');
         setErrorMsg(msg);
       }
     } finally {
@@ -366,8 +354,7 @@ export const GitOperations: FC<GitOperationsProps> = ({
       if (!hasKey) return;
       const diff = await getGitDiff(projectPath);
       const msg = await generateCommitMessage(diff);
-      const prefix = computePrefix(prefixConfig, selectedPrefixIndex);
-      setCommitMessage(prefix + msg);
+      setContent(msg);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err));
     } finally {
@@ -378,13 +365,25 @@ export const GitOperations: FC<GitOperationsProps> = ({
   const handlePrefixChange = (index: number) => {
     const newIndex = index;
     setSelectedPrefixIndex(newIndex);
-    const body = stripPrefix(commitMessage, prefixConfig);
     const newPrefix = computePrefix(prefixConfig, newIndex);
-    setCommitMessage(newPrefix + (body ? ' ' + body : body));
+    setPrefix(newPrefix);
+  };
+
+  const handlePrefixToContent = () => {
+    if (!prefix) return;
+    const newContent = prefix + (content ? ' ' + content : '');
+    setContent(newContent.trimStart());
+    setPrefix('');
+    // 找到空模板或设为最后一个+1
+    const emptyIdx = prefixConfig.templates.findIndex((t) => t === '');
+    if (emptyIdx >= 0) {
+      setSelectedPrefixIndex(emptyIdx);
+    }
   };
 
   const handleConfirmCommit = async (withPush: boolean) => {
-    if (!commitMessage.trim()) return;
+    const fullMessage = (prefix + content).trim();
+    if (!fullMessage) return;
     setCommitting(true);
     try {
       const projectConfig = workspaceConfig?.projects.find((p: { name: string }) => p.name === projectName);
@@ -394,7 +393,7 @@ export const GitOperations: FC<GitOperationsProps> = ({
       if (resolvedName || resolvedEmail) {
         await setGitUserConfig(projectPath, { name: resolvedName, email: resolvedEmail });
       }
-      await commitAll(projectPath, commitMessage.trim(), resolvedName, resolvedEmail);
+      await commitAll(projectPath, fullMessage, resolvedName, resolvedEmail);
       setShowCommitDialog(false);
       if (withPush) {
         try {
@@ -616,7 +615,7 @@ export const GitOperations: FC<GitOperationsProps> = ({
 
       {/* Commit dialog */}
       <Dialog open={showCommitDialog} onOpenChange={setShowCommitDialog}>
-        <DialogContent className="max-w-[480px]">
+        <DialogContent className="max-w-[640px]">
           <DialogHeader>
             <DialogTitle>{t('git.commitMessage')}</DialogTitle>
             <DialogDescription>
@@ -624,37 +623,63 @@ export const GitOperations: FC<GitOperationsProps> = ({
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            {prefixConfig.enabled && prefixConfig.templates.length > 0 && (
-              <Select
-                value={String(selectedPrefixIndex)}
-                onValueChange={(v) => handlePrefixChange(Number(v))}
-                disabled={generatingMessage}
+            {/* Prefix block */}
+            {prefixConfig.enabled && prefix && (
+              <div
+                onClick={handlePrefixToContent}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/10 border border-blue-500/30 rounded-md text-sm text-blue-300 cursor-pointer hover:bg-blue-500/20 hover:border-blue-500/50 transition-colors select-none"
+                title={t('git.clickPrefixToEdit', '点击将前缀转换为可编辑内容')}
               >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder={t('git.selectPrefix')} />
-                </SelectTrigger>
-                <SelectContent>
-                  {prefixConfig.templates.map((tmpl, idx) => (
-                    <SelectItem key={idx} value={String(idx)}>
-                      {renderCommitPrefix(tmpl, {
-                        worktreeName: worktreeDisplayName || projectPath.split('/').pop() || '',
-                        projectName,
-                        branchName: currentBranch,
-                        repoName: projectPath.split('/').pop() || '',
-                      })}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                <span className="font-mono">{prefix}</span>
+                <span className="text-blue-500/60 text-xs">✕</span>
+              </div>
             )}
+
+            {/* Content textarea */}
             <textarea
-              value={commitMessage}
-              onChange={(e) => setCommitMessage(e.target.value)}
-              placeholder={generatingMessage ? t('git.generating') : ''}
+              value={content}
+              onChange={(e) => {
+                setContent(e.target.value);
+              }}
+              placeholder={generatingMessage ? t('git.generating') : t('git.commitMessagePlaceholder', '输入 commit 内容...')}
               disabled={generatingMessage}
               className="w-full h-24 bg-slate-800 border border-slate-600 rounded-lg p-3 text-sm text-slate-200 placeholder-slate-500 resize-none focus:border-blue-500 focus:outline-none"
             />
-            <div className="flex justify-end">
+
+            {/* Preview of full message */}
+            {(prefix || content) && (
+              <div className="text-xs text-slate-500 bg-slate-900/50 rounded px-2 py-1.5 border border-slate-700/30">
+                <span className="text-slate-400">{t('git.preview', '预览')}:</span>{' '}
+                <span className="text-slate-300 font-mono">{(prefix + content) || t('git.emptyMessage', '(空)')}</span>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between">
+              {/* Prefix template selector */}
+              {prefixConfig.enabled && prefixConfig.templates.length > 0 && (
+                <Select
+                  value={String(selectedPrefixIndex)}
+                  onValueChange={(v) => handlePrefixChange(Number(v))}
+                  disabled={generatingMessage}
+                >
+                  <SelectTrigger className="w-48 truncate text-xs h-8">
+                    <SelectValue placeholder={t('git.selectPrefix')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {prefixConfig.templates.map((tmpl, idx) => (
+                      <SelectItem key={idx} value={String(idx)} className="text-xs">
+                        {renderCommitPrefix(tmpl, {
+                          worktreeName: worktreeDisplayName || projectPath.split('/').pop() || '',
+                          projectName,
+                          branchName: currentBranch,
+                          repoName: projectPath.split('/').pop() || '',
+                        }) || t('git.noPrefix', '无')}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+
               <Button
                 variant="ghost"
                 size="sm"
@@ -674,13 +699,13 @@ export const GitOperations: FC<GitOperationsProps> = ({
             <Button
               variant="secondary"
               onClick={() => handleConfirmCommit(false)}
-              disabled={!commitMessage.trim() || committing || generatingMessage}
+              disabled={!(prefix + content).trim() || committing || generatingMessage}
             >
               {t('git.commitOnly')}
             </Button>
             <Button
               onClick={() => handleConfirmCommit(true)}
-              disabled={!commitMessage.trim() || committing || generatingMessage}
+              disabled={!(prefix + content).trim() || committing || generatingMessage}
             >
               {committing ? t('git.committing') : t('git.commitAndPush')}
             </Button>
