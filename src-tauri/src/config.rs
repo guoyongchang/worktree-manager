@@ -49,7 +49,7 @@ pub fn load_global_config() -> GlobalConfig {
     }
 
     let config_path = get_global_config_path();
-    let config = if config_path.exists() {
+    let mut config = if config_path.exists() {
         match fs::read_to_string(&config_path) {
             Ok(content) => match serde_json::from_str::<GlobalConfig>(&content) {
                 Ok(cfg) => cfg,
@@ -68,6 +68,11 @@ pub fn load_global_config() -> GlobalConfig {
         let _ = save_global_config_internal(&default_config);
         default_config
     };
+
+    if config.commit_prefix_templates.is_empty() {
+        config.commit_prefix_templates = crate::types::default_prefix_templates();
+        let _ = save_global_config_internal(&config);
+    }
 
     {
         let mut cache = GLOBAL_CONFIG_CACHE.lock().unwrap();
@@ -224,6 +229,14 @@ mod tests {
         assert!(!object.contains_key("wms_subdomain"));
         assert!(!object.contains_key("wms_jwt"));
         assert!(!object.contains_key("device_id"));
+        assert!(
+            object.get("commit_prefix_enabled").is_some(),
+            "commit_prefix_enabled should be serialized"
+        );
+        assert!(
+            object.get("commit_prefix_templates").is_some(),
+            "commit_prefix_templates should be serialized"
+        );
     }
 }
 

@@ -165,7 +165,7 @@ fn default_true() -> bool {
     true
 }
 
-fn default_prefix_templates() -> Vec<String> {
+pub fn default_prefix_templates() -> Vec<String> {
     vec!["[{{worktree-name}}]".to_string()]
 }
 
