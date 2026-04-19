@@ -28,6 +28,7 @@ import {
   CloseIcon,
   TerminalIcon,
 } from './Icons';
+import { Pencil } from 'lucide-react';
 import {
   syncWithBaseBranch,
   pushToRemote,
@@ -623,28 +624,29 @@ export const GitOperations: FC<GitOperationsProps> = ({
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            {/* Prefix block */}
-            {prefixConfig.enabled && prefix && (
-              <div
-                onClick={handlePrefixToContent}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/10 border border-blue-500/30 rounded-md text-sm text-blue-300 cursor-pointer hover:bg-blue-500/20 hover:border-blue-500/50 transition-colors select-none"
-                title={t('git.clickPrefixToEdit', '点击将前缀转换为可编辑内容')}
-              >
-                <span className="font-mono">{prefix}</span>
-                <span className="text-blue-500/60 text-xs">✕</span>
-              </div>
-            )}
-
-            {/* Content textarea */}
-            <textarea
-              value={content}
-              onChange={(e) => {
-                setContent(e.target.value);
-              }}
-              placeholder={generatingMessage ? t('git.generating') : t('git.commitMessagePlaceholder', '输入 commit 内容...')}
-              disabled={generatingMessage}
-              className="w-full h-24 bg-slate-800 border border-slate-600 rounded-lg p-3 text-sm text-slate-200 placeholder-slate-500 resize-none focus:border-blue-500 focus:outline-none"
-            />
+            {/* Content area with inline prefix */}
+            <div className="relative">
+              {prefixConfig.enabled && prefix && (
+                <div
+                  onClick={handlePrefixToContent}
+                  className="absolute left-3 top-3 z-10 inline-flex items-center gap-1 px-2 py-0.5 bg-blue-500/15 border border-blue-500/30 rounded text-xs text-blue-300 cursor-pointer hover:bg-blue-500/25 hover:border-blue-500/50 transition-colors select-none"
+                  title={t('git.clickPrefixToEdit', '点击将前缀转换为可编辑内容')}
+                >
+                  <Pencil className="w-3 h-3 text-blue-400/70" />
+                  <span className="font-mono">{prefix}</span>
+                </div>
+              )}
+              <textarea
+                value={content}
+                onChange={(e) => {
+                  setContent(e.target.value);
+                }}
+                placeholder={generatingMessage ? t('git.generating') : t('git.commitMessagePlaceholder', '输入 commit 内容...')}
+                disabled={generatingMessage}
+                className="w-full h-24 bg-slate-800 border border-slate-600 rounded-lg p-3 text-sm text-slate-200 placeholder-slate-500 resize-none focus:border-blue-500 focus:outline-none"
+                style={{ paddingLeft: prefix ? `${prefix.length * 0.55 + 2.5}rem` : undefined }}
+              />
+            </div>
 
             {/* Preview of full message */}
             {(prefix || content) && (
