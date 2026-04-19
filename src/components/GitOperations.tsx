@@ -696,9 +696,10 @@ export const GitOperations: FC<GitOperationsProps> = ({
                         >
                           <span className="flex items-center w-full gap-2"
                           >
-                            <Star
-                              className={`w-3 h-3 shrink-0 ${isDefault ? 'fill-amber-400 text-amber-400' : 'text-slate-500 hover:text-amber-400'}`}
-                              onPointerDown={(e) => {
+                            <button
+                              type="button"
+                              className="p-0.5 rounded hover:bg-slate-700/50 pointer-events-auto"
+                              onClick={(e) => {
                                 e.stopPropagation();
                                 e.preventDefault();
                                 const newConfig = { ...prefixConfig, default_index: idx };
@@ -709,7 +710,11 @@ export const GitOperations: FC<GitOperationsProps> = ({
                                   default_index: idx,
                                 }).catch(() => {});
                               }}
-                            />
+                            >
+                              <Star
+                                className={`w-3 h-3 ${isDefault ? 'fill-amber-400 text-amber-400' : 'text-slate-500 hover:text-amber-400'}`}
+                              />
+                            </button>
                             <span className="truncate">{label}</span>
                           </span>
                         </SelectItem>
@@ -719,9 +724,10 @@ export const GitOperations: FC<GitOperationsProps> = ({
                     >
                       <span className="flex items-center w-full gap-2"
                       >
-                        <Star
-                          className={`w-3 h-3 shrink-0 ${prefixConfig.default_index === prefixConfig.templates.length ? 'fill-amber-400 text-amber-400' : 'text-slate-500 hover:text-amber-400'}`}
-                          onPointerDown={(e) => {
+                        <button
+                          type="button"
+                          className="p-0.5 rounded hover:bg-slate-700/50 pointer-events-auto"
+                          onClick={(e) => {
                             e.stopPropagation();
                             e.preventDefault();
                             const noPrefixIdx = prefixConfig.templates.length;
@@ -733,7 +739,11 @@ export const GitOperations: FC<GitOperationsProps> = ({
                               default_index: noPrefixIdx,
                             }).catch(() => {});
                           }}
-                        />
+                        >
+                          <Star
+                            className={`w-3 h-3 ${prefixConfig.default_index === prefixConfig.templates.length ? 'fill-amber-400 text-amber-400' : 'text-slate-500 hover:text-amber-400'}`}
+                          />
+                        </button>
                         <span>{t('git.noPrefix', '无')}</span>
                       </span>
                     </SelectItem>
