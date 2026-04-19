@@ -807,46 +807,9 @@ async fn h_pty_resize(Json(args): Json<Value>) -> Response {
     let session_id = args["sessionId"].as_str().unwrap_or("").to_string();
     let cols = args["cols"].as_u64().unwrap_or(80) as u16;
     let rows = args["rows"].as_u64().unwrap_or(24) as u16;
-    let request_client_id = args["clientId"].as_str().map(|s| s.to_string());
+    let _request_client_id = args["clientId"].as_str().map(|s| s.to_string());
 
-    // "Last active client wins resize" — per-session gating.
-    // Only the client that most recently broadcast terminal state for THIS session
-    // can resize it. Per-window sessions make cross-window gating unnecessary.
-    let active_client_id = crate::TERMINAL_STATES
-        .lock()
-        .ok()
-        .and_then(|states| {
-            states.values()
-                .find(|ts| ts.session_id.as_deref() == Some(&session_id))
-                .and_then(|ts| ts.client_id.clone())
-        });
-
-    let is_active = if let Some(ref req_cid) = request_client_id {
-        active_client_id.as_deref() == Some(req_cid)
-    } else {
-        // No clientId provided (legacy/Tauri desktop) — always allow
-        true
-    };
-
-    if !is_active {
-        log::info!(
-            "[http] REJECTED pty_resize: client={:?} session={} size={}x{} (active_client={:?})",
-            request_client_id,
-            session_id,
-            cols,
-            rows,
-            active_client_id
-        );
-        return result_ok(Ok::<(), String>(()));
-    }
-
-    log::info!(
-        "[http] ACCEPTED pty_resize: client={:?} session={} size={}x{}",
-        request_client_id,
-        session_id,
-        cols,
-        rows
-    );
+    log::info!("[http] pty_resize: session={} size={}x{}", session_id, cols, rows);
     result_ok(with_pty_manager(move |m| m.resize_session(&session_id, cols, rows)).await)
 }
 
@@ -1488,9 +1451,6 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                 .await;
             }
 
-            // "Last active client wins resize" — only the most recently active
-            // client's resize is applied to the PTY. This prevents a mobile
-            // client (40 cols) from breaking output formatting on the PC (120 cols).
             "pty_resize" => {
                 let pty_session_id = match parsed["sessionId"].as_str() {
                     Some(s) => s.to_string(),
@@ -1498,50 +1458,15 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                 };
                 let cols = parsed["cols"].as_u64().unwrap_or(80) as u16;
                 let rows = parsed["rows"].as_u64().unwrap_or(24) as u16;
-                let request_client_id = parsed["clientId"].as_str().map(|s| s.to_string());
+                let _request_client_id = parsed["clientId"].as_str().map(|s| s.to_string());
 
-                // "Last active client wins resize" — per-session gating.
-                let active_client_id = crate::TERMINAL_STATES
-                    .lock()
-                    .ok()
-                    .and_then(|states| {
-                        states.values()
-                            .find(|ts| ts.session_id.as_deref() == Some(&pty_session_id))
-                            .and_then(|ts| ts.client_id.clone())
-                    });
-
-                let is_active = if let Some(ref req_cid) = request_client_id {
-                    active_client_id.as_deref() == Some(req_cid)
-                } else {
-                    // No clientId provided (legacy/local) — always allow
-                    true
-                };
-
-                if is_active {
-                    log::info!(
-                        "[ws] ACCEPTED pty_resize: client={:?} session={} size={}x{}",
-                        request_client_id,
-                        pty_session_id,
-                        cols,
-                        rows
-                    );
-                    let _ = tokio::task::spawn_blocking(move || {
-                        PTY_MANAGER
-                            .lock()
-                            .map_err(|e| format!("Lock error: {}", e))
-                            .and_then(|m| m.resize_session(&pty_session_id, cols, rows))
-                    })
-                    .await;
-                } else {
-                    log::info!(
-                        "[ws] REJECTED pty_resize: client={:?} session={} size={}x{} (active_client={:?})",
-                        request_client_id,
-                        pty_session_id,
-                        cols,
-                        rows,
-                        active_client_id
-                    );
-                }
+                log::info!("[ws] pty_resize: session={} size={}x{}", pty_session_id, cols, rows);
+                let _ = tokio::task::spawn_blocking(move || {
+                    PTY_MANAGER
+                        .lock()
+                        .map_err(|e| format!("Lock error: {}", e))
+                        .and_then(|m| m.resize_session(&pty_session_id, cols, rows))
+                }).await;
             }
 
             "subscribe_locks" => {
