@@ -64,6 +64,16 @@ pub(crate) async fn set_dashscope_api_key(key: String) -> Result<(), String> {
     set_dashscope_api_key_inner(key)
 }
 
+#[tauri::command]
+pub(crate) fn check_dashscope_api_key() -> bool {
+    let config = crate::config::load_global_config();
+    config
+        .dashscope_api_key
+        .as_ref()
+        .map(|k| !k.is_empty())
+        .unwrap_or(false)
+}
+
 // ==================== Dashscope Base URL Commands ====================
 
 const DEFAULT_DASHSCOPE_WS_URL: &str = "wss://dashscope.aliyuncs.com/api-ws/v1/inference/";
