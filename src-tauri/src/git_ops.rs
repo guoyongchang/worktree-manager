@@ -732,6 +732,7 @@ pub fn merge_to_test_branch(path: &Path, test_branch: &str) -> Result<String, St
         .arg("push")
         .arg("origin")
         .arg(test_branch)
+        .arg("--no-verify")
         .output()
         .map_err(|e| format!("执行 git push origin {} 失败: {}", test_branch, e))?;
 
@@ -923,6 +924,7 @@ pub fn merge_to_base_branch(path: &Path, base_branch: &str) -> Result<String, St
         .arg("push")
         .arg("origin")
         .arg(base_branch)
+        .arg("--no-verify")
         .output()
         .map_err(|e| format!("执行 git push origin {} 失败: {}", base_branch, e))?;
 
@@ -1219,6 +1221,7 @@ pub fn create_pull_request(
                 .arg("-u")
                 .arg("origin")
                 .arg(&current_branch)
+                .arg("--no-verify")
                 .arg("-o")
                 .arg("merge_request.create")
                 .arg("-o")
