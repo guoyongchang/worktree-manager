@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use wait_timeout::ChildExt;
 
@@ -8,8 +10,6 @@ use crate::types::ScannedFolder;
 
 // Git command timeout (30 seconds)
 pub(crate) const GIT_COMMAND_TIMEOUT_SECS: u64 = 30;
-
-use std::sync::Mutex;
 
 // Custom git path set by user (empty = auto-detect)
 static CUSTOM_GIT_PATH: Mutex<String> = Mutex::new(String::new());
@@ -81,8 +81,67 @@ fn resolve_git_path() -> String {
     }
 }
 
+/// Get the user's login shell path.
+fn get_login_shell() -> String {
+    std::env::var("SHELL").unwrap_or_else(|_| {
+        if Path::new("/bin/zsh").exists() {
+            "/bin/zsh".to_string()
+        } else if Path::new("/bin/bash").exists() {
+            "/bin/bash".to_string()
+        } else {
+            "/bin/sh".to_string()
+        }
+    })
+}
+
+/// Cache of environment variables loaded from the user's login shell.
+/// Only populated on Unix systems where the app may not inherit the user's shell env.
+static USER_ENV_CACHE: OnceLock<HashMap<String, String>> = OnceLock::new();
+
+/// Load environment variables by running the user's login shell with `-l -c env`.
+/// This captures PATH and other variables set in ~/.zshrc, ~/.bash_profile, etc.
+fn load_user_env_from_shell() -> HashMap<String, String> {
+    let shell = get_login_shell();
+    let output = Command::new(&shell)
+        .args(["-l", "-c", "env -0"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output();
+
+    let mut env = HashMap::new();
+
+    match output {
+        Ok(out) if out.status.success() => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            for entry in stdout.split('\0') {
+                if let Some((key, value)) = entry.split_once('=') {
+                    env.insert(key.to_string(), value.to_string());
+                }
+            }
+            log::info!("[git] Loaded {} env vars from login shell {}", env.len(), shell);
+        }
+        Ok(out) => {
+            log::warn!(
+                "[git] Login shell env dump failed (status: {:?})",
+                out.status.code()
+            );
+        }
+        Err(e) => {
+            log::warn!("[git] Failed to spawn login shell for env: {}", e);
+        }
+    }
+
+    env
+}
+
+/// Get the full user environment from the login shell (cached).
+pub(crate) fn get_user_env() -> &'static HashMap<String, String> {
+    USER_ENV_CACHE.get_or_init(load_user_env_from_shell)
+}
+
 /// Create a `Command` for git that:
 /// - Uses custom path if set, otherwise auto-detects
+/// - On Unix: merges user's login shell PATH so hooks can find tools like cargo
 /// - Hides the console window on Windows (CREATE_NO_WINDOW)
 pub(crate) fn git_command() -> Command {
     let git = resolve_git_path();
@@ -96,7 +155,16 @@ pub(crate) fn git_command() -> Command {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        Command::new(&git)
+        let mut cmd = Command::new(&git);
+        // Merge user's shell PATH so git hooks can find tools (cargo, node, etc.)
+        let user_env = get_user_env();
+        if let Some(shell_path) = user_env.get("PATH") {
+            let current_path = std::env::var("PATH").unwrap_or_default();
+            if !shell_path.is_empty() && shell_path != &current_path {
+                cmd.env("PATH", format!("{}:{}", shell_path, current_path));
+            }
+        }
+        cmd
     }
 }
 

@@ -192,7 +192,7 @@ pub fn create_vault_symlinks(
                 // Check if it points into the current vault (safe to replace)
                 // Otherwise backup the symlink target info before removing
                 let is_vault_link = if let Ok(target) = fs::read_link(&link_path) {
-                    target.starts_with(&source.parent().unwrap_or(Path::new("")))
+                    target.starts_with(source.parent().unwrap_or(Path::new("")))
                 } else {
                     false
                 };

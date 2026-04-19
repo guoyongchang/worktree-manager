@@ -11,6 +11,7 @@ pub struct CommitPrefixConfig {
 #[tauri::command]
 pub(crate) fn get_commit_prefix_config() -> Result<CommitPrefixConfig, String> {
     let config = load_global_config();
+    log::info!("[config] get_commit_prefix_config: default_index={}, templates={:?}", config.default_prefix_index, config.commit_prefix_templates);
     Ok(CommitPrefixConfig {
         templates: config.commit_prefix_templates,
         enabled: config.commit_prefix_enabled,
@@ -25,10 +26,13 @@ pub(crate) fn set_commit_prefix_config(
     default_index: usize,
 ) -> Result<(), String> {
     let mut config = load_global_config();
+    log::info!("[config] set_commit_prefix_config: old default={}, new default={}", config.default_prefix_index, default_index);
     config.commit_prefix_templates = templates.into_iter().take(3).collect();
     config.commit_prefix_enabled = enabled;
     config.default_prefix_index = default_index;
-    save_global_config_internal(&config)
+    save_global_config_internal(&config)?;
+    log::info!("[config] set_commit_prefix_config: saved ok");
+    Ok(())
 }
 
 #[derive(Debug, Serialize, Deserialize)]

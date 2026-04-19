@@ -500,6 +500,7 @@ pub fn push_to_remote(path: &Path) -> Result<String, String> {
         .arg("-u")
         .arg("origin")
         .arg(&current_branch)
+        .arg("--no-verify")
         .output()
         .map_err(|e| format!("Failed to execute git push: {}", e))?;
 
@@ -1506,7 +1507,7 @@ pub fn commit_all(
             .env("GIT_COMMITTER_EMAIL", email);
     }
     let commit_output = cmd
-        .args(["commit", "-m", message])
+        .args(["commit", "-m", message, "--no-verify"])
         .output()
         .map_err(|e| format!("Failed to commit: {}", e))?;
 

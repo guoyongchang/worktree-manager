@@ -487,8 +487,8 @@ export async function commitAll(
   return callBackend<string>('commit_all', {
     path,
     message,
-    author_name: authorName,
-    author_email: authorEmail,
+    authorName,
+    authorEmail,
   });
 }
 
@@ -586,7 +586,7 @@ export async function setCommitPrefixConfig(config: CommitPrefixConfig): Promise
   return callBackend<void>('set_commit_prefix_config', {
     templates: config.templates,
     enabled: config.enabled,
-    default_index: config.default_index,
+    defaultIndex: config.default_index,
   });
 }
 

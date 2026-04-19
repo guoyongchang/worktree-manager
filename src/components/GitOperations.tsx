@@ -315,21 +315,27 @@ export const GitOperations: FC<GitOperationsProps> = ({
       try {
         config = await getCommitPrefixConfig();
         setPrefixConfig(config);
+        console.log('[commit] got prefix config:', config);
       } catch {
         config = { templates: ['[{{worktree-name}}]'], enabled: true, default_index: 0 };
         setPrefixConfig(config);
+        console.log('[commit] fallback prefix config');
       }
 
       const projectConfig = workspaceConfig?.projects.find((p: { name: string }) => p.name === projectName);
+      console.log('[commit] projectConfig:', projectConfig);
       // 优先使用 project 的 commit_prefix_index，如果没有则使用全局 default_index
       let prefixIndex = projectConfig?.commit_prefix_index;
-      if (prefixIndex === undefined) {
+      console.log('[commit] raw prefixIndex from project:', prefixIndex);
+      if (prefixIndex == null) {
         prefixIndex = config.default_index;
       }
       if (prefixIndex < 0 || prefixIndex > config.templates.length) prefixIndex = 0;
+      console.log('[commit] final prefixIndex:', prefixIndex, 'templates.length:', config.templates.length, 'default_index:', config.default_index);
       setSelectedPrefixIndex(prefixIndex);
 
       const computedPrefix = computePrefix(config, prefixIndex);
+      console.log('[commit] computedPrefix:', computedPrefix);
       setPrefix(computedPrefix);
 
       const hasKey = await checkDashscopeApiKey();
@@ -701,13 +707,15 @@ export const GitOperations: FC<GitOperationsProps> = ({
                               onPointerDown={(e) => {
                                 e.stopPropagation();
                                 e.preventDefault();
+                                console.log('[prefix] star pointerdown: old default=', prefixConfig.default_index, 'new default=', idx);
                                 const newConfig = { ...prefixConfig, default_index: idx };
                                 setPrefixConfig(newConfig);
                                 setCommitPrefixConfig({
                                   templates: prefixConfig.templates,
                                   enabled: prefixConfig.enabled,
                                   default_index: idx,
-                                }).catch(() => {});
+                                }).then(() => console.log('[prefix] save success'))
+                                  .catch((err) => console.error('[prefix] save error:', err));
                               }}
                             >
                               <Star
@@ -729,13 +737,15 @@ export const GitOperations: FC<GitOperationsProps> = ({
                             e.stopPropagation();
                             e.preventDefault();
                             const noPrefixIdx = prefixConfig.templates.length;
+                            console.log('[prefix] star pointerdown (no-prefix): old default=', prefixConfig.default_index, 'new default=', noPrefixIdx);
                             const newConfig = { ...prefixConfig, default_index: noPrefixIdx };
                             setPrefixConfig(newConfig);
                             setCommitPrefixConfig({
                               templates: prefixConfig.templates,
                               enabled: prefixConfig.enabled,
                               default_index: noPrefixIdx,
-                            }).catch(() => {});
+                            }).then(() => console.log('[prefix] save success (no-prefix)'))
+                              .catch((err) => console.error('[prefix] save error (no-prefix):', err));
                           }}
                         >
                           <Star
