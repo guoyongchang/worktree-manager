@@ -16,7 +16,7 @@
 
 > **场景一：线上着火，但你手里的活还没提交**
 >
-> 你正在 `feature/checkout-v3` 上重构结算流程，改了十几个文件，`npm run dev` 跑着热更新。这时候 Slack 弹出告警：线上支付回调 500 了。你得马上修。
+> 你正在 `feature/checkout-v2` 上重构结算流程，改了十几个文件，`npm run dev` 跑着热更新。这时候 Slack 弹出告警：线上支付回调 500 了。你得马上修。
 >
 > 传统做法：`git stash` → 切到 `hotfix` → `npm install`（依赖版本不一样，得重装）→ 修完推上去 → 切回来 → `git stash pop` → 祈祷没冲突 → 重启 dev server 等构建缓存重建。整个流程 15 分钟起步，而线上还在报错。
 >
