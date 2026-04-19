@@ -32,6 +32,7 @@ pub struct TerminalState {
     pub active_terminal_tab: Option<String>,
     pub terminal_visible: bool,
     pub client_id: Option<String>,
+    pub session_id: Option<String>, // PTY session ID for per-session resize gating
 }
 
 #[derive(Debug, Serialize, Clone)]

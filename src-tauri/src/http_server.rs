@@ -720,6 +720,7 @@ async fn h_broadcast_terminal_state(Json(args): Json<Value>) -> Response {
     let active_terminal_tab = args["activeTerminalTab"].as_str().map(|s| s.to_string());
     let terminal_visible = args["terminalVisible"].as_bool().unwrap_or(false);
     let client_id = args["clientId"].as_str().map(|s| s.to_string());
+    let session_id = args["sessionId"].as_str().map(|s| s.to_string());
 
     crate::commands::window::broadcast_terminal_state(
         app,
@@ -729,6 +730,7 @@ async fn h_broadcast_terminal_state(Json(args): Json<Value>) -> Response {
         active_terminal_tab,
         terminal_visible,
         client_id,
+        session_id,
     );
     result_void_ok()
 }
@@ -807,16 +809,39 @@ async fn h_pty_resize(Json(args): Json<Value>) -> Response {
     let rows = args["rows"].as_u64().unwrap_or(24) as u16;
     let request_client_id = args["clientId"].as_str().map(|s| s.to_string());
 
-    // "Last active client wins resize" — same gating as the WebSocket handler.
-    // Client gating removed - per-window PTY sessions make cross-window resize gating unnecessary
-    // Get current active client for logging
-    let _active_client_id = crate::TERMINAL_STATES
+    // "Last active client wins resize" — per-session gating.
+    // Only the client that most recently broadcast terminal state for THIS session
+    // can resize it. Per-window sessions make cross-window gating unnecessary.
+    let active_client_id = crate::TERMINAL_STATES
         .lock()
         .ok()
-        .and_then(|states| states.values().find_map(|ts| ts.client_id.clone()));
+        .and_then(|states| {
+            states.values()
+                .find(|ts| ts.session_id.as_deref() == Some(&session_id))
+                .and_then(|ts| ts.client_id.clone())
+        });
+
+    let is_active = if let Some(ref req_cid) = request_client_id {
+        active_client_id.as_deref() == Some(req_cid)
+    } else {
+        // No clientId provided (legacy/Tauri desktop) — always allow
+        true
+    };
+
+    if !is_active {
+        log::info!(
+            "[http] REJECTED pty_resize: client={:?} session={} size={}x{} (active_client={:?})",
+            request_client_id,
+            session_id,
+            cols,
+            rows,
+            active_client_id
+        );
+        return result_ok(Ok::<(), String>(()));
+    }
 
     log::info!(
-        "[http] pty_resize: client={:?} session={} size={}x{}",
+        "[http] ACCEPTED pty_resize: client={:?} session={} size={}x{}",
         request_client_id,
         session_id,
         cols,
@@ -1475,26 +1500,48 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                 let rows = parsed["rows"].as_u64().unwrap_or(24) as u16;
                 let request_client_id = parsed["clientId"].as_str().map(|s| s.to_string());
 
-                // Get current active client for logging
-                let _active_client_id = crate::TERMINAL_STATES
+                // "Last active client wins resize" — per-session gating.
+                let active_client_id = crate::TERMINAL_STATES
                     .lock()
                     .ok()
-                    .and_then(|states| states.values().find_map(|ts| ts.client_id.clone()));
+                    .and_then(|states| {
+                        states.values()
+                            .find(|ts| ts.session_id.as_deref() == Some(&pty_session_id))
+                            .and_then(|ts| ts.client_id.clone())
+                    });
 
-                log::info!(
-                    "[ws] pty_resize: client={:?} session={} size={}x{}",
-                    request_client_id,
-                    pty_session_id,
-                    cols,
-                    rows
-                );
-                let _ = tokio::task::spawn_blocking(move || {
-                    PTY_MANAGER
-                        .lock()
-                        .map_err(|e| format!("Lock error: {}", e))
-                        .and_then(|m| m.resize_session(&pty_session_id, cols, rows))
-                })
-                .await;
+                let is_active = if let Some(ref req_cid) = request_client_id {
+                    active_client_id.as_deref() == Some(req_cid)
+                } else {
+                    // No clientId provided (legacy/local) — always allow
+                    true
+                };
+
+                if is_active {
+                    log::info!(
+                        "[ws] ACCEPTED pty_resize: client={:?} session={} size={}x{}",
+                        request_client_id,
+                        pty_session_id,
+                        cols,
+                        rows
+                    );
+                    let _ = tokio::task::spawn_blocking(move || {
+                        PTY_MANAGER
+                            .lock()
+                            .map_err(|e| format!("Lock error: {}", e))
+                            .and_then(|m| m.resize_session(&pty_session_id, cols, rows))
+                    })
+                    .await;
+                } else {
+                    log::info!(
+                        "[ws] REJECTED pty_resize: client={:?} session={} size={}x{} (active_client={:?})",
+                        request_client_id,
+                        pty_session_id,
+                        cols,
+                        rows,
+                        active_client_id
+                    );
+                }
             }
 
             "subscribe_locks" => {
@@ -1669,8 +1716,9 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                     parsed["activeTerminalTab"].as_str().map(|s| s.to_string());
                 let terminal_visible = parsed["terminalVisible"].as_bool().unwrap_or(false);
                 let client_id = parsed["clientId"].as_str().map(|s| s.to_string());
+                let session_id = parsed["sessionId"].as_str().map(|s| s.to_string());
 
-                // Update cache with client_id
+                // Update cache with client_id and session_id
                 if let Ok(mut states) = crate::TERMINAL_STATES.lock() {
                     let key = (workspace_path.clone(), worktree_name.clone());
                     states.insert(
@@ -1680,6 +1728,7 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                             active_terminal_tab: active_terminal_tab.clone(),
                             terminal_visible,
                             client_id: client_id.clone(),
+                            session_id: session_id.clone(),
                         },
                     );
                 }
@@ -1692,6 +1741,7 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                     "activeTerminalTab": active_terminal_tab,
                     "terminalVisible": terminal_visible,
                     "clientId": client_id,
+                    "sessionId": session_id,
                 })
                 .to_string();
                 let _ = TERMINAL_STATE_BROADCAST.send(broadcast_msg);
@@ -1711,6 +1761,7 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                             "activeTerminalTab": active_terminal_tab,
                             "terminalVisible": terminal_visible,
                             "clientId": client_id,
+                            "sessionId": session_id,
                         }),
                     );
                 }

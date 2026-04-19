@@ -64,10 +64,42 @@ pub(crate) fn pty_resize(
     session_id: String,
     cols: u16,
     rows: u16,
-    _client_id: Option<String>, // Keep parameter for API compatibility, ignore it
+    client_id: Option<String>,
 ) -> Result<(), String> {
+    // "Last active client wins resize" — per-session gating.
+    // Per-window PTY sessions (session_id includes windowLabel) make cross-window
+    // resize gating unnecessary. Only gate within the same session.
+    let active_client_id = crate::TERMINAL_STATES
+        .lock()
+        .ok()
+        .and_then(|states| {
+            states.values()
+                .find(|ts| ts.session_id.as_deref() == Some(&session_id))
+                .and_then(|ts| ts.client_id.clone())
+        });
+
+    let is_active = if let Some(ref req_cid) = client_id {
+        active_client_id.as_deref() == Some(req_cid)
+    } else {
+        // No clientId provided (legacy) — always allow
+        true
+    };
+
+    if !is_active {
+        log::info!(
+            "[pty] REJECTED RESIZE: client={:?} session={} size={}x{} (active_client={:?})",
+            client_id,
+            session_id,
+            cols,
+            rows,
+            active_client_id
+        );
+        return Ok(());
+    }
+
     log::info!(
-        "[pty] RESIZE: session={} size={}x{}",
+        "[pty] ACCEPTED RESIZE: client={:?} session={} size={}x{}",
+        client_id,
         session_id,
         cols,
         rows

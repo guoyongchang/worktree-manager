@@ -392,7 +392,8 @@ export async function broadcastTerminalState(
   activatedTerminals: string[],
   activeTerminalTab: string | null,
   terminalVisible: boolean,
-  clientId?: string
+  clientId?: string,
+  sessionId?: string | null
 ): Promise<void> {
   return callBackend('broadcast_terminal_state', {
     workspacePath,
@@ -401,6 +402,7 @@ export async function broadcastTerminalState(
     activeTerminalTab,
     terminalVisible,
     clientId,
+    sessionId,
   });
 }
 

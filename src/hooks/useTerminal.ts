@@ -144,6 +144,7 @@ export function useTerminal(
       const active = activeTerminalTabRef.current;
       const visible = terminalVisibleRef.current;
       const clientId = clientIdRef.current;
+      const sessionId = active ? `pty-${resolvedWindowId}-${active.replace(/[#\/]/g, '-')}` : null;
 
       if (import.meta.env.DEV) {
         console.log('[useTerminal] broadcast:', 'tabs:', tabs, 'active:', active);
@@ -151,13 +152,13 @@ export function useTerminal(
 
       if (_isTauri) {
         broadcastTerminalStateBackend(
-          workspacePath, worktreeName, tabs, active, visible, clientId
+          workspacePath, worktreeName, tabs, active, visible, clientId, sessionId
         ).catch(err => {
           console.error('[useTerminal] Failed to broadcast terminal state:', err);
         });
       } else {
         getWebSocketManager().broadcastTerminalState(
-          workspacePath, worktreeName, tabs, active, visible, clientId
+          workspacePath, worktreeName, tabs, active, visible, clientId, sessionId
         );
       }
       lastBroadcastTime.current = Date.now();

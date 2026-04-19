@@ -193,6 +193,7 @@ pub(crate) fn broadcast_terminal_state(
     active_terminal_tab: Option<String>,
     terminal_visible: bool,
     client_id: Option<String>,
+    session_id: Option<String>,
 ) {
     log::debug!(
         "[window] Broadcasting terminal state: ws={}, wt={}",
@@ -210,6 +211,7 @@ pub(crate) fn broadcast_terminal_state(
                 active_terminal_tab: active_terminal_tab.clone(),
                 terminal_visible,
                 client_id: client_id.clone(),
+                session_id: session_id.clone(),
             },
         );
     }
@@ -222,6 +224,7 @@ pub(crate) fn broadcast_terminal_state(
         "activeTerminalTab": active_terminal_tab,
         "terminalVisible": terminal_visible,
         "clientId": client_id,
+        "sessionId": session_id,
     })) {
         let _ = TERMINAL_STATE_BROADCAST.send(json_str);
     }
@@ -236,6 +239,7 @@ pub(crate) fn broadcast_terminal_state(
             "activeTerminalTab": active_terminal_tab,
             "terminalVisible": terminal_visible,
             "clientId": client_id,
+            "sessionId": session_id,
         }),
     );
 }

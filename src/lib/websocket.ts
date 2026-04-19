@@ -220,7 +220,8 @@ class WebSocketManager {
     activatedTerminals: string[],
     activeTerminalTab: string | null,
     terminalVisible: boolean,
-    clientId?: string
+    clientId?: string,
+    sessionId?: string | null
   ) {
     this.sendJson({
       type: 'broadcast_terminal_state',
@@ -230,6 +231,7 @@ class WebSocketManager {
       activeTerminalTab,
       terminalVisible,
       clientId,
+      sessionId,
     });
   }
 
