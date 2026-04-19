@@ -1473,7 +1473,12 @@ pub fn get_git_diff(path: &Path) -> Result<String, String> {
 }
 
 /// Stage all changes and commit with the given message
-pub fn commit_all(path: &Path, message: &str) -> Result<String, String> {
+pub fn commit_all(
+    path: &Path,
+    message: &str,
+    author_name: Option<&str>,
+    author_email: Option<&str>,
+) -> Result<String, String> {
     log::info!("[git] Committing all changes at: {}", path.display());
 
     // git add -A
@@ -1489,10 +1494,18 @@ pub fn commit_all(path: &Path, message: &str) -> Result<String, String> {
         return Err(format!("git add failed: {}", stderr));
     }
 
-    // git commit -m
-    let commit_output = git_command()
-        .arg("-C")
-        .arg(path)
+    // git commit -m with optional author override
+    let mut cmd = git_command();
+    cmd.arg("-C").arg(path);
+    if let Some(name) = author_name {
+        cmd.env("GIT_AUTHOR_NAME", name)
+            .env("GIT_COMMITTER_NAME", name);
+    }
+    if let Some(email) = author_email {
+        cmd.env("GIT_AUTHOR_EMAIL", email)
+            .env("GIT_COMMITTER_EMAIL", email);
+    }
+    let commit_output = cmd
         .args(["commit", "-m", message])
         .output()
         .map_err(|e| format!("Failed to commit: {}", e))?;
@@ -1507,6 +1520,72 @@ pub fn commit_all(path: &Path, message: &str) -> Result<String, String> {
         .to_string();
     log::info!("[git] Commit successful: {}", stdout);
     Ok(format!("Committed: {}", message))
+}
+
+/// Get local git user.name and user.email config
+pub fn get_git_user_config(path: &Path) -> Result<(Option<String>, Option<String>), String> {
+    let name_output = git_command()
+        .arg("-C")
+        .arg(path)
+        .args(["config", "--local", "user.name"])
+        .output()
+        .map_err(|e| format!("Failed to get user.name: {}", e))?;
+    let name = if name_output.status.success() {
+        Some(String::from_utf8_lossy(&name_output.stdout).trim().to_string())
+    } else {
+        None
+    };
+
+    let email_output = git_command()
+        .arg("-C")
+        .arg(path)
+        .args(["config", "--local", "user.email"])
+        .output()
+        .map_err(|e| format!("Failed to get user.email: {}", e))?;
+    let email = if email_output.status.success() {
+        Some(String::from_utf8_lossy(&email_output.stdout).trim().to_string())
+    } else {
+        None
+    };
+
+    Ok((name, email))
+}
+
+/// Set local git user.name and user.email config
+pub fn set_git_user_config(
+    path: &Path,
+    name: Option<&str>,
+    email: Option<&str>,
+) -> Result<(), String> {
+    if let Some(name) = name {
+        let output = git_command()
+            .arg("-C")
+            .arg(path)
+            .args(["config", "user.name", name])
+            .output()
+            .map_err(|e| format!("Failed to set user.name: {}", e))?;
+        if !output.status.success() {
+            return Err(format!(
+                "git config user.name failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+    }
+    if let Some(email) = email {
+        let output = git_command()
+            .arg("-C")
+            .arg(path)
+            .args(["config", "user.email", email])
+            .output()
+            .map_err(|e| format!("Failed to set user.email: {}", e))?;
+        if !output.status.success() {
+            return Err(format!(
+                "git config user.email failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+    }
+    Ok(())
 }
 
 // ==================== Changed Files API ====================

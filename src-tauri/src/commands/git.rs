@@ -536,10 +536,42 @@ pub(crate) async fn get_git_diff(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub(crate) async fn commit_all(path: String, message: String) -> Result<String, String> {
+pub(crate) async fn commit_all(
+    path: String,
+    message: String,
+    author_name: Option<String>,
+    author_email: Option<String>,
+) -> Result<String, String> {
     blocking(move || {
         let normalized = normalize_path(&path);
-        git_ops::commit_all(Path::new(&normalized), &message)
+        git_ops::commit_all(
+            Path::new(&normalized),
+            &message,
+            author_name.as_deref(),
+            author_email.as_deref(),
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+pub(crate) async fn get_git_user_config(path: String) -> Result<(Option<String>, Option<String>), String> {
+    blocking(move || {
+        let normalized = normalize_path(&path);
+        git_ops::get_git_user_config(Path::new(&normalized))
+    })
+    .await
+}
+
+#[tauri::command]
+pub(crate) async fn set_git_user_config(
+    path: String,
+    name: Option<String>,
+    email: Option<String>,
+) -> Result<(), String> {
+    blocking(move || {
+        let normalized = normalize_path(&path);
+        git_ops::set_git_user_config(Path::new(&normalized), name.as_deref(), email.as_deref())
     })
     .await
 }

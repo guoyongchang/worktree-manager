@@ -516,7 +516,9 @@ async fn h_get_git_diff(Json(args): Json<Value>) -> Response {
 async fn h_commit_all(Json(args): Json<Value>) -> Response {
     let path = args["path"].as_str().unwrap_or("").to_string();
     let message = args["message"].as_str().unwrap_or("").to_string();
-    result_json(crate::commands::git::commit_all(path, message).await)
+    let author_name = args["authorName"].as_str().map(|s| s.to_string());
+    let author_email = args["authorEmail"].as_str().map(|s| s.to_string());
+    result_json(crate::commands::git::commit_all(path, message, author_name, author_email).await)
 }
 
 async fn h_generate_commit_message(Json(args): Json<Value>) -> Response {
