@@ -40,6 +40,7 @@ pub use commands::worktree::{
     list_worktrees_impl, restore_worktree_impl, scan_linked_folders_internal,
 };
 
+use commands::config::*;
 use commands::git::*;
 use commands::pty::*;
 use commands::sharing::*;
@@ -215,11 +216,21 @@ pub fn run() {
             set_dashscope_base_url,
             get_voice_refine_enabled,
             set_voice_refine_enabled,
+            check_dashscope_api_key,
             voice_start,
             voice_send_audio,
             voice_stop,
             voice_is_active,
             voice_refine_text,
+            // 提交前缀配置
+            get_commit_prefix_config,
+            set_commit_prefix_config,
+            // Git 用户全局配置
+            get_git_user_global_config,
+            set_git_user_global_config,
+            // Git 用户本地配置
+            get_git_user_config,
+            set_git_user_config,
             // 更新镜像
             check_mirror_update,
             download_update_via_mirror,
