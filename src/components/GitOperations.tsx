@@ -45,6 +45,7 @@ import {
   setCommitPrefixConfig,
   getGitUserGlobalConfig,
   setGitUserConfig,
+  getSkipGitHooks,
   type BranchDiffStats,
 } from '@/lib/backend';
 import type { WorkspaceConfig } from '@/types';
@@ -404,7 +405,8 @@ export const GitOperations: FC<GitOperationsProps> = ({
       if (resolvedName || resolvedEmail) {
         await setGitUserConfig(projectPath, { name: resolvedName, email: resolvedEmail });
       }
-      await commitAll(projectPath, fullMessage, resolvedName, resolvedEmail);
+      const skipHooks = await getSkipGitHooks();
+      await commitAll(projectPath, fullMessage, resolvedName, resolvedEmail, skipHooks);
       setShowCommitDialog(false);
       if (withPush) {
         try {

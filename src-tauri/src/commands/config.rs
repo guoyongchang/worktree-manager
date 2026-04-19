@@ -60,3 +60,16 @@ pub(crate) fn set_git_user_global_config(
     config.git_user_email = email;
     save_global_config_internal(&config)
 }
+
+#[tauri::command]
+pub(crate) fn get_skip_git_hooks() -> Result<bool, String> {
+    let config = load_global_config();
+    Ok(config.skip_git_hooks)
+}
+
+#[tauri::command]
+pub(crate) fn set_skip_git_hooks(skip: bool) -> Result<(), String> {
+    let mut config = load_global_config();
+    config.skip_git_hooks = skip;
+    save_global_config_internal(&config)
+}

@@ -21,7 +21,7 @@ import { RefreshCw, Search, Mic, Eye, EyeOff, Settings, Globe, Info, Trash2, Wre
 import { BackIcon, PlusIcon, TrashIcon } from './Icons';
 import { BranchCombobox } from './BranchCombobox';
 import type { WorkspaceRef, WorkspaceConfig, ProjectConfig, ScannedFolder, VaultStatus, VaultItemChild } from '../types';
-import { getAppVersion, getAppIcon, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, voiceStart, voiceStop, isTauri, getRemoteBranches, openLink, callBackend, loadWorkspaceConfigByPath, saveWorkspaceConfigByPath, getVaultStatus, vaultLink, listVaultItemChildren, getCommitPrefixConfig, setCommitPrefixConfig, getGitUserGlobalConfig, setGitUserGlobalConfig } from '../lib/backend';
+import { getAppVersion, getAppIcon, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, voiceStart, voiceStop, isTauri, getRemoteBranches, openLink, callBackend, loadWorkspaceConfigByPath, saveWorkspaceConfigByPath, getVaultStatus, vaultLink, listVaultItemChildren, getCommitPrefixConfig, setCommitPrefixConfig, getGitUserGlobalConfig, setGitUserGlobalConfig, getSkipGitHooks, setSkipGitHooks as saveSkipGitHooks } from '../lib/backend';
 
 // ==================== VaultItemTree (recursive) ====================
 interface VaultItemTreeProps {
@@ -507,6 +507,8 @@ export const SettingsView: FC<SettingsViewProps> = ({
   const [globalGitName, setGlobalGitName] = useState('');
   const [globalGitEmail, setGlobalGitEmail] = useState('');
   const [gitUserSaving, setGitUserSaving] = useState(false);
+  const [skipGitHooks, setSkipGitHooks] = useState(false);
+  const [skipGitHooksLoaded, setSkipGitHooksLoaded] = useState(false);
 
   const handleSavePrefixConfig = useCallback(async () => {
     setPrefixSaving(true);
@@ -806,6 +808,13 @@ export const SettingsView: FC<SettingsViewProps> = ({
         setGlobalGitEmail(cfg.email || '');
       })
       .catch(() => {});
+
+    getSkipGitHooks()
+      .then(v => {
+        setSkipGitHooks(v);
+        setSkipGitHooksLoaded(true);
+      })
+      .catch(() => setSkipGitHooksLoaded(true));
   }, []);
 
   // ==================== Menu items ====================
@@ -1610,6 +1619,21 @@ export const SettingsView: FC<SettingsViewProps> = ({
                       className={`relative inline-flex h-5 w-8 items-center rounded-full transition-colors ${prefixEnabled ? 'bg-blue-500' : 'bg-slate-600'}`}
                     >
                       <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${prefixEnabled ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+                    </button>
+                  </div>
+
+                  {/* Skip Git Hooks */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-sm text-slate-400">{t('settings.skipGitHooks', '跳过 Git Hooks')}</label>
+                      <p className="text-xs text-slate-500">{t('settings.skipGitHooksDesc', '提交时跳过 pre-commit / commit-msg hooks')}</p>
+                    </div>
+                    <button type="button"
+                      onClick={() => { const newVal = !skipGitHooks; setSkipGitHooks(newVal); saveSkipGitHooks(newVal).catch(() => {}); }}
+                      disabled={!skipGitHooksLoaded}
+                      className={`relative inline-flex h-5 w-8 items-center rounded-full transition-colors ${skipGitHooks ? 'bg-blue-500' : 'bg-slate-600'}`}
+                    >
+                      <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${skipGitHooks ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
                     </button>
                   </div>
 

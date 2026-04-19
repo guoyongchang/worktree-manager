@@ -1482,8 +1482,9 @@ pub fn commit_all(
     message: &str,
     author_name: Option<&str>,
     author_email: Option<&str>,
+    skip_hooks: bool,
 ) -> Result<String, String> {
-    log::info!("[git] Committing all changes at: {}", path.display());
+    log::info!("[git] Committing all changes at: {}, skip_hooks={}", path.display(), skip_hooks);
 
     // git add -A
     let add_output = git_command()
@@ -1509,8 +1510,12 @@ pub fn commit_all(
         cmd.env("GIT_AUTHOR_EMAIL", email)
             .env("GIT_COMMITTER_EMAIL", email);
     }
+    let mut args = vec!["commit", "-m", message];
+    if skip_hooks {
+        args.push("--no-verify");
+    }
     let commit_output = cmd
-        .args(["commit", "-m", message, "--no-verify"])
+        .args(args)
         .output()
         .map_err(|e| format!("Failed to commit: {}", e))?;
 

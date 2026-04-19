@@ -162,6 +162,8 @@ pub struct GlobalConfig {
     pub git_user_name: Option<String>,
     #[serde(default)]
     pub git_user_email: Option<String>,
+    #[serde(default)]
+    pub skip_git_hooks: bool,
 }
 
 fn default_true() -> bool {
@@ -193,6 +195,7 @@ impl Default for GlobalConfig {
             default_prefix_index: 0,
             git_user_name: None,
             git_user_email: None,
+            skip_git_hooks: false,
         }
     }
 }

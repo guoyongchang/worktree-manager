@@ -18,6 +18,7 @@ use super::{
     h_get_connected_clients, h_get_current_workspace, h_get_dashscope_api_key,
     h_get_dashscope_base_url, h_get_file_diff, h_get_git_diff, h_get_git_user_config,
     h_get_git_user_global_config, h_get_last_share_password, h_get_last_share_port,
+    h_get_skip_git_hooks,
     h_get_locked_worktrees, h_get_main_occupation, h_get_main_workspace_status, h_get_ngrok_token,
     h_get_opened_workspaces, h_get_remote_branches, h_get_share_info, h_get_share_state,
     h_get_terminal_state, h_get_voice_refine_enabled, h_get_workspace_config, h_kick_client,
@@ -30,6 +31,7 @@ use super::{
     h_save_workspace_config_by_path, h_scan_existing_projects, h_scan_linked_folders,
     h_set_commit_prefix_config, h_set_dashscope_api_key, h_set_dashscope_base_url, h_set_git_path,
     h_set_git_user_config, h_set_git_user_global_config, h_set_ngrok_token,
+    h_set_skip_git_hooks,
     h_set_voice_refine_enabled, h_set_window_workspace, h_start_ngrok_tunnel, h_start_sharing,
     h_stop_ngrok_tunnel, h_stop_sharing, h_switch_branch, h_switch_workspace,
     h_sync_with_base_branch, h_unlock_worktree, h_unregister_window, h_update_share_password,
@@ -283,6 +285,8 @@ pub(super) fn build_api_router(cert_pem: Option<String>) -> Router {
             "/api/set_git_user_global_config",
             post(h_set_git_user_global_config),
         )
+        .route("/api/get_skip_git_hooks", post(h_get_skip_git_hooks))
+        .route("/api/set_skip_git_hooks", post(h_set_skip_git_hooks))
         .route("/api/get_git_user_config", post(h_get_git_user_config))
         .route("/api/set_git_user_config", post(h_set_git_user_config))
         .route("/api/get_app_version", post(h_get_app_version))

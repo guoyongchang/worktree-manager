@@ -228,6 +228,9 @@ pub fn run() {
             // Git 用户全局配置
             get_git_user_global_config,
             set_git_user_global_config,
+            // Git hooks 跳过配置
+            get_skip_git_hooks,
+            set_skip_git_hooks,
             // Git 用户本地配置
             get_git_user_config,
             set_git_user_config,

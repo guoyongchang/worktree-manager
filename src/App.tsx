@@ -36,7 +36,7 @@ if (typeof window !== 'undefined' && isTauri()) {
     if ((e.metaKey || e.ctrlKey) && e.key === 'p') {
       e.preventDefault();
     }
-    // DEV: Open devtools on F12 if enabled in settings
+    // DEV: Open native WebView devtools on F12 if enabled in settings
     if (e.key === 'F12') {
       const devConsoleEnabled = localStorage.getItem('dev-console-enabled') === 'true';
       if (devConsoleEnabled) {

@@ -140,7 +140,7 @@ export function useTerminal(
       const active = activeTerminalTabRef.current;
       const visible = terminalVisibleRef.current;
       const clientId = clientIdRef.current;
-      const sessionId = active ? `pty-${active.replace(/[#\/]/g, '-')}` : null;
+      const sessionId = active ? `pty-${active.replace(/[#/]/g, '-')}` : null;
 
       if (import.meta.env.DEV) {
         console.log('[useTerminal] broadcast:', 'tabs:', tabs, 'active:', active);

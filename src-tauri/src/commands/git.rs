@@ -541,6 +541,7 @@ pub(crate) async fn commit_all(
     message: String,
     author_name: Option<String>,
     author_email: Option<String>,
+    skip_hooks: Option<bool>,
 ) -> Result<String, String> {
     blocking(move || {
         let normalized = normalize_path(&path);
@@ -549,6 +550,7 @@ pub(crate) async fn commit_all(
             &message,
             author_name.as_deref(),
             author_email.as_deref(),
+            skip_hooks.unwrap_or(false),
         )
     })
     .await

@@ -518,7 +518,8 @@ async fn h_commit_all(Json(args): Json<Value>) -> Response {
     let message = args["message"].as_str().unwrap_or("").to_string();
     let author_name = args["authorName"].as_str().map(|s| s.to_string());
     let author_email = args["authorEmail"].as_str().map(|s| s.to_string());
-    result_json(crate::commands::git::commit_all(path, message, author_name, author_email).await)
+    let skip_hooks = args["skipHooks"].as_bool();
+    result_json(crate::commands::git::commit_all(path, message, author_name, author_email, skip_hooks).await)
 }
 
 async fn h_generate_commit_message(Json(args): Json<Value>) -> Response {
@@ -559,6 +560,19 @@ async fn h_set_git_user_global_config(Json(args): Json<SetGitUserGlobalArgs>) ->
     result_ok(crate::commands::config::set_git_user_global_config(
         args.name, args.email,
     ))
+}
+
+async fn h_get_skip_git_hooks() -> Response {
+    result_json(crate::commands::config::get_skip_git_hooks())
+}
+
+#[derive(serde::Deserialize)]
+struct SetSkipGitHooksArgs {
+    skip: bool,
+}
+
+async fn h_set_skip_git_hooks(Json(args): Json<SetSkipGitHooksArgs>) -> Response {
+    result_ok(crate::commands::config::set_skip_git_hooks(args.skip))
 }
 
 async fn h_get_git_user_config(Json(args): Json<Value>) -> Response {

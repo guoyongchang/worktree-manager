@@ -485,13 +485,23 @@ export async function commitAll(
   message: string,
   authorName?: string,
   authorEmail?: string,
+  skipHooks?: boolean,
 ): Promise<string> {
   return callBackend<string>('commit_all', {
     path,
     message,
     authorName,
     authorEmail,
+    skipHooks,
   });
+}
+
+export async function getSkipGitHooks(): Promise<boolean> {
+  return callBackend<boolean>('get_skip_git_hooks');
+}
+
+export async function setSkipGitHooks(skip: boolean): Promise<void> {
+  return callBackend<void>('set_skip_git_hooks', { skip });
 }
 
 /** Generate commit message using AI */
