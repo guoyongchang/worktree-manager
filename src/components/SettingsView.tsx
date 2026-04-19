@@ -21,7 +21,7 @@ import { RefreshCw, Search, Mic, Eye, EyeOff, Settings, Globe, Info, Trash2, Wre
 import { BackIcon, PlusIcon, TrashIcon } from './Icons';
 import { BranchCombobox } from './BranchCombobox';
 import type { WorkspaceRef, WorkspaceConfig, ProjectConfig, ScannedFolder, VaultStatus, VaultItemChild } from '../types';
-import { getAppVersion, getAppIcon, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, voiceStart, voiceStop, isTauri, getRemoteBranches, openLink, callBackend, loadWorkspaceConfigByPath, saveWorkspaceConfigByPath, getVaultStatus, vaultLink, listVaultItemChildren } from '../lib/backend';
+import { getAppVersion, getAppIcon, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, voiceStart, voiceStop, isTauri, getRemoteBranches, openLink, callBackend, loadWorkspaceConfigByPath, saveWorkspaceConfigByPath, getVaultStatus, vaultLink, listVaultItemChildren, getCommitPrefixConfig, setCommitPrefixConfig, getGitUserGlobalConfig, setGitUserGlobalConfig } from '../lib/backend';
 
 // ==================== VaultItemTree (recursive) ====================
 interface VaultItemTreeProps {
@@ -372,7 +372,7 @@ interface SettingsViewProps {
   onRemoveWorkspace?: (path: string) => void;
 }
 
-type SettingsSection = 'workspaces' | 'vault' | 'tools' | 'share' | 'voice' | 'about';
+type SettingsSection = 'workspaces' | 'vault' | 'tools' | 'share' | 'commit' | 'voice' | 'about';
 
 export const SettingsView: FC<SettingsViewProps> = ({
   workspaceConfig,
@@ -447,7 +447,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
     setConfig(prev => ({ ...prev, [field]: value }));
   }, []);
 
-  const updateProject = useCallback((index: number, field: keyof ProjectConfig, value: string | boolean | string[]) => {
+  const updateProject = useCallback((index: number, field: keyof ProjectConfig, value: string | boolean | string[] | number | undefined) => {
     setConfig(prev => {
       const newProjects = [...prev.projects];
       newProjects[index] = { ...newProjects[index], [field]: value };
@@ -498,6 +498,38 @@ export const SettingsView: FC<SettingsViewProps> = ({
       setSaving(false);
     }
   }, [config, isCurrentWs, onSaveConfig, selectedWsPath]);
+
+  // Commit prefix & git user state (must be before useCallbacks that reference them)
+  const [prefixTemplates, setPrefixTemplates] = useState<string[]>(['[{{worktree-name}}]']);
+  const [prefixEnabled, setPrefixEnabled] = useState(true);
+  const [prefixSaving, setPrefixSaving] = useState(false);
+  const [globalGitName, setGlobalGitName] = useState('');
+  const [globalGitEmail, setGlobalGitEmail] = useState('');
+  const [gitUserSaving, setGitUserSaving] = useState(false);
+
+  const handleSavePrefixConfig = useCallback(async () => {
+    setPrefixSaving(true);
+    try {
+      await setCommitPrefixConfig({
+        templates: prefixTemplates.slice(0, 3),
+        enabled: prefixEnabled,
+      });
+    } finally {
+      setPrefixSaving(false);
+    }
+  }, [prefixTemplates, prefixEnabled]);
+
+  const handleSaveGitUser = useCallback(async () => {
+    setGitUserSaving(true);
+    try {
+      await setGitUserGlobalConfig({
+        name: globalGitName.trim() || undefined,
+        email: globalGitEmail.trim() || undefined,
+      });
+    } finally {
+      setGitUserSaving(false);
+    }
+  }, [globalGitName, globalGitEmail]);
 
   const handleScanProject = useCallback(async (projectName: string) => {
     setScanningProject(projectName);
@@ -753,12 +785,30 @@ export const SettingsView: FC<SettingsViewProps> = ({
   // Cleanup mic test on unmount
   useEffect(() => stopMicTest, [stopMicTest]);
 
+  // Load commit prefix & git user global config
+  useEffect(() => {
+    getCommitPrefixConfig()
+      .then(cfg => {
+        setPrefixTemplates(cfg.templates.length > 0 ? cfg.templates : ['[{{worktree-name}}]']);
+        setPrefixEnabled(cfg.enabled);
+      })
+      .catch(() => {});
+
+    getGitUserGlobalConfig()
+      .then(cfg => {
+        setGlobalGitName(cfg.name || '');
+        setGlobalGitEmail(cfg.email || '');
+      })
+      .catch(() => {});
+  }, []);
+
   // ==================== Menu items ====================
   const menuItems = [
     { id: 'workspaces' as SettingsSection, label: t('settings.workspaceConfig'), icon: <Settings className="w-3.5 h-3.5" /> },
     { id: 'vault' as SettingsSection, label: t('settings.vaultNav', 'Vault'), icon: <Link2 className="w-3.5 h-3.5" /> },
     { id: 'tools' as SettingsSection, label: t('settings.toolsNav', '工具'), icon: <Wrench className="w-3.5 h-3.5" /> },
     ...(isTauri() ? [{ id: 'share' as SettingsSection, label: t('settings.externalShareNav', '外网分享'), icon: <Globe className="w-3.5 h-3.5" /> }] : []),
+    { id: 'commit' as SettingsSection, label: t('settings.commitNav', '提交设置'), icon: <FileText className="w-3.5 h-3.5" /> },
     { id: 'voice' as SettingsSection, label: t('settings.voiceNav'), icon: <Mic className="w-3.5 h-3.5" /> },
     { id: 'about' as SettingsSection, label: t('settings.about'), icon: <Info className="w-3.5 h-3.5" /> },
   ];
@@ -1027,6 +1077,33 @@ export const SettingsView: FC<SettingsViewProps> = ({
                                     </Select>
                                   );
                                 })()}
+                              </div>
+                              <div>
+                                <label className="block text-[10px] text-slate-600 mb-0.5">{t('settings.commitPrefixLabel', '前缀模板')}</label>
+                                <Select value={String(proj.commit_prefix_index ?? 0)}
+                                  onValueChange={(value) => updateProject(index, 'commit_prefix_index', parseInt(value, 10))}
+                                >
+                                  <SelectTrigger className="w-full h-7 text-xs"><SelectValue /></SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="0">模板 1</SelectItem>
+                                    <SelectItem value="1">模板 2</SelectItem>
+                                    <SelectItem value="2">模板 3</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div>
+                                <label className="block text-[10px] text-slate-600 mb-0.5">{t('settings.gitUserNameOverride', 'Git 用户名(覆盖)')}</label>
+                                <Input type="text" value={proj.git_user_name || ''}
+                                  onChange={(e) => updateProject(index, 'git_user_name', e.target.value || undefined)}
+                                  placeholder={t('settings.inheritGlobal', '继承全局')} className="h-7 text-xs"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] text-slate-600 mb-0.5">{t('settings.gitUserEmailOverride', 'Git 邮箱(覆盖)')}</label>
+                                <Input type="text" value={proj.git_user_email || ''}
+                                  onChange={(e) => updateProject(index, 'git_user_email', e.target.value || undefined)}
+                                  placeholder={t('settings.inheritGlobal', '继承全局')} className="h-7 text-xs"
+                                />
                               </div>
                             </div>
                             <Button variant="ghost" size="icon" onClick={() => removeProject(index)}
@@ -1505,6 +1582,97 @@ export const SettingsView: FC<SettingsViewProps> = ({
                       onClick={() => openLink('https://dashscope.console.aliyun.com/apiKey')}
                     >{t('settings.getApiKey')}</button>
                   </p>
+                </div>
+              </div>
+            )}
+
+            {/* ==================== Commit ==================== */}
+            {activeSection === 'commit' && (
+              <div>
+                <h2 className="text-lg font-medium mb-4">{t('settings.commitTitle', '提交设置')}</h2>
+                <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 space-y-4">
+                  {/* 前缀开关 */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-sm text-slate-400">{t('settings.prefixEnabled', '启用提交前缀')}</label>
+                      <p className="text-xs text-slate-500">{t('settings.prefixEnabledDesc', '在 commit message 前自动添加前缀')}</p>
+                    </div>
+                    <button type="button"
+                      onClick={() => setPrefixEnabled(v => !v)}
+                      className={`relative inline-flex h-5 w-8 items-center rounded-full transition-colors ${prefixEnabled ? 'bg-blue-500' : 'bg-slate-600'}`}
+                    >
+                      <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${prefixEnabled ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+                    </button>
+                  </div>
+
+                  {/* 模板列表 */}
+                  {prefixEnabled && (
+                    <div className="space-y-2">
+                      <label className="block text-sm text-slate-400">{t('settings.prefixTemplates', '前缀模板（最多3个）')}</label>
+                      {prefixTemplates.map((tpl, i) => (
+                        <div key={i} className="flex gap-2">
+                          <Input type="text" value={tpl}
+                            onChange={(e) => {
+                              const next = [...prefixTemplates];
+                              next[i] = e.target.value;
+                              setPrefixTemplates(next);
+                            }}
+                            placeholder="[{{worktree-name}}]"
+                            className="flex-1 text-xs"
+                          />
+                          {prefixTemplates.length > 1 && (
+                            <Button variant="ghost" size="sm"
+                              onClick={() => setPrefixTemplates(prefixTemplates.filter((_, idx) => idx !== i))}
+                              className="text-red-400/60 hover:text-red-300"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
+                          )}
+                        </div>
+                      ))}
+                      {prefixTemplates.length < 3 && (
+                        <Button variant="secondary" size="sm"
+                          onClick={() => setPrefixTemplates([...prefixTemplates, ''])}
+                          className="text-xs"
+                        >
+                          <PlusIcon className="w-3 h-3" /> {t('settings.addTemplate', '添加模板')}
+                        </Button>
+                      )}
+                      <p className="text-xs text-slate-500">
+                        {t('settings.prefixVarsHint', '可用变量: {{worktree-name}}, {{project-name}}, {{branch-name}}, {{repo-name}}, {{date}}')}
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="border-t border-slate-700/50 pt-4">
+                    <Button variant="secondary" size="sm" onClick={handleSavePrefixConfig} disabled={prefixSaving}>
+                      {prefixSaving ? t('common.saving') : t('common.save')}
+                    </Button>
+                  </div>
+
+                  {/* 全局 Git User */}
+                  <div className="border-t border-slate-700/50 pt-4 space-y-3">
+                    <h3 className="text-sm font-medium text-slate-300">{t('settings.globalGitUser', '全局 Git 用户')}</h3>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">{t('settings.gitUserName', '用户名')}</label>
+                        <Input type="text" value={globalGitName}
+                          onChange={(e) => setGlobalGitName(e.target.value)}
+                          placeholder="Git 用户名" className="text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">{t('settings.gitUserEmail', '邮箱')}</label>
+                        <Input type="text" value={globalGitEmail}
+                          onChange={(e) => setGlobalGitEmail(e.target.value)}
+                          placeholder="user@example.com" className="text-xs"
+                        />
+                      </div>
+                    </div>
+                    <Button variant="secondary" size="sm" onClick={handleSaveGitUser} disabled={gitUserSaving}>
+                      {gitUserSaving ? t('common.saving') : t('common.save')}
+                    </Button>
+                  </div>
                 </div>
               </div>
             )}

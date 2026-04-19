@@ -583,7 +583,7 @@ export async function getCommitPrefixConfig(): Promise<CommitPrefixConfig> {
 }
 
 export async function setCommitPrefixConfig(config: CommitPrefixConfig): Promise<void> {
-  return callBackend<void>('set_commit_prefix_config', config);
+  return callBackend<void>('set_commit_prefix_config', { ...config });
 }
 
 export async function getGitUserGlobalConfig(): Promise<GitUserConfig> {
@@ -591,7 +591,7 @@ export async function getGitUserGlobalConfig(): Promise<GitUserConfig> {
 }
 
 export async function setGitUserGlobalConfig(config: GitUserConfig): Promise<void> {
-  return callBackend<void>('set_git_user_global_config', config);
+  return callBackend<void>('set_git_user_global_config', { ...config });
 }
 
 export async function getGitUserConfig(path: string): Promise<GitUserConfig> {
@@ -628,7 +628,7 @@ export async function getFileDiff(path: string, filePath: string): Promise<impor
 
 // ── Vault API ────────────────────────────────
 
-import type { VaultStatus, VaultLinkResponse, VaultItemChild } from '../types';
+import type { VaultStatus, VaultLinkResponse, VaultItemChild, CommitPrefixConfig, GitUserConfig } from '../types';
 
 export async function getVaultStatus(): Promise<VaultStatus> {
   return callBackend<VaultStatus>('vault_status');
