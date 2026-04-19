@@ -1,7 +1,8 @@
 {
   "src/**/*.{ts,tsx}": [
     "eslint --fix",
-    "bash -c 'tsc --noEmit'"
+    "bash -c 'tsc --noEmit'",
+    "node scripts/check-i18n.mjs"
   ],
   "src/locales/*.json": [
     "node scripts/check-i18n.mjs"
