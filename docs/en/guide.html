@@ -995,6 +995,37 @@ lsof -i :49152</code></pre>
                 <p class="text-slate-300"><strong>merge_strategy</strong>: Merge strategy (<code>merge</code> or <code>rebase</code>)</p>
               </div>
             </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">Git Commit Configuration</h3>
+              <p class="text-slate-300 mb-3">In "Settings → Commit Settings", you can configure commit prefix templates and Git user info.</p>
+
+              <div class="space-y-4">
+                <div>
+                  <h4 class="text-lg font-semibold mb-2 text-blue-400">Commit Prefix Templates</h4>
+                  <p class="text-slate-300 mb-2">Supports up to 3 prefix templates, automatically prepended to the commit message. Variable substitution is supported:</p>
+                  <ul class="list-disc list-inside text-slate-300 space-y-1 mb-3">
+                    <li><code>{{worktree-name}}</code> — Current worktree name</li>
+                    <li><code>{{project-name}}</code> — Project name</li>
+                    <li><code>{{branch-name}}</code> — Current branch name</li>
+                    <li><code>{{repo-name}}</code> — Repository name</li>
+                    <li><code>{{date:YYYY-MM-DD}}</code> — Date (supports YYYY, MM, DD, HH, mm formats)</li>
+                  </ul>
+                  <p class="text-slate-300 text-sm">Example: <code>[{{worktree-name}}] {{project-name}} at {{date}}</code> renders as <code>[feature-123] frontend at 2026-04-19</code></p>
+                  <p class="text-slate-300 text-sm mt-2">Switch templates from the dropdown, click the star icon to set the default. The "None" option disables the prefix.</p>
+                </div>
+
+                <div>
+                  <h4 class="text-lg font-semibold mb-2 text-blue-400">Git User Configuration</h4>
+                  <p class="text-slate-300 mb-2">Supports global and per-project configuration to avoid committing with the wrong username/email.</p>
+                  <ul class="list-disc list-inside text-slate-300 space-y-1">
+                    <li><strong>Global</strong>: Configure in "Settings → Commit Settings", applies to all projects</li>
+                    <li><strong>Per-project</strong>: Configure for each project in "Settings → Projects", leave empty to inherit global</li>
+                    <li>When committing, the corresponding <code>user.name</code> and <code>user.email</code> are automatically written to the repository</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
 

@@ -992,6 +992,37 @@ lsof -i :49152</code></pre>
                 <p class="text-slate-300"><strong>merge_strategy</strong>: 合并策略 (<code>merge</code> 或 <code>rebase</code>)</p>
               </div>
             </div>
+
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6">
+              <h3 class="text-xl font-semibold mb-4">Git 提交配置</h3>
+              <p class="text-slate-300 mb-3">在「设置 → 提交设置」中可配置提交前缀模板和 Git 用户信息。</p>
+
+              <div class="space-y-4">
+                <div>
+                  <h4 class="text-lg font-semibold mb-2 text-blue-400">提交前缀模板</h4>
+                  <p class="text-slate-300 mb-2">支持最多 3 个前缀模板，提交时自动添加到 commit message 前面。支持变量替换：</p>
+                  <ul class="list-disc list-inside text-slate-300 space-y-1 mb-3">
+                    <li><code>{{worktree-name}}</code> — 当前 worktree 名称</li>
+                    <li><code>{{project-name}}</code> — 项目名称</li>
+                    <li><code>{{branch-name}}</code> — 当前分支名</li>
+                    <li><code>{{repo-name}}</code> — 仓库名称</li>
+                    <li><code>{{date:YYYY-MM-DD}}</code> — 日期（支持 YYYY, MM, DD, HH, mm 格式）</li>
+                  </ul>
+                  <p class="text-slate-300 text-sm">示例：<code>[{{worktree-name}}] {{project-name}} at {{date}}</code> 会渲染为 <code>[feature-123] frontend at 2026-04-19</code></p>
+                  <p class="text-slate-300 text-sm mt-2">可在下拉框中切换模板，点击星星图标设置默认模板。「无」选项表示不使用前缀。</p>
+                </div>
+
+                <div>
+                  <h4 class="text-lg font-semibold mb-2 text-blue-400">Git 用户配置</h4>
+                  <p class="text-slate-300 mb-2">支持全局和项目级两级配置，避免用错误的用户名/邮箱提交。</p>
+                  <ul class="list-disc list-inside text-slate-300 space-y-1">
+                    <li><strong>全局设置</strong>：在「设置 → 提交设置」中配置，对所有项目生效</li>
+                    <li><strong>项目级设置</strong>：在「设置 → 项目」中为每个项目单独配置，留空则继承全局</li>
+                    <li>提交时会自动写入对应仓库的 <code>user.name</code> 和 <code>user.email</code></li>
+                  </ul>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
 
