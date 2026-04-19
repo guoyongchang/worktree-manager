@@ -96,7 +96,7 @@ export interface TerminalHandle {
 const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible, clientId }, ref) => {
   // Keep desktop PTY on polling until the event-stream path can preserve replay semantics.
   const enableDesktopEventStreaming = false;
-  const { t } = useTranslation();
+  useTranslation();
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -120,8 +120,13 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
     startY: 0,
   });
   const [wsConnected, setWsConnected] = useState(!isTauri() ? getWebSocketManager().isConnected() : true);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+  }>({ visible: false, x: 0, y: 0 });
   const [isMobile, setIsMobile] = useState(false);
+  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
   const [initStatus, setInitStatus] = useState<string | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
   const gotFirstDataRef = useRef(false);
@@ -141,32 +146,53 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
-    setContextMenu({ x: e.clientX, y: e.clientY });
+    setContextMenu({ visible: true, x: e.clientX, y: e.clientY });
   }, []);
 
-  const handleCopy = useCallback(async () => {
-    setContextMenu(null);
-    const term = xtermRef.current;
-    if (!term) return;
-    const selection = term.getSelection();
-    if (selection) {
-      try { await navigator.clipboard.writeText(selection); } catch { /* noop */ }
-    }
-    term.clearSelection();
+  const handleCloseContextMenu = useCallback(() => {
+    setContextMenu(prev => ({ ...prev, visible: false }));
   }, []);
+
+  const handleCopy = useCallback(() => {
+    if (xtermRef.current) {
+      const selection = xtermRef.current.getSelection();
+      if (selection) {
+        navigator.clipboard.writeText(selection).catch(() => {});
+      }
+    }
+    handleCloseContextMenu();
+  }, [handleCloseContextMenu]);
 
   const handlePaste = useCallback(async () => {
-    setContextMenu(null);
     try {
       const text = await navigator.clipboard.readText();
-      if (text) writeToPty(sessionIdRef.current, text);
-    } catch { /* noop */ }
-  }, []);
+      if (text && xtermRef.current) {
+        writeToPty(sessionIdRef.current, text);
+      }
+    } catch {
+      // Ignore paste errors
+    }
+    handleCloseContextMenu();
+  }, [handleCloseContextMenu]);
 
   const handleClear = useCallback(() => {
-    setContextMenu(null);
     if (xtermRef.current) {
       xtermRef.current.clear();
+    }
+    handleCloseContextMenu();
+  }, [handleCloseContextMenu]);
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    longPressTimer.current = setTimeout(() => {
+      const touch = e.touches[0];
+      setContextMenu({ visible: true, x: touch.clientX, y: touch.clientY });
+    }, 500);
+  }, []);
+
+  const handleTouchEnd = useCallback(() => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
     }
   }, []);
 
@@ -575,6 +601,11 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
     }).catch(() => { /* noop */ });
   }, [visible, clientId]);
 
+  const handleResizeToFit = useCallback(() => {
+    handleResize();
+    handleCloseContextMenu();
+  }, [handleResize, handleCloseContextMenu]);
+
 
   useEffect(() => {
     if (!initializedRef.current) return;
@@ -640,6 +671,8 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
           ref={terminalRef}
           className="h-full w-full overflow-hidden"
           style={{ padding: '4px 8px', background: '#0f172a' }}
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
         />
 
         {/* Initializing overlay */}
@@ -689,47 +722,44 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
         )}
 
         {/* Context Menu */}
-        {contextMenu && (
-          <div
-            className="fixed inset-0 z-50"
-            onClick={() => setContextMenu(null)}
-            onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }}
-          >
+        {contextMenu.visible && (
+          <>
             <div
-              className="absolute bg-slate-800 border border-slate-600 rounded-lg shadow-xl py-1 min-w-[140px]"
-              style={{ left: Math.min(contextMenu.x, window.innerWidth - 140), top: Math.min(contextMenu.y, window.innerHeight - 150) }}
-              onClick={(e) => e.stopPropagation()}
+              className="fixed inset-0 z-40"
+              onClick={handleCloseContextMenu}
+            />
+            <div
+              className="fixed z-50 bg-slate-800 border border-slate-700 rounded-lg shadow-lg py-1 min-w-[140px]"
+              style={{ left: contextMenu.x, top: contextMenu.y }}
             >
               <button
+                className="w-full px-3 py-1.5 text-left text-sm text-slate-300 hover:bg-slate-700 transition-colors"
                 onClick={handleCopy}
-                className="w-full px-4 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 flex items-center gap-2"
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
-                </svg>
-                {t('terminal.copyContent')}
+                Copy
               </button>
               <button
+                className="w-full px-3 py-1.5 text-left text-sm text-slate-300 hover:bg-slate-700 transition-colors"
                 onClick={handlePaste}
-                className="w-full px-4 py-2 text-left text-sm text-slate-200 hover:bg-slate-700 flex items-center gap-2"
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                </svg>
-                {t('terminal.paste')}
+                Paste
               </button>
               <div className="border-t border-slate-700 my-1" />
               <button
-                onClick={handleClear}
-                className="w-full px-4 py-2 text-left text-sm text-red-400 hover:bg-slate-700 hover:text-red-300 flex items-center gap-2"
+                className="w-full px-3 py-1.5 text-left text-sm text-slate-300 hover:bg-slate-700 transition-colors"
+                onClick={handleResizeToFit}
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-                {t('terminal.clear')}
+                Resize to Fit
+              </button>
+              <div className="border-t border-slate-700 my-1" />
+              <button
+                className="w-full px-3 py-1.5 text-left text-sm text-slate-300 hover:bg-slate-700 transition-colors"
+                onClick={handleClear}
+              >
+                Clear
               </button>
             </div>
-          </div>
+          </>
         )}
       </div>
       {isMobile && <MobileTerminalToolbar sessionId={sessionIdRef.current} />}
