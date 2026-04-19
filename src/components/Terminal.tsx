@@ -8,7 +8,6 @@ import { callBackend, isTauri, openLink, getPlatform } from '../lib/backend';
 import { getWebSocketManager } from '../lib/websocket';
 import { TERMINAL } from '../constants';
 import '@xterm/xterm/css/xterm.css';
-import { getCurrentWindow } from '@tauri-apps/api/window';
 
 const TERMINAL_THEME = {
   background: '#0f172a',
@@ -113,9 +112,8 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
   const fitAddonRef = useRef<FitAddon | null>(null);
   // Extract actual cwd (remove #timestamp suffix if present)
   const actualCwd = cwd.split('#')[0];
-  // Get window label for per-window PTY sessions (sub-windows need unique session IDs)
-  const windowLabel = isTauri() ? getCurrentWindow().label : 'browser';
-  const sessionIdRef = useRef<string>(`pty-${windowLabel}-${actualCwd.replace(/[/#]/g, '-')}`);
+  // Session ID is path-based so all clients (desktop + browser) share the same PTY
+  const sessionIdRef = useRef<string>(`pty-${actualCwd.replace(/[/#]/g, '-')}`);
   const readerIntervalRef = useRef<number | null>(null);
   const wsSubscribedRef = useRef(false);
   const desktopUnlistenRef = useRef<UnlistenFn | null>(null);
