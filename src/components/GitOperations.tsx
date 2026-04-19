@@ -673,7 +673,16 @@ export const GitOperations: FC<GitOperationsProps> = ({
                   <SelectTrigger className="w-48 truncate text-xs h-8">
                     <SelectValue placeholder={t('git.selectPrefix')} />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="prefix-select-dropdown"
+                  >
+                    <style>{`
+                      .prefix-select-dropdown [data-radix-select-viewport] [role="option"] {
+                        padding-right: 0.5rem !important;
+                      }
+                      .prefix-select-dropdown [data-radix-select-viewport] [role="option"] .absolute.right-2 {
+                        display: none !important;
+                      }
+                    `}</style>
                     {prefixConfig.templates.map((tmpl, idx) => {
                       const label = renderCommitPrefix(tmpl, {
                         worktreeName: worktreeDisplayName || projectPath.split('/').pop() || '',
@@ -685,9 +694,8 @@ export const GitOperations: FC<GitOperationsProps> = ({
                       return (
                         <SelectItem key={idx} value={String(idx)} className="text-xs"
                         >
-                          <span className="flex items-center justify-between w-full gap-2"
+                          <span className="flex items-center w-full gap-2"
                           >
-                            <span className="truncate">{label}</span>
                             <Star
                               className={`w-3 h-3 shrink-0 ${isDefault ? 'fill-amber-400 text-amber-400' : 'text-slate-500 hover:text-amber-400'}`}
                               onPointerDown={(e) => {
@@ -702,15 +710,15 @@ export const GitOperations: FC<GitOperationsProps> = ({
                                 }).catch(() => {});
                               }}
                             />
+                            <span className="truncate">{label}</span>
                           </span>
                         </SelectItem>
                       );
                     })}
                     <SelectItem value={String(prefixConfig.templates.length)} className="text-xs"
                     >
-                      <span className="flex items-center justify-between w-full gap-2"
+                      <span className="flex items-center w-full gap-2"
                       >
-                        <span>{t('git.noPrefix', '无')}</span>
                         <Star
                           className={`w-3 h-3 shrink-0 ${prefixConfig.default_index === prefixConfig.templates.length ? 'fill-amber-400 text-amber-400' : 'text-slate-500 hover:text-amber-400'}`}
                           onPointerDown={(e) => {
@@ -726,6 +734,7 @@ export const GitOperations: FC<GitOperationsProps> = ({
                             }).catch(() => {});
                           }}
                         />
+                        <span>{t('git.noPrefix', '无')}</span>
                       </span>
                     </SelectItem>
                   </SelectContent>
