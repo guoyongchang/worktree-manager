@@ -193,6 +193,9 @@ pub fn clone_project_impl(window_label: &str, request: CloneProjectRequest) -> R
         test_branch: request.test_branch,
         merge_strategy: request.merge_strategy,
         linked_folders: request.linked_folders,
+        commit_prefix_index: None,
+        git_user_name: None,
+        git_user_email: None,
     });
 
     save_workspace_config_internal(&workspace_path, &config)?;
@@ -324,6 +327,9 @@ pub fn add_existing_project_impl(
         test_branch,
         merge_strategy,
         linked_folders: vec![],
+        commit_prefix_index: None,
+        git_user_name: None,
+        git_user_email: None,
     });
 
     save_workspace_config_internal(&workspace_path, &config)?;

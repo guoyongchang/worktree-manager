@@ -177,6 +177,9 @@ fn scan_worktrees_dir(
                         test_branch: "test".to_string(),
                         merge_strategy: "merge".to_string(),
                         linked_folders: vec![],
+                        commit_prefix_index: None,
+                        git_user_name: None,
+                        git_user_email: None,
                     });
 
                 let info = get_worktree_info_for_branches(
@@ -480,6 +483,9 @@ pub fn create_worktree_impl(
                     test_branch: "test".to_string(),
                     merge_strategy: "merge".to_string(),
                     linked_folders: vec![],
+                    commit_prefix_index: None,
+                    git_user_name: None,
+                    git_user_email: None,
                 })
         })
         .collect();
@@ -1171,6 +1177,9 @@ pub fn add_project_to_worktree_impl(
             test_branch: "test".to_string(),
             merge_strategy: "merge".to_string(),
             linked_folders: vec![],
+            commit_prefix_index: None,
+            git_user_name: None,
+            git_user_email: None,
         });
 
     log::info!(

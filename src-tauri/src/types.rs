@@ -151,10 +151,22 @@ pub struct GlobalConfig {
     pub dashscope_base_url: Option<String>,
     #[serde(default = "default_true")]
     pub voice_refine_enabled: bool,
+    #[serde(default = "default_prefix_templates")]
+    pub commit_prefix_templates: Vec<String>,
+    #[serde(default = "default_true")]
+    pub commit_prefix_enabled: bool,
+    #[serde(default)]
+    pub git_user_name: Option<String>,
+    #[serde(default)]
+    pub git_user_email: Option<String>,
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn default_prefix_templates() -> Vec<String> {
+    vec!["[{{worktree-name}}]".to_string()]
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -173,6 +185,10 @@ impl Default for GlobalConfig {
             dashscope_api_key: None,
             dashscope_base_url: None,
             voice_refine_enabled: true,
+            commit_prefix_templates: default_prefix_templates(),
+            commit_prefix_enabled: true,
+            git_user_name: None,
+            git_user_email: None,
         }
     }
 }
@@ -206,6 +222,12 @@ pub struct ProjectConfig {
     pub merge_strategy: String,
     #[serde(default)]
     pub linked_folders: Vec<String>, // 要链接的文件夹列表
+    #[serde(default)]
+    pub commit_prefix_index: Option<usize>,
+    #[serde(default)]
+    pub git_user_name: Option<String>,
+    #[serde(default)]
+    pub git_user_email: Option<String>,
 }
 
 impl Default for WorkspaceConfig {

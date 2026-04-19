@@ -10,6 +10,9 @@ export interface ProjectConfig {
   test_branch: string;
   merge_strategy: string;
   linked_folders: string[];
+  commit_prefix_index?: number;
+  git_user_name?: string;
+  git_user_email?: string;
 }
 
 export interface WorkspaceConfig {
@@ -203,4 +206,15 @@ export interface VaultLinkResponse {
 export interface VaultItemChild {
   name: string;
   item_type: 'file' | 'directory';
+}
+
+// Commit prefix & git user config types
+export interface CommitPrefixConfig {
+  templates: string[];
+  enabled: boolean;
+}
+
+export interface GitUserConfig {
+  name?: string;
+  email?: string;
 }

@@ -478,8 +478,18 @@ export async function getGitDiff(path: string): Promise<string> {
 }
 
 /** Stage all changes and commit with message */
-export async function commitAll(path: string, message: string): Promise<string> {
-  return callBackend<string>('commit_all', { path, message });
+export async function commitAll(
+  path: string,
+  message: string,
+  authorName?: string,
+  authorEmail?: string,
+): Promise<string> {
+  return callBackend<string>('commit_all', {
+    path,
+    message,
+    author_name: authorName,
+    author_email: authorEmail,
+  });
 }
 
 /** Generate commit message using AI */
@@ -558,6 +568,38 @@ export async function getVoiceRefineEnabled(): Promise<boolean> {
 
 export async function setVoiceRefineEnabled(enabled: boolean): Promise<void> {
   return callBackend<void>('set_voice_refine_enabled', { enabled });
+}
+
+export async function checkDashscopeApiKey(): Promise<boolean> {
+  return callBackend<boolean>('check_dashscope_api_key');
+}
+
+// ---------------------------------------------------------------------------
+// Commit Prefix & Git User Config API
+// ---------------------------------------------------------------------------
+
+export async function getCommitPrefixConfig(): Promise<CommitPrefixConfig> {
+  return callBackend<CommitPrefixConfig>('get_commit_prefix_config');
+}
+
+export async function setCommitPrefixConfig(config: CommitPrefixConfig): Promise<void> {
+  return callBackend<void>('set_commit_prefix_config', config);
+}
+
+export async function getGitUserGlobalConfig(): Promise<GitUserConfig> {
+  return callBackend<GitUserConfig>('get_git_user_global_config');
+}
+
+export async function setGitUserGlobalConfig(config: GitUserConfig): Promise<void> {
+  return callBackend<void>('set_git_user_global_config', config);
+}
+
+export async function getGitUserConfig(path: string): Promise<GitUserConfig> {
+  return callBackend<GitUserConfig>('get_git_user_config', { path });
+}
+
+export async function setGitUserConfig(path: string, config: GitUserConfig): Promise<void> {
+  return callBackend<void>('set_git_user_config', { path, ...config });
 }
 
 // ---------------------------------------------------------------------------
