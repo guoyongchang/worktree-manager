@@ -11,6 +11,7 @@
 <!-- 测试 commit message 前缀模板功能 -->
 <!-- 第二次测试：prefix/content 分离 -->
 <!-- 第三次测试：点击前缀 block 转换为 content -->
+<!-- 第四次测试：inline prefix block with edit icon -->
 
 </div>
 
