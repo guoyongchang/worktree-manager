@@ -289,9 +289,11 @@ export const MobileWorktreeDetail: FC<MobileWorktreeDetailProps> = ({
                                             {/* Git operations */}
                                             <GitOperations
                                                 projectPath={project.path}
+                                                projectName={project.name}
                                                 baseBranch={project.base_branch}
                                                 testBranch={project.test_branch || ''}
                                                 currentBranch={project.current_branch}
+                                                worktreeDisplayName={selectedWorktree.display_name || selectedWorktree.name}
                                                 onRefresh={onRefresh}
                                                 autoRefreshSlot={selectedWorktree.is_archived ? undefined : index}
                                             />

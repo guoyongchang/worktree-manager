@@ -843,6 +843,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                         <div className="mt-3 pt-3 border-t border-slate-700/50">
                           <GitOperations
                             projectPath={projectPath}
+                            projectName={proj.name}
                             baseBranch={proj.base_branch}
                             testBranch={proj.test_branch}
                             currentBranch={proj.current_branch}
@@ -977,6 +978,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                       <div className="mt-3 pt-3 border-t border-slate-700/50">
                         <GitOperations
                           projectPath={proj.path}
+                          projectName={proj.name}
                           baseBranch={proj.base_branch}
                           testBranch={proj.test_branch}
                           currentBranch={proj.current_branch}
@@ -1235,9 +1237,11 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                 <div className="mt-3 pt-3 border-t border-slate-700/50">
                   <GitOperations
                     projectPath={proj.path}
+                    projectName={proj.name}
                     baseBranch={proj.base_branch}
                     testBranch={proj.test_branch}
                     currentBranch={proj.current_branch}
+                    worktreeDisplayName={selectedWorktree.display_name || selectedWorktree.name}
                     onRefresh={onRefresh}
                     onOpenTerminal={onOpenTerminalPanel}
                     autoRefreshSlot={selectedWorktree.is_archived ? undefined : index}

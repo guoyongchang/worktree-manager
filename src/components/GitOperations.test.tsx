@@ -14,6 +14,10 @@ const backend = vi.hoisted(() => ({
   getGitDiff: vi.fn(),
   commitAll: vi.fn(),
   generateCommitMessage: vi.fn(),
+  checkDashscopeApiKey: vi.fn(),
+  getCommitPrefixConfig: vi.fn(),
+  getGitUserGlobalConfig: vi.fn(),
+  setGitUserConfig: vi.fn(),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -51,6 +55,7 @@ describe('GitOperations', () => {
       render(
         <GitOperations
           projectPath="/tmp/worktree/project-a"
+          projectName="project-a"
           baseBranch="main"
           testBranch="test"
           currentBranch="feature/demo"

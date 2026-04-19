@@ -10,6 +10,13 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 import {
   RefreshIcon,
@@ -32,8 +39,14 @@ import {
   getGitDiff,
   commitAll,
   generateCommitMessage,
+  checkDashscopeApiKey,
+  getCommitPrefixConfig,
+  getGitUserGlobalConfig,
+  setGitUserConfig,
   type BranchDiffStats,
 } from '@/lib/backend';
+import type { WorkspaceConfig } from '@/types';
+import { renderCommitPrefix } from '@/lib/commit-prefix';
 import { CreatePRModal } from './CreatePRModal';
 
 const AUTO_REFRESH_INTERVAL_MS = 60_000;
@@ -48,9 +61,12 @@ function isConflictError(msg: string): boolean {
 
 interface GitOperationsProps {
   projectPath: string;
+  projectName: string;
   baseBranch: string;
   testBranch: string;
   currentBranch: string;
+  worktreeDisplayName?: string;
+  workspaceConfig?: WorkspaceConfig;
   onRefresh?: () => void;
   onOpenTerminal?: (path: string) => void;
   autoRefreshSlot?: number;
@@ -58,9 +74,12 @@ interface GitOperationsProps {
 
 export const GitOperations: FC<GitOperationsProps> = ({
   projectPath,
+  projectName,
   baseBranch,
   testBranch,
   currentBranch,
+  worktreeDisplayName,
+  workspaceConfig,
   onRefresh,
   onOpenTerminal,
   autoRefreshSlot,
@@ -82,6 +101,11 @@ export const GitOperations: FC<GitOperationsProps> = ({
   const [commitMessage, setCommitMessage] = useState('');
   const [generatingMessage, setGeneratingMessage] = useState(false);
   const [committing, setCommitting] = useState(false);
+  const [prefixConfig, setPrefixConfig] = useState<{ templates: string[]; enabled: boolean }>({
+    templates: ['[{{worktree-name}}]'],
+    enabled: true,
+  });
+  const [selectedPrefixIndex, setSelectedPrefixIndex] = useState(0);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const fetchingSyncingRef = useRef(fetchingSyncing);
@@ -258,14 +282,69 @@ export const GitOperations: FC<GitOperationsProps> = ({
     runGitAction('mergeBase', () => mergeToBaseBranch(projectPath, baseBranch));
   };
 
+  const computePrefix = useCallback((
+    config: { templates: string[]; enabled: boolean },
+    prefixIndex: number,
+  ): string => {
+    if (!config.enabled || config.templates.length === 0) return '';
+    const template = config.templates[prefixIndex] ?? config.templates[0] ?? '';
+    if (!template) return '';
+    const repoName = projectPath.split('/').pop() || '';
+    return renderCommitPrefix(template, {
+      worktreeName: worktreeDisplayName || repoName,
+      projectName,
+      branchName: currentBranch,
+      repoName,
+    });
+  }, [projectPath, projectName, currentBranch, worktreeDisplayName]);
+
+  const stripPrefix = useCallback((msg: string, config: { templates: string[]; enabled: boolean }): string => {
+    if (!config.enabled || config.templates.length === 0) return msg;
+    const repoName = projectPath.split('/').pop() || '';
+    const vars = {
+      worktreeName: worktreeDisplayName || repoName,
+      projectName,
+      branchName: currentBranch,
+      repoName,
+    };
+    for (const tmpl of config.templates) {
+      const prefix = renderCommitPrefix(tmpl, vars);
+      if (prefix && msg.startsWith(prefix)) {
+        return msg.slice(prefix.length).trimStart();
+      }
+    }
+    return msg;
+  }, [projectPath, projectName, currentBranch, worktreeDisplayName]);
+
   const handleCommitClick = async () => {
     setShowCommitDialog(true);
     setCommitMessage('');
     setGeneratingMessage(true);
     try {
-      const diff = await getGitDiff(projectPath);
-      const msg = await generateCommitMessage(diff);
-      setCommitMessage(msg);
+      let config: { templates: string[]; enabled: boolean };
+      try {
+        config = await getCommitPrefixConfig();
+        setPrefixConfig(config);
+      } catch {
+        config = { templates: ['[{{worktree-name}}]'], enabled: true };
+        setPrefixConfig(config);
+      }
+
+      const projectConfig = workspaceConfig?.projects.find((p: { name: string }) => p.name === projectName);
+      let prefixIndex = projectConfig?.commit_prefix_index ?? 0;
+      if (prefixIndex < 0 || prefixIndex >= config.templates.length) prefixIndex = 0;
+      setSelectedPrefixIndex(prefixIndex);
+
+      const prefix = computePrefix(config, prefixIndex);
+
+      const hasKey = await checkDashscopeApiKey();
+      if (hasKey) {
+        const diff = await getGitDiff(projectPath);
+        const msg = await generateCommitMessage(diff);
+        setCommitMessage(prefix + msg);
+      } else {
+        setCommitMessage(prefix);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes('No changes')) {
@@ -283,9 +362,12 @@ export const GitOperations: FC<GitOperationsProps> = ({
   const handleRegenerateMessage = async () => {
     setGeneratingMessage(true);
     try {
+      const hasKey = await checkDashscopeApiKey();
+      if (!hasKey) return;
       const diff = await getGitDiff(projectPath);
       const msg = await generateCommitMessage(diff);
-      setCommitMessage(msg);
+      const prefix = computePrefix(prefixConfig, selectedPrefixIndex);
+      setCommitMessage(prefix + msg);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err));
     } finally {
@@ -293,11 +375,26 @@ export const GitOperations: FC<GitOperationsProps> = ({
     }
   };
 
+  const handlePrefixChange = (index: number) => {
+    const newIndex = index;
+    setSelectedPrefixIndex(newIndex);
+    const body = stripPrefix(commitMessage, prefixConfig);
+    const newPrefix = computePrefix(prefixConfig, newIndex);
+    setCommitMessage(newPrefix + (body ? ' ' + body : body));
+  };
+
   const handleConfirmCommit = async (withPush: boolean) => {
     if (!commitMessage.trim()) return;
     setCommitting(true);
     try {
-      await commitAll(projectPath, commitMessage.trim());
+      const projectConfig = workspaceConfig?.projects.find((p: { name: string }) => p.name === projectName);
+      const globalConfig = await getGitUserGlobalConfig();
+      const resolvedName = projectConfig?.git_user_name || globalConfig.name;
+      const resolvedEmail = projectConfig?.git_user_email || globalConfig.email;
+      if (resolvedName || resolvedEmail) {
+        await setGitUserConfig(projectPath, { name: resolvedName, email: resolvedEmail });
+      }
+      await commitAll(projectPath, commitMessage.trim(), resolvedName, resolvedEmail);
       setShowCommitDialog(false);
       if (withPush) {
         try {
@@ -527,6 +624,29 @@ export const GitOperations: FC<GitOperationsProps> = ({
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
+            {prefixConfig.enabled && prefixConfig.templates.length > 0 && (
+              <Select
+                value={String(selectedPrefixIndex)}
+                onValueChange={(v) => handlePrefixChange(Number(v))}
+                disabled={generatingMessage}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder={t('git.selectPrefix')} />
+                </SelectTrigger>
+                <SelectContent>
+                  {prefixConfig.templates.map((tmpl, idx) => (
+                    <SelectItem key={idx} value={String(idx)}>
+                      {renderCommitPrefix(tmpl, {
+                        worktreeName: worktreeDisplayName || projectPath.split('/').pop() || '',
+                        projectName,
+                        branchName: currentBranch,
+                        repoName: projectPath.split('/').pop() || '',
+                      })}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             <textarea
               value={commitMessage}
               onChange={(e) => setCommitMessage(e.target.value)}
