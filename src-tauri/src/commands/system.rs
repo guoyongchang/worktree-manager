@@ -435,7 +435,8 @@ pub(crate) fn open_log_dir() -> Result<(), String> {
 
 /// Extract the icon of an app/exe as a base64 data URL.
 #[tauri::command]
-pub(crate) fn get_app_icon(_path: String) -> Option<String> {
+#[allow(unused_variables)]
+pub(crate) fn get_app_icon(path: String) -> Option<String> {
     #[cfg(target_os = "macos")]
     {
         return extract_macos_app_icon(&path);
