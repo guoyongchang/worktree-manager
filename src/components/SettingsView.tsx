@@ -1088,6 +1088,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                                     <SelectItem value="0">模板 1</SelectItem>
                                     <SelectItem value="1">模板 2</SelectItem>
                                     <SelectItem value="2">模板 3</SelectItem>
+                                    <SelectItem value="3">{t('settings.noPrefix', '无')}</SelectItem>
                                   </SelectContent>
                                 </Select>
                               </div>

@@ -289,7 +289,8 @@ export const GitOperations: FC<GitOperationsProps> = ({
     prefixIndex: number,
   ): string => {
     if (!config.enabled || config.templates.length === 0) return '';
-    const template = config.templates[prefixIndex] ?? config.templates[0] ?? '';
+    if (prefixIndex >= config.templates.length) return ''; // "无" option
+    const template = config.templates[prefixIndex] ?? '';
     if (!template) return '';
     const repoName = projectPath.split('/').pop() || '';
     return renderCommitPrefix(template, {
@@ -319,7 +320,7 @@ export const GitOperations: FC<GitOperationsProps> = ({
 
       const projectConfig = workspaceConfig?.projects.find((p: { name: string }) => p.name === projectName);
       let prefixIndex = projectConfig?.commit_prefix_index ?? 0;
-      if (prefixIndex < 0 || prefixIndex >= config.templates.length) prefixIndex = 0;
+      if (prefixIndex < 0 || prefixIndex > config.templates.length) prefixIndex = 0;
       setSelectedPrefixIndex(prefixIndex);
 
       const computedPrefix = computePrefix(config, prefixIndex);
@@ -375,11 +376,8 @@ export const GitOperations: FC<GitOperationsProps> = ({
     const newContent = prefix + (content ? ' ' + content : '');
     setContent(newContent.trimStart());
     setPrefix('');
-    // 找到空模板或设为最后一个+1
-    const emptyIdx = prefixConfig.templates.findIndex((t) => t === '');
-    if (emptyIdx >= 0) {
-      setSelectedPrefixIndex(emptyIdx);
-    }
+    // 切换到"无"选项（索引 = 模板数量，超出范围表示无前缀）
+    setSelectedPrefixIndex(prefixConfig.templates.length);
   };
 
   const handleConfirmCommit = async (withPush: boolean) => {
@@ -677,9 +675,12 @@ export const GitOperations: FC<GitOperationsProps> = ({
                           projectName,
                           branchName: currentBranch,
                           repoName: projectPath.split('/').pop() || '',
-                        }) || t('git.noPrefix', '无')}
+                        }) || t('git.emptyPrefix', '(空模板)')}
                       </SelectItem>
                     ))}
+                    <SelectItem value={String(prefixConfig.templates.length)} className="text-xs">
+                      {t('git.noPrefix', '无')}
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               )}
