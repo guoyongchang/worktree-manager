@@ -526,6 +526,74 @@ async fn h_generate_commit_message(Json(args): Json<Value>) -> Response {
     result_json(crate::commands::voice::generate_commit_message(diff).await)
 }
 
+async fn h_get_commit_prefix_config() -> Response {
+    result_json(crate::commands::config::get_commit_prefix_config())
+}
+
+#[derive(serde::Deserialize)]
+struct SetPrefixArgs {
+    templates: Vec<String>,
+    enabled: bool,
+}
+
+async fn h_set_commit_prefix_config(Json(args): Json<SetPrefixArgs>) -> Response {
+    result_ok(crate::commands::config::set_commit_prefix_config(args.templates, args.enabled))
+}
+
+async fn h_get_git_user_global_config() -> Response {
+    result_json(crate::commands::config::get_git_user_global_config())
+}
+
+#[derive(serde::Deserialize)]
+struct SetGitUserGlobalArgs {
+    name: Option<String>,
+    email: Option<String>,
+}
+
+async fn h_set_git_user_global_config(Json(args): Json<SetGitUserGlobalArgs>) -> Response {
+    result_ok(crate::commands::config::set_git_user_global_config(args.name, args.email))
+}
+
+async fn h_get_git_user_config(Json(args): Json<Value>) -> Response {
+    let path = args["path"].as_str().unwrap_or("").to_string();
+    let normalized = normalize_path(&path);
+    let result = tokio::task::spawn_blocking(move || {
+        git_ops::get_git_user_config(std::path::Path::new(&normalized))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))
+    .and_then(|r| r);
+    result_json(result)
+}
+
+#[derive(serde::Deserialize)]
+struct SetGitUserArgs {
+    path: String,
+    name: Option<String>,
+    email: Option<String>,
+}
+
+async fn h_set_git_user_config(Json(args): Json<SetGitUserArgs>) -> Response {
+    let normalized = normalize_path(&args.path);
+    let name = args.name;
+    let email = args.email;
+    let result = tokio::task::spawn_blocking(move || {
+        git_ops::set_git_user_config(
+            std::path::Path::new(&normalized),
+            name.as_deref(),
+            email.as_deref(),
+        )
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))
+    .and_then(|r| r);
+    result_ok(result)
+}
+
+async fn h_check_dashscope_api_key() -> Response {
+    Json(json!(crate::commands::voice::check_dashscope_api_key())).into_response()
+}
+
 // -- Scan --
 
 async fn h_scan_linked_folders(Json(args): Json<Value>) -> Response {
