@@ -59,7 +59,7 @@ const TOOLBAR_BUTTONS = (() => {
   ];
 })();
 
-function MobileTerminalToolbar({ sessionId }: { sessionId: string }) {
+function MobileTerminalToolbar({ sessionId, onResize }: { sessionId: string; onResize?: () => void }) {
   return (
     <div className="flex items-center gap-1.5 px-2 py-1.5 bg-slate-800/95 border-t border-slate-700/50 overflow-x-auto shrink-0 scrollbar-none">
       {TOOLBAR_BUTTONS.map((btn) => (
@@ -74,6 +74,17 @@ function MobileTerminalToolbar({ sessionId }: { sessionId: string }) {
           {btn.label}
         </button>
       ))}
+      {onResize && (
+        <button
+          onPointerDown={(e) => {
+            e.preventDefault();
+            onResize();
+          }}
+          className="shrink-0 px-2.5 py-1 rounded-full bg-blue-700/80 text-blue-200 text-xs font-medium active:bg-blue-600 select-none touch-manipulation"
+        >
+          Resize
+        </button>
+      )}
     </div>
   );
 }
@@ -762,7 +773,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
           </>
         )}
       </div>
-      {isMobile && <MobileTerminalToolbar sessionId={sessionIdRef.current} />}
+      {isMobile && <MobileTerminalToolbar sessionId={sessionIdRef.current} onResize={handleResize} />}
     </div>
   );
 });
