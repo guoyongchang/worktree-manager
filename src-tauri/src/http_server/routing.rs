@@ -18,24 +18,25 @@ use super::{
     h_get_connected_clients, h_get_current_workspace, h_get_dashscope_api_key,
     h_get_dashscope_base_url, h_get_file_diff, h_get_git_diff, h_get_git_user_config,
     h_get_git_user_global_config, h_get_last_share_password, h_get_last_share_port,
-    h_get_locked_worktrees, h_get_main_occupation, h_get_main_workspace_status, h_get_ngrok_token,
-    h_get_opened_workspaces, h_get_remote_branches, h_get_share_info, h_get_share_state,
-    h_get_skip_git_hooks, h_get_terminal_state, h_get_voice_refine_enabled, h_get_workspace_config,
-    h_kick_client, h_list_vault_item_children, h_list_workspaces, h_list_worktrees,
-    h_load_workspace_config_by_path, h_lock_worktree, h_merge_to_base_branch,
-    h_merge_to_test_branch, h_open_devtools, h_open_in_editor, h_open_in_terminal, h_open_log_dir,
-    h_open_workspace_window, h_pty_close, h_pty_close_by_path, h_pty_create, h_pty_exists,
-    h_pty_read, h_pty_resize, h_pty_write, h_push_to_remote, h_remove_project_from_config,
-    h_remove_workspace, h_restore_worktree, h_reveal_in_finder, h_save_workspace_config,
-    h_save_workspace_config_by_path, h_scan_existing_projects, h_scan_linked_folders,
-    h_set_commit_prefix_config, h_set_dashscope_api_key, h_set_dashscope_base_url, h_set_git_path,
-    h_set_git_user_config, h_set_git_user_global_config, h_set_ngrok_token, h_set_skip_git_hooks,
+    h_get_locked_worktrees, h_get_main_occupation, h_get_main_workspace_status,
+    h_get_mirror_sources, h_get_ngrok_token, h_get_opened_workspaces, h_get_remote_branches,
+    h_get_share_info, h_get_share_state, h_get_skip_git_hooks, h_get_terminal_state,
+    h_get_voice_refine_enabled, h_get_workspace_config, h_kick_client, h_list_vault_item_children,
+    h_list_workspaces, h_list_worktrees, h_load_workspace_config_by_path, h_lock_worktree,
+    h_merge_to_base_branch, h_merge_to_test_branch, h_open_devtools, h_open_in_editor,
+    h_open_in_terminal, h_open_log_dir, h_open_workspace_window, h_pty_close, h_pty_close_by_path,
+    h_pty_create, h_pty_exists, h_pty_read, h_pty_resize, h_pty_write, h_push_to_remote,
+    h_remove_project_from_config, h_remove_workspace, h_restore_worktree, h_reveal_in_finder,
+    h_save_custom_mirrors, h_save_workspace_config, h_save_workspace_config_by_path,
+    h_scan_existing_projects, h_scan_linked_folders, h_set_commit_prefix_config,
+    h_set_dashscope_api_key, h_set_dashscope_base_url, h_set_git_path, h_set_git_user_config,
+    h_set_git_user_global_config, h_set_ngrok_token, h_set_skip_git_hooks,
     h_set_voice_refine_enabled, h_set_window_workspace, h_start_ngrok_tunnel, h_start_sharing,
     h_stop_ngrok_tunnel, h_stop_sharing, h_switch_branch, h_switch_workspace,
-    h_sync_with_base_branch, h_unlock_worktree, h_unregister_window, h_update_share_password,
-    h_vault_link, h_vault_status, h_voice_is_active, h_voice_refine_text, h_voice_send_audio,
-    h_voice_start, h_voice_stop, h_ws_upgrade, is_allowed_origin, load_mcp_config, save_mcp_config,
-    McpConfig,
+    h_sync_with_base_branch, h_test_mirror_speed, h_unlock_worktree, h_unregister_window,
+    h_update_share_password, h_vault_link, h_vault_status, h_voice_is_active, h_voice_refine_text,
+    h_voice_send_audio, h_voice_start, h_voice_stop, h_ws_upgrade, is_allowed_origin,
+    load_mcp_config, save_mcp_config, McpConfig,
 };
 
 pub(super) fn build_cors_layer() -> CorsLayer {
@@ -294,6 +295,9 @@ pub(super) fn build_api_router(cert_pem: Option<String>) -> Router {
             "/api/download_update_via_mirror",
             post(h_download_update_via_mirror),
         )
+        .route("/api/test_mirror_speed", post(h_test_mirror_speed))
+        .route("/api/get_mirror_sources", post(h_get_mirror_sources))
+        .route("/api/save_custom_mirrors", post(h_save_custom_mirrors))
         .route("/api/open_devtools", post(h_open_devtools))
         .route("/api/mcp/config", post(h_mcp_config))
         .route("/api/mcp/set_capability", post(h_set_mcp_capability))

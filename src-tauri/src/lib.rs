@@ -1,8 +1,8 @@
 mod commands;
 pub mod config;
-pub mod mirror;
 mod git_ops;
 pub mod http_server;
+pub mod mirror;
 mod pty_manager;
 pub mod state;
 pub(crate) mod tls;
@@ -238,6 +238,9 @@ pub fn run() {
             // 更新镜像
             check_mirror_update,
             download_update_via_mirror,
+            test_mirror_speed,
+            get_mirror_sources,
+            save_custom_mirrors,
             // DevTools
             open_devtools,
             // Vault

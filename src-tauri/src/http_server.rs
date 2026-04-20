@@ -1155,16 +1155,43 @@ async fn h_get_app_version() -> Response {
     Json(json!(env!("CARGO_PKG_VERSION"))).into_response()
 }
 
-async fn h_check_mirror_update() -> Response {
-    result_json(crate::commands::system::check_mirror_update().await)
+async fn h_check_mirror_update(Json(payload): Json<Value>) -> Response {
+    let mirror_url = payload["mirrorUrl"]
+        .as_str()
+        .unwrap_or("https://gh-proxy.org/")
+        .to_string();
+    result_json(crate::commands::system::check_mirror_update(mirror_url).await)
 }
 
-async fn h_download_update_via_mirror() -> Response {
+async fn h_download_update_via_mirror(Json(payload): Json<Value>) -> Response {
     let app = match current_app_handle() {
         Ok(app) => app,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
     };
-    result_ok(crate::commands::system::download_update_via_mirror(app).await)
+    let mirror_url = payload["mirrorUrl"]
+        .as_str()
+        .unwrap_or("https://gh-proxy.org/")
+        .to_string();
+    result_ok(crate::commands::system::download_update_via_mirror(app, mirror_url).await)
+}
+
+async fn h_test_mirror_speed() -> Response {
+    result_json(crate::commands::system::test_mirror_speed().await)
+}
+
+async fn h_get_mirror_sources() -> Response {
+    result_json(Ok(crate::commands::system::get_mirror_sources()))
+}
+
+async fn h_save_custom_mirrors(Json(payload): Json<Value>) -> Response {
+    let mirrors: Vec<crate::types::CustomMirror> =
+        match serde_json::from_value(payload["mirrors"].clone()) {
+            Ok(m) => m,
+            Err(e) => {
+                return (StatusCode::BAD_REQUEST, format!("Invalid mirrors: {}", e)).into_response()
+            }
+        };
+    result_ok(crate::commands::system::save_custom_mirrors(mirrors))
 }
 
 async fn h_open_devtools() -> Response {

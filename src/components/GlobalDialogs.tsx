@@ -62,6 +62,12 @@ export const GlobalDialogs: FC<GlobalDialogsProps> = ({
         mirrorError={updater.mirrorError}
         onOfficialDownload={updater.startDownload}
         onMirrorDownload={updater.downloadViaMirror}
+        mirrorTestResults={updater.mirrorTestResults}
+        selectedMirror={updater.selectedMirror}
+        speedTesting={updater.speedTesting}
+        onTestSpeed={updater.testMirrorSpeed}
+        onAddCustomMirror={updater.addCustomMirror}
+        onRemoveCustomMirror={updater.removeCustomMirror}
       />
 
       {/* Updater Dialogs */}

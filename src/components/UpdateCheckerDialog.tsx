@@ -1,4 +1,4 @@
-import { type FC } from 'react';
+import { type FC, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Dialog,
@@ -8,6 +8,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Rocket,
   CheckCircle,
@@ -16,8 +17,12 @@ import {
   ArrowRight,
   Globe,
   Github,
+  Zap,
+  Plus,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
-import type { UpdateInfo, ChannelStatus } from '@/hooks/useUpdater';
+import type { UpdateInfo, ChannelStatus, MirrorTestResult, MirrorSource } from '@/hooks/useUpdater';
 
 // --- Simple Markdown Renderer (reused from UpdaterDialogs) ---
 
@@ -199,6 +204,142 @@ const ChannelCard: FC<ChannelCardProps> = ({
   );
 };
 
+// --- Mirror List Panel ---
+
+interface MirrorListPanelProps {
+  results: MirrorTestResult[];
+  selectedMirror: MirrorSource | null;
+  speedTesting: boolean;
+  onTestSpeed: () => void;
+  onAddCustomMirror: (name: string, url: string) => Promise<void>;
+  onRemoveCustomMirror: (name: string) => Promise<void>;
+}
+
+const MirrorListPanel: FC<MirrorListPanelProps> = ({
+  results,
+  selectedMirror,
+  speedTesting,
+  onTestSpeed,
+  onAddCustomMirror,
+  // onRemoveCustomMirror is available via props for future per-mirror delete buttons
+}) => {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newUrl, setNewUrl] = useState('');
+
+  const handleAdd = async () => {
+    const name = newName.trim();
+    let url = newUrl.trim();
+    if (!name || !url) return;
+    if (!url.endsWith('/')) url += '/';
+    await onAddCustomMirror(name, url);
+    setNewName('');
+    setNewUrl('');
+    onTestSpeed();
+  };
+
+  return (
+    <div className="mt-2">
+      <button
+        type="button"
+        className="w-full flex items-center justify-between text-[11px] text-slate-400 hover:text-slate-300 transition-colors py-1"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <span className="flex items-center gap-1.5">
+          <Zap className="w-3 h-3 text-emerald-400" />
+          {speedTesting
+            ? t('updater.speedTesting')
+            : selectedMirror
+              ? t('updater.bestMirror', {
+                  name: selectedMirror.name,
+                  speed: results.find((r) => r.url === selectedMirror.url)?.speed_mbps ?? '?',
+                })
+              : t('updater.mirrorList')}
+        </span>
+        {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+      </button>
+
+      {expanded && (
+        <div className="mt-1 rounded-lg bg-slate-800/50 border border-slate-700/50 p-2 space-y-1">
+          {results.map((r) => (
+            <div
+              key={r.name}
+              className={`flex items-center justify-between text-[11px] px-2 py-1 rounded ${
+                selectedMirror?.url === r.url
+                  ? 'bg-emerald-500/10 border border-emerald-500/20'
+                  : 'hover:bg-slate-700/50'
+              }`}
+            >
+              <span className="flex items-center gap-2 min-w-0">
+                <span className={`w-1.5 h-1.5 rounded-full ${r.available ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                <span className="text-slate-300 truncate">{r.name}</span>
+              </span>
+              <span className="flex items-center gap-2 shrink-0">
+                {r.available ? (
+                  <span className="text-emerald-400">{r.speed_mbps} MB/s</span>
+                ) : (
+                  <span className="text-red-400">{t('updater.mirrorUnavailable')}</span>
+                )}
+              </span>
+            </div>
+          ))}
+
+          {results.length === 0 && !speedTesting && (
+            <div className="text-[11px] text-slate-500 text-center py-2">
+              {t('updater.noMirrorAvailable')}
+            </div>
+          )}
+
+          {speedTesting && (
+            <div className="flex items-center justify-center gap-2 py-2">
+              <Loader2 className="w-3 h-3 text-emerald-400 animate-spin" />
+              <span className="text-[11px] text-slate-400">{t('updater.speedTesting')}</span>
+            </div>
+          )}
+
+          {!speedTesting && results.length > 0 && (
+            <button
+              type="button"
+              className="w-full text-[11px] text-slate-500 hover:text-slate-300 transition-colors py-1"
+              onClick={onTestSpeed}
+            >
+              {t('updater.retest')}
+            </button>
+          )}
+
+          <div className="pt-1 border-t border-slate-700/50">
+            <p className="text-[10px] text-slate-500 mb-1">{t('updater.addCustomMirror')}</p>
+            <div className="flex gap-1.5">
+              <Input
+                className="h-6 text-[11px] flex-1 min-w-0"
+                placeholder={t('updater.mirrorName')}
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+              />
+              <Input
+                className="h-6 text-[11px] flex-[2] min-w-0"
+                placeholder={t('updater.mirrorUrl')}
+                value={newUrl}
+                onChange={(e) => setNewUrl(e.target.value)}
+              />
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0 shrink-0"
+                onClick={handleAdd}
+                disabled={!newName.trim() || !newUrl.trim()}
+              >
+                <Plus className="w-3 h-3" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // --- Update Checker Dialog ---
 
 interface UpdateCheckerDialogProps {
@@ -212,6 +353,12 @@ interface UpdateCheckerDialogProps {
   mirrorError: string;
   onOfficialDownload: () => void;
   onMirrorDownload: () => void;
+  mirrorTestResults: MirrorTestResult[];
+  selectedMirror: MirrorSource | null;
+  speedTesting: boolean;
+  onTestSpeed: () => void;
+  onAddCustomMirror: (name: string, url: string) => Promise<void>;
+  onRemoveCustomMirror: (name: string) => Promise<void>;
 }
 
 export const UpdateCheckerDialog: FC<UpdateCheckerDialogProps> = ({
@@ -225,6 +372,12 @@ export const UpdateCheckerDialog: FC<UpdateCheckerDialogProps> = ({
   mirrorError,
   onOfficialDownload,
   onMirrorDownload,
+  mirrorTestResults,
+  selectedMirror,
+  speedTesting,
+  onTestSpeed,
+  onAddCustomMirror,
+  onRemoveCustomMirror,
 }) => {
   const { t } = useTranslation();
 
@@ -266,16 +419,26 @@ export const UpdateCheckerDialog: FC<UpdateCheckerDialogProps> = ({
             />
             <ChannelCard
               title={t('updater.mirrorChannel')}
-              subtitle="gh-proxy.org"
+              subtitle={selectedMirror?.name ?? 'GHProxy'}
               icon={<Globe className="w-4 h-4 text-emerald-400" />}
               status={mirrorStatus}
               version={mirrorVersion ?? updateInfo?.version}
               error={mirrorError}
-              buttonLabel={t('updater.mirrorDownload')}
+              buttonLabel={selectedMirror ? t('updater.downloadVia', { name: selectedMirror.name }) : t('updater.mirrorDownload')}
               onAction={onMirrorDownload}
               accentColor="emerald"
             />
           </div>
+
+          {/* Mirror List Panel */}
+          <MirrorListPanel
+            results={mirrorTestResults}
+            selectedMirror={selectedMirror}
+            speedTesting={speedTesting}
+            onTestSpeed={onTestSpeed}
+            onAddCustomMirror={onAddCustomMirror}
+            onRemoveCustomMirror={onRemoveCustomMirror}
+          />
         </div>
 
         {/* Release Notes (shown if any channel found update) */}

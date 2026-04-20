@@ -44,8 +44,7 @@ const PING_TEST_BASE_URL: &str =
 const PING_TIMEOUT_SECS: u64 = 3;
 
 /// 吞吐量测速文件：pip 24.3.1 release zip (~4MB)
-const SPEED_TEST_BASE_URL: &str =
-    "https://github.com/pypa/pip/archive/refs/tags/24.3.1.zip";
+const SPEED_TEST_BASE_URL: &str = "https://github.com/pypa/pip/archive/refs/tags/24.3.1.zip";
 
 /// 测速时长（秒）
 const SPEED_TEST_DURATION_SECS: u64 = 10;
@@ -109,7 +108,9 @@ fn unavailable_result(mirror: &MirrorSource) -> MirrorTestResult {
 async fn ping_mirror(mirror: &MirrorSource) -> (MirrorSource, bool) {
     let test_url = format!(
         "{}{}?t={}",
-        mirror.url, PING_TEST_BASE_URL, make_timestamp()
+        mirror.url,
+        PING_TEST_BASE_URL,
+        make_timestamp()
     );
 
     log::info!("[mirror] PING {}: {}", mirror.name, test_url);
@@ -123,18 +124,16 @@ async fn ping_mirror(mirror: &MirrorSource) -> (MirrorSource, bool) {
     };
 
     match client.get(&test_url).send().await {
-        Ok(r) if r.status().is_success() => {
-            match r.bytes().await {
-                Ok(body) if body.len() > 100 => {
-                    log::info!("[mirror] PING {} OK ({} bytes)", mirror.name, body.len());
-                    (mirror.clone(), true)
-                }
-                _ => {
-                    log::warn!("[mirror] PING {} returned empty/small body", mirror.name);
-                    (mirror.clone(), false)
-                }
+        Ok(r) if r.status().is_success() => match r.bytes().await {
+            Ok(body) if body.len() > 100 => {
+                log::info!("[mirror] PING {} OK ({} bytes)", mirror.name, body.len());
+                (mirror.clone(), true)
             }
-        }
+            _ => {
+                log::warn!("[mirror] PING {} returned empty/small body", mirror.name);
+                (mirror.clone(), false)
+            }
+        },
         Ok(r) => {
             log::warn!("[mirror] PING {} returned HTTP {}", mirror.name, r.status());
             (mirror.clone(), false)
@@ -150,7 +149,9 @@ async fn ping_mirror(mirror: &MirrorSource) -> (MirrorSource, bool) {
 async fn speed_test_mirror(mirror: &MirrorSource) -> MirrorTestResult {
     let test_url = format!(
         "{}{}?t={}",
-        mirror.url, SPEED_TEST_BASE_URL, make_timestamp()
+        mirror.url,
+        SPEED_TEST_BASE_URL,
+        make_timestamp()
     );
 
     log::info!("[mirror] Speed testing {}: {}", mirror.name, test_url);
@@ -292,7 +293,10 @@ pub async fn test_all_mirrors() -> Vec<MirrorTestResult> {
         *cache = Some((Instant::now(), results.clone()));
     }
 
-    log::info!("[mirror] Speed test complete, {} total results", results.len());
+    log::info!(
+        "[mirror] Speed test complete, {} total results",
+        results.len()
+    );
     results
 }
 
@@ -302,7 +306,10 @@ pub async fn get_fastest_mirrors() -> Vec<MirrorTestResult> {
         let cache = MIRROR_CACHE.lock().unwrap();
         if let Some((cached_at, ref results)) = *cache {
             if cached_at.elapsed().as_secs() < CACHE_TTL_SECS {
-                log::info!("[mirror] Using cached speed test results ({} entries)", results.len());
+                log::info!(
+                    "[mirror] Using cached speed test results ({} entries)",
+                    results.len()
+                );
                 return results.clone();
             }
         }
