@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { RefreshCw, Search, Mic, Eye, EyeOff, Settings, Globe, Info, Trash2, Wrench, FolderOpen, Brain, Link2, Folder, FileText, ChevronRight, ChevronDown, Star } from 'lucide-react';
+import { RefreshCw, Search, Mic, Eye, EyeOff, Settings, Globe, Info, Trash2, Wrench, FolderOpen, Brain, Link2, Folder, FileText, ChevronRight, ChevronDown, Star, Copy, Check } from 'lucide-react';
 import { BackIcon, PlusIcon, TrashIcon } from './Icons';
 import { BranchCombobox } from './BranchCombobox';
 import type { WorkspaceRef, WorkspaceConfig, ProjectConfig, ScannedFolder, VaultStatus, VaultItemChild } from '../types';
@@ -126,6 +126,76 @@ const VaultItemTree: FC<VaultItemTreeProps> = ({
           ))}
         </div>
       )}
+    </div>
+  );
+};
+
+// ==================== CopyableCommand ====================
+const CopyableCommand: FC<{ command: string; step: number }> = ({ command, step }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(command);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="flex items-center gap-1.5 group">
+      <span className="text-[10px] text-amber-400/60 font-medium shrink-0">{step}.</span>
+      <code className="text-[11px] text-slate-300 bg-slate-800 px-2 py-0.5 rounded font-mono select-all break-all flex-1">
+        {command}
+      </code>
+      <button
+        type="button"
+        className="shrink-0 p-0.5 text-slate-500 hover:text-amber-400 transition-colors opacity-0 group-hover:opacity-100"
+        onClick={handleCopy}
+        title="Copy"
+      >
+        {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+      </button>
+    </div>
+  );
+};
+
+// ==================== MemoryHookGuide ====================
+const MemoryHookGuide: FC = () => {
+  const { t } = useTranslation();
+
+  return (
+    <div className="mt-4 bg-amber-500/5 border border-amber-500/20 rounded-lg p-4">
+      <div className="flex items-start gap-3">
+        <Brain className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+        <div className="min-w-0">
+          <h3 className="text-sm font-medium text-amber-300">
+            {t('settings.memoryHookTitle', 'Memory Hook 插件')}
+          </h3>
+          <p className="text-xs text-slate-400 mt-1 space-y-0.5">
+            <span className="block">{t('settings.memoryHookDesc', '安装 Claude Code 插件以增强知识库集成：')}</span>
+            <span className="block text-amber-400/70">
+              <strong>MemoryInject</strong> — {t('settings.memoryInjectDesc', '会话开始时自动注入知识库上下文')}
+            </span>
+            <span className="block text-amber-400/70">
+              <strong>/memory-sync</strong> — {t('settings.memorySyncDesc', '压缩时临时归档会话记录')}
+            </span>
+            <span className="block text-amber-400/70">
+              <strong>/memory-archive</strong> — {t('settings.memoryArchiveDesc', '需求结束时全局归档到知识库')}
+            </span>
+          </p>
+          <div className="mt-2.5 space-y-1.5">
+            <CopyableCommand step={1} command="claude plugin marketplace add guoyongchang/worktree-manager-obsidian-bridge" />
+            <CopyableCommand step={2} command="claude plugin install worktree-manager-memory-hook@worktree-manager-obsidian-bridge" />
+          </div>
+          <button
+            type="button"
+            className="mt-2.5 text-[11px] text-amber-400 hover:text-amber-300 transition-colors flex items-center gap-1"
+            onClick={() => openLink('https://github.com/guoyongchang/worktree-manager-obsidian-bridge')}
+          >
+            GitHub
+            <ChevronRight className="w-3 h-3" />
+          </button>
+        </div>
+      </div>
     </div>
   );
 };
@@ -356,49 +426,7 @@ const VaultSettingsSection: FC = () => {
       </div>
 
       {/* Memory Hook Plugin Guide */}
-      {(
-        <div className="mt-4 bg-amber-500/5 border border-amber-500/20 rounded-lg p-4">
-          <div className="flex items-start gap-3">
-            <Brain className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-            <div className="min-w-0">
-              <h3 className="text-sm font-medium text-amber-300">
-                {t('settings.memoryHookTitle', 'Memory Hook 插件')}
-              </h3>
-              <p className="text-xs text-slate-400 mt-1 space-y-0.5">
-                <span className="block">{t('settings.memoryHookDesc', '安装 Claude Code 插件以增强知识库集成：')}</span>
-                <span className="block text-amber-400/70">
-                  <strong>MemoryInject</strong> — {t('settings.memoryInjectDesc', '会话开始时自动注入知识库上下文')}
-                </span>
-                <span className="block text-amber-400/70">
-                  <strong>MemorySync</strong> — {t('settings.memorySyncDesc', '自动归档会话记录到知识库')}
-                </span>
-              </p>
-              <div className="mt-2.5 space-y-1.5">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] text-amber-400/60 font-medium shrink-0">1.</span>
-                  <code className="text-[11px] text-slate-300 bg-slate-800 px-2 py-0.5 rounded font-mono select-all break-all">
-                    claude plugin marketplace add guoyongchang/worktree-manager-obsidian-bridge
-                  </code>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] text-amber-400/60 font-medium shrink-0">2.</span>
-                  <code className="text-[11px] text-slate-300 bg-slate-800 px-2 py-0.5 rounded font-mono select-all break-all">
-                    claude plugin install worktree-manager-memory-hook@worktree-manager-obsidian-bridge
-                  </code>
-                </div>
-              </div>
-              <button
-                type="button"
-                className="mt-2.5 text-[11px] text-amber-400 hover:text-amber-300 transition-colors flex items-center gap-1"
-                onClick={() => openLink('https://github.com/guoyongchang/worktree-manager-obsidian-bridge')}
-              >
-                GitHub
-                <ChevronRight className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <MemoryHookGuide />
     </div>
   );
 };
