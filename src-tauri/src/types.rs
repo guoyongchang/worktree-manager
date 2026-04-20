@@ -164,6 +164,14 @@ pub struct GlobalConfig {
     pub git_user_email: Option<String>,
     #[serde(default)]
     pub skip_git_hooks: bool,
+    #[serde(default)]
+    pub custom_mirrors: Vec<CustomMirror>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CustomMirror {
+    pub name: String,
+    pub url: String, // 前缀，如 "https://ghproxy.net/"
 }
 
 fn default_true() -> bool {
@@ -196,6 +204,7 @@ impl Default for GlobalConfig {
             git_user_name: None,
             git_user_email: None,
             skip_git_hooks: false,
+            custom_mirrors: vec![],
         }
     }
 }

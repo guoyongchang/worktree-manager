@@ -1,5 +1,6 @@
 mod commands;
 pub mod config;
+pub mod mirror;
 mod git_ops;
 pub mod http_server;
 mod pty_manager;
