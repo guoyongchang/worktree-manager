@@ -213,6 +213,7 @@ interface MirrorListPanelProps {
   onTestSpeed: () => void;
   onAddCustomMirror: (name: string, url: string) => Promise<void>;
   onRemoveCustomMirror: (name: string) => Promise<void>;
+  onSelectMirror: (mirror: MirrorSource) => void;
 }
 
 const MirrorListPanel: FC<MirrorListPanelProps> = ({
@@ -222,6 +223,7 @@ const MirrorListPanel: FC<MirrorListPanelProps> = ({
   onTestSpeed,
   onAddCustomMirror,
   // onRemoveCustomMirror is available via props for future per-mirror delete buttons
+  onSelectMirror,
 }) => {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
@@ -265,11 +267,14 @@ const MirrorListPanel: FC<MirrorListPanelProps> = ({
           {results.map((r) => (
             <div
               key={r.name}
+              role={r.available ? 'button' : undefined}
+              tabIndex={r.available ? 0 : undefined}
               className={`flex items-center justify-between text-[11px] px-2 py-1 rounded ${
                 selectedMirror?.url === r.url
                   ? 'bg-emerald-500/10 border border-emerald-500/20'
-                  : 'hover:bg-slate-700/50'
+                  : r.available ? 'hover:bg-slate-700/50 cursor-pointer' : 'opacity-60'
               }`}
+              onClick={() => r.available && onSelectMirror({ name: r.name, url: r.url, builtin: true })}
             >
               <span className="flex items-center gap-2 min-w-0">
                 <span className={`w-1.5 h-1.5 rounded-full ${r.available ? 'bg-emerald-400' : 'bg-red-400'}`} />
@@ -359,6 +364,7 @@ interface UpdateCheckerDialogProps {
   onTestSpeed: () => void;
   onAddCustomMirror: (name: string, url: string) => Promise<void>;
   onRemoveCustomMirror: (name: string) => Promise<void>;
+  onSelectMirror: (mirror: MirrorSource) => void;
 }
 
 export const UpdateCheckerDialog: FC<UpdateCheckerDialogProps> = ({
@@ -378,6 +384,7 @@ export const UpdateCheckerDialog: FC<UpdateCheckerDialogProps> = ({
   onTestSpeed,
   onAddCustomMirror,
   onRemoveCustomMirror,
+  onSelectMirror,
 }) => {
   const { t } = useTranslation();
 
@@ -438,6 +445,7 @@ export const UpdateCheckerDialog: FC<UpdateCheckerDialogProps> = ({
             onTestSpeed={onTestSpeed}
             onAddCustomMirror={onAddCustomMirror}
             onRemoveCustomMirror={onRemoveCustomMirror}
+            onSelectMirror={onSelectMirror}
           />
         </div>
 

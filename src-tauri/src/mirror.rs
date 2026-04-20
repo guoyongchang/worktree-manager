@@ -49,6 +49,12 @@ const SPEED_TEST_BASE_URL: &str = "https://github.com/pypa/pip/archive/refs/tags
 /// 测速时长（秒）
 const SPEED_TEST_DURATION_SECS: u64 = 10;
 
+/// PING 最小有效大小（字节）— favicon.ico 约 24KB，低于 10KB 视为返回了错误页
+const PING_MIN_VALID_BYTES: usize = 10_000;
+
+/// 测速最小有效下载量（字节）— 低于此值说明源返回了错误页而非真实文件
+const SPEED_TEST_MIN_VALID_BYTES: u64 = 100_000;
+
 /// 缓存有效期（秒）
 const CACHE_TTL_SECS: u64 = 30 * 60;
 
@@ -125,12 +131,19 @@ async fn ping_mirror(mirror: &MirrorSource) -> (MirrorSource, bool) {
 
     match client.get(&test_url).send().await {
         Ok(r) if r.status().is_success() => match r.bytes().await {
-            Ok(body) if body.len() > 100 => {
+            Ok(body) if body.len() > PING_MIN_VALID_BYTES => {
                 log::info!("[mirror] PING {} OK ({} bytes)", mirror.name, body.len());
                 (mirror.clone(), true)
             }
-            _ => {
-                log::warn!("[mirror] PING {} returned empty/small body", mirror.name);
+            Ok(body) => {
+                log::warn!(
+                    "[mirror] PING {} returned suspicious body size ({} bytes < {} threshold), likely error page",
+                    mirror.name, body.len(), PING_MIN_VALID_BYTES
+                );
+                (mirror.clone(), false)
+            }
+            Err(e) => {
+                log::warn!("[mirror] PING {} body read failed: {}", mirror.name, e);
                 (mirror.clone(), false)
             }
         },
@@ -220,7 +233,7 @@ async fn speed_test_mirror(mirror: &MirrorSource) -> MirrorTestResult {
         url: mirror.url.clone(),
         bytes_downloaded: total_bytes,
         speed_mbps: (speed_mbps * 100.0).round() / 100.0,
-        available: total_bytes > 0,
+        available: total_bytes > SPEED_TEST_MIN_VALID_BYTES,
     }
 }
 

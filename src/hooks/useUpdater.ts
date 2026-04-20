@@ -67,6 +67,7 @@ export interface UseUpdaterReturn {
   testMirrorSpeed: () => Promise<void>;
   addCustomMirror: (name: string, url: string) => Promise<void>;
   removeCustomMirror: (name: string) => Promise<void>;
+  selectMirror: (mirror: MirrorSource) => void;
 }
 
 export function useUpdater(): UseUpdaterReturn {
@@ -487,5 +488,6 @@ export function useUpdater(): UseUpdaterReturn {
     testMirrorSpeed,
     addCustomMirror,
     removeCustomMirror,
+    selectMirror: setSelectedMirror,
   };
 }
