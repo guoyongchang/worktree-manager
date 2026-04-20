@@ -22,17 +22,21 @@ const BUILTIN_MIRRORS: &[(&str, &str)] = &[
 
 镜像 URL 格式：`{mirror_prefix}{github_url}`，例如 `https://ghproxy.net/https://github.com/...`。
 
-## 测速方案
+## 测速方案（两阶段）
 
-**测试文件**：`https://github.com/pypa/pip/archive/refs/tags/24.3.1.zip?t={timestamp}`（~4MB）
+**第一阶段 — PING 过滤**：
+- 测试文件：`https://raw.githubusercontent.com/facebook/react/refs/heads/main/fixtures/dom/public/favicon.ico?t={timestamp}`（~3KB）
+- 并发对所有源 GET 此文件，3 秒超时
+- 响应成功且 body > 100 字节视为存活，否则标记不可用
+- 快速过滤掉死源，避免后续浪费 10 秒测速时间
 
-**策略**：
-- 用户点击检查更新时，并发测速所有源（内置 + 自定义）
-- 每个源限时 10 秒，通过镜像代理下载测试文件
+**第二阶段 — 吞吐量测速**：
+- 测试文件：`https://github.com/pypa/pip/archive/refs/tags/24.3.1.zip?t={timestamp}`（~4MB）
+- 仅对 PING 存活的源并发下载，每个限时 10 秒
 - 记录 10 秒内下载的总字节数作为排序依据
 - `?t={timestamp}` 防止 CDN 缓存
-- 过滤掉 0 字节（不可用）的源
-- 结果缓存 30 分钟（进程内 `Mutex<Option<(Instant, Vec<MirrorTestResult>)>>`）
+
+**缓存**：结果缓存 30 分钟（进程内 `Mutex<Option<(Instant, Vec<MirrorTestResult>)>>`）
 
 **下载 fallback**：用测速排名第一的源下载，失败自动切换到第二、第三名，最多尝试 3 个源。
 

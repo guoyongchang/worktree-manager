@@ -95,7 +95,14 @@ const BUILTIN_MIRRORS: &[(&str, &str)] = &[
     ("ghproxy.cn", "https://ghproxy.cn/"),
 ];
 
-/// 测速文件：pip 24.3.1 release zip (~4MB)
+/// PING 测试文件：React favicon (~3KB)，用于快速过滤不可用源
+const PING_TEST_BASE_URL: &str =
+    "https://raw.githubusercontent.com/facebook/react/refs/heads/main/fixtures/dom/public/favicon.ico";
+
+/// PING 超时（秒）
+const PING_TIMEOUT_SECS: u64 = 3;
+
+/// 吞吐量测速文件：pip 24.3.1 release zip (~4MB)
 const SPEED_TEST_BASE_URL: &str =
     "https://github.com/pypa/pip/archive/refs/tags/24.3.1.zip";
 
@@ -164,31 +171,95 @@ EOF
 
 ---
 
-### Task 2: 并发测速实现
+### Task 2: 两阶段并发测速实现
 
 **Files:**
 - Modify: `src-tauri/src/mirror.rs`
 
-- [ ] **Step 1: 在 `mirror.rs` 中添加单源测速函数 `test_single_mirror`**
+两阶段策略：
+1. **PING 阶段**：并发 GET favicon.ico（~3KB），3 秒超时，快速过滤不可用源
+2. **测速阶段**：仅对存活源并发 10s 下载 pip zip，测真实吞吐量
+
+- [ ] **Step 1: 在 `mirror.rs` 中添加 PING 测试函数 `ping_mirror`**
 
 在 `clear_mirror_cache()` 函数之后添加：
 
 ```rust
 // ==================== 测速逻辑 ====================
 
-/// 对单个镜像源进行限时下载测速
-async fn test_single_mirror(mirror: &MirrorSource) -> MirrorTestResult {
-    let timestamp = std::time::SystemTime::now()
+fn make_timestamp() -> u128 {
+    std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
-        .as_millis();
+        .as_millis()
+}
 
+fn unavailable_result(mirror: &MirrorSource) -> MirrorTestResult {
+    MirrorTestResult {
+        name: mirror.name.clone(),
+        url: mirror.url.clone(),
+        bytes_downloaded: 0,
+        speed_mbps: 0.0,
+        available: false,
+    }
+}
+
+/// 第一阶段：PING 测试，用小文件快速验证镜像是否可用
+async fn ping_mirror(mirror: &MirrorSource) -> (MirrorSource, bool) {
     let test_url = format!(
         "{}{}?t={}",
-        mirror.url, SPEED_TEST_BASE_URL, timestamp
+        mirror.url, PING_TEST_BASE_URL, make_timestamp()
     );
 
-    log::info!("[mirror] Testing {}: {}", mirror.name, test_url);
+    log::info!("[mirror] PING {}: {}", mirror.name, test_url);
+
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(PING_TIMEOUT_SECS))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return (mirror.clone(), false),
+    };
+
+    match client.get(&test_url).send().await {
+        Ok(r) if r.status().is_success() => {
+            // 确保能读到内容（不是空响应或错误页）
+            match r.bytes().await {
+                Ok(body) if body.len() > 100 => {
+                    log::info!("[mirror] PING {} OK ({} bytes)", mirror.name, body.len());
+                    (mirror.clone(), true)
+                }
+                _ => {
+                    log::warn!("[mirror] PING {} returned empty/small body", mirror.name);
+                    (mirror.clone(), false)
+                }
+            }
+        }
+        Ok(r) => {
+            log::warn!("[mirror] PING {} returned HTTP {}", mirror.name, r.status());
+            (mirror.clone(), false)
+        }
+        Err(e) => {
+            log::warn!("[mirror] PING {} failed: {}", mirror.name, e);
+            (mirror.clone(), false)
+        }
+    }
+}
+```
+
+- [ ] **Step 2: 添加单源吞吐量测速函数 `speed_test_mirror`**
+
+在 `ping_mirror` 之后添加：
+
+```rust
+/// 第二阶段：对存活源进行限时下载测速
+async fn speed_test_mirror(mirror: &MirrorSource) -> MirrorTestResult {
+    let test_url = format!(
+        "{}{}?t={}",
+        mirror.url, SPEED_TEST_BASE_URL, make_timestamp()
+    );
+
+    log::info!("[mirror] Speed testing {}: {}", mirror.name, test_url);
 
     let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(SPEED_TEST_DURATION_SECS + 2))
@@ -197,13 +268,7 @@ async fn test_single_mirror(mirror: &MirrorSource) -> MirrorTestResult {
         Ok(c) => c,
         Err(e) => {
             log::warn!("[mirror] Failed to build client for {}: {}", mirror.name, e);
-            return MirrorTestResult {
-                name: mirror.name.clone(),
-                url: mirror.url.clone(),
-                bytes_downloaded: 0,
-                speed_mbps: 0.0,
-                available: false,
-            };
+            return unavailable_result(mirror);
         }
     };
 
@@ -211,23 +276,11 @@ async fn test_single_mirror(mirror: &MirrorSource) -> MirrorTestResult {
         Ok(r) if r.status().is_success() => r,
         Ok(r) => {
             log::warn!("[mirror] {} returned HTTP {}", mirror.name, r.status());
-            return MirrorTestResult {
-                name: mirror.name.clone(),
-                url: mirror.url.clone(),
-                bytes_downloaded: 0,
-                speed_mbps: 0.0,
-                available: false,
-            };
+            return unavailable_result(mirror);
         }
         Err(e) => {
             log::warn!("[mirror] {} connection failed: {}", mirror.name, e);
-            return MirrorTestResult {
-                name: mirror.name.clone(),
-                url: mirror.url.clone(),
-                bytes_downloaded: 0,
-                speed_mbps: 0.0,
-                available: false,
-            };
+            return unavailable_result(mirror);
         }
     };
 
@@ -278,25 +331,69 @@ async fn test_single_mirror(mirror: &MirrorSource) -> MirrorTestResult {
 }
 ```
 
-- [ ] **Step 2: 添加并发测速函数 `test_all_mirrors`**
+- [ ] **Step 3: 添加两阶段编排函数 `test_all_mirrors`**
 
-在 `test_single_mirror` 之后添加：
+在 `speed_test_mirror` 之后添加：
 
 ```rust
-/// 并发测速所有镜像源
+/// 两阶段并发测速：先 PING 过滤，再对存活源测吞吐量
 pub async fn test_all_mirrors() -> Vec<MirrorTestResult> {
     let mirrors = get_all_mirrors();
-    log::info!("[mirror] Starting speed test for {} mirrors...", mirrors.len());
+    log::info!(
+        "[mirror] Phase 1: PING testing {} mirrors ({}s timeout)...",
+        mirrors.len(),
+        PING_TIMEOUT_SECS
+    );
 
-    let handles: Vec<_> = mirrors
-        .into_iter()
+    // Phase 1: 并发 PING
+    let ping_handles: Vec<_> = mirrors
+        .iter()
         .map(|m| {
-            tokio::spawn(async move { test_single_mirror(&m).await })
+            let m = m.clone();
+            tokio::spawn(async move { ping_mirror(&m).await })
+        })
+        .collect();
+
+    let mut alive_mirrors: Vec<MirrorSource> = Vec::new();
+    let mut dead_results: Vec<MirrorTestResult> = Vec::new();
+
+    for handle in ping_handles {
+        if let Ok((mirror, alive)) = handle.await {
+            if alive {
+                alive_mirrors.push(mirror);
+            } else {
+                dead_results.push(unavailable_result(&mirror));
+            }
+        }
+    }
+
+    log::info!(
+        "[mirror] Phase 1 complete: {}/{} alive, proceeding to speed test",
+        alive_mirrors.len(),
+        alive_mirrors.len() + dead_results.len()
+    );
+
+    if alive_mirrors.is_empty() {
+        return dead_results;
+    }
+
+    // Phase 2: 并发测速存活源
+    log::info!(
+        "[mirror] Phase 2: Speed testing {} alive mirrors ({}s each)...",
+        alive_mirrors.len(),
+        SPEED_TEST_DURATION_SECS
+    );
+
+    let speed_handles: Vec<_> = alive_mirrors
+        .iter()
+        .map(|m| {
+            let m = m.clone();
+            tokio::spawn(async move { speed_test_mirror(&m).await })
         })
         .collect();
 
     let mut results: Vec<MirrorTestResult> = Vec::new();
-    for handle in handles {
+    for handle in speed_handles {
         if let Ok(result) = handle.await {
             results.push(result);
         }
@@ -304,6 +401,8 @@ pub async fn test_all_mirrors() -> Vec<MirrorTestResult> {
 
     // 按下载量降序排序
     results.sort_by(|a, b| b.bytes_downloaded.cmp(&a.bytes_downloaded));
+    // 不可用源追加在末尾
+    results.extend(dead_results);
 
     // 更新缓存
     {
@@ -311,6 +410,7 @@ pub async fn test_all_mirrors() -> Vec<MirrorTestResult> {
         *cache = Some((Instant::now(), results.clone()));
     }
 
+    log::info!("[mirror] Speed test complete, {} total results", results.len());
     results
 }
 
@@ -340,7 +440,7 @@ Expected: 编译通过
 ```bash
 git add src-tauri/src/mirror.rs
 git commit -m "$(cat <<'EOF'
-feat(mirror): implement concurrent speed testing with real file download
+feat(mirror): implement two-phase speed testing (PING filter + throughput measurement)
 EOF
 )"
 ```
