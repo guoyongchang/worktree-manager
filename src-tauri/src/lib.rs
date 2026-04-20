@@ -78,7 +78,16 @@ pub fn run() {
         .on_window_event(|window, event| {
             match event {
                 tauri::WindowEvent::CloseRequested { api, .. } => {
-                    // Check if sharing is active and stop it before closing
+                    // Check if there are active terminal sessions
+                    let terminal_count = {
+                        if let Ok(manager) = PTY_MANAGER.lock() {
+                            manager.session_count()
+                        } else {
+                            0
+                        }
+                    };
+
+                    // Check if sharing is active
                     let share_active = {
                         if let Ok(state) = SHARE_STATE.lock() {
                             state.active
@@ -87,30 +96,46 @@ pub fn run() {
                         }
                     };
 
-                    if share_active {
-                        // Prevent immediate close
+                    if terminal_count > 0 || share_active {
                         api.prevent_close();
-
-                        // Clone window for async task
                         let window = window.clone();
 
-                        // Stop sharing in background, then close window
                         tauri::async_runtime::spawn(async move {
-                            log::info!("Window closing - stopping sharing first");
-
-                            // Stop ngrok tunnel
-                            if let Err(e) = stop_ngrok_tunnel().await {
-                                log::warn!("Failed to stop ngrok tunnel on close: {}", e);
+                            // If terminals are open, ask user to confirm
+                            if terminal_count > 0 {
+                                use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+                                let (tx, rx) = tokio::sync::oneshot::channel();
+                                window
+                                    .dialog()
+                                    .message(format!(
+                                        "有 {} 个活跃终端会话，关闭将终止所有会话。\n\n确定关闭？",
+                                        terminal_count
+                                    ))
+                                    .title("Worktree Manager")
+                                    .buttons(MessageDialogButtons::OkCancelCustom(
+                                        "关闭".to_string(),
+                                        "取消".to_string(),
+                                    ))
+                                    .show(move |confirmed| {
+                                        let _ = tx.send(confirmed);
+                                    });
+                                if let Ok(false) = rx.await {
+                                    return;
+                                }
                             }
 
-                            // Stop sharing
-                            if let Err(e) = stop_sharing().await {
-                                log::warn!("Failed to stop sharing on close: {}", e);
+                            // Stop sharing if active
+                            if share_active {
+                                log::info!("Window closing - stopping sharing first");
+                                if let Err(e) = stop_ngrok_tunnel().await {
+                                    log::warn!("Failed to stop ngrok tunnel on close: {}", e);
+                                }
+                                if let Err(e) = stop_sharing().await {
+                                    log::warn!("Failed to stop sharing on close: {}", e);
+                                }
+                                log::info!("Sharing stopped, closing window");
                             }
 
-                            log::info!("Sharing stopped, closing window");
-
-                            // Now close the window
                             let _ = window.close();
                         });
                     }
