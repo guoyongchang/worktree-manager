@@ -354,6 +354,45 @@ const VaultSettingsSection: FC = () => {
           </>
         )}
       </div>
+
+      {/* Obsidian Bridge Plugin Guide */}
+      {status?.connected && (
+        <div className="mt-4 bg-amber-500/5 border border-amber-500/20 rounded-lg p-4">
+          <div className="flex items-start gap-3">
+            <Brain className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+            <div className="min-w-0">
+              <h3 className="text-sm font-medium text-amber-300">
+                {t('settings.bridgePluginTitle', 'Obsidian Bridge 插件')}
+              </h3>
+              <p className="text-xs text-slate-400 mt-1">
+                {t('settings.bridgePluginDesc', '安装 Claude Code 插件，自动注入知识库上下文、归档会话记录。')}
+              </p>
+              <div className="mt-2.5 space-y-1.5">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] text-amber-400/60 font-medium shrink-0">1.</span>
+                  <code className="text-[11px] text-slate-300 bg-slate-800 px-2 py-0.5 rounded font-mono select-all break-all">
+                    claude plugin marketplace add guoyongchang/worktree-manager-obsidian-bridge
+                  </code>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] text-amber-400/60 font-medium shrink-0">2.</span>
+                  <code className="text-[11px] text-slate-300 bg-slate-800 px-2 py-0.5 rounded font-mono select-all break-all">
+                    claude plugin install worktree-manager-memory-hook@worktree-manager-obsidian-bridge
+                  </code>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="mt-2.5 text-[11px] text-amber-400 hover:text-amber-300 transition-colors flex items-center gap-1"
+                onClick={() => openLink('https://github.com/guoyongchang/worktree-manager-obsidian-bridge')}
+              >
+                GitHub
+                <ChevronRight className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
