@@ -355,17 +355,23 @@ const VaultSettingsSection: FC = () => {
         )}
       </div>
 
-      {/* Obsidian Bridge Plugin Guide */}
+      {/* Memory Hook Plugin Guide */}
       {status?.connected && (
         <div className="mt-4 bg-amber-500/5 border border-amber-500/20 rounded-lg p-4">
           <div className="flex items-start gap-3">
             <Brain className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
             <div className="min-w-0">
               <h3 className="text-sm font-medium text-amber-300">
-                {t('settings.bridgePluginTitle', 'Obsidian Bridge 插件')}
+                {t('settings.memoryHookTitle', 'Memory Hook 插件')}
               </h3>
-              <p className="text-xs text-slate-400 mt-1">
-                {t('settings.bridgePluginDesc', '安装 Claude Code 插件，自动注入知识库上下文、归档会话记录。')}
+              <p className="text-xs text-slate-400 mt-1 space-y-0.5">
+                <span className="block">{t('settings.memoryHookDesc', '安装 Claude Code 插件以增强知识库集成：')}</span>
+                <span className="block text-amber-400/70">
+                  <strong>MemoryInject</strong> — {t('settings.memoryInjectDesc', '会话开始时自动注入知识库上下文')}
+                </span>
+                <span className="block text-amber-400/70">
+                  <strong>MemorySync</strong> — {t('settings.memorySyncDesc', '自动归档会话记录到知识库')}
+                </span>
               </p>
               <div className="mt-2.5 space-y-1.5">
                 <div className="flex items-center gap-1.5">
