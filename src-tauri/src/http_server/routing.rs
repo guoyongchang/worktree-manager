@@ -31,12 +31,12 @@ use super::{
     h_scan_existing_projects, h_scan_linked_folders, h_set_commit_prefix_config,
     h_set_dashscope_api_key, h_set_dashscope_base_url, h_set_git_path, h_set_git_user_config,
     h_set_git_user_global_config, h_set_ngrok_token, h_set_skip_git_hooks,
-    h_set_voice_refine_enabled, h_set_window_workspace, h_start_ngrok_tunnel, h_start_sharing,
-    h_stop_ngrok_tunnel, h_stop_sharing, h_switch_branch, h_switch_workspace,
-    h_sync_with_base_branch, h_test_mirror_speed, h_unlock_worktree, h_unregister_window,
-    h_update_share_password, h_vault_link, h_vault_status, h_voice_is_active, h_voice_refine_text,
-    h_voice_send_audio, h_voice_start, h_voice_stop, h_ws_upgrade, is_allowed_origin,
-    load_mcp_config, save_mcp_config, McpConfig,
+    h_set_voice_refine_enabled, h_set_window_workspace, h_speed_test_single_mirror,
+    h_start_ngrok_tunnel, h_start_sharing, h_stop_ngrok_tunnel, h_stop_sharing, h_switch_branch,
+    h_switch_workspace, h_sync_with_base_branch, h_test_mirror_speed, h_unlock_worktree,
+    h_unregister_window, h_update_share_password, h_vault_link, h_vault_status, h_voice_is_active,
+    h_voice_refine_text, h_voice_send_audio, h_voice_start, h_voice_stop, h_ws_upgrade,
+    is_allowed_origin, load_mcp_config, save_mcp_config, McpConfig,
 };
 
 pub(super) fn build_cors_layer() -> CorsLayer {
@@ -296,6 +296,10 @@ pub(super) fn build_api_router(cert_pem: Option<String>) -> Router {
             post(h_download_update_via_mirror),
         )
         .route("/api/test_mirror_speed", post(h_test_mirror_speed))
+        .route(
+            "/api/speed_test_single_mirror",
+            post(h_speed_test_single_mirror),
+        )
         .route("/api/get_mirror_sources", post(h_get_mirror_sources))
         .route("/api/save_custom_mirrors", post(h_save_custom_mirrors))
         .route("/api/open_devtools", post(h_open_devtools))

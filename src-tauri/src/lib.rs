@@ -239,6 +239,7 @@ pub fn run() {
             check_mirror_update,
             download_update_via_mirror,
             test_mirror_speed,
+            speed_test_single_mirror,
             get_mirror_sources,
             save_custom_mirrors,
             // DevTools

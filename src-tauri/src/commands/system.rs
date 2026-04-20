@@ -1519,16 +1519,27 @@ pub(crate) async fn download_update_via_mirror(
 
 // ==================== 镜像源管理 ====================
 
-/// 触发测速，返回排序后的结果列表
+/// 并发 PING 所有镜像源，返回可用性结果（不做吞吐量测速）
 #[tauri::command]
 pub(crate) async fn test_mirror_speed() -> Result<Vec<crate::mirror::MirrorTestResult>, String> {
-    log::info!("[system] Starting mirror speed test...");
-    let results = crate::mirror::test_all_mirrors().await;
+    log::info!("[system] Starting mirror PING test...");
+    let results = crate::mirror::ping_all_mirrors().await;
     log::info!(
-        "[system] Mirror speed test complete, {} results",
+        "[system] Mirror PING test complete, {} results",
         results.len()
     );
     Ok(results)
+}
+
+/// 对单个镜像源进行吞吐量测速（10秒）
+#[tauri::command]
+pub(crate) async fn speed_test_single_mirror(
+    mirror_url: String,
+) -> Result<crate::mirror::MirrorTestResult, String> {
+    log::info!("[system] Speed testing single mirror: {}", mirror_url);
+    crate::mirror::speed_test_single(&mirror_url)
+        .await
+        .ok_or_else(|| format!("Mirror not found: {}", mirror_url))
 }
 
 /// 返回所有镜像源（内置 + 自定义）

@@ -55,7 +55,8 @@ const PING_MIN_VALID_BYTES: usize = 10_000;
 /// 测速最小有效下载量（字节）— 低于此值说明源返回了错误页而非真实文件
 const SPEED_TEST_MIN_VALID_BYTES: u64 = 100_000;
 
-/// 缓存有效期（秒）
+/// 缓存有效期（秒）— 预留给未来自动刷新
+#[allow(dead_code)]
 const CACHE_TTL_SECS: u64 = 30 * 60;
 
 // ==================== 缓存 ====================
@@ -237,11 +238,11 @@ async fn speed_test_mirror(mirror: &MirrorSource) -> MirrorTestResult {
     }
 }
 
-/// 两阶段并发测速：先 PING 过滤，再对存活源测吞吐量
-pub async fn test_all_mirrors() -> Vec<MirrorTestResult> {
+/// 并发 PING 所有镜像源，PING 通过即标记为可用（不做吞吐量测速）
+pub async fn ping_all_mirrors() -> Vec<MirrorTestResult> {
     let mirrors = get_all_mirrors();
     log::info!(
-        "[mirror] Phase 1: PING testing {} mirrors ({}s timeout)...",
+        "[mirror] PING testing {} mirrors ({}s timeout)...",
         mirrors.len(),
         PING_TIMEOUT_SECS
     );
@@ -254,81 +255,58 @@ pub async fn test_all_mirrors() -> Vec<MirrorTestResult> {
         })
         .collect();
 
-    let mut alive_mirrors: Vec<MirrorSource> = Vec::new();
-    let mut dead_results: Vec<MirrorTestResult> = Vec::new();
+    let mut results: Vec<MirrorTestResult> = Vec::new();
 
     for handle in ping_handles {
         if let Ok((mirror, alive)) = handle.await {
             if alive {
-                alive_mirrors.push(mirror);
+                results.push(MirrorTestResult {
+                    name: mirror.name.clone(),
+                    url: mirror.url.clone(),
+                    bytes_downloaded: 0,
+                    speed_mbps: 0.0,
+                    available: true,
+                });
             } else {
-                dead_results.push(unavailable_result(&mirror));
+                results.push(unavailable_result(&mirror));
             }
         }
     }
 
-    log::info!(
-        "[mirror] Phase 1 complete: {}/{} alive, proceeding to speed test",
-        alive_mirrors.len(),
-        alive_mirrors.len() + dead_results.len()
-    );
+    // 可用源排前面
+    results.sort_by(|a, b| b.available.cmp(&a.available));
 
-    if alive_mirrors.is_empty() {
-        return dead_results;
-    }
-
-    log::info!(
-        "[mirror] Phase 2: Speed testing {} alive mirrors ({}s each)...",
-        alive_mirrors.len(),
-        SPEED_TEST_DURATION_SECS
-    );
-
-    let speed_handles: Vec<_> = alive_mirrors
-        .iter()
-        .map(|m| {
-            let m = m.clone();
-            tokio::spawn(async move { speed_test_mirror(&m).await })
-        })
-        .collect();
-
-    let mut results: Vec<MirrorTestResult> = Vec::new();
-    for handle in speed_handles {
-        if let Ok(result) = handle.await {
-            results.push(result);
-        }
-    }
-
-    results.sort_by(|a, b| b.bytes_downloaded.cmp(&a.bytes_downloaded));
-    results.extend(dead_results);
-
+    // 更新缓存
     {
         let mut cache = MIRROR_CACHE.lock().unwrap();
         *cache = Some((Instant::now(), results.clone()));
     }
 
     log::info!(
-        "[mirror] Speed test complete, {} total results",
+        "[mirror] PING complete: {}/{} available",
+        results.iter().filter(|r| r.available).count(),
         results.len()
     );
     results
 }
 
-/// 获取测速结果，优先用缓存（30 分钟 TTL）
-pub async fn get_fastest_mirrors() -> Vec<MirrorTestResult> {
+/// 对单个镜像源进行吞吐量测速（10 秒），返回更新后的结果
+pub async fn speed_test_single(mirror_url: &str) -> Option<MirrorTestResult> {
+    let mirrors = get_all_mirrors();
+    let mirror = mirrors.iter().find(|m| m.url == mirror_url)?;
+    let result = speed_test_mirror(mirror).await;
+
+    // 更新缓存中该源的结果
     {
-        let cache = MIRROR_CACHE.lock().unwrap();
-        if let Some((cached_at, ref results)) = *cache {
-            if cached_at.elapsed().as_secs() < CACHE_TTL_SECS {
-                log::info!(
-                    "[mirror] Using cached speed test results ({} entries)",
-                    results.len()
-                );
-                return results.clone();
+        let mut cache = MIRROR_CACHE.lock().unwrap();
+        if let Some((_, ref mut results)) = *cache {
+            if let Some(existing) = results.iter_mut().find(|r| r.url == mirror_url) {
+                *existing = result.clone();
             }
         }
     }
 
-    test_all_mirrors().await
+    Some(result)
 }
 
 /// 读取缓存的测速结果（不触发新测速）

@@ -1179,6 +1179,11 @@ async fn h_test_mirror_speed() -> Response {
     result_json(crate::commands::system::test_mirror_speed().await)
 }
 
+async fn h_speed_test_single_mirror(Json(payload): Json<Value>) -> Response {
+    let mirror_url = payload["mirrorUrl"].as_str().unwrap_or("").to_string();
+    result_json(crate::commands::system::speed_test_single_mirror(mirror_url).await)
+}
+
 async fn h_get_mirror_sources() -> Response {
     result_json(Ok(crate::commands::system::get_mirror_sources()))
 }

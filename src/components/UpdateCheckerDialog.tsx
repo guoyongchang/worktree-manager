@@ -19,6 +19,7 @@ import {
   Github,
   Zap,
   Plus,
+  Gauge,
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
@@ -214,6 +215,7 @@ interface MirrorListPanelProps {
   onAddCustomMirror: (name: string, url: string) => Promise<void>;
   onRemoveCustomMirror: (name: string) => Promise<void>;
   onSelectMirror: (mirror: MirrorSource) => void;
+  onSpeedTestSingle: (mirrorUrl: string) => Promise<void>;
 }
 
 const MirrorListPanel: FC<MirrorListPanelProps> = ({
@@ -224,11 +226,13 @@ const MirrorListPanel: FC<MirrorListPanelProps> = ({
   onAddCustomMirror,
   // onRemoveCustomMirror is available via props for future per-mirror delete buttons
   onSelectMirror,
+  onSpeedTestSingle,
 }) => {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [newName, setNewName] = useState('');
   const [newUrl, setNewUrl] = useState('');
+  const [testingMirrors, setTestingMirrors] = useState<Set<string>>(new Set());
 
   const handleAdd = async () => {
     const name = newName.trim();
@@ -282,7 +286,35 @@ const MirrorListPanel: FC<MirrorListPanelProps> = ({
               </span>
               <span className="flex items-center gap-2 shrink-0">
                 {r.available ? (
-                  <span className="text-emerald-400">{r.speed_mbps} MB/s</span>
+                  <>
+                    {r.speed_mbps > 0 ? (
+                      <span className="text-emerald-400">{r.speed_mbps} MB/s</span>
+                    ) : (
+                      <span className="text-slate-500">PING OK</span>
+                    )}
+                    {testingMirrors.has(r.url) ? (
+                      <Loader2 className="w-3 h-3 text-emerald-400 animate-spin" />
+                    ) : (
+                      <button
+                        type="button"
+                        className="text-slate-500 hover:text-emerald-400 transition-colors"
+                        title={t('updater.retest')}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setTestingMirrors((prev) => new Set(prev).add(r.url));
+                          onSpeedTestSingle(r.url).finally(() =>
+                            setTestingMirrors((prev) => {
+                              const next = new Set(prev);
+                              next.delete(r.url);
+                              return next;
+                            }),
+                          );
+                        }}
+                      >
+                        <Gauge className="w-3 h-3" />
+                      </button>
+                    )}
+                  </>
                 ) : (
                   <span className="text-red-400">{t('updater.mirrorUnavailable')}</span>
                 )}
@@ -365,6 +397,7 @@ interface UpdateCheckerDialogProps {
   onAddCustomMirror: (name: string, url: string) => Promise<void>;
   onRemoveCustomMirror: (name: string) => Promise<void>;
   onSelectMirror: (mirror: MirrorSource) => void;
+  onSpeedTestSingle: (mirrorUrl: string) => Promise<void>;
 }
 
 export const UpdateCheckerDialog: FC<UpdateCheckerDialogProps> = ({
@@ -385,6 +418,7 @@ export const UpdateCheckerDialog: FC<UpdateCheckerDialogProps> = ({
   onAddCustomMirror,
   onRemoveCustomMirror,
   onSelectMirror,
+  onSpeedTestSingle,
 }) => {
   const { t } = useTranslation();
 
@@ -446,6 +480,7 @@ export const UpdateCheckerDialog: FC<UpdateCheckerDialogProps> = ({
             onAddCustomMirror={onAddCustomMirror}
             onRemoveCustomMirror={onRemoveCustomMirror}
             onSelectMirror={onSelectMirror}
+            onSpeedTestSingle={onSpeedTestSingle}
           />
         </div>
 

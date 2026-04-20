@@ -68,6 +68,7 @@ export interface UseUpdaterReturn {
   addCustomMirror: (name: string, url: string) => Promise<void>;
   removeCustomMirror: (name: string) => Promise<void>;
   selectMirror: (mirror: MirrorSource) => void;
+  speedTestSingle: (mirrorUrl: string) => Promise<void>;
 }
 
 export function useUpdater(): UseUpdaterReturn {
@@ -238,6 +239,17 @@ export function useUpdater(): UseUpdaterReturn {
       await callBackend('save_custom_mirrors', { mirrors: customMirrors });
     } catch (err) {
       console.error('[updater] Failed to remove custom mirror:', err);
+    }
+  }, []);
+
+  const speedTestSingle = useCallback(async (mirrorUrl: string) => {
+    try {
+      const result = await callBackend<MirrorTestResult>('speed_test_single_mirror', { mirrorUrl });
+      setMirrorTestResults((prev) =>
+        prev.map((r) => (r.url === mirrorUrl ? result : r)),
+      );
+    } catch (err) {
+      console.error('[updater] Single mirror speed test failed:', err);
     }
   }, []);
 
@@ -489,5 +501,6 @@ export function useUpdater(): UseUpdaterReturn {
     addCustomMirror,
     removeCustomMirror,
     selectMirror: setSelectedMirror,
+    speedTestSingle,
   };
 }

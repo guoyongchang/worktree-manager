@@ -69,6 +69,7 @@ export const GlobalDialogs: FC<GlobalDialogsProps> = ({
         onAddCustomMirror={updater.addCustomMirror}
         onRemoveCustomMirror={updater.removeCustomMirror}
         onSelectMirror={updater.selectMirror}
+        onSpeedTestSingle={updater.speedTestSingle}
       />
 
       {/* Updater Dialogs */}
