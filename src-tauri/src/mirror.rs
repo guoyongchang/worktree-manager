@@ -19,6 +19,7 @@ pub struct MirrorTestResult {
     pub url: String,
     pub bytes_downloaded: u64,
     pub speed_mbps: f64,
+    pub ping_ms: u64,
     pub available: bool,
 }
 
@@ -107,12 +108,13 @@ fn unavailable_result(mirror: &MirrorSource) -> MirrorTestResult {
         url: mirror.url.clone(),
         bytes_downloaded: 0,
         speed_mbps: 0.0,
+        ping_ms: 0,
         available: false,
     }
 }
 
-/// 第一阶段：PING 测试，用小文件快速验证镜像是否可用
-async fn ping_mirror(mirror: &MirrorSource) -> (MirrorSource, bool) {
+/// 第一阶段：PING 测试，用小文件快速验证镜像是否可用，返回 (mirror, available, ping_ms)
+async fn ping_mirror(mirror: &MirrorSource) -> (MirrorSource, bool, u64) {
     let test_url = format!(
         "{}{}?t={}",
         mirror.url,
@@ -127,34 +129,42 @@ async fn ping_mirror(mirror: &MirrorSource) -> (MirrorSource, bool) {
         .build()
     {
         Ok(c) => c,
-        Err(_) => return (mirror.clone(), false),
+        Err(_) => return (mirror.clone(), false, 0),
     };
+
+    let start = Instant::now();
 
     match client.get(&test_url).send().await {
         Ok(r) if r.status().is_success() => match r.bytes().await {
             Ok(body) if body.len() > PING_MIN_VALID_BYTES => {
-                log::info!("[mirror] PING {} OK ({} bytes)", mirror.name, body.len());
-                (mirror.clone(), true)
+                let ping_ms = start.elapsed().as_millis() as u64;
+                log::info!(
+                    "[mirror] PING {} OK ({} bytes, {}ms)",
+                    mirror.name,
+                    body.len(),
+                    ping_ms
+                );
+                (mirror.clone(), true, ping_ms)
             }
             Ok(body) => {
                 log::warn!(
                     "[mirror] PING {} returned suspicious body size ({} bytes < {} threshold), likely error page",
                     mirror.name, body.len(), PING_MIN_VALID_BYTES
                 );
-                (mirror.clone(), false)
+                (mirror.clone(), false, 0)
             }
             Err(e) => {
                 log::warn!("[mirror] PING {} body read failed: {}", mirror.name, e);
-                (mirror.clone(), false)
+                (mirror.clone(), false, 0)
             }
         },
         Ok(r) => {
             log::warn!("[mirror] PING {} returned HTTP {}", mirror.name, r.status());
-            (mirror.clone(), false)
+            (mirror.clone(), false, 0)
         }
         Err(e) => {
             log::warn!("[mirror] PING {} failed: {}", mirror.name, e);
-            (mirror.clone(), false)
+            (mirror.clone(), false, 0)
         }
     }
 }
@@ -229,11 +239,22 @@ async fn speed_test_mirror(mirror: &MirrorSource) -> MirrorTestResult {
         speed_mbps
     );
 
+    // 保留缓存中已有的 ping_ms
+    let ping_ms = {
+        let cache = MIRROR_CACHE.lock().unwrap();
+        cache
+            .as_ref()
+            .and_then(|(_, results)| results.iter().find(|r| r.url == mirror.url))
+            .map(|r| r.ping_ms)
+            .unwrap_or(0)
+    };
+
     MirrorTestResult {
         name: mirror.name.clone(),
         url: mirror.url.clone(),
         bytes_downloaded: total_bytes,
         speed_mbps: (speed_mbps * 100.0).round() / 100.0,
+        ping_ms,
         available: total_bytes > SPEED_TEST_MIN_VALID_BYTES,
     }
 }
@@ -258,13 +279,14 @@ pub async fn ping_all_mirrors() -> Vec<MirrorTestResult> {
     let mut results: Vec<MirrorTestResult> = Vec::new();
 
     for handle in ping_handles {
-        if let Ok((mirror, alive)) = handle.await {
+        if let Ok((mirror, alive, ping_ms)) = handle.await {
             if alive {
                 results.push(MirrorTestResult {
                     name: mirror.name.clone(),
                     url: mirror.url.clone(),
                     bytes_downloaded: 0,
                     speed_mbps: 0.0,
+                    ping_ms,
                     available: true,
                 });
             } else {
@@ -273,8 +295,12 @@ pub async fn ping_all_mirrors() -> Vec<MirrorTestResult> {
         }
     }
 
-    // 可用源排前面
-    results.sort_by(|a, b| b.available.cmp(&a.available));
+    // 可用源按 ping 延迟升序排列，不可用源排末尾
+    results.sort_by(|a, b| {
+        b.available
+            .cmp(&a.available)
+            .then(a.ping_ms.cmp(&b.ping_ms))
+    });
 
     // 更新缓存
     {

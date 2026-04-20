@@ -36,6 +36,7 @@ export interface MirrorTestResult {
   url: string;
   bytes_downloaded: number;
   speed_mbps: number;
+  ping_ms: number;
   available: boolean;
 }
 
@@ -67,7 +68,7 @@ export interface UseUpdaterReturn {
   testMirrorSpeed: () => Promise<void>;
   addCustomMirror: (name: string, url: string) => Promise<void>;
   removeCustomMirror: (name: string) => Promise<void>;
-  selectMirror: (mirror: MirrorSource) => void;
+  selectMirror: (mirror: MirrorSource) => Promise<void>;
   speedTestSingle: (mirrorUrl: string) => Promise<void>;
 }
 
@@ -500,7 +501,44 @@ export function useUpdater(): UseUpdaterReturn {
     testMirrorSpeed,
     addCustomMirror,
     removeCustomMirror,
-    selectMirror: setSelectedMirror,
+    selectMirror: async (mirror: MirrorSource) => {
+      setSelectedMirror(mirror);
+      // 用新选中的源重新检查更新
+      setMirrorStatus('checking');
+      try {
+        const manifest = await callBackend<{
+          version: string;
+          pub_date: string;
+          notes: string;
+          current_version: string;
+        }>('check_mirror_update', { mirrorUrl: mirror.url });
+
+        const latestVersion = manifest.version;
+        const currentVersion = manifest.current_version;
+        setMirrorVersion(latestVersion);
+        if (latestVersion && latestVersion !== currentVersion) {
+          if (!updateRef.current) {
+            setUpdateInfo((prev) =>
+              prev ?? {
+                version: latestVersion,
+                currentVersion,
+                date: manifest.pub_date?.split('T')[0] ?? new Date().toISOString().split('T')[0],
+                notes: manifest.notes
+                  ? String(manifest.notes).split('\n').filter((l: string) => l.trim())
+                  : [],
+              },
+            );
+          }
+          setMirrorStatus('available');
+        } else {
+          setMirrorStatus('up-to-date');
+        }
+      } catch (err) {
+        console.error('[updater] Mirror check after switch failed:', err);
+        setMirrorError(String(err));
+        setMirrorStatus('error');
+      }
+    },
     speedTestSingle,
   };
 }

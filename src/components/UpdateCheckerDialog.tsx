@@ -214,7 +214,7 @@ interface MirrorListPanelProps {
   onTestSpeed: () => void;
   onAddCustomMirror: (name: string, url: string) => Promise<void>;
   onRemoveCustomMirror: (name: string) => Promise<void>;
-  onSelectMirror: (mirror: MirrorSource) => void;
+  onSelectMirror: (mirror: MirrorSource) => Promise<void>;
   onSpeedTestSingle: (mirrorUrl: string) => Promise<void>;
 }
 
@@ -290,7 +290,7 @@ const MirrorListPanel: FC<MirrorListPanelProps> = ({
                     {r.speed_mbps > 0 ? (
                       <span className="text-emerald-400">{r.speed_mbps} MB/s</span>
                     ) : (
-                      <span className="text-slate-500">PING OK</span>
+                      <span className="text-slate-500">{r.ping_ms}ms</span>
                     )}
                     {testingMirrors.has(r.url) ? (
                       <Loader2 className="w-3 h-3 text-emerald-400 animate-spin" />
@@ -396,7 +396,7 @@ interface UpdateCheckerDialogProps {
   onTestSpeed: () => void;
   onAddCustomMirror: (name: string, url: string) => Promise<void>;
   onRemoveCustomMirror: (name: string) => Promise<void>;
-  onSelectMirror: (mirror: MirrorSource) => void;
+  onSelectMirror: (mirror: MirrorSource) => Promise<void>;
   onSpeedTestSingle: (mirrorUrl: string) => Promise<void>;
 }
 
