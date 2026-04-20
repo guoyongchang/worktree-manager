@@ -136,7 +136,7 @@ pub fn run() {
                                 log::info!("Sharing stopped, closing window");
                             }
 
-                            let _ = window.close();
+                            let _ = window.destroy();
                         });
                     }
                 }
