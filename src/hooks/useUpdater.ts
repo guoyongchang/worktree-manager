@@ -264,7 +264,7 @@ export function useUpdater(): UseUpdaterReturn {
         pub_date: string;
         notes: string;
         current_version: string;
-      }>('check_mirror_update', { mirror_url: fastest.url });
+      }>('check_mirror_update', { mirrorUrl: fastest.url });
 
       const latestVersion = manifest.version;
       const currentVersion = manifest.current_version;
@@ -424,7 +424,7 @@ export function useUpdater(): UseUpdaterReturn {
 
     try {
       await callBackend('download_update_via_mirror', {
-        mirror_url: selectedMirror?.url ?? 'https://gh-proxy.org/',
+        mirrorUrl: selectedMirror?.url ?? 'https://gh-proxy.org/',
       });
       setState('success');
     } catch (err) {
