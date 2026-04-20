@@ -356,7 +356,7 @@ const VaultSettingsSection: FC = () => {
       </div>
 
       {/* Memory Hook Plugin Guide */}
-      {status?.connected && (
+      {(
         <div className="mt-4 bg-amber-500/5 border border-amber-500/20 rounded-lg p-4">
           <div className="flex items-start gap-3">
             <Brain className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
