@@ -820,7 +820,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
   // ==================== Menu items ====================
   const menuItems = [
     { id: 'workspaces' as SettingsSection, label: t('settings.workspaceConfig'), icon: <Settings className="w-3.5 h-3.5" /> },
-    { id: 'vault' as SettingsSection, label: t('settings.vaultNav'), icon: <Brain className="w-3.5 h-3.5" /> },
+    { id: 'vault' as SettingsSection, label: t('settings.vaultNav'), icon: <Brain className="w-3.5 h-3.5 text-amber-400" /> },
     { id: 'tools' as SettingsSection, label: t('settings.toolsNav', '工具'), icon: <Wrench className="w-3.5 h-3.5" /> },
     ...(isTauri() ? [{ id: 'share' as SettingsSection, label: t('settings.externalShareNav', '外网分享'), icon: <Globe className="w-3.5 h-3.5" /> }] : []),
     { id: 'commit' as SettingsSection, label: t('settings.commitNav', '提交设置'), icon: <FileText className="w-3.5 h-3.5" /> },
