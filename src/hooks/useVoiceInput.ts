@@ -189,13 +189,15 @@ export function useVoiceInput(
 
   // ---- 进入 ready 状态：获取麦克风，建立音频管道 ----
   const enterReady = useCallback(async () => {
-    if (busyRef.current) return;
+    console.log('[voice] enterReady called, busyRef:', busyRef.current, 'currentStatus:', voiceStatusRef.current);
+    if (busyRef.current) { console.log('[voice] enterReady SKIPPED (busy)'); return; }
     busyRef.current = true;
     setVoiceError(null);
 
     // 从后端读取 AI 优化开关（缓存到 ref，录音期间不再重复请求）
     try {
       refineEnabledRef.current = await getVoiceRefineEnabled();
+      console.log('[voice] refineEnabled:', refineEnabledRef.current);
     } catch {
       refineEnabledRef.current = true;
     }
@@ -206,6 +208,7 @@ export function useVoiceInput(
       }
 
       const preferredDeviceId = localStorage.getItem('preferred-mic-device-id');
+      console.log('[voice] requesting getUserMedia, preferredDevice:', preferredDeviceId);
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           sampleRate: 16000,
@@ -215,11 +218,13 @@ export function useVoiceInput(
           ...(preferredDeviceId ? { deviceId: { exact: preferredDeviceId } } : {}),
         },
       });
+      console.log('[voice] getUserMedia OK, tracks:', stream.getAudioTracks().length);
       mediaStreamRef.current = stream;
 
       const audioCtx = new AudioContext({ sampleRate: 16000 });
       audioCtxRef.current = audioCtx;
       sampleRateRef.current = audioCtx.sampleRate;
+      console.log('[voice] AudioContext created, sampleRate:', audioCtx.sampleRate, 'state:', audioCtx.state);
 
       const source = audioCtx.createMediaStreamSource(stream);
       sourceRef.current = source;
@@ -247,9 +252,11 @@ export function useVoiceInput(
       processor.connect(audioCtx.destination);
 
       setVoiceStatus('ready');
+      console.log('[voice] enterReady SUCCESS → status=ready');
     } catch (e) {
       cleanupAudio();
       const msg = e instanceof Error ? e.message : String(e);
+      console.error('[voice] enterReady FAILED:', msg);
       if (msg.includes('Permission') || msg.includes('NotAllowed')) {
         setVoiceError(i18next.t('voice.permissionDenied'));
       } else if (msg.includes('NotFound') || msg.includes('audio-capture')) {
@@ -260,26 +267,31 @@ export function useVoiceInput(
       setVoiceStatus('error');
     } finally {
       busyRef.current = false;
+      console.log('[voice] enterReady finally, busyRef reset to false');
     }
   }, [cleanupAudio]);
 
   // ---- 退出 ready 状态：释放麦克风 ----
   const exitReady = useCallback(async () => {
+    console.log('[voice] exitReady called, currentStatus:', voiceStatusRef.current);
     isStreamingRef.current = false;
     await voiceStop().catch(() => {});
     cleanupAudio();
     clearStaging();
     setVoiceStatus('idle');
     setIsKeyHeld(false);
+    console.log('[voice] exitReady done → status=idle');
   }, [cleanupAudio, clearStaging]);
 
   // ---- 开始录音：连接 Dashscope，打开音频发送开关，初始化暂存区 ----
   const startStreaming = useCallback(async () => {
-    if (busyRef.current) return;
-    if (voiceStatusRef.current !== 'ready') return;
+    console.log('[voice] startStreaming called, busyRef:', busyRef.current, 'currentStatus:', voiceStatusRef.current);
+    if (busyRef.current) { console.log('[voice] startStreaming SKIPPED (busy)'); return; }
+    if (voiceStatusRef.current !== 'ready') { console.log('[voice] startStreaming SKIPPED (not ready)'); return; }
     busyRef.current = true;
 
     try {
+      console.log('[voice] calling voiceStart, sampleRate:', sampleRateRef.current);
       await voiceStart(sampleRateRef.current);
       isStreamingRef.current = true;
       // 初始化暂存区
@@ -293,8 +305,10 @@ export function useVoiceInput(
       pendingSendRef.current = false;
       lastFinalRef.current = '';
       setVoiceStatus('recording');
+      console.log('[voice] startStreaming SUCCESS → status=recording');
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      console.error('[voice] startStreaming FAILED:', msg);
       setVoiceError(msg);
       // 连接 Dashscope 失败不影响 ready 状态
       setVoiceStatus('ready');
@@ -305,6 +319,7 @@ export function useVoiceInput(
 
   // ---- 停止录音：关闭音频发送，断开 Dashscope，回到 ready ----
   const stopStreaming = useCallback(async () => {
+    console.log('[voice] stopStreaming called, currentStatus:', voiceStatusRef.current);
     isStreamingRef.current = false;
     pendingSendRef.current = true;
     await voiceStop().catch(() => {});
@@ -312,12 +327,14 @@ export function useVoiceInput(
     // 但如果事件已经触发了（racing），主动检查
     if (voiceStatusRef.current === 'recording') {
       setVoiceStatus('ready');
+      console.log('[voice] stopStreaming → status=ready');
     }
   }, []);
 
   // ---- toggleVoice：麦克风按钮点击，切换 idle ↔ ready ----
   const toggleVoice = useCallback(() => {
     const status = voiceStatusRef.current;
+    console.log('[voice] toggleVoice called, currentStatus:', status);
     if (status === 'idle' || status === 'error') {
       enterReady();
     } else if (status === 'ready') {
@@ -469,11 +486,13 @@ export function useVoiceInput(
     };
   }, [startStreaming, stopStreaming]);
 
-  // ---- 移动端长按录音：一步完成 enterReady + startStreaming ----
+  // ---- 一步完成 enterReady + startStreaming ----
   const startRecording = useCallback(async () => {
     const status = voiceStatusRef.current;
+    console.log('[voice] startRecording called, currentStatus:', status);
     if (status === 'idle' || status === 'error') {
       await enterReady();
+      console.log('[voice] startRecording: after enterReady, status now:', voiceStatusRef.current);
       // enterReady 成功后 status 变为 ready，继续 startStreaming
       if (voiceStatusRef.current === 'ready') {
         await startStreaming();
@@ -481,10 +500,12 @@ export function useVoiceInput(
     } else if (status === 'ready') {
       await startStreaming();
     }
+    console.log('[voice] startRecording done, final status:', voiceStatusRef.current);
   }, [enterReady, startStreaming]);
 
-  // ---- 移动端松开停止 ----
+  // ---- 停止录音 ----
   const stopRecording = useCallback(async () => {
+    console.log('[voice] stopRecording called, currentStatus:', voiceStatusRef.current);
     if (voiceStatusRef.current === 'recording') {
       await stopStreaming();
     }

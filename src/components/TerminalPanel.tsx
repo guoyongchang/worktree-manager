@@ -161,6 +161,7 @@ const FloatingMicButton: FC<{
   const handleTouchEnd = useCallback(() => {
     // Only toggle recording if it was a tap (not a drag)
     if (!dragRef.current.isDragging) {
+      console.log('[voice-ui] FloatingMicButton tapped, voiceStatus:', voiceStatus);
       if (voiceStatus === 'recording') {
         onStopRecording?.();
       } else {
@@ -449,6 +450,7 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
+                  console.log('[voice-ui] tab-bar mic clicked, voiceStatus:', voiceStatus);
                   if (voiceStatus === 'recording') {
                     onStopRecording?.();
                   } else if (voiceStatus === 'idle' || voiceStatus === 'error') {
