@@ -59,7 +59,7 @@ function float32ToBase64Pcm(samples: Float32Array): string {
 export function useVoiceInput(
   onTranscribed: (text: string) => void,
 ): UseVoiceInputReturn {
-  const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>('idle');
+  const [voiceStatus, _setVoiceStatus] = useState<VoiceStatus>('idle');
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [isKeyHeld, setIsKeyHeld] = useState(false);
   const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
@@ -80,8 +80,12 @@ export function useVoiceInput(
   const busyRef = useRef(false);
 
   // 用 ref 追踪状态，避免 keyboard handler 闭包过期
-  const voiceStatusRef = useRef(voiceStatus);
-  voiceStatusRef.current = voiceStatus;
+  // Sync ref immediately on set to avoid stale reads in async flows
+  const voiceStatusRef = useRef<VoiceStatus>('idle');
+  const setVoiceStatus = useCallback((s: VoiceStatus) => {
+    voiceStatusRef.current = s;
+    _setVoiceStatus(s);
+  }, []);
 
   // Staging refs for async callbacks
   const stagingRef = useRef<StagingState | null>(null);
