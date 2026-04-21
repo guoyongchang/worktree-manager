@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { BackIcon } from './Icons';
 import { GitOperations } from './GitOperations';
-import { Terminal as TerminalIcon, Plus, FolderGit2, Maximize2, Minimize2 } from 'lucide-react';
+import { Terminal as TerminalIcon, Plus, FolderGit2, Minimize2 } from 'lucide-react';
 import { TerminalPanel } from './TerminalPanel';
 import type {
     WorktreeListItem,
