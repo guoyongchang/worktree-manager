@@ -468,6 +468,80 @@ pub(crate) async fn voice_is_active() -> Result<bool, String> {
     voice_is_active_inner()
 }
 
+// ==================== Unified AI Chat Helper ====================
+
+pub(crate) async fn call_ai_chat(
+    messages: Vec<serde_json::Value>,
+    model: Option<&str>,
+    temperature: f64,
+) -> Result<String, String> {
+    let messages_value = serde_json::Value::Array(messages);
+
+    // Try cloud first
+    if crate::cloud_client::is_cloud_configured() {
+        match crate::cloud_client::cloud_ai_chat(&messages_value, model, false).await {
+            Ok(resp_text) => {
+                let resp: serde_json::Value = serde_json::from_str(&resp_text)
+                    .map_err(|e| format!("parse cloud response error: {}", e))?;
+                let content = resp["choices"][0]["message"]["content"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string();
+                return Ok(content);
+            }
+            Err(e) if e.is_auth_failed() => {
+                return Err(format!("云端认证已过期，请重新配对: {}", e));
+            }
+            Err(e) if e.is_network_error() => {
+                log::warn!("Cloud AI failed (network), falling back to local: {}", e);
+            }
+            Err(e) => {
+                return Err(format!("云端 AI 请求失败: {}", e));
+            }
+        }
+    }
+
+    // Fallback: local Dashscope
+    let config = crate::config::load_global_config();
+    let api_key = config
+        .dashscope_api_key
+        .ok_or("未配置 AI 能力（无云端连接且无本地 API Key）")?;
+    let base_url = config
+        .dashscope_base_url
+        .unwrap_or_else(|| "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string());
+
+    let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let body = serde_json::json!({
+        "model": model.unwrap_or("qwen-turbo-latest"),
+        "messages": messages_value,
+        "temperature": temperature,
+    });
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("AI request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        let msg = resp.text().await.unwrap_or_default();
+        return Err(format!("AI API error: {}", msg));
+    }
+
+    let resp_json: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("parse response error: {}", e))?;
+    Ok(resp_json["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or("")
+        .to_string())
+}
+
 // ==================== AI Text Refinement (Qwen LLM) ====================
 
 const REFINE_SYSTEM_PROMPT: &str = "\
@@ -494,55 +568,18 @@ pub(crate) async fn voice_refine_text_inner(text: String) -> Result<String, Stri
         return Ok(String::new());
     }
 
-    let config = load_global_config();
-    let api_key = config
-        .dashscope_api_key
-        .filter(|k| !k.is_empty())
-        .ok_or_else(|| "Dashscope API Key 未配置".to_string())?;
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
-
     let user_content = format!("<raw>{}</raw>", trimmed);
+    let messages = vec![
+        serde_json::json!({"role": "system", "content": REFINE_SYSTEM_PROMPT}),
+        serde_json::json!({"role": "user", "content": user_content}),
+    ];
 
-    let body = serde_json::json!({
-        "model": "qwen-turbo-latest",
-        "messages": [
-            { "role": "system", "content": REFINE_SYSTEM_PROMPT },
-            { "role": "user", "content": user_content }
-        ],
-        "temperature": 0.0
-    });
-
-    let resp = client
-        .post("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions")
-        .header("Authorization", format!("Bearer {}", api_key))
-        .header("Content-Type", "application/json")
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("AI 请求失败: {}", e))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-        return Err(format!("AI API 返回错误 {}: {}", status, text));
-    }
-
-    let json: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("解析 AI 响应失败: {}", e))?;
-
-    let refined = json["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or(trimmed)
-        .trim()
-        .to_string();
-
-    Ok(refined)
+    let result = call_ai_chat(messages, None, 0.0).await?;
+    Ok(if result.is_empty() {
+        trimmed.to_string()
+    } else {
+        result.trim().to_string()
+    })
 }
 
 #[tauri::command]
@@ -575,51 +612,15 @@ pub(crate) async fn generate_commit_message(diff: String) -> Result<String, Stri
         return Err("No diff provided".to_string());
     }
 
-    let config = load_global_config();
-    let api_key = config
-        .dashscope_api_key
-        .filter(|k| !k.is_empty())
-        .ok_or_else(|| "Dashscope API Key 未配置，请在设置中配置".to_string())?;
+    let messages = vec![
+        serde_json::json!({"role": "system", "content": COMMIT_MSG_SYSTEM_PROMPT}),
+        serde_json::json!({"role": "user", "content": trimmed}),
+    ];
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
-
-    let body = serde_json::json!({
-        "model": "qwen-turbo-latest",
-        "messages": [
-            { "role": "system", "content": COMMIT_MSG_SYSTEM_PROMPT },
-            { "role": "user", "content": trimmed }
-        ],
-        "temperature": 0.3
-    });
-
-    let resp = client
-        .post("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions")
-        .header("Authorization", format!("Bearer {}", api_key))
-        .header("Content-Type", "application/json")
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("AI 请求失败: {}", e))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-        return Err(format!("AI API 返回错误 {}: {}", status, text));
-    }
-
-    let json: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| format!("解析 AI 响应失败: {}", e))?;
-
-    let message = json["choices"][0]["message"]["content"]
-        .as_str()
-        .unwrap_or("chore: update")
-        .trim()
-        .to_string();
-
-    Ok(message)
+    let result = call_ai_chat(messages, None, 0.3).await?;
+    Ok(if result.is_empty() {
+        "chore: update".to_string()
+    } else {
+        result.trim().to_string()
+    })
 }
