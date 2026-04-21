@@ -277,7 +277,12 @@ export function useVoiceInput(
 
   // ---- 退出 ready 状态：释放麦克风 ----
   const exitReady = useCallback(async () => {
-    console.log('[voice] exitReady called, currentStatus:', voiceStatusRef.current);
+    console.log('[voice] exitReady called, currentStatus:', voiceStatusRef.current, 'busyRef:', busyRef.current);
+    // Don't interrupt an ongoing enterReady → startStreaming sequence
+    if (busyRef.current) {
+      console.log('[voice] exitReady SKIPPED (busy — startRecording in progress)');
+      return;
+    }
     isStreamingRef.current = false;
     await voiceStop().catch(() => {});
     cleanupAudio();
@@ -285,14 +290,12 @@ export function useVoiceInput(
     setVoiceStatus('idle');
     setIsKeyHeld(false);
     console.log('[voice] exitReady done → status=idle');
-  }, [cleanupAudio, clearStaging]);
+  }, [cleanupAudio, clearStaging, setVoiceStatus]);
 
   // ---- 开始录音：连接 Dashscope，打开音频发送开关，初始化暂存区 ----
   const startStreaming = useCallback(async () => {
     console.log('[voice] startStreaming called, busyRef:', busyRef.current, 'currentStatus:', voiceStatusRef.current);
-    if (busyRef.current) { console.log('[voice] startStreaming SKIPPED (busy)'); return; }
     if (voiceStatusRef.current !== 'ready') { console.log('[voice] startStreaming SKIPPED (not ready)'); return; }
-    busyRef.current = true;
 
     try {
       console.log('[voice] calling voiceStart, sampleRate:', sampleRateRef.current);
@@ -316,10 +319,9 @@ export function useVoiceInput(
       setVoiceError(msg);
       // 连接 Dashscope 失败不影响 ready 状态
       setVoiceStatus('ready');
-    } finally {
-      busyRef.current = false;
     }
-  }, []);
+    // Note: busyRef is managed by startRecording, not here
+  }, [setVoiceStatus]);
 
   // ---- 停止录音：关闭音频发送，断开 Dashscope，回到 ready ----
   const stopStreaming = useCallback(async () => {
@@ -490,20 +492,26 @@ export function useVoiceInput(
     };
   }, [startStreaming, stopStreaming]);
 
-  // ---- 一步完成 enterReady + startStreaming ----
+  // ---- 一步完成 enterReady + startStreaming（全程持有 busyRef 锁） ----
   const startRecording = useCallback(async () => {
     const status = voiceStatusRef.current;
-    console.log('[voice] startRecording called, currentStatus:', status);
+    console.log('[voice] startRecording called, currentStatus:', status, 'busyRef:', busyRef.current);
+    if (busyRef.current) { console.log('[voice] startRecording SKIPPED (busy)'); return; }
+
     if (status === 'idle' || status === 'error') {
+      // busyRef will be set by enterReady — don't release until startStreaming is done
       await enterReady();
       console.log('[voice] startRecording: after enterReady, status now:', voiceStatusRef.current);
-      // enterReady 成功后 status 变为 ready，继续 startStreaming
       if (voiceStatusRef.current === 'ready') {
+        // Keep busyRef=true (enterReady set it), startStreaming checks it but we override
+        busyRef.current = true; // re-assert in case enterReady's finally cleared it
         await startStreaming();
       }
     } else if (status === 'ready') {
       await startStreaming();
     }
+    // Now release the lock
+    busyRef.current = false;
     console.log('[voice] startRecording done, final status:', voiceStatusRef.current);
   }, [enterReady, startStreaming]);
 
