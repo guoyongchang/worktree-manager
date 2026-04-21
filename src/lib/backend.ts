@@ -689,8 +689,8 @@ export async function cloudGetStatus(): Promise<CloudStatus> {
   return callBackend('cloud_get_status')
 }
 
-export async function cloudStartPairing(serverUrl: string, deviceName: string): Promise<PairingInfo> {
-  return callBackend('cloud_start_pairing', { serverUrl, deviceName })
+export async function cloudStartPairing(): Promise<PairingInfo> {
+  return callBackend('cloud_start_pairing')
 }
 
 export async function cloudCheckPairingStatus(): Promise<PairingStatus> {

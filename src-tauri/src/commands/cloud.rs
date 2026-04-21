@@ -3,6 +3,20 @@ use std::sync::Mutex;
 
 use crate::config::{load_global_config, save_global_config_internal};
 
+const DEFAULT_WMS_URL: &str = "https://wms.kirov-opensource.com/";
+
+fn get_default_device_name() -> String {
+    if let Ok(output) = std::process::Command::new("hostname").output() {
+        if output.status.success() {
+            let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !name.is_empty() {
+                return name;
+            }
+        }
+    }
+    "Worktree Manager".to_string()
+}
+
 // ==================== JWT helpers ====================
 
 /// Decode the JWT payload (middle base64 part) without signature verification
@@ -151,10 +165,9 @@ pub(crate) async fn cloud_get_status() -> Result<CloudStatus, String> {
 /// POSTs to `{server_url}/api/device-codes`, stores server_url + device_name in config,
 /// and stores the returned code + secret in PAIRING_STATE.
 #[tauri::command]
-pub(crate) async fn cloud_start_pairing(
-    server_url: String,
-    device_name: String,
-) -> Result<DeviceCodeResponse, String> {
+pub(crate) async fn cloud_start_pairing() -> Result<DeviceCodeResponse, String> {
+    let server_url = DEFAULT_WMS_URL.to_string();
+    let device_name = get_default_device_name();
     let client = reqwest::Client::new();
 
     let resp = client

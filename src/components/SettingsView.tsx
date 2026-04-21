@@ -681,8 +681,6 @@ export const SettingsView: FC<SettingsViewProps> = ({
 
   // Cloud connection state
   const [cloudStatus, setCloudStatus] = useState<CloudStatus | null>(null)
-  const [cloudServerUrl, setCloudServerUrl] = useState('')
-  const [cloudDeviceName, setCloudDeviceName] = useState('')
   const [pairingCode, setPairingCode] = useState<string | null>(null)
   const [pairingStatus, setPairingStatus] = useState<PairingStatus | null>(null)
   const pairingIntervalRef = useRef<NodeJS.Timeout | null>(null)
@@ -924,7 +922,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
   // ==================== Cloud connection handlers ====================
   const handleStartPairing = async () => {
     try {
-      const info = await cloudStartPairing(cloudServerUrl, cloudDeviceName || 'My Desktop')
+      const info = await cloudStartPairing()
       setPairingCode(info.code)
       const interval = setInterval(async () => {
         try {
@@ -935,7 +933,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
             pairingIntervalRef.current = null
             setPairingCode(null)
           }
-        } catch {}
+        } catch { /* ignore */ }
       }, 3000)
       pairingIntervalRef.current = interval
     } catch (e: any) {
@@ -971,7 +969,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
     ...(isTauri() ? [{ id: 'share' as SettingsSection, label: t('settings.externalShareNav', '外网分享'), icon: <Globe className="w-3.5 h-3.5" /> }] : []),
     { id: 'commit' as SettingsSection, label: t('settings.commitNav', '提交设置'), icon: <FileText className="w-3.5 h-3.5" /> },
     { id: 'voice' as SettingsSection, label: t('settings.voiceNav'), icon: <Mic className="w-3.5 h-3.5" /> },
-    { id: 'cloud' as SettingsSection, label: t('settings.cloudNav', '云端连接'), icon: <Link2 className="w-3.5 h-3.5" /> },
+    // { id: 'cloud' as SettingsSection, label: t('settings.cloudNav', '云端连接'), icon: <Link2 className="w-3.5 h-3.5" /> },
     { id: 'about' as SettingsSection, label: t('settings.about'), icon: <Info className="w-3.5 h-3.5" /> },
   ];
 
@@ -1872,7 +1870,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
               </div>
             )}
 
-            {/* ==================== Cloud ==================== */}
+            {/* ==================== Cloud (hidden from menu) ==================== */}
             {activeSection === 'cloud' && (
               <div className="space-y-4">
                 <h2 className="text-lg font-medium mb-4">{t('settings.cloudTitle', '云端连接')}</h2>
@@ -1917,9 +1915,9 @@ export const SettingsView: FC<SettingsViewProps> = ({
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      <Input placeholder={t('settings.cloudServerUrlPlaceholder', '云端服务地址 (https://...)')} value={cloudServerUrl} onChange={(e) => setCloudServerUrl(e.target.value)} />
-                      <Input placeholder={t('settings.cloudDeviceNamePlaceholder', '设备名称 (可选)')} value={cloudDeviceName} onChange={(e) => setCloudDeviceName(e.target.value)} />
-                      <Button onClick={handleStartPairing} disabled={!cloudServerUrl}>{t('settings.cloudStartPairing', '开始配对')}</Button>
+                      <p className="text-sm text-muted-foreground">服务端 <code className="bg-slate-700/50 px-1.5 py-0.5 rounded text-xs">https://wms.kirov-opensource.com/</code></p>
+                      <p className="text-sm text-muted-foreground">设备名称 <code className="bg-slate-700/50 px-1.5 py-0.5 rounded text-xs">自动获取 hostname</code></p>
+                      <Button onClick={handleStartPairing}>{t('settings.cloudStartPairing', '开始配对')}</Button>
                     </div>
                   )}
                 </div>

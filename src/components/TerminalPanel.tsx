@@ -101,9 +101,9 @@ const FLOATING_BTN_MARGIN = 16; // 距离右边缘的默认间距
 
 const FloatingMicButton: FC<{
   voiceStatus: VoiceStatus;
-  onStartRecording?: () => void;
+  onToggleVoice?: () => void;
   onStopRecording?: () => void;
-}> = ({ voiceStatus, onStartRecording, onStopRecording }) => {
+}> = ({ voiceStatus, onToggleVoice, onStopRecording }) => {
   const { t } = useTranslation();
   const [pos, setPos] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
   const posRef = useRef(pos);
@@ -165,11 +165,11 @@ const FloatingMicButton: FC<{
       if (voiceStatus === 'recording') {
         onStopRecording?.();
       } else {
-        onStartRecording?.();
+        onToggleVoice?.();
       }
     }
     dragRef.current.isDragging = false;
-  }, [voiceStatus, onStartRecording, onStopRecording]);
+  }, [voiceStatus, onToggleVoice, onStopRecording]);
 
   const isRecording = voiceStatus === 'recording';
 
@@ -247,7 +247,6 @@ interface TerminalPanelProps {
   isKeyHeld?: boolean;
   analyserNode?: AnalyserNode | null;
   onToggleVoice?: () => void;
-  onStartRecording?: () => void;
   onStopRecording?: () => void;
   staging?: StagingState | null;
   clientId?: string;
@@ -275,7 +274,6 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
   isKeyHeld = false,
   analyserNode,
   onToggleVoice,
-  onStartRecording,
   onStopRecording,
   staging,
   clientId,
@@ -453,10 +451,8 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
                   console.log('[voice-ui] tab-bar mic clicked, voiceStatus:', voiceStatus);
                   if (voiceStatus === 'recording') {
                     onStopRecording?.();
-                  } else if (voiceStatus === 'idle' || voiceStatus === 'error') {
-                    onStartRecording?.();
-                  } else if (voiceStatus === 'ready') {
-                    onStartRecording?.();
+                  } else {
+                    onToggleVoice?.();
                   }
                 }}
                 className={`p-1.5 rounded transition-colors relative ${getVoiceButtonClass(voiceStatus)}`}
@@ -543,7 +539,7 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
         {IS_MOBILE_WEB && (voiceStatus === 'ready' || voiceStatus === 'recording') && (
           <FloatingMicButton
             voiceStatus={voiceStatus}
-            onStartRecording={onStartRecording}
+            onToggleVoice={onToggleVoice}
             onStopRecording={onStopRecording}
           />
         )}

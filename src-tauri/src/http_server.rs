@@ -1882,10 +1882,8 @@ async fn h_cloud_get_status() -> Response {
     result_json(crate::commands::cloud::cloud_get_status().await)
 }
 
-async fn h_cloud_start_pairing(Json(args): Json<Value>) -> Response {
-    let server_url = args["serverUrl"].as_str().unwrap_or("").to_string();
-    let device_name = args["deviceName"].as_str().unwrap_or("").to_string();
-    result_json(crate::commands::cloud::cloud_start_pairing(server_url, device_name).await)
+async fn h_cloud_start_pairing() -> Response {
+    result_json(crate::commands::cloud::cloud_start_pairing().await)
 }
 
 async fn h_cloud_check_pairing_status() -> Response {

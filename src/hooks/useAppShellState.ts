@@ -143,13 +143,15 @@ export function useAppShellState(t: TFunction): UseAppShellStateReturn {
   );
 
   const voiceMountedRef = useRef(false);
+  const stopVoiceRef = useRef(voice.stopVoice);
+  stopVoiceRef.current = voice.stopVoice;
   useEffect(() => {
     if (voiceMountedRef.current) {
-      voice.stopVoice();
+      stopVoiceRef.current();
     } else {
       voiceMountedRef.current = true;
     }
-  }, [actions.selectedWorktree, terminalHook.activeTerminalTab, voice]);
+  }, [actions.selectedWorktree, terminalHook.activeTerminalTab]);
 
   useEffect(() => {
     if (isTauri()) return;

@@ -1316,6 +1316,7 @@ mod tests {
         let err = vault_link_impl(
             window_label,
             Some(vault_source.path().to_string_lossy().to_string()),
+            false,
         )
         .unwrap_err();
 
