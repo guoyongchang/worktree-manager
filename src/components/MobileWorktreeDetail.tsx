@@ -118,9 +118,22 @@ export const MobileWorktreeDetail: FC<MobileWorktreeDetailProps> = ({
     const [expandedProject, setExpandedProject] = useState<string | null>(null);
     const [terminalFullscreen, setTerminalFullscreen] = useState(false);
 
+    // When switching to terminals tab, auto-enter fullscreen
+    const switchToTerminals = useCallback(() => {
+        setActiveTab('terminals');
+        setTerminalFullscreen(true);
+        setTimeout(() => window.dispatchEvent(new Event('resize')), 100);
+    }, []);
+
     // Trigger terminal resize after fullscreen toggle
     const toggleTerminalFullscreen = useCallback(() => {
-        setTerminalFullscreen(f => !f);
+        setTerminalFullscreen(f => {
+            // Exiting fullscreen → go back to projects
+            if (f) {
+                setTimeout(() => setActiveTab('projects'), 0);
+            }
+            return !f;
+        });
         // Delay to let CSS layout settle, then trigger resize
         setTimeout(() => window.dispatchEvent(new Event('resize')), 100);
     }, []);
@@ -324,7 +337,7 @@ export const MobileWorktreeDetail: FC<MobileWorktreeDetailProps> = ({
                                                 <button
                                                     onClick={() => {
                                                         onOpenTerminalPanel(project.path);
-                                                        setActiveTab('terminals');
+                                                        switchToTerminals();
                                                     }}
                                                     className="w-full py-2 rounded-lg bg-slate-700/30 text-slate-400 text-xs font-medium active:bg-slate-600/30 transition-colors"
                                                 >
@@ -437,7 +450,7 @@ export const MobileWorktreeDetail: FC<MobileWorktreeDetailProps> = ({
                                     onCloseTab={(path) => onCloseTerminalTab?.(path)}
                                     onCloseAllTabs={() => onCloseAllTerminalTabs?.()}
                                     onToggle={() => { }}
-                                    onCollapse={() => { if (terminalFullscreen) setTerminalFullscreen(false); else setActiveTab('projects'); }}
+                                    onCollapse={toggleTerminalFullscreen}
                                     voiceStatus={voiceStatus}
                                     voiceError={voiceError}
                                     isKeyHeld={isKeyHeld}
@@ -481,7 +494,7 @@ export const MobileWorktreeDetail: FC<MobileWorktreeDetailProps> = ({
                             )}
                         </button>
                         <button
-                            onClick={() => setActiveTab('terminals')}
+                            onClick={switchToTerminals}
                             className={`flex-1 flex flex-col items-center justify-center gap-0.5 relative transition-all active:scale-95 ${activeTab === 'terminals'
                                 ? 'text-blue-400'
                                 : 'text-slate-500 active:text-slate-300'
