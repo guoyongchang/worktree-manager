@@ -3,6 +3,38 @@ use std::sync::Mutex;
 
 use crate::config::{load_global_config, save_global_config_internal};
 
+// ==================== JWT helpers ====================
+
+/// Decode the JWT payload (middle base64 part) without signature verification
+/// to extract exp and sub claims. Returns (exp_iso8601, sub).
+fn decode_jwt_claims(token: &str) -> Option<(String, String)> {
+    let parts: Vec<&str> = token.splitn(3, '.').collect();
+    if parts.len() < 2 {
+        return None;
+    }
+    use base64::Engine;
+    let payload_b64 = parts[1];
+    let padded = match payload_b64.len() % 4 {
+        2 => format!("{}==", payload_b64),
+        3 => format!("{}=", payload_b64),
+        _ => payload_b64.to_string(),
+    };
+    let decoded = base64::engine::general_purpose::URL_SAFE
+        .decode(&padded)
+        .ok()?;
+    let claims: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
+    let exp = claims["exp"].as_u64()?;
+    let sub = claims["sub"].as_str().unwrap_or("").to_string();
+    let exp_dt = chrono::DateTime::<chrono::Utc>::from_timestamp(exp as i64, 0)?;
+    Some((exp_dt.to_rfc3339(), sub))
+}
+
+#[derive(serde::Deserialize, Debug)]
+struct MeResponse {
+    email: Option<String>,
+    username: Option<String>,
+}
+
 // ==================== Pairing State ====================
 
 struct PairingState {
@@ -21,6 +53,8 @@ pub struct CloudStatus {
     pub pairing: bool,
     pub server_url: Option<String>,
     pub user_email: Option<String>,
+    pub username: Option<String>,
+    pub token_expires_at: Option<String>, // ISO 8601
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
@@ -49,6 +83,7 @@ struct ApproveResponse {
 // ==================== Commands ====================
 
 /// Returns current cloud connection status.
+/// If connected, decodes JWT for expiry and fetches /api/me for user info.
 #[tauri::command]
 pub(crate) async fn cloud_get_status() -> Result<CloudStatus, String> {
     let config = load_global_config();
@@ -56,11 +91,56 @@ pub(crate) async fn cloud_get_status() -> Result<CloudStatus, String> {
         let state = PAIRING_STATE.lock().map_err(|e| e.to_string())?;
         state.is_some()
     };
+
+    let access_token = config.cloud.access_token.as_ref().filter(|t| !t.is_empty()).cloned();
+    let connected = access_token.is_some();
+
+    if !connected {
+        return Ok(CloudStatus {
+            connected: false,
+            pairing,
+            server_url: config.cloud.server_url,
+            user_email: None,
+            username: None,
+            token_expires_at: None,
+        });
+    }
+
+    let token = access_token.unwrap();
+    let server_url = config.cloud.server_url.clone();
+
+    // Decode JWT locally to get expiry
+    let token_expires_at = decode_jwt_claims(&token).map(|(exp, _)| exp);
+
+    // Fetch /api/me for user info
+    let (user_email, username) = if let Some(ref url) = server_url {
+        let client = reqwest::Client::new();
+        match client
+            .get(format!("{}/api/me", url.trim_end_matches('/')))
+            .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", token))
+            .timeout(std::time::Duration::from_secs(5))
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => {
+                match resp.json::<MeResponse>().await {
+                    Ok(me) => (me.email, me.username),
+                    Err(_) => (None, None),
+                }
+            }
+            _ => (None, None),
+        }
+    } else {
+        (None, None)
+    };
+
     Ok(CloudStatus {
-        connected: config.cloud.access_token.as_ref().map(|t| !t.is_empty()).unwrap_or(false),
+        connected,
         pairing,
-        server_url: config.cloud.server_url,
-        user_email: None,
+        server_url,
+        user_email,
+        username,
+        token_expires_at,
     })
 }
 
@@ -175,12 +255,12 @@ pub(crate) async fn cloud_check_pairing_status() -> Result<DeviceCodeStatusRespo
 /// POSTs to `{server_url}/api/device-codes/{code}/approve` and stores received tokens.
 #[tauri::command]
 pub(crate) async fn cloud_approve_pairing() -> Result<ApproveResponse, String> {
-    let (code, server_url) = {
+    let (code, device_secret, server_url) = {
         let state = PAIRING_STATE.lock().map_err(|e| e.to_string())?;
         let s = state
             .as_ref()
             .ok_or_else(|| "没有进行中的配对流程".to_string())?;
-        (s.code.clone(), s.server_url.clone())
+        (s.code.clone(), s.device_secret.clone(), s.server_url.clone())
     };
 
     let client = reqwest::Client::new();
@@ -191,7 +271,7 @@ pub(crate) async fn cloud_approve_pairing() -> Result<ApproveResponse, String> {
             server_url.trim_end_matches('/'),
             code
         ))
-        .json(&serde_json::json!({}))
+        .json(&serde_json::json!({ "device_secret": device_secret }))
         .send()
         .await
         .map_err(|e| format!("请求失败: {}", e))?;
@@ -231,12 +311,12 @@ pub(crate) async fn cloud_approve_pairing() -> Result<ApproveResponse, String> {
 /// Rejects the pairing for this device code and clears PAIRING_STATE.
 #[tauri::command]
 pub(crate) async fn cloud_reject_pairing() -> Result<(), String> {
-    let (code, server_url) = {
+    let (code, device_secret, server_url) = {
         let state = PAIRING_STATE.lock().map_err(|e| e.to_string())?;
         let s = state
             .as_ref()
             .ok_or_else(|| "没有进行中的配对流程".to_string())?;
-        (s.code.clone(), s.server_url.clone())
+        (s.code.clone(), s.device_secret.clone(), s.server_url.clone())
     };
 
     let client = reqwest::Client::new();
@@ -247,7 +327,7 @@ pub(crate) async fn cloud_reject_pairing() -> Result<(), String> {
             server_url.trim_end_matches('/'),
             code
         ))
-        .json(&serde_json::json!({}))
+        .json(&serde_json::json!({ "device_secret": device_secret }))
         .send()
         .await
         .map_err(|e| format!("请求失败: {}", e))?;

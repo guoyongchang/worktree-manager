@@ -39,6 +39,8 @@ pub async fn cloud_ai_chat(
     messages: &Value,
     model: Option<&str>,
     stream: bool,
+    purpose: &str,
+    temperature: Option<f64>,
 ) -> Result<String, CloudError> {
     let config = load_global_config();
     let server_url = config
@@ -60,9 +62,12 @@ pub async fn cloud_ai_chat(
     );
     let client = reqwest::Client::new();
 
-    let mut body = serde_json::json!({ "messages": messages, "stream": stream });
+    let mut body = serde_json::json!({ "messages": messages, "stream": stream, "purpose": purpose });
     if let Some(m) = model {
         body["model"] = Value::String(m.to_string());
+    }
+    if let Some(t) = temperature {
+        body["temperature"] = Value::from(t);
     }
 
     let resp = client

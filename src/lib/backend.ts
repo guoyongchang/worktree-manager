@@ -670,6 +670,8 @@ export interface CloudStatus {
   pairing: boolean
   server_url: string | null
   user_email: string | null
+  username: string | null
+  token_expires_at: string | null  // ISO 8601
 }
 
 export interface PairingInfo {

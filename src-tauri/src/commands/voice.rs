@@ -474,12 +474,13 @@ pub(crate) async fn call_ai_chat(
     messages: Vec<serde_json::Value>,
     model: Option<&str>,
     temperature: f64,
+    purpose: &str,
 ) -> Result<String, String> {
     let messages_value = serde_json::Value::Array(messages);
 
     // Try cloud first
     if crate::cloud_client::is_cloud_configured() {
-        match crate::cloud_client::cloud_ai_chat(&messages_value, model, false).await {
+        match crate::cloud_client::cloud_ai_chat(&messages_value, model, false, purpose, Some(temperature)).await {
             Ok(resp_text) => {
                 let resp: serde_json::Value = serde_json::from_str(&resp_text)
                     .map_err(|e| format!("parse cloud response error: {}", e))?;
@@ -574,7 +575,7 @@ pub(crate) async fn voice_refine_text_inner(text: String) -> Result<String, Stri
         serde_json::json!({"role": "user", "content": user_content}),
     ];
 
-    let result = call_ai_chat(messages, None, 0.0).await?;
+    let result = call_ai_chat(messages, None, 0.0, "voice_refine").await?;
     Ok(if result.is_empty() {
         trimmed.to_string()
     } else {
@@ -617,7 +618,7 @@ pub(crate) async fn generate_commit_message(diff: String) -> Result<String, Stri
         serde_json::json!({"role": "user", "content": trimmed}),
     ];
 
-    let result = call_ai_chat(messages, None, 0.3).await?;
+    let result = call_ai_chat(messages, None, 0.3, "chat").await?;
     Ok(if result.is_empty() {
         "chore: update".to_string()
     } else {

@@ -1868,12 +1868,27 @@ export const SettingsView: FC<SettingsViewProps> = ({
                 <h2 className="text-lg font-medium mb-4">{t('settings.cloudTitle', '云端连接')}</h2>
                 <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4">
                   {cloudStatus?.connected ? (
-                    <div className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
-                      <div>
-                        <p className="text-sm font-medium text-green-700 dark:text-green-300">{t('settings.cloudConnected', '已连接')}</p>
-                        <p className="text-xs text-muted-foreground">{cloudStatus.server_url}</p>
+                    <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-green-700 dark:text-green-300">{t('settings.cloudConnected', '已连接')}</p>
+                          <p className="text-xs text-muted-foreground">{cloudStatus.server_url}</p>
+                        </div>
+                        <Button variant="outline" size="sm" onClick={handleCloudDisconnect}>{t('settings.cloudDisconnect', '断开连接')}</Button>
                       </div>
-                      <Button variant="outline" size="sm" onClick={handleCloudDisconnect}>{t('settings.cloudDisconnect', '断开连接')}</Button>
+                      {(cloudStatus.username || cloudStatus.user_email) && (
+                        <div className="text-xs text-muted-foreground space-y-0.5 pt-1 border-t border-green-200/30">
+                          {cloudStatus.username && (
+                            <p>{t('settings.cloudUsername', '用户名')}: <span className="text-slate-300">{cloudStatus.username}</span></p>
+                          )}
+                          {cloudStatus.user_email && (
+                            <p>{t('settings.cloudEmail', '邮箱')}: <span className="text-slate-300">{cloudStatus.user_email}</span></p>
+                          )}
+                          {cloudStatus.token_expires_at && (
+                            <p>{t('settings.cloudTokenExpiry', 'Token 有效期至')}: <span className="text-slate-300">{new Date(cloudStatus.token_expires_at).toLocaleString()}</span></p>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ) : pairingCode ? (
                     <div className="space-y-3 p-4 border border-slate-700/50 rounded-lg">
