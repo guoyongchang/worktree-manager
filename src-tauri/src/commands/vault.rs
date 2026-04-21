@@ -624,6 +624,7 @@ pub fn vault_status_impl(window_label: &str) -> Result<VaultStatus, String> {
 pub fn vault_link_impl(
     window_label: &str,
     path: Option<String>,
+    keep_symlinks: bool,
 ) -> Result<VaultLinkResponse, String> {
     let workspace_path =
         get_window_workspace_path(window_label).ok_or("No workspace bound to window")?;
@@ -738,8 +739,10 @@ pub fn vault_link_impl(
             let previous_vault_path = read_vault_path_from_overrides(workspace_root);
             let previous_linked_items = get_vault_linked_items(workspace_root);
 
-            // Disconnect: remove vault symlinks, clear overrides, clear linked items
-            remove_vault_symlinks(workspace_root)?;
+            // Disconnect: optionally remove vault symlinks, clear overrides, clear linked items
+            if !keep_symlinks {
+                remove_vault_symlinks(workspace_root)?;
+            }
             let persist_result = (|| -> Result<(), String> {
                 clear_vault_from_overrides(workspace_root)?;
                 update_vault_linked_items(workspace_root, &[])?;
@@ -781,8 +784,9 @@ pub(crate) fn vault_status(window: tauri::Window) -> Result<VaultStatus, String>
 pub(crate) fn vault_link(
     window: tauri::Window,
     path: Option<String>,
+    keep_symlinks: Option<bool>,
 ) -> Result<VaultLinkResponse, String> {
-    vault_link_impl(window.label(), path)
+    vault_link_impl(window.label(), path, keep_symlinks.unwrap_or(false))
 }
 
 /// List children of a vault item (file or directory).

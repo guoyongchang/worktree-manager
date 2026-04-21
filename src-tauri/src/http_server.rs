@@ -1233,7 +1233,8 @@ pub async fn h_vault_link(
             v.as_str().map(|s| s.to_string())
         }
     });
-    result_json(crate::commands::vault::vault_link_impl(&sid, path))
+    let keep_symlinks = args.get("keepSymlinks").and_then(|v| v.as_bool()).unwrap_or(false);
+    result_json(crate::commands::vault::vault_link_impl(&sid, path, keep_symlinks))
 }
 
 pub async fn h_list_vault_item_children(

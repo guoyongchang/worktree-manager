@@ -462,6 +462,8 @@
   "settings.vaultInputPlaceholder": "或粘贴 Vault 目录路径...",
   "settings.vaultRefresh": "刷新",
   "settings.vaultDisconnectConfirm": "确定要断开 Vault 吗？这将移除所有软链接。",
+  "settings.vaultSoftDisconnect": "断开(保留链接)",
+  "settings.vaultSoftDisconnectConfirm": "断开 Vault 配置但保留本地软链接，确定？",
   "settings.memoryHookTitle": "Memory Hook",
   "settings.memoryHookDesc": "Memory Hook 用于自动记录 AI 对话到 Memory Wiki",
   "settings.memoryInjectDesc": "在对话开始时自动注入 Memory Wiki 上下文",

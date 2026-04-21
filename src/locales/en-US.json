@@ -471,6 +471,8 @@
   "settings.vaultInputPlaceholder": "Or paste Vault directory path...",
   "settings.vaultRefresh": "Refresh",
   "settings.vaultDisconnectConfirm": "Are you sure you want to disconnect the Vault? This will remove all symlinks.",
+  "settings.vaultSoftDisconnect": "Disconnect (keep links)",
+  "settings.vaultSoftDisconnectConfirm": "Disconnect Vault config but keep local symlinks?",
   "settings.memoryHookTitle": "Memory Hook",
   "settings.memoryHookDesc": "Memory Hook automatically records AI conversations to Memory Wiki",
   "settings.memoryInjectDesc": "Automatically inject Memory Wiki context at conversation start",

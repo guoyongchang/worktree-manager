@@ -292,14 +292,17 @@ const VaultSettingsSection: FC = () => {
     }
   }, [status?.vault_path]);
 
-  const handleDisconnect = useCallback(async () => {
-    if (!window.confirm(t('settings.vaultDisconnectConfirm', '确定要断开 Vault 吗？这将移除所有软链接。'))) {
+  const handleDisconnect = useCallback(async (keepSymlinks = false) => {
+    const msg = keepSymlinks
+      ? t('settings.vaultSoftDisconnectConfirm', '断开 Vault 配置但保留本地软链接，确定？')
+      : t('settings.vaultDisconnectConfirm', '确定要断开 Vault 吗？这将移除所有软链接。');
+    if (!window.confirm(msg)) {
       return;
     }
     setError(null);
     setLinking(true);
     try {
-      await vaultLink(null);
+      await vaultLink(null, keepSymlinks);
       setStatus({ connected: false, vault_path: null, synced_items: [] });
     } catch (e) {
       setError(String(e));
@@ -383,10 +386,17 @@ const VaultSettingsSection: FC = () => {
               </Button>
               <Button
                 variant="ghost" size="sm" disabled={linking}
-                onClick={handleDisconnect}
+                onClick={() => handleDisconnect(false)}
                 className="text-red-400 hover:text-red-300"
               >
                 {t('settings.vaultDisconnect', '断开')}
+              </Button>
+              <Button
+                variant="ghost" size="sm" disabled={linking}
+                onClick={() => handleDisconnect(true)}
+                className="text-orange-400 hover:text-orange-300"
+              >
+                {t('settings.vaultSoftDisconnect', '断开(保留链接)')}
               </Button>
             </div>
           </>

@@ -650,8 +650,8 @@ export async function getVaultStatus(): Promise<VaultStatus> {
   return callBackend<VaultStatus>('vault_status');
 }
 
-export async function vaultLink(path: string | null): Promise<VaultLinkResponse> {
-  return callBackend<VaultLinkResponse>('vault_link', { path });
+export async function vaultLink(path: string | null, keepSymlinks?: boolean): Promise<VaultLinkResponse> {
+  return callBackend<VaultLinkResponse>('vault_link', { path, keepSymlinks });
 }
 
 export async function listVaultItemChildren(
