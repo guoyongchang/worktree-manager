@@ -447,7 +447,16 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
             )}
             {onToggleVoice && (
               <button
-                onClick={(e) => { e.stopPropagation(); onToggleVoice(); }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (voiceStatus === 'recording') {
+                    onStopRecording?.();
+                  } else if (voiceStatus === 'idle' || voiceStatus === 'error') {
+                    onStartRecording?.();
+                  } else if (voiceStatus === 'ready') {
+                    onStartRecording?.();
+                  }
+                }}
                 className={`p-1.5 rounded transition-colors relative ${getVoiceButtonClass(voiceStatus)}`}
                 title={getVoiceButtonTitle(voiceStatus, isKeyHeld, voiceError, t)}
                 aria-label={t('terminal.voiceOff')}
