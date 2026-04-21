@@ -35,8 +35,10 @@ use super::{
     h_start_ngrok_tunnel, h_start_sharing, h_stop_ngrok_tunnel, h_stop_sharing, h_switch_branch,
     h_switch_workspace, h_sync_with_base_branch, h_test_mirror_speed, h_unlock_worktree,
     h_unregister_window, h_update_share_password, h_vault_link, h_vault_status, h_voice_is_active,
-    h_voice_refine_text, h_voice_send_audio, h_voice_start, h_voice_stop, h_ws_upgrade,
-    is_allowed_origin, load_mcp_config, save_mcp_config, McpConfig,
+    h_voice_refine_text, h_voice_send_audio, h_voice_start, h_voice_stop,
+    h_cloud_get_status, h_cloud_start_pairing, h_cloud_check_pairing_status,
+    h_cloud_approve_pairing, h_cloud_reject_pairing, h_cloud_disconnect,
+    h_ws_upgrade, is_allowed_origin, load_mcp_config, save_mcp_config, McpConfig,
 };
 
 pub(super) fn build_cors_layer() -> CorsLayer {
@@ -305,6 +307,13 @@ pub(super) fn build_api_router(cert_pem: Option<String>) -> Router {
         .route("/api/open_devtools", post(h_open_devtools))
         .route("/api/mcp/config", post(h_mcp_config))
         .route("/api/mcp/set_capability", post(h_set_mcp_capability))
+        // Cloud
+        .route("/api/cloud_get_status", post(h_cloud_get_status))
+        .route("/api/cloud_start_pairing", post(h_cloud_start_pairing))
+        .route("/api/cloud_check_pairing_status", post(h_cloud_check_pairing_status))
+        .route("/api/cloud_approve_pairing", post(h_cloud_approve_pairing))
+        .route("/api/cloud_reject_pairing", post(h_cloud_reject_pairing))
+        .route("/api/cloud_disconnect", post(h_cloud_disconnect))
         // Vault
         .route("/api/vault_status", post(h_vault_status))
         .route("/api/vault_link", post(h_vault_link))

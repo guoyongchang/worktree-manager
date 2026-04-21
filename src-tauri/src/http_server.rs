@@ -1868,6 +1868,34 @@ async fn h_set_voice_refine_enabled(Json(args): Json<Value>) -> Response {
     ))
 }
 
+// -- Cloud connection --
+
+async fn h_cloud_get_status() -> Response {
+    result_json(crate::commands::cloud::cloud_get_status().await)
+}
+
+async fn h_cloud_start_pairing(Json(args): Json<Value>) -> Response {
+    let server_url = args["serverUrl"].as_str().unwrap_or("").to_string();
+    let device_name = args["deviceName"].as_str().unwrap_or("").to_string();
+    result_json(crate::commands::cloud::cloud_start_pairing(server_url, device_name).await)
+}
+
+async fn h_cloud_check_pairing_status() -> Response {
+    result_json(crate::commands::cloud::cloud_check_pairing_status().await)
+}
+
+async fn h_cloud_approve_pairing() -> Response {
+    result_ok(crate::commands::cloud::cloud_approve_pairing().await)
+}
+
+async fn h_cloud_reject_pairing() -> Response {
+    result_ok(crate::commands::cloud::cloud_reject_pairing().await)
+}
+
+async fn h_cloud_disconnect() -> Response {
+    result_ok(crate::commands::cloud::cloud_disconnect().await)
+}
+
 // -- Connected clients --
 
 async fn h_get_connected_clients() -> Response {
