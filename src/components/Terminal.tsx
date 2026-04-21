@@ -81,9 +81,7 @@ function MobileTerminalToolbar({
     };
   }, [pendingBtn]);
 
-  const handleBtn = (btn: typeof TOOLBAR_BUTTONS[0], e: React.PointerEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
+  const handleBtn = (btn: typeof TOOLBAR_BUTTONS[0]) => {
     // Blur any focused element to prevent keyboard popup
     (document.activeElement as HTMLElement)?.blur();
 
@@ -104,11 +102,13 @@ function MobileTerminalToolbar({
   };
 
   return (
-    <div className="flex items-center gap-1.5 px-2 py-1.5 bg-slate-800/95 border-t border-slate-700/50 overflow-x-auto shrink-0 scrollbar-none">
+    <div className="flex items-center gap-1.5 px-2 py-1.5 bg-slate-800/95 border-t border-slate-700/50 overflow-x-auto shrink-0 scrollbar-none"
+      style={{ touchAction: 'pan-x' }}
+    >
       {TOOLBAR_BUTTONS.map((btn) => (
         <button
           key={btn.label}
-          onPointerDown={(e) => handleBtn(btn, e)}
+          onClick={() => handleBtn(btn)}
           className={`shrink-0 px-2.5 py-1 rounded-full text-xs font-medium select-none touch-manipulation transition-colors ${
             pendingBtn === btn.label
               ? 'bg-yellow-600/90 text-yellow-100 ring-1 ring-yellow-400'
@@ -120,8 +120,7 @@ function MobileTerminalToolbar({
       ))}
       {onResize && (
         <button
-          onPointerDown={(e) => {
-            e.preventDefault();
+          onClick={() => {
             (document.activeElement as HTMLElement)?.blur();
             onResize();
           }}
@@ -132,8 +131,7 @@ function MobileTerminalToolbar({
       )}
       {onDebug && (
         <button
-          onPointerDown={(e) => {
-            e.preventDefault();
+          onClick={() => {
             (document.activeElement as HTMLElement)?.blur();
             onDebug();
           }}
