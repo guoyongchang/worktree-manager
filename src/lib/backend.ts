@@ -660,3 +660,49 @@ export async function listVaultItemChildren(
 ): Promise<VaultItemChild[]> {
   return callBackend<VaultItemChild[]>('list_vault_item_children', { vaultPath, relativePath });
 }
+
+// ---------------------------------------------------------------------------
+// Cloud connection
+// ---------------------------------------------------------------------------
+
+export interface CloudStatus {
+  connected: boolean
+  pairing: boolean
+  server_url: string | null
+  user_email: string | null
+}
+
+export interface PairingInfo {
+  code: string
+  expires_at: string
+}
+
+export interface PairingStatus {
+  status: string
+  user_email: string | null
+  username: string | null
+}
+
+export async function cloudGetStatus(): Promise<CloudStatus> {
+  return callBackend('cloud_get_status')
+}
+
+export async function cloudStartPairing(serverUrl: string, deviceName: string): Promise<PairingInfo> {
+  return callBackend('cloud_start_pairing', { serverUrl, deviceName })
+}
+
+export async function cloudCheckPairingStatus(): Promise<PairingStatus> {
+  return callBackend('cloud_check_pairing_status')
+}
+
+export async function cloudApprovePairing(): Promise<void> {
+  return callBackend('cloud_approve_pairing')
+}
+
+export async function cloudRejectPairing(): Promise<void> {
+  return callBackend('cloud_reject_pairing')
+}
+
+export async function cloudDisconnect(): Promise<void> {
+  return callBackend('cloud_disconnect')
+}
