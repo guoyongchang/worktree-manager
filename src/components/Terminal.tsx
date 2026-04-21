@@ -380,19 +380,18 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
 
     term.open(terminalRef.current);
 
-    // On mobile, prevent xterm's internal textarea from auto-focusing
-    // This stops the soft keyboard from popping up on touch/long-press
+    // On mobile, prevent soft keyboard from popping up on casual touch.
+    // Use inputMode="none" which hides the keyboard but still allows xterm to receive input.
+    // Double-tap to explicitly open the keyboard.
     if (isMobileDevice) {
       const xtermTextarea = terminalRef.current?.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement | null;
       if (xtermTextarea) {
-        xtermTextarea.setAttribute('readonly', 'readonly');
-        // Allow keyboard only on explicit double-tap on the terminal area
+        xtermTextarea.inputMode = 'none';
         terminalRef.current?.addEventListener('dblclick', () => {
-          xtermTextarea.removeAttribute('readonly');
+          xtermTextarea.inputMode = 'text';
           xtermTextarea.focus();
-          // Re-apply readonly after keyboard is dismissed
           xtermTextarea.addEventListener('blur', () => {
-            xtermTextarea.setAttribute('readonly', 'readonly');
+            xtermTextarea.inputMode = 'none';
           }, { once: true });
         });
       }
