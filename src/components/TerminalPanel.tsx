@@ -143,8 +143,7 @@ const FloatingMicButton: FC<{
     d.startPosX = currentX ?? 0;
     d.startPosY = cur.y ?? 0;
     d.isDragging = false;
-    onStartRecording?.();
-  }, [onStartRecording]);
+  }, []);
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     const touch = e.touches[0];
@@ -160,9 +159,16 @@ const FloatingMicButton: FC<{
   }, [constrain]);
 
   const handleTouchEnd = useCallback(() => {
+    // Only toggle recording if it was a tap (not a drag)
+    if (!dragRef.current.isDragging) {
+      if (voiceStatus === 'recording') {
+        onStopRecording?.();
+      } else {
+        onStartRecording?.();
+      }
+    }
     dragRef.current.isDragging = false;
-    onStopRecording?.();
-  }, [onStopRecording]);
+  }, [voiceStatus, onStartRecording, onStopRecording]);
 
   const isRecording = voiceStatus === 'recording';
 

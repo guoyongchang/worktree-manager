@@ -154,9 +154,9 @@ function MobileTerminalToolbar({
         </button>
       )}
       {sentToast && (
-        <span className="shrink-0 px-2 py-0.5 rounded bg-green-600/90 text-green-100 text-xs font-medium animate-pulse">
+        <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[100] px-4 py-2 rounded-lg bg-green-600/95 text-green-100 text-sm font-medium shadow-lg pointer-events-none animate-pulse">
           {sentToast} sent
-        </span>
+        </div>
       )}
     </div>
   );
