@@ -1,5 +1,6 @@
 mod commands;
 pub mod config;
+pub mod cloud_client;
 mod git_ops;
 pub mod http_server;
 pub mod mirror;
