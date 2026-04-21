@@ -1351,27 +1351,36 @@ pub fn add_project_to_worktree_impl(
         request.project_name
     );
 
-    // Try to set upstream tracking without pushing.
-    // If the remote branch exists (e.g. branch was reused), set tracking.
-    // If it doesn't exist yet, skip — upstream will be set on first manual push.
-    let upstream_ref = format!("origin/{}", branch_name);
-    let set_upstream = run_git_command_with_timeout(
-        &["branch", "--set-upstream-to", &upstream_ref],
+    // Push to create remote branch and set upstream tracking.
+    // Even though there are no user commits yet, this is necessary to prevent
+    // IDEs from defaulting to push to the base branch (uat/main).
+    let push_output = run_git_command_with_timeout(
+        &["push", "-u", "origin", &branch_name],
         wt_proj_path.to_str().unwrap(),
     );
-    match set_upstream {
+    match push_output {
         Ok(p) if p.status.success() => {
             log::info!(
-                "[worktree] Project '{}': set upstream to {} succeeded",
+                "[worktree] Project '{}': git push -u origin {} succeeded",
                 request.project_name,
-                upstream_ref
+                branch_name
             );
         }
-        Ok(_) | Err(_) => {
-            log::info!(
-                "[worktree] Project '{}': remote branch {} not found yet, upstream will be set on first push",
+        Ok(p) => {
+            let stderr = String::from_utf8_lossy(&p.stderr);
+            log::warn!(
+                "[worktree] Project '{}': git push -u origin {} failed (project added successfully): {}",
                 request.project_name,
-                upstream_ref
+                branch_name,
+                stderr
+            );
+        }
+        Err(e) => {
+            log::warn!(
+                "[worktree] Project '{}': git push -u origin {} failed to execute: {}",
+                request.project_name,
+                branch_name,
+                e
             );
         }
     }
