@@ -21,7 +21,8 @@ import { RefreshCw, Search, Mic, Eye, EyeOff, Settings, Globe, Info, Trash2, Wre
 import { BackIcon, PlusIcon, TrashIcon } from './Icons';
 import { BranchCombobox } from './BranchCombobox';
 import type { WorkspaceRef, WorkspaceConfig, ProjectConfig, ScannedFolder, VaultStatus, VaultItemChild } from '../types';
-import { getAppVersion, getAppIcon, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, voiceStart, voiceStop, isTauri, getRemoteBranches, openLink, callBackend, loadWorkspaceConfigByPath, saveWorkspaceConfigByPath, getVaultStatus, vaultLink, listVaultItemChildren, getCommitPrefixConfig, setCommitPrefixConfig, getGitUserGlobalConfig, setGitUserGlobalConfig, getSkipGitHooks, setSkipGitHooks as saveSkipGitHooks } from '../lib/backend';
+import { getAppVersion, getAppIcon, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, voiceStart, voiceStop, isTauri, getRemoteBranches, openLink, callBackend, loadWorkspaceConfigByPath, saveWorkspaceConfigByPath, getVaultStatus, vaultLink, listVaultItemChildren, getCommitPrefixConfig, setCommitPrefixConfig, getGitUserGlobalConfig, setGitUserGlobalConfig, getSkipGitHooks, setSkipGitHooks as saveSkipGitHooks, cloudGetStatus, cloudStartPairing, cloudCheckPairingStatus, cloudApprovePairing, cloudRejectPairing, cloudDisconnect } from '../lib/backend';
+import type { CloudStatus, PairingStatus } from '../lib/backend';
 
 // ==================== VaultItemTree (recursive) ====================
 interface VaultItemTreeProps {
@@ -445,7 +446,7 @@ interface SettingsViewProps {
   onRemoveWorkspace?: (path: string) => void;
 }
 
-type SettingsSection = 'workspaces' | 'vault' | 'tools' | 'share' | 'commit' | 'voice' | 'about';
+type SettingsSection = 'workspaces' | 'vault' | 'tools' | 'share' | 'commit' | 'voice' | 'cloud' | 'about';
 
 export const SettingsView: FC<SettingsViewProps> = ({
   workspaceConfig,
@@ -668,6 +669,14 @@ export const SettingsView: FC<SettingsViewProps> = ({
   const [voiceRefineEnabled, setVoiceRefineEnabled] = useState(true);
   const [voiceRefineLoaded, setVoiceRefineLoaded] = useState(false);
 
+  // Cloud connection state
+  const [cloudStatus, setCloudStatus] = useState<CloudStatus | null>(null)
+  const [cloudServerUrl, setCloudServerUrl] = useState('')
+  const [cloudDeviceName, setCloudDeviceName] = useState('')
+  const [pairingCode, setPairingCode] = useState<string | null>(null)
+  const [pairingStatus, setPairingStatus] = useState<PairingStatus | null>(null)
+  const pairingIntervalRef = useRef<NodeJS.Timeout | null>(null)
+
   // DEV settings
   const [devConsoleEnabled, setDevConsoleEnabled] = useState(() => localStorage.getItem('dev-console-enabled') === 'true');
 
@@ -865,6 +874,18 @@ export const SettingsView: FC<SettingsViewProps> = ({
   // Cleanup mic test on unmount
   useEffect(() => stopMicTest, [stopMicTest]);
 
+  // Load cloud status on mount
+  useEffect(() => {
+    cloudGetStatus().then(setCloudStatus).catch(() => {})
+  }, [])
+
+  // Cleanup pairing interval on unmount
+  useEffect(() => {
+    return () => {
+      if (pairingIntervalRef.current) clearInterval(pairingIntervalRef.current)
+    }
+  }, [])
+
   // Load commit prefix & git user global config
   useEffect(() => {
     getCommitPrefixConfig()
@@ -890,6 +911,48 @@ export const SettingsView: FC<SettingsViewProps> = ({
       .catch(() => setSkipGitHooksLoaded(true));
   }, []);
 
+  // ==================== Cloud connection handlers ====================
+  const handleStartPairing = async () => {
+    try {
+      const info = await cloudStartPairing(cloudServerUrl, cloudDeviceName || 'My Desktop')
+      setPairingCode(info.code)
+      const interval = setInterval(async () => {
+        try {
+          const status = await cloudCheckPairingStatus()
+          setPairingStatus(status)
+          if (status.status === 'expired') {
+            clearInterval(interval)
+            pairingIntervalRef.current = null
+            setPairingCode(null)
+          }
+        } catch {}
+      }, 3000)
+      pairingIntervalRef.current = interval
+    } catch (e: any) {
+      console.error('Pairing failed:', e)
+    }
+  }
+
+  const handleCloudApprove = async () => {
+    await cloudApprovePairing()
+    if (pairingIntervalRef.current) clearInterval(pairingIntervalRef.current)
+    setPairingCode(null)
+    setPairingStatus(null)
+    setCloudStatus(await cloudGetStatus())
+  }
+
+  const handleCloudReject = async () => {
+    await cloudRejectPairing()
+    if (pairingIntervalRef.current) clearInterval(pairingIntervalRef.current)
+    setPairingCode(null)
+    setPairingStatus(null)
+  }
+
+  const handleCloudDisconnect = async () => {
+    await cloudDisconnect()
+    setCloudStatus(await cloudGetStatus())
+  }
+
   // ==================== Menu items ====================
   const menuItems = [
     { id: 'workspaces' as SettingsSection, label: t('settings.workspaceConfig'), icon: <Settings className="w-3.5 h-3.5" /> },
@@ -898,6 +961,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
     ...(isTauri() ? [{ id: 'share' as SettingsSection, label: t('settings.externalShareNav', '外网分享'), icon: <Globe className="w-3.5 h-3.5" /> }] : []),
     { id: 'commit' as SettingsSection, label: t('settings.commitNav', '提交设置'), icon: <FileText className="w-3.5 h-3.5" /> },
     { id: 'voice' as SettingsSection, label: t('settings.voiceNav'), icon: <Mic className="w-3.5 h-3.5" /> },
+    { id: 'cloud' as SettingsSection, label: t('settings.cloudNav', '云端连接'), icon: <Link2 className="w-3.5 h-3.5" /> },
     { id: 'about' as SettingsSection, label: t('settings.about'), icon: <Info className="w-3.5 h-3.5" /> },
   ];
 
@@ -1794,6 +1858,45 @@ export const SettingsView: FC<SettingsViewProps> = ({
                       {gitUserSaving ? t('common.saving') : t('common.save')}
                     </Button>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* ==================== Cloud ==================== */}
+            {activeSection === 'cloud' && (
+              <div className="space-y-4">
+                <h2 className="text-lg font-medium mb-4">{t('settings.cloudTitle', '云端连接')}</h2>
+                <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4">
+                  {cloudStatus?.connected ? (
+                    <div className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                      <div>
+                        <p className="text-sm font-medium text-green-700 dark:text-green-300">{t('settings.cloudConnected', '已连接')}</p>
+                        <p className="text-xs text-muted-foreground">{cloudStatus.server_url}</p>
+                      </div>
+                      <Button variant="outline" size="sm" onClick={handleCloudDisconnect}>{t('settings.cloudDisconnect', '断开连接')}</Button>
+                    </div>
+                  ) : pairingCode ? (
+                    <div className="space-y-3 p-4 border border-slate-700/50 rounded-lg">
+                      <p className="text-sm text-muted-foreground">{t('settings.cloudPairingHint', '请在 WMS 管理后台输入以下配对码：')}</p>
+                      <p className="text-3xl font-mono font-bold text-center tracking-wider">{pairingCode}</p>
+                      {pairingStatus?.status === 'claimed' && (
+                        <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded">
+                          <p className="text-sm">{t('settings.cloudPairingRequest', '用户')} <strong>{pairingStatus.user_email || pairingStatus.username}</strong> {t('settings.cloudPairingRequestSuffix', '请求连接此设备')}</p>
+                          <div className="flex gap-2 mt-2">
+                            <Button size="sm" onClick={handleCloudApprove}>{t('settings.cloudApprove', '同意')}</Button>
+                            <Button size="sm" variant="outline" onClick={handleCloudReject}>{t('settings.cloudReject', '拒绝')}</Button>
+                          </div>
+                        </div>
+                      )}
+                      <Button variant="ghost" size="sm" onClick={handleCloudReject}>{t('settings.cloudCancelPairing', '取消配对')}</Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <Input placeholder={t('settings.cloudServerUrlPlaceholder', '云端服务地址 (https://...)')} value={cloudServerUrl} onChange={(e) => setCloudServerUrl(e.target.value)} />
+                      <Input placeholder={t('settings.cloudDeviceNamePlaceholder', '设备名称 (可选)')} value={cloudDeviceName} onChange={(e) => setCloudDeviceName(e.target.value)} />
+                      <Button onClick={handleStartPairing} disabled={!cloudServerUrl}>{t('settings.cloudStartPairing', '开始配对')}</Button>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
