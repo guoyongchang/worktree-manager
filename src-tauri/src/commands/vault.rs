@@ -6,6 +6,23 @@ use serde::{Deserialize, Serialize};
 use crate::config::get_window_workspace_path;
 use crate::config::{load_workspace_config, save_workspace_config_internal};
 
+/// Remove a symlink or junction. On Windows, directory symlinks/junctions
+/// require `remove_dir` instead of `remove_file` (which returns OS error 5).
+fn remove_symlink(path: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        if path.is_dir() {
+            fs::remove_dir(path)
+        } else {
+            fs::remove_file(path)
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        fs::remove_file(path)
+    }
+}
+
 // ==================== Data Structures ====================
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -217,7 +234,7 @@ pub fn create_vault_symlinks(
                     }
                 }
 
-                fs::remove_file(&link_path).map_err(|e| {
+                remove_symlink(&link_path).map_err(|e| {
                     format!("Failed to remove existing symlink '{}': {}", file_name, e)
                 })?;
             } else {
@@ -370,7 +387,7 @@ fn remove_vault_symlinks_matching(
 
             if should_remove {
                 let name = entry.file_name().to_string_lossy().to_string();
-                fs::remove_file(&path)
+                remove_symlink(&path)
                     .map_err(|e| format!("Failed to remove symlink '{}': {}", name, e))?;
 
                 // Restore .local backup (regular file/dir) if exists
