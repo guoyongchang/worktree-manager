@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { BackIcon } from './Icons';
 import { GitOperations } from './GitOperations';
-import { Terminal as TerminalIcon, Plus, FolderGit2, Minimize2 } from 'lucide-react';
+import { Terminal as TerminalIcon, Plus, FolderGit2 } from 'lucide-react';
 import { TerminalPanel } from './TerminalPanel';
 import type {
     WorktreeListItem,
@@ -421,18 +421,9 @@ export const MobileWorktreeDetail: FC<MobileWorktreeDetailProps> = ({
                         )}
 
                         {/* Terminal panel */}
-                        <div className={`flex-1 min-h-0 flex flex-col ${terminalFullscreen ? 'fixed inset-0 z-50 bg-slate-900' : ''}`}
+                        <div className="flex-1 min-h-0 flex flex-col"
                             style={{ touchAction: 'none' }}
                         >
-                            {/* Fullscreen header bar */}
-                            {terminalFullscreen && (
-                                <div className="shrink-0 flex items-center justify-between px-3 py-1.5 bg-slate-800 border-b border-slate-700/50">
-                                    <span className="text-xs text-slate-400">Terminal</span>
-                                    <button onClick={toggleTerminalFullscreen} className="p-1 rounded active:bg-slate-700">
-                                        <Minimize2 className="w-4 h-4 text-slate-400" />
-                                    </button>
-                                </div>
-                            )}
                             {activatedTerminals.size > 0 ? (
                                 <TerminalPanel
                                     visible={true}
