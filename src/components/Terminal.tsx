@@ -68,18 +68,29 @@ function MobileTerminalToolbar({
   onDebug?: () => void;
 }) {
   const [pendingBtn, setPendingBtn] = useState<string | null>(null);
+  const [sentToast, setSentToast] = useState<string | null>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
 
-  // Click outside / timeout clears pending state
+  // Click outside toolbar / timeout clears pending state
   useEffect(() => {
     if (!pendingBtn) return;
     const timer = setTimeout(() => setPendingBtn(null), 2000);
-    const handleOutside = () => setPendingBtn(null);
-    document.addEventListener('pointerdown', handleOutside, { capture: true, once: true });
+    const handleOutside = (e: PointerEvent) => {
+      // Don't clear if the tap is inside the toolbar (let onClick handle it)
+      if (toolbarRef.current?.contains(e.target as Node)) return;
+      setPendingBtn(null);
+    };
+    document.addEventListener('pointerdown', handleOutside);
     return () => {
       clearTimeout(timer);
-      document.removeEventListener('pointerdown', handleOutside, { capture: true });
+      document.removeEventListener('pointerdown', handleOutside);
     };
   }, [pendingBtn]);
+
+  const showSentToast = (label: string) => {
+    setSentToast(label);
+    setTimeout(() => setSentToast(null), 800);
+  };
 
   const handleBtn = (btn: typeof TOOLBAR_BUTTONS[0]) => {
     // Blur any focused element to prevent keyboard popup
@@ -90,6 +101,7 @@ function MobileTerminalToolbar({
         // Second tap — execute
         writeToPty(sessionId, btn.data);
         setPendingBtn(null);
+        showSentToast(btn.label);
       } else {
         // First tap — highlight
         setPendingBtn(btn.label);
@@ -102,7 +114,7 @@ function MobileTerminalToolbar({
   };
 
   return (
-    <div className="flex items-center gap-1.5 px-2 py-1.5 bg-slate-800/95 border-t border-slate-700/50 overflow-x-auto shrink-0 scrollbar-none"
+    <div ref={toolbarRef} className="flex items-center gap-1.5 px-2 py-1.5 bg-slate-800/95 border-t border-slate-700/50 overflow-x-auto shrink-0 scrollbar-none"
       style={{ touchAction: 'pan-x' }}
     >
       {TOOLBAR_BUTTONS.map((btn) => (
@@ -139,6 +151,11 @@ function MobileTerminalToolbar({
         >
           Debug
         </button>
+      )}
+      {sentToast && (
+        <span className="shrink-0 px-2 py-0.5 rounded bg-green-600/90 text-green-100 text-xs font-medium animate-pulse">
+          {sentToast} sent
+        </span>
       )}
     </div>
   );
