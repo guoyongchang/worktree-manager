@@ -137,6 +137,18 @@ impl NonceCache {
 
 // ==================== 配置结构 ====================
 
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct CloudConfig {
+    #[serde(default)]
+    pub server_url: Option<String>,
+    #[serde(default)]
+    pub access_token: Option<String>,
+    #[serde(default)]
+    pub refresh_token: Option<String>,
+    #[serde(default)]
+    pub device_name: Option<String>,
+}
+
 // 全局配置：存储在 ~/.config/worktree-manager/global.json
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct GlobalConfig {
@@ -166,6 +178,8 @@ pub struct GlobalConfig {
     pub skip_git_hooks: bool,
     #[serde(default)]
     pub custom_mirrors: Vec<CustomMirror>,
+    #[serde(default)]
+    pub cloud: CloudConfig,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -205,6 +219,7 @@ impl Default for GlobalConfig {
             git_user_email: None,
             skip_git_hooks: false,
             custom_mirrors: vec![],
+            cloud: CloudConfig::default(),
         }
     }
 }
