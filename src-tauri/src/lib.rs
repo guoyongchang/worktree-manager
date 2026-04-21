@@ -42,6 +42,7 @@ pub use commands::worktree::{
     list_worktrees_impl, restore_worktree_impl, scan_linked_folders_internal,
 };
 
+use commands::cloud::*;
 use commands::config::*;
 use commands::git::*;
 use commands::pty::*;
@@ -274,6 +275,13 @@ pub fn run() {
             vault_status,
             vault_link,
             list_vault_item_children,
+            // 云端连接
+            cloud_get_status,
+            cloud_start_pairing,
+            cloud_check_pairing_status,
+            cloud_approve_pairing,
+            cloud_reject_pairing,
+            cloud_disconnect,
         ])
         .setup(|app| {
             // Initialize APP_HANDLE for use in WebSocket handlers
