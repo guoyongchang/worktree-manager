@@ -43,10 +43,10 @@ function writeToPty(sessionId: string, data: string) {
 
 const TOOLBAR_BUTTONS = (() => {
   const isMac = getPlatform() === 'mac';
-  return [
+  const buttons: { label: string; data: string; confirm: boolean }[] = [
     { label: 'Esc', data: '\x1b', confirm: true },
     { label: isMac ? '⌃C' : 'Ctrl+C', data: '\x03', confirm: true },
-    { label: isMac ? '⌃D' : 'Ctrl+D', data: '\x04', confirm: true },
+    ...(!isMac ? [{ label: 'Ctrl+D', data: '\x04', confirm: true }] : []),
     { label: isMac ? '⌃Z' : 'Ctrl+Z', data: '\x1a', confirm: true },
     { label: 'Tab', data: '\t', confirm: false },
     { label: '←', data: '\x1b[D', confirm: false },
@@ -56,6 +56,7 @@ const TOOLBAR_BUTTONS = (() => {
     { label: 'Home', data: '\x1b[H', confirm: false },
     { label: 'End', data: '\x1b[F', confirm: false },
   ];
+  return buttons;
 })();
 
 function MobileTerminalToolbar({
