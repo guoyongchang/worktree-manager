@@ -10,9 +10,11 @@ use super::{
     h_add_existing_project, h_add_project_to_worktree, h_add_workspace, h_archive_worktree,
     h_auth_challenge, h_auth_verify, h_broadcast_terminal_state, h_cert_pem,
     h_check_dashscope_api_key, h_check_mirror_update, h_check_remote_branch_exists,
-    h_check_worktree_status, h_clone_project, h_commit_all, h_create_pull_request,
-    h_create_workspace, h_create_worktree, h_delete_archived_worktree, h_deploy_to_main,
-    h_detect_tools, h_download_update_via_mirror, h_exit_main_occupation, h_fetch_project_remote,
+    h_check_worktree_status, h_clone_project, h_cloud_approve_pairing,
+    h_cloud_check_pairing_status, h_cloud_disconnect, h_cloud_get_status, h_cloud_reject_pairing,
+    h_cloud_start_pairing, h_commit_all, h_create_pull_request, h_create_workspace,
+    h_create_worktree, h_delete_archived_worktree, h_deploy_to_main, h_detect_tools,
+    h_download_update_via_mirror, h_exit_main_occupation, h_fetch_project_remote,
     h_generate_commit_message, h_get_app_icon, h_get_app_version, h_get_branch_diff_stats,
     h_get_changed_files, h_get_commit_prefix_config, h_get_config_path_info,
     h_get_connected_clients, h_get_current_workspace, h_get_dashscope_api_key,
@@ -35,10 +37,8 @@ use super::{
     h_start_ngrok_tunnel, h_start_sharing, h_stop_ngrok_tunnel, h_stop_sharing, h_switch_branch,
     h_switch_workspace, h_sync_with_base_branch, h_test_mirror_speed, h_unlock_worktree,
     h_unregister_window, h_update_share_password, h_vault_link, h_vault_status, h_voice_is_active,
-    h_voice_refine_text, h_voice_send_audio, h_voice_start, h_voice_stop,
-    h_cloud_get_status, h_cloud_start_pairing, h_cloud_check_pairing_status,
-    h_cloud_approve_pairing, h_cloud_reject_pairing, h_cloud_disconnect,
-    h_ws_upgrade, is_allowed_origin, load_mcp_config, save_mcp_config, McpConfig,
+    h_voice_refine_text, h_voice_send_audio, h_voice_start, h_voice_stop, h_ws_upgrade,
+    is_allowed_origin, load_mcp_config, save_mcp_config, McpConfig,
 };
 
 pub(super) fn build_cors_layer() -> CorsLayer {
@@ -310,7 +310,10 @@ pub(super) fn build_api_router(cert_pem: Option<String>) -> Router {
         // Cloud
         .route("/api/cloud_get_status", post(h_cloud_get_status))
         .route("/api/cloud_start_pairing", post(h_cloud_start_pairing))
-        .route("/api/cloud_check_pairing_status", post(h_cloud_check_pairing_status))
+        .route(
+            "/api/cloud_check_pairing_status",
+            post(h_cloud_check_pairing_status),
+        )
         .route("/api/cloud_approve_pairing", post(h_cloud_approve_pairing))
         .route("/api/cloud_reject_pairing", post(h_cloud_reject_pairing))
         .route("/api/cloud_disconnect", post(h_cloud_disconnect))

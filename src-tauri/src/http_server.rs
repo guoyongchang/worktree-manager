@@ -1233,8 +1233,15 @@ pub async fn h_vault_link(
             v.as_str().map(|s| s.to_string())
         }
     });
-    let keep_symlinks = args.get("keepSymlinks").and_then(|v| v.as_bool()).unwrap_or(false);
-    result_json(crate::commands::vault::vault_link_impl(&sid, path, keep_symlinks))
+    let keep_symlinks = args
+        .get("keepSymlinks")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    result_json(crate::commands::vault::vault_link_impl(
+        &sid,
+        path,
+        keep_symlinks,
+    ))
 }
 
 pub async fn h_list_vault_item_children(
@@ -1886,7 +1893,7 @@ async fn h_cloud_check_pairing_status() -> Response {
 }
 
 async fn h_cloud_approve_pairing() -> Response {
-    result_ok(crate::commands::cloud::cloud_approve_pairing().await)
+    result_json(crate::commands::cloud::cloud_approve_pairing().await)
 }
 
 async fn h_cloud_reject_pairing() -> Response {

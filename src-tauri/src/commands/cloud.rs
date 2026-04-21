@@ -58,26 +58,26 @@ pub struct CloudStatus {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
-struct DeviceCodeResponse {
-    code: String,
-    device_secret: String,
-    expires_in: Option<u64>,
-    poll_interval: Option<u64>,
+pub struct DeviceCodeResponse {
+    pub code: String,
+    pub device_secret: String,
+    pub expires_in: Option<u64>,
+    pub poll_interval: Option<u64>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
-struct DeviceCodeStatusResponse {
-    status: String,
-    access_token: Option<String>,
-    refresh_token: Option<String>,
-    user_email: Option<String>,
+pub struct DeviceCodeStatusResponse {
+    pub status: String,
+    pub access_token: Option<String>,
+    pub refresh_token: Option<String>,
+    pub user_email: Option<String>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
-struct ApproveResponse {
-    access_token: Option<String>,
-    refresh_token: Option<String>,
-    user_email: Option<String>,
+pub struct ApproveResponse {
+    pub access_token: Option<String>,
+    pub refresh_token: Option<String>,
+    pub user_email: Option<String>,
 }
 
 // ==================== Commands ====================
@@ -92,7 +92,12 @@ pub(crate) async fn cloud_get_status() -> Result<CloudStatus, String> {
         state.is_some()
     };
 
-    let access_token = config.cloud.access_token.as_ref().filter(|t| !t.is_empty()).cloned();
+    let access_token = config
+        .cloud
+        .access_token
+        .as_ref()
+        .filter(|t| !t.is_empty())
+        .cloned();
     let connected = access_token.is_some();
 
     if !connected {
@@ -122,12 +127,10 @@ pub(crate) async fn cloud_get_status() -> Result<CloudStatus, String> {
             .send()
             .await
         {
-            Ok(resp) if resp.status().is_success() => {
-                match resp.json::<MeResponse>().await {
-                    Ok(me) => (me.email, me.username),
-                    Err(_) => (None, None),
-                }
-            }
+            Ok(resp) if resp.status().is_success() => match resp.json::<MeResponse>().await {
+                Ok(me) => (me.email, me.username),
+                Err(_) => (None, None),
+            },
             _ => (None, None),
         }
     } else {
@@ -155,7 +158,10 @@ pub(crate) async fn cloud_start_pairing(
     let client = reqwest::Client::new();
 
     let resp = client
-        .post(format!("{}/api/device-codes", server_url.trim_end_matches('/')))
+        .post(format!(
+            "{}/api/device-codes",
+            server_url.trim_end_matches('/')
+        ))
         .json(&serde_json::json!({ "device_name": device_name }))
         .send()
         .await
@@ -204,7 +210,11 @@ pub(crate) async fn cloud_check_pairing_status() -> Result<DeviceCodeStatusRespo
         let s = state
             .as_ref()
             .ok_or_else(|| "没有进行中的配对流程".to_string())?;
-        (s.code.clone(), s.device_secret.clone(), s.server_url.clone())
+        (
+            s.code.clone(),
+            s.device_secret.clone(),
+            s.server_url.clone(),
+        )
     };
 
     let client = reqwest::Client::new();
@@ -260,7 +270,11 @@ pub(crate) async fn cloud_approve_pairing() -> Result<ApproveResponse, String> {
         let s = state
             .as_ref()
             .ok_or_else(|| "没有进行中的配对流程".to_string())?;
-        (s.code.clone(), s.device_secret.clone(), s.server_url.clone())
+        (
+            s.code.clone(),
+            s.device_secret.clone(),
+            s.server_url.clone(),
+        )
     };
 
     let client = reqwest::Client::new();
@@ -316,7 +330,11 @@ pub(crate) async fn cloud_reject_pairing() -> Result<(), String> {
         let s = state
             .as_ref()
             .ok_or_else(|| "没有进行中的配对流程".to_string())?;
-        (s.code.clone(), s.device_secret.clone(), s.server_url.clone())
+        (
+            s.code.clone(),
+            s.device_secret.clone(),
+            s.server_url.clone(),
+        )
     };
 
     let client = reqwest::Client::new();

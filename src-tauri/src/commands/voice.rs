@@ -480,7 +480,15 @@ pub(crate) async fn call_ai_chat(
 
     // Try cloud first
     if crate::cloud_client::is_cloud_configured() {
-        match crate::cloud_client::cloud_ai_chat(&messages_value, model, false, purpose, Some(temperature)).await {
+        match crate::cloud_client::cloud_ai_chat(
+            &messages_value,
+            model,
+            false,
+            purpose,
+            Some(temperature),
+        )
+        .await
+        {
             Ok(resp_text) => {
                 let resp: serde_json::Value = serde_json::from_str(&resp_text)
                     .map_err(|e| format!("parse cloud response error: {}", e))?;

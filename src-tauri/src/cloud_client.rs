@@ -62,7 +62,8 @@ pub async fn cloud_ai_chat(
     );
     let client = reqwest::Client::new();
 
-    let mut body = serde_json::json!({ "messages": messages, "stream": stream, "purpose": purpose });
+    let mut body =
+        serde_json::json!({ "messages": messages, "stream": stream, "purpose": purpose });
     if let Some(m) = model {
         body["model"] = Value::String(m.to_string());
     }
@@ -103,10 +104,7 @@ pub async fn cloud_ai_chat(
                 // Retry with new token
                 let resp2 = client
                     .post(&url)
-                    .header(
-                        header::AUTHORIZATION,
-                        format!("Bearer {}", new_token),
-                    )
+                    .header(header::AUTHORIZATION, format!("Bearer {}", new_token))
                     .header(header::CONTENT_TYPE, "application/json")
                     .json(&body)
                     .timeout(std::time::Duration::from_secs(60))
@@ -144,10 +142,7 @@ pub async fn cloud_ai_chat(
     }
 }
 
-async fn refresh_access_token(
-    server_url: &str,
-    refresh_token: &str,
-) -> Result<String, CloudError> {
+async fn refresh_access_token(server_url: &str, refresh_token: &str) -> Result<String, CloudError> {
     let url = format!("{}/api/auth/refresh", server_url.trim_end_matches('/'));
     let client = reqwest::Client::new();
     let resp = client
