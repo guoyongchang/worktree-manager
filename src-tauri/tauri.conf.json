@@ -48,7 +48,8 @@
       "endpoints": [
         "https://github.com/guoyongchang/worktree-manager/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVFQ0QzNjE5NDBBNTFGRjEKUldUeEg2VkFHVGJOWHUwZWphQmRHMHA5bTVoNDJRTy9ORW54cTlhY1JRZCtXaXRYOHZPUG9tVVMK"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVFQ0QzNjE5NDBBNTFGRjEKUldUeEg2VkFHVGJOWHUwZWphQmRHMHA5bTVoNDJRTy9ORW54cTlhY1JRZCtXaXRYOHZPUG9tVVMK",
+      "dangerousInsecureTransportProtocol": true
     }
   }
 }
