@@ -215,7 +215,6 @@ export function useVoiceInput(
       console.log('[voice] requesting getUserMedia, preferredDevice:', preferredDeviceId);
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          sampleRate: 16000,
           channelCount: 1,
           echoCancellation: true,
           noiseSuppression: true,
