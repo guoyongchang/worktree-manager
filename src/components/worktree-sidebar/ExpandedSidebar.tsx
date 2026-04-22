@@ -801,37 +801,61 @@ const SidebarBottomBar: FC<{
   onOpenLogDir: () => void;
 }> = ({ appVersion, hasUpdate, isDev, isMainWin, isTauri, onCheckUpdate, onOpenLogDir }) => {
   const { t } = useTranslation();
+  const [devConsoleEnabled, setDevConsoleEnabled] = useState(() => localStorage.getItem('dev-console-enabled') === 'true');
+
+  useEffect(() => {
+    const handler = () => {
+      setDevConsoleEnabled(localStorage.getItem('dev-console-enabled') === 'true');
+    };
+    window.addEventListener('storage', handler);
+    window.addEventListener('dev-console-enabled-changed', handler);
+    return () => {
+      window.removeEventListener('storage', handler);
+      window.removeEventListener('dev-console-enabled-changed', handler);
+    };
+  }, []);
 
   return (
     <div className="px-3 h-8 border-t border-slate-700/50 flex items-center justify-between shrink-0">
       {isMainWin ? (
         isDev ? (
           <button
-            onClick={() => { callBackend('open_devtools').catch(() => { }); }}
+            onClick={() => { callBackend('open_devtools').catch(() => { /* ignore */ }); }}
             className="text-xs text-amber-500/70 hover:text-amber-400 transition-colors cursor-pointer font-mono"
             title={t('sidebar.openDevTools')}
           >
             DEV
           </button>
         ) : (
-          <TooltipProvider delayDuration={300}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={onCheckUpdate}
-                  className="relative text-xs text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
-                >
-                  v{appVersion}
-                  {hasUpdate && (
-                    <span className="absolute -top-1 -right-2.5 w-2 h-2 bg-red-500 rounded-full" />
-                  )}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top">
-                {hasUpdate ? t('sidebar.hasUpdateAvailable') : t('settings.checkUpdate')}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <div className="flex items-center gap-2">
+            <TooltipProvider delayDuration={300}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={onCheckUpdate}
+                    className="relative text-xs text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
+                  >
+                    v{appVersion}
+                    {hasUpdate && (
+                      <span className="absolute -top-1 -right-2.5 w-2 h-2 bg-red-500 rounded-full" />
+                    )}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {hasUpdate ? t('sidebar.hasUpdateAvailable') : t('settings.checkUpdate')}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            {devConsoleEnabled && (
+              <button
+                onClick={() => { callBackend('open_devtools').catch(() => { /* ignore */ }); }}
+                className="text-[10px] text-amber-500/70 hover:text-amber-400 transition-colors cursor-pointer font-mono"
+                title={t('sidebar.openDevTools')}
+              >
+                DevTools
+              </button>
+            )}
+          </div>
         )
       ) : (
         <div />

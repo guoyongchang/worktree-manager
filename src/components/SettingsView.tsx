@@ -1958,7 +1958,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                         <label className="text-sm text-slate-400">DevTools (F12)</label>
                         <p className="text-xs text-slate-500">{t('settings.devToolsDesc', 'Press F12 to open developer tools')}</p>
                       </div>
-                      <button type="button" onClick={() => { const newVal = !devConsoleEnabled; setDevConsoleEnabled(newVal); localStorage.setItem('dev-console-enabled', String(newVal)); }}
+                      <button type="button" onClick={() => { const newVal = !devConsoleEnabled; setDevConsoleEnabled(newVal); localStorage.setItem('dev-console-enabled', String(newVal)); window.dispatchEvent(new Event('dev-console-enabled-changed')); }}
                         className={`relative inline-flex h-5 w-8 items-center rounded-full transition-colors ${devConsoleEnabled ? 'bg-blue-500' : 'bg-slate-600'}`}
                       ><span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${devConsoleEnabled ? 'translate-x-3.5' : 'translate-x-0.5'}`} /></button>
                     </div>
