@@ -150,9 +150,31 @@ export function useWorkspaceActions(
   const [archiveModal, setArchiveModal] = useState<ArchiveModalState | null>(null);
   const [deleteConfirmWorktree, setDeleteConfirmWorktree] = useState<WorktreeListItem | null>(null);
 
-  // Editor selection
+  // Editor selection — prefer user's saved preference, fallback to first detected (non-hidden) editor
   const [selectedEditor, setSelectedEditor] = useState<EditorType>(() => {
-    return (localStorage.getItem('preferred_editor') as EditorType) || 'vscode';
+    const saved = localStorage.getItem('preferred_editor') as EditorType | null;
+    if (saved) {
+      // Verify saved editor still exists in detected list and isn't hidden
+      try {
+        const detected: Array<{ id: string }> = JSON.parse(localStorage.getItem('detected_editors') || '[]');
+        const hidden: string[] = JSON.parse(localStorage.getItem('hidden_editors') || '[]');
+        if (detected.some(e => e.id === saved && !hidden.includes(e.id))) {
+          return saved;
+        }
+        // Saved editor not available — pick first visible detected one
+        const first = detected.find(e => !hidden.includes(e.id));
+        if (first) return first.id as EditorType;
+      } catch { /* ignore */ }
+      return saved; // parsing failed, trust the saved value
+    }
+    // No saved preference — pick first detected non-hidden editor
+    try {
+      const detected: Array<{ id: string }> = JSON.parse(localStorage.getItem('detected_editors') || '[]');
+      const hidden: string[] = JSON.parse(localStorage.getItem('hidden_editors') || '[]');
+      const first = detected.find(e => !hidden.includes(e.id));
+      if (first) return first.id as EditorType;
+    } catch { /* ignore */ }
+    return 'vscode'; // ultimate fallback
   });
 
   // Auto-detect tools on mount only if no editors/terminals cached yet
@@ -186,6 +208,19 @@ export function useWorkspaceActions(
         localStorage.setItem('editor_icons', JSON.stringify(editorIcons));
         localStorage.setItem('detected_editors', JSON.stringify(editorList));
         localStorage.setItem('tool_paths', JSON.stringify(toolPaths));
+        // Auto-select first detected editor if current selection is not available
+        const hiddenIds: string[] = JSON.parse(localStorage.getItem('hidden_editors') || '[]');
+        const visibleEditors = editorList.filter(e => !hiddenIds.includes(e.id));
+        if (visibleEditors.length > 0) {
+          setSelectedEditor(prev => {
+            if (!visibleEditors.some(e => e.id === prev)) {
+              const newDefault = visibleEditors[0].id as EditorType;
+              localStorage.setItem('preferred_editor', newDefault);
+              return newDefault;
+            }
+            return prev;
+          });
+        }
         window.dispatchEvent(new Event('editors-detected'));
       }
       if (tools?.terminals) {

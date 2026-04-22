@@ -604,6 +604,10 @@ impl PtyManager {
         self.sessions.contains_key(id)
     }
 
+    pub fn session_count(&self) -> usize {
+        self.sessions.len()
+    }
+
     /// Get a broadcast receiver and replay buffer snapshot for a PTY session (used by WebSocket subscribers).
     /// Returns (replay_data, broadcast_receiver).
     pub fn subscribe_session(&self, id: &str) -> Option<(Vec<u8>, broadcast::Receiver<Vec<u8>>)> {

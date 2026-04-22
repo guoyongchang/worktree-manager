@@ -39,6 +39,8 @@ fn is_localhost_only_path(path: &str) -> bool {
             | "/api/get_dashscope_base_url"
             | "/api/set_dashscope_base_url"
             | "/api/download_update_via_mirror"
+            | "/api/test_mirror_speed"
+            | "/api/save_custom_mirrors"
             | "/api/open_devtools"
     )
 }

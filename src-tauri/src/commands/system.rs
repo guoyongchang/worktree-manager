@@ -1249,17 +1249,18 @@ pub(crate) fn get_app_version() -> String {
 /// 通过 gh-proxy.org 镜像检测最新版本（仅检测，不下载）
 /// 返回 JSON: { "version": "...", "pub_date": "...", "notes": "..." }
 #[tauri::command]
-pub(crate) async fn check_mirror_update() -> Result<serde_json::Value, String> {
-    log::info!("[system] Checking mirror for updates...");
+pub(crate) async fn check_mirror_update(mirror_url: String) -> Result<serde_json::Value, String> {
+    log::info!("[system] Checking mirror for updates via {}...", mirror_url);
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .build()
         .map_err(|e| format!("HTTP client error: {}", e))?;
 
-    let endpoint =
-        "https://gh-proxy.org/https://github.com/guoyongchang/worktree-manager/releases/latest/download/latest.json";
+    let github_url =
+        "https://github.com/guoyongchang/worktree-manager/releases/latest/download/latest.json";
+    let endpoint = format!("{}{}", mirror_url, github_url);
     let resp = client
-        .get(endpoint)
+        .get(&endpoint)
         .send()
         .await
         .map_err(|e| format!("Failed to fetch mirror manifest: {}", e))?;
@@ -1305,25 +1306,22 @@ pub(crate) async fn check_mirror_update() -> Result<serde_json::Value, String> {
 
 // ==================== 更新镜像下载 ====================
 
-/// 通过 gh-proxy.org 镜像下载更新（内置更新流程，非浏览器跳转）
-/// 原理：获取 latest.json → 将下载 URL 替换为 gh-proxy 代理 → 用本地临时服务提供修改后的 manifest → 走 Tauri 内置更新器
-#[tauri::command]
-pub(crate) async fn download_update_via_mirror(app: tauri::AppHandle) -> Result<(), String> {
+/// 通过镜像下载更新的内部实现（单个镜像源）
+async fn download_with_mirror(app: &tauri::AppHandle, mirror_url: &str) -> Result<(), String> {
     use tauri::Emitter;
     use tauri_plugin_updater::UpdaterExt;
 
-    log::info!("[system] Starting mirror update download...");
-
-    // 1. Fetch latest.json from GitHub
+    // 1. Fetch latest.json from GitHub (via mirror)
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|e| format!("HTTP client error: {}", e))?;
 
-    let endpoint =
+    let github_manifest =
         "https://github.com/guoyongchang/worktree-manager/releases/latest/download/latest.json";
+    let endpoint = format!("{}{}", mirror_url, github_manifest);
     let resp = client
-        .get(endpoint)
+        .get(&endpoint)
         .send()
         .await
         .map_err(|e| format!("Failed to fetch update manifest: {}", e))?;
@@ -1332,13 +1330,13 @@ pub(crate) async fn download_update_via_mirror(app: tauri::AppHandle) -> Result<
         .await
         .map_err(|e| format!("Failed to parse update manifest: {}", e))?;
 
-    // 2. Modify all platform download URLs to use gh-proxy.org
+    // 2. Modify all platform download URLs to use the mirror
     if let Some(platforms) = manifest.get_mut("platforms") {
         if let Some(obj) = platforms.as_object_mut() {
             for (platform, info) in obj.iter_mut() {
                 if let Some(url_val) = info.get_mut("url") {
                     if let Some(url_str) = url_val.as_str() {
-                        let proxied = format!("https://gh-proxy.org/{}", url_str);
+                        let proxied = format!("{}{}", mirror_url, url_str);
                         log::info!("[system] Proxied URL for {}: {}", platform, proxied);
                         *url_val = serde_json::Value::String(proxied);
                     }
@@ -1402,8 +1400,6 @@ pub(crate) async fn download_update_via_mirror(app: tauri::AppHandle) -> Result<
     log::info!("[system] Mirror update found: v{}", update.version);
 
     // 6. Download and install with progress events emitted to the frontend
-    //    on_chunk callback: FnMut(chunk_length: usize, content_length: Option<u64>)
-    //    on_download_finish callback: FnOnce()
     let app_for_chunk = app.clone();
     let app_for_finish = app.clone();
     let mut first_chunk = true;
@@ -1411,7 +1407,6 @@ pub(crate) async fn download_update_via_mirror(app: tauri::AppHandle) -> Result<
     update
         .download_and_install(
             move |chunk_len: usize, content_length: Option<u64>| {
-                // Emit "Started" on the first chunk
                 if first_chunk {
                     first_chunk = false;
                     let _ = app_for_chunk.emit(
@@ -1422,7 +1417,6 @@ pub(crate) async fn download_update_via_mirror(app: tauri::AppHandle) -> Result<
                         }),
                     );
                 }
-                // Emit "Progress" for every chunk
                 let _ = app_for_chunk.emit(
                     "mirror-update-progress",
                     serde_json::json!({
@@ -1432,7 +1426,6 @@ pub(crate) async fn download_update_via_mirror(app: tauri::AppHandle) -> Result<
                 );
             },
             move || {
-                // Emit "Finished" when download completes
                 let _ = app_for_finish.emit(
                     "mirror-update-progress",
                     serde_json::json!({
@@ -1449,8 +1442,119 @@ pub(crate) async fn download_update_via_mirror(app: tauri::AppHandle) -> Result<
     if let Some(handle) = server_guard.0.take() {
         handle.abort();
     }
-    log::info!("[system] Mirror update download complete");
+    log::info!(
+        "[system] Mirror update download complete via {}",
+        mirror_url
+    );
 
+    Ok(())
+}
+
+/// 通过镜像下载更新，支持自动 fallback 到其他可用镜像源
+#[tauri::command]
+pub(crate) async fn download_update_via_mirror(
+    app: tauri::AppHandle,
+    mirror_url: String,
+) -> Result<(), String> {
+    use tauri::Emitter;
+
+    log::info!(
+        "[system] Starting mirror update download via {}...",
+        mirror_url
+    );
+
+    // Build fallback list: primary mirror + cached available mirrors (up to 3 total)
+    let mut fallback_list = vec![mirror_url.clone()];
+    let cached = crate::mirror::get_cached_results();
+    for r in &cached {
+        if r.available && r.url != mirror_url && fallback_list.len() < 3 {
+            fallback_list.push(r.url.clone());
+        }
+    }
+
+    log::info!(
+        "[system] Fallback mirror list ({} entries): {:?}",
+        fallback_list.len(),
+        fallback_list
+    );
+
+    let mut last_error = String::new();
+
+    for (attempt, url) in fallback_list.iter().enumerate() {
+        if attempt > 0 {
+            log::info!(
+                "[system] Fallback attempt #{}: trying {}...",
+                attempt + 1,
+                url
+            );
+            let _ = app.emit(
+                "mirror-update-progress",
+                serde_json::json!({
+                    "event": "Fallback",
+                    "data": { "mirror": url, "attempt": attempt + 1 }
+                }),
+            );
+        }
+
+        match download_with_mirror(&app, url).await {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                log::warn!(
+                    "[system] Mirror download failed via {} (attempt {}): {}",
+                    url,
+                    attempt + 1,
+                    e
+                );
+                last_error = e;
+            }
+        }
+    }
+
+    Err(format!(
+        "All {} mirror(s) failed. Last error: {}",
+        fallback_list.len(),
+        last_error
+    ))
+}
+
+// ==================== 镜像源管理 ====================
+
+/// 并发 PING 所有镜像源，返回可用性结果（不做吞吐量测速）
+#[tauri::command]
+pub(crate) async fn test_mirror_speed() -> Result<Vec<crate::mirror::MirrorTestResult>, String> {
+    log::info!("[system] Starting mirror PING test...");
+    let results = crate::mirror::ping_all_mirrors().await;
+    log::info!(
+        "[system] Mirror PING test complete, {} results",
+        results.len()
+    );
+    Ok(results)
+}
+
+/// 对单个镜像源进行吞吐量测速（10秒）
+#[tauri::command]
+pub(crate) async fn speed_test_single_mirror(
+    mirror_url: String,
+) -> Result<crate::mirror::MirrorTestResult, String> {
+    log::info!("[system] Speed testing single mirror: {}", mirror_url);
+    crate::mirror::speed_test_single(&mirror_url)
+        .await
+        .ok_or_else(|| format!("Mirror not found: {}", mirror_url))
+}
+
+/// 返回所有镜像源（内置 + 自定义）
+#[tauri::command]
+pub(crate) fn get_mirror_sources() -> Vec<crate::mirror::MirrorSource> {
+    crate::mirror::get_all_mirrors()
+}
+
+/// 保存用户自定义镜像源到 global.json
+#[tauri::command]
+pub(crate) fn save_custom_mirrors(mirrors: Vec<crate::types::CustomMirror>) -> Result<(), String> {
+    let mut config = crate::config::load_global_config();
+    config.custom_mirrors = mirrors;
+    crate::config::save_global_config_internal(&config)?;
+    crate::mirror::clear_mirror_cache();
     Ok(())
 }
 

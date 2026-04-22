@@ -6,6 +6,23 @@ use serde::{Deserialize, Serialize};
 use crate::config::get_window_workspace_path;
 use crate::config::{load_workspace_config, save_workspace_config_internal};
 
+/// Remove a symlink or junction. On Windows, directory symlinks/junctions
+/// require `remove_dir` instead of `remove_file` (which returns OS error 5).
+fn remove_symlink(path: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        if path.is_dir() {
+            fs::remove_dir(path)
+        } else {
+            fs::remove_file(path)
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        fs::remove_file(path)
+    }
+}
+
 // ==================== Data Structures ====================
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -217,7 +234,7 @@ pub fn create_vault_symlinks(
                     }
                 }
 
-                fs::remove_file(&link_path).map_err(|e| {
+                remove_symlink(&link_path).map_err(|e| {
                     format!("Failed to remove existing symlink '{}': {}", file_name, e)
                 })?;
             } else {
@@ -370,7 +387,7 @@ fn remove_vault_symlinks_matching(
 
             if should_remove {
                 let name = entry.file_name().to_string_lossy().to_string();
-                fs::remove_file(&path)
+                remove_symlink(&path)
                     .map_err(|e| format!("Failed to remove symlink '{}': {}", name, e))?;
 
                 // Restore .local backup (regular file/dir) if exists
@@ -607,6 +624,7 @@ pub fn vault_status_impl(window_label: &str) -> Result<VaultStatus, String> {
 pub fn vault_link_impl(
     window_label: &str,
     path: Option<String>,
+    keep_symlinks: bool,
 ) -> Result<VaultLinkResponse, String> {
     let workspace_path =
         get_window_workspace_path(window_label).ok_or("No workspace bound to window")?;
@@ -721,8 +739,10 @@ pub fn vault_link_impl(
             let previous_vault_path = read_vault_path_from_overrides(workspace_root);
             let previous_linked_items = get_vault_linked_items(workspace_root);
 
-            // Disconnect: remove vault symlinks, clear overrides, clear linked items
-            remove_vault_symlinks(workspace_root)?;
+            // Disconnect: optionally remove vault symlinks, clear overrides, clear linked items
+            if !keep_symlinks {
+                remove_vault_symlinks(workspace_root)?;
+            }
             let persist_result = (|| -> Result<(), String> {
                 clear_vault_from_overrides(workspace_root)?;
                 update_vault_linked_items(workspace_root, &[])?;
@@ -764,8 +784,9 @@ pub(crate) fn vault_status(window: tauri::Window) -> Result<VaultStatus, String>
 pub(crate) fn vault_link(
     window: tauri::Window,
     path: Option<String>,
+    keep_symlinks: Option<bool>,
 ) -> Result<VaultLinkResponse, String> {
-    vault_link_impl(window.label(), path)
+    vault_link_impl(window.label(), path, keep_symlinks.unwrap_or(false))
 }
 
 /// List children of a vault item (file or directory).
@@ -1295,6 +1316,7 @@ mod tests {
         let err = vault_link_impl(
             window_label,
             Some(vault_source.path().to_string_lossy().to_string()),
+            false,
         )
         .unwrap_err();
 

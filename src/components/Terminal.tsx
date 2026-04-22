@@ -43,19 +43,20 @@ function writeToPty(sessionId: string, data: string) {
 
 const TOOLBAR_BUTTONS = (() => {
   const isMac = getPlatform() === 'mac';
-  return [
-    { label: 'Esc', data: '\x1b' },
-    { label: isMac ? '⌃C' : 'Ctrl+C', data: '\x03' },
-    { label: isMac ? '⌃D' : 'Ctrl+D', data: '\x04' },
-    { label: isMac ? '⌃Z' : 'Ctrl+Z', data: '\x1a' },
-    { label: 'Tab', data: '\t' },
-    { label: '←', data: '\x1b[D' },
-    { label: '→', data: '\x1b[C' },
-    { label: '↑', data: '\x1b[A' },
-    { label: '↓', data: '\x1b[B' },
-    { label: 'Home', data: '\x1b[H' },
-    { label: 'End', data: '\x1b[F' },
+  const buttons: { label: string; data: string; confirm: boolean }[] = [
+    { label: 'Esc', data: '\x1b', confirm: true },
+    { label: isMac ? '⌃C' : 'Ctrl+C', data: '\x03', confirm: true },
+    ...(!isMac ? [{ label: 'Ctrl+D', data: '\x04', confirm: true }] : []),
+    { label: isMac ? '⌃Z' : 'Ctrl+Z', data: '\x1a', confirm: true },
+    { label: 'Tab', data: '\t', confirm: false },
+    { label: '←', data: '\x1b[D', confirm: false },
+    { label: '→', data: '\x1b[C', confirm: false },
+    { label: '↑', data: '\x1b[A', confirm: false },
+    { label: '↓', data: '\x1b[B', confirm: false },
+    { label: 'Home', data: '\x1b[H', confirm: false },
+    { label: 'End', data: '\x1b[F', confirm: false },
   ];
+  return buttons;
 })();
 
 function MobileTerminalToolbar({
@@ -67,24 +68,73 @@ function MobileTerminalToolbar({
   onResize?: () => void;
   onDebug?: () => void;
 }) {
+  const [pendingBtn, setPendingBtn] = useState<string | null>(null);
+  const [sentToast, setSentToast] = useState<string | null>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+
+  // Click outside toolbar / timeout clears pending state
+  useEffect(() => {
+    if (!pendingBtn) return;
+    const timer = setTimeout(() => setPendingBtn(null), 2000);
+    const handleOutside = (e: PointerEvent) => {
+      // Don't clear if the tap is inside the toolbar (let onClick handle it)
+      if (toolbarRef.current?.contains(e.target as Node)) return;
+      setPendingBtn(null);
+    };
+    document.addEventListener('pointerdown', handleOutside);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('pointerdown', handleOutside);
+    };
+  }, [pendingBtn]);
+
+  const showSentToast = (label: string) => {
+    setSentToast(label);
+    setTimeout(() => setSentToast(null), 800);
+  };
+
+  const handleBtn = (btn: typeof TOOLBAR_BUTTONS[0]) => {
+    // Blur any focused element to prevent keyboard popup
+    (document.activeElement as HTMLElement)?.blur();
+
+    if (btn.confirm) {
+      if (pendingBtn === btn.label) {
+        // Second tap — execute
+        writeToPty(sessionId, btn.data);
+        setPendingBtn(null);
+        showSentToast(btn.label);
+      } else {
+        // First tap — highlight
+        setPendingBtn(btn.label);
+      }
+    } else {
+      // No confirmation needed (arrows, tab, etc.)
+      writeToPty(sessionId, btn.data);
+      setPendingBtn(null);
+    }
+  };
+
   return (
-    <div className="flex items-center gap-1.5 px-2 py-1.5 bg-slate-800/95 border-t border-slate-700/50 overflow-x-auto shrink-0 scrollbar-none">
+    <div ref={toolbarRef} className="flex items-center gap-1.5 px-2 py-1.5 bg-slate-800/95 border-t border-slate-700/50 overflow-x-auto shrink-0 scrollbar-none"
+      style={{ touchAction: 'pan-x' }}
+    >
       {TOOLBAR_BUTTONS.map((btn) => (
         <button
           key={btn.label}
-          onPointerDown={(e) => {
-            e.preventDefault();
-            writeToPty(sessionId, btn.data);
-          }}
-          className="shrink-0 px-2.5 py-1 rounded-full bg-slate-700/80 text-slate-300 text-xs font-medium active:bg-slate-600 select-none touch-manipulation"
+          onClick={() => handleBtn(btn)}
+          className={`shrink-0 px-2.5 py-1 rounded-full text-xs font-medium select-none touch-manipulation transition-colors ${
+            pendingBtn === btn.label
+              ? 'bg-yellow-600/90 text-yellow-100 ring-1 ring-yellow-400'
+              : 'bg-slate-700/80 text-slate-300 active:bg-slate-600'
+          }`}
         >
           {btn.label}
         </button>
       ))}
       {onResize && (
         <button
-          onPointerDown={(e) => {
-            e.preventDefault();
+          onClick={() => {
+            (document.activeElement as HTMLElement)?.blur();
             onResize();
           }}
           className="shrink-0 px-2.5 py-1 rounded-full bg-blue-700/80 text-blue-200 text-xs font-medium active:bg-blue-600 select-none touch-manipulation"
@@ -94,14 +144,19 @@ function MobileTerminalToolbar({
       )}
       {onDebug && (
         <button
-          onPointerDown={(e) => {
-            e.preventDefault();
+          onClick={() => {
+            (document.activeElement as HTMLElement)?.blur();
             onDebug();
           }}
           className="shrink-0 px-2.5 py-1 rounded-full bg-amber-700/80 text-amber-200 text-xs font-medium active:bg-amber-600 select-none touch-manipulation"
         >
           Debug
         </button>
+      )}
+      {sentToast && (
+        <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[100] px-4 py-2 rounded-lg bg-green-600/95 text-green-100 text-sm font-medium shadow-lg pointer-events-none animate-pulse">
+          {sentToast} sent
+        </div>
       )}
     </div>
   );
@@ -325,6 +380,23 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
     term.loadAddon(webLinksAddon);
 
     term.open(terminalRef.current);
+
+    // On mobile, prevent soft keyboard from popping up on casual touch.
+    // Use inputMode="none" which hides the keyboard but still allows xterm to receive input.
+    // Double-tap to explicitly open the keyboard.
+    if (isMobileDevice) {
+      const xtermTextarea = terminalRef.current?.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement | null;
+      if (xtermTextarea) {
+        xtermTextarea.inputMode = 'none';
+        terminalRef.current?.addEventListener('dblclick', () => {
+          xtermTextarea.inputMode = 'text';
+          xtermTextarea.focus();
+          xtermTextarea.addEventListener('blur', () => {
+            xtermTextarea.inputMode = 'none';
+          }, { once: true });
+        });
+      }
+    }
 
     // Let Alt+V pass through xterm for voice input
     term.attachCustomKeyEventHandler((e) => !(e.altKey && e.code === 'KeyV'));

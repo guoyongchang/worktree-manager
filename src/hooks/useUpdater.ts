@@ -25,6 +25,21 @@ export interface DownloadProgress {
   percentage: number;
 }
 
+export interface MirrorSource {
+  name: string;
+  url: string;
+  builtin: boolean;
+}
+
+export interface MirrorTestResult {
+  name: string;
+  url: string;
+  bytes_downloaded: number;
+  speed_mbps: number;
+  ping_ms: number;
+  available: boolean;
+}
+
 export interface UseUpdaterReturn {
   state: UpdaterState;
   updateInfo: UpdateInfo | null;
@@ -46,6 +61,15 @@ export interface UseUpdaterReturn {
   mirrorVersion: string | null;
   officialError: string;
   mirrorError: string;
+  // Mirror source management
+  mirrorTestResults: MirrorTestResult[];
+  selectedMirror: MirrorSource | null;
+  speedTesting: boolean;
+  testMirrorSpeed: () => Promise<void>;
+  addCustomMirror: (name: string, url: string) => Promise<void>;
+  removeCustomMirror: (name: string) => Promise<void>;
+  selectMirror: (mirror: MirrorSource) => Promise<void>;
+  speedTestSingle: (mirrorUrl: string) => Promise<void>;
 }
 
 export function useUpdater(): UseUpdaterReturn {
@@ -67,6 +91,9 @@ export function useUpdater(): UseUpdaterReturn {
   const [mirrorVersion, setMirrorVersion] = useState<string | null>(null);
   const [officialError, setOfficialError] = useState('');
   const [mirrorError, setMirrorError] = useState('');
+  const [mirrorTestResults, setMirrorTestResults] = useState<MirrorTestResult[]>([]);
+  const [selectedMirror, setSelectedMirror] = useState<MirrorSource | null>(null);
+  const [speedTesting, setSpeedTesting] = useState(false);
 
   // Store the native Update object (Tauri only)
   const updateRef = useRef<unknown>(null);
@@ -175,22 +202,89 @@ export function useUpdater(): UseUpdaterReturn {
     }
   }, []);
 
+  const testMirrorSpeed = useCallback(async () => {
+    setSpeedTesting(true);
+    try {
+      const results = await callBackend<MirrorTestResult[]>('test_mirror_speed');
+      setMirrorTestResults(results);
+      const fastest = results.find((r) => r.available);
+      if (fastest) {
+        setSelectedMirror({ name: fastest.name, url: fastest.url, builtin: true });
+      }
+    } catch (err) {
+      console.error('[updater] Mirror speed test failed:', err);
+    } finally {
+      setSpeedTesting(false);
+    }
+  }, []);
+
+  const addCustomMirror = useCallback(async (name: string, url: string) => {
+    try {
+      const sources = await callBackend<MirrorSource[]>('get_mirror_sources');
+      const customMirrors = sources
+        .filter((s) => !s.builtin)
+        .map((s) => ({ name: s.name, url: s.url }));
+      customMirrors.push({ name, url });
+      await callBackend('save_custom_mirrors', { mirrors: customMirrors });
+    } catch (err) {
+      console.error('[updater] Failed to add custom mirror:', err);
+    }
+  }, []);
+
+  const removeCustomMirror = useCallback(async (name: string) => {
+    try {
+      const sources = await callBackend<MirrorSource[]>('get_mirror_sources');
+      const customMirrors = sources
+        .filter((s) => !s.builtin && s.name !== name)
+        .map((s) => ({ name: s.name, url: s.url }));
+      await callBackend('save_custom_mirrors', { mirrors: customMirrors });
+    } catch (err) {
+      console.error('[updater] Failed to remove custom mirror:', err);
+    }
+  }, []);
+
+  const speedTestSingle = useCallback(async (mirrorUrl: string) => {
+    try {
+      const result = await callBackend<MirrorTestResult>('speed_test_single_mirror', { mirrorUrl });
+      setMirrorTestResults((prev) =>
+        prev.map((r) => (r.url === mirrorUrl ? result : r)),
+      );
+    } catch (err) {
+      console.error('[updater] Single mirror speed test failed:', err);
+    }
+  }, []);
+
   const checkMirrorChannel = useCallback(async () => {
     setMirrorStatus('checking');
     try {
+      // 先测速
+      setSpeedTesting(true);
+      const results = await callBackend<MirrorTestResult[]>('test_mirror_speed');
+      setMirrorTestResults(results);
+      setSpeedTesting(false);
+
+      const fastest = results.find((r) => r.available);
+      if (!fastest) {
+        setMirrorError('No mirror available');
+        setMirrorStatus('error');
+        return;
+      }
+
+      setSelectedMirror({ name: fastest.name, url: fastest.url, builtin: true });
+
+      // 用最快源检查更新
       const manifest = await callBackend<{
         version: string;
         pub_date: string;
         notes: string;
         current_version: string;
-      }>('check_mirror_update');
+      }>('check_mirror_update', { mirrorUrl: fastest.url });
 
       const latestVersion = manifest.version;
       const currentVersion = manifest.current_version;
 
       setMirrorVersion(latestVersion);
       if (latestVersion && latestVersion !== currentVersion) {
-        // Also populate updateInfo if official hasn't found it yet
         if (!updateRef.current) {
           setUpdateInfo((prev) =>
             prev ?? {
@@ -211,6 +305,7 @@ export function useUpdater(): UseUpdaterReturn {
       console.error('[updater] Mirror channel check failed:', err);
       setMirrorError(String(err));
       setMirrorStatus('error');
+      setSpeedTesting(false);
     }
   }, []);
 
@@ -342,7 +437,9 @@ export function useUpdater(): UseUpdaterReturn {
     );
 
     try {
-      await callBackend('download_update_via_mirror');
+      await callBackend('download_update_via_mirror', {
+        mirrorUrl: selectedMirror?.url ?? 'https://gh-proxy.org/',
+      });
       setState('success');
     } catch (err) {
       console.error('Failed to download mirror update:', err);
@@ -351,7 +448,7 @@ export function useUpdater(): UseUpdaterReturn {
     } finally {
       unlisten();
     }
-  }, [updateInfo]);
+  }, [updateInfo, selectedMirror]);
 
   const restartApp = useCallback(async () => {
     if (!isTauri()) return;
@@ -398,5 +495,50 @@ export function useUpdater(): UseUpdaterReturn {
     mirrorVersion,
     officialError,
     mirrorError,
+    mirrorTestResults,
+    selectedMirror,
+    speedTesting,
+    testMirrorSpeed,
+    addCustomMirror,
+    removeCustomMirror,
+    selectMirror: async (mirror: MirrorSource) => {
+      setSelectedMirror(mirror);
+      // 用新选中的源重新检查更新
+      setMirrorStatus('checking');
+      try {
+        const manifest = await callBackend<{
+          version: string;
+          pub_date: string;
+          notes: string;
+          current_version: string;
+        }>('check_mirror_update', { mirrorUrl: mirror.url });
+
+        const latestVersion = manifest.version;
+        const currentVersion = manifest.current_version;
+        setMirrorVersion(latestVersion);
+        if (latestVersion && latestVersion !== currentVersion) {
+          if (!updateRef.current) {
+            setUpdateInfo((prev) =>
+              prev ?? {
+                version: latestVersion,
+                currentVersion,
+                date: manifest.pub_date?.split('T')[0] ?? new Date().toISOString().split('T')[0],
+                notes: manifest.notes
+                  ? String(manifest.notes).split('\n').filter((l: string) => l.trim())
+                  : [],
+              },
+            );
+          }
+          setMirrorStatus('available');
+        } else {
+          setMirrorStatus('up-to-date');
+        }
+      } catch (err) {
+        console.error('[updater] Mirror check after switch failed:', err);
+        setMirrorError(String(err));
+        setMirrorStatus('error');
+      }
+    },
+    speedTestSingle,
   };
 }

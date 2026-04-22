@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, type FC } from 'react';
+import { useState, useCallback, useRef, useEffect, type FC } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { BackIcon } from './Icons';
@@ -58,7 +58,6 @@ interface MobileWorktreeDetailProps {
     isKeyHeld?: boolean;
     analyserNode?: AnalyserNode | null;
     onToggleVoice?: () => void;
-    onStartRecording?: () => void;
     onStopRecording?: () => void;
     staging?: StagingState | null;
 }
@@ -108,7 +107,6 @@ export const MobileWorktreeDetail: FC<MobileWorktreeDetailProps> = ({
     isKeyHeld,
     analyserNode,
     onToggleVoice,
-    onStartRecording,
     onStopRecording,
     staging,
 }) => {
@@ -116,6 +114,27 @@ export const MobileWorktreeDetail: FC<MobileWorktreeDetailProps> = ({
     const [activeTab, setActiveTab] = useState<DetailTab>('projects');
     const [switchingBranch, setSwitchingBranch] = useState<string | null>(null);
     const [expandedProject, setExpandedProject] = useState<string | null>(null);
+    const [terminalFullscreen, setTerminalFullscreen] = useState(false);
+
+    // When switching to terminals tab, auto-enter fullscreen
+    const switchToTerminals = useCallback(() => {
+        setActiveTab('terminals');
+        setTerminalFullscreen(true);
+        setTimeout(() => window.dispatchEvent(new Event('resize')), 100);
+    }, []);
+
+    // Trigger terminal resize after fullscreen toggle
+    const toggleTerminalFullscreen = useCallback(() => {
+        setTerminalFullscreen(f => {
+            // Exiting fullscreen → go back to projects
+            if (f) {
+                setTimeout(() => setActiveTab('projects'), 0);
+            }
+            return !f;
+        });
+        // Delay to let CSS layout settle, then trigger resize
+        setTimeout(() => window.dispatchEvent(new Event('resize')), 100);
+    }, []);
 
     const handleSwitchBranch = useCallback(async (branch: string) => {
         if (!selectedWorktree || !onSwitchBranch) return;
@@ -131,12 +150,25 @@ export const MobileWorktreeDetail: FC<MobileWorktreeDetailProps> = ({
         try { await navigator.clipboard.writeText(path); } catch { /* clipboard API may not be available */ }
     }, []);
 
-    // Swipe-right to go back
+    // Lock body scroll when terminal tab is active (prevent page bounce on mobile)
+    useEffect(() => {
+        if (activeTab === 'terminals') {
+            document.body.style.overflow = 'hidden';
+            document.body.style.touchAction = 'none';
+            return () => {
+                document.body.style.overflow = '';
+                document.body.style.touchAction = '';
+            };
+        }
+    }, [activeTab]);
+
+    // Swipe-right to go back (disabled when on terminals tab to avoid interfering with xterm)
     const touchStartRef = useRef<{ x: number; y: number } | null>(null);
     const handleTouchStart = useCallback((e: React.TouchEvent) => {
+        if (activeTab === 'terminals') return;
         const touch = e.touches[0];
         touchStartRef.current = { x: touch.clientX, y: touch.clientY };
-    }, []);
+    }, [activeTab]);
     const handleTouchEnd = useCallback((e: React.TouchEvent) => {
         if (!touchStartRef.current) return;
         const touch = e.changedTouches[0];
@@ -303,7 +335,7 @@ export const MobileWorktreeDetail: FC<MobileWorktreeDetailProps> = ({
                                                 <button
                                                     onClick={() => {
                                                         onOpenTerminalPanel(project.path);
-                                                        setActiveTab('terminals');
+                                                        switchToTerminals();
                                                     }}
                                                     className="w-full py-2 rounded-lg bg-slate-700/30 text-slate-400 text-xs font-medium active:bg-slate-600/30 transition-colors"
                                                 >
@@ -387,12 +419,16 @@ export const MobileWorktreeDetail: FC<MobileWorktreeDetailProps> = ({
                         )}
 
                         {/* Terminal panel */}
-                        <div className="flex-1 min-h-0 flex flex-col">
+                        <div className="flex-1 min-h-0 flex flex-col"
+                            style={{ touchAction: 'none' }}
+                        >
                             {activatedTerminals.size > 0 ? (
                                 <TerminalPanel
                                     visible={true}
                                     height={0}
                                     fillContainer={true}
+                                    isFullscreen={terminalFullscreen}
+                                    onToggleFullscreen={toggleTerminalFullscreen}
                                     onStartResize={() => { }}
                                     terminalTabs={terminalTabs}
                                     activatedTerminals={activatedTerminals}
@@ -403,13 +439,12 @@ export const MobileWorktreeDetail: FC<MobileWorktreeDetailProps> = ({
                                     onCloseTab={(path) => onCloseTerminalTab?.(path)}
                                     onCloseAllTabs={() => onCloseAllTerminalTabs?.()}
                                     onToggle={() => { }}
-                                    onCollapse={() => setActiveTab('projects')}
+                                    onCollapse={toggleTerminalFullscreen}
                                     voiceStatus={voiceStatus}
                                     voiceError={voiceError}
                                     isKeyHeld={isKeyHeld}
                                     analyserNode={analyserNode}
                                     onToggleVoice={onToggleVoice}
-                                    onStartRecording={onStartRecording}
                                     onStopRecording={onStopRecording}
                                     staging={staging}
                                     clientId={clientId}
@@ -447,7 +482,7 @@ export const MobileWorktreeDetail: FC<MobileWorktreeDetailProps> = ({
                             )}
                         </button>
                         <button
-                            onClick={() => setActiveTab('terminals')}
+                            onClick={switchToTerminals}
                             className={`flex-1 flex flex-col items-center justify-center gap-0.5 relative transition-all active:scale-95 ${activeTab === 'terminals'
                                 ? 'text-blue-400'
                                 : 'text-slate-500 active:text-slate-300'

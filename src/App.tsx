@@ -336,7 +336,6 @@ function App() {
                   isKeyHeld={voice.isKeyHeld}
                   analyserNode={voice.analyserNode}
                   onToggleVoice={voice.toggleVoice}
-                  onStartRecording={voice.startRecording}
                   onStopRecording={voice.stopRecording}
                   staging={voice.staging}
                   clientId={terminalHook.clientId}
@@ -349,7 +348,7 @@ function App() {
 
         {/* ==================== Mobile Layout ==================== */}
         {isMobileWeb && (
-          <div className="h-screen bg-slate-900 text-slate-100 flex flex-col overflow-hidden">
+          <div className="bg-slate-900 text-slate-100 flex flex-col overflow-hidden" style={{ height: '100dvh' }}>
             {/* Mobile content area */}
             <div className="flex-1 min-h-0 overflow-hidden">
               {/* List view */}
@@ -410,7 +409,6 @@ function App() {
                   isKeyHeld={voice.isKeyHeld}
                   analyserNode={voice.analyserNode}
                   onToggleVoice={voice.toggleVoice}
-                  onStartRecording={voice.startRecording}
                   onStopRecording={voice.stopRecording}
                   staging={voice.staging}
                 />

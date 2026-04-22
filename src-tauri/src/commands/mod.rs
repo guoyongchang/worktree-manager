@@ -1,3 +1,4 @@
+pub(crate) mod cloud;
 pub(crate) mod config;
 pub(crate) mod git;
 pub(crate) mod pty;

@@ -1251,10 +1251,19 @@ pub fn add_project_to_worktree_impl(
             git_user_email: None,
         });
 
+    // Resolve display name from mapping (used as branch name)
+    let mapping_path = root.join(&config.worktrees_dir).join("mapping.json");
+    let mapping = load_worktree_mapping(&mapping_path);
+    let branch_name = mapping
+        .get(&request.worktree_name)
+        .cloned()
+        .unwrap_or_else(|| request.worktree_name.clone());
+
     log::info!(
-        "[worktree] Adding project '{}' to worktree '{}' (base_branch: {})",
+        "[worktree] Adding project '{}' to worktree '{}' (branch: '{}', base_branch: {})",
         request.project_name,
         request.worktree_name,
+        branch_name,
         request.base_branch
     );
 
@@ -1272,7 +1281,7 @@ pub fn add_project_to_worktree_impl(
             main_proj_path.to_str().unwrap(),
             "branch",
             "--list",
-            &request.worktree_name,
+            &branch_name,
         ])
         .output();
 
@@ -1289,7 +1298,7 @@ pub fn add_project_to_worktree_impl(
     let output = if branch_exists {
         log::info!(
             "[worktree] Branch '{}' already exists, using it for project '{}'",
-            request.worktree_name,
+            branch_name,
             request.project_name
         );
         git_command()
@@ -1299,14 +1308,14 @@ pub fn add_project_to_worktree_impl(
                 "worktree",
                 "add",
                 wt_proj_path.to_str().unwrap(),
-                &request.worktree_name,
+                &branch_name,
             ])
             .output()
             .map_err(|e| format!("Failed to create worktree: {}", e))?
     } else {
         log::info!(
             "[worktree] Creating new branch '{}' for project '{}' from origin/{}",
-            request.worktree_name,
+            branch_name,
             request.project_name,
             request.base_branch
         );
@@ -1318,7 +1327,7 @@ pub fn add_project_to_worktree_impl(
                 "add",
                 wt_proj_path.to_str().unwrap(),
                 "-b",
-                &request.worktree_name,
+                &branch_name,
                 &format!("origin/{}", request.base_branch),
             ])
             .output()
@@ -1342,9 +1351,11 @@ pub fn add_project_to_worktree_impl(
         request.project_name
     );
 
-    // Set upstream for the branch so git push works without -u flag
+    // Push to create remote branch and set upstream tracking.
+    // Even though there are no user commits yet, this is necessary to prevent
+    // IDEs from defaulting to push to the base branch (uat/main).
     let push_output = run_git_command_with_timeout(
-        &["push", "-u", "origin", &request.worktree_name],
+        &["push", "-u", "origin", &branch_name],
         wt_proj_path.to_str().unwrap(),
     );
     match push_output {
@@ -1352,7 +1363,7 @@ pub fn add_project_to_worktree_impl(
             log::info!(
                 "[worktree] Project '{}': git push -u origin {} succeeded",
                 request.project_name,
-                request.worktree_name
+                branch_name
             );
         }
         Ok(p) => {
@@ -1360,15 +1371,15 @@ pub fn add_project_to_worktree_impl(
             log::warn!(
                 "[worktree] Project '{}': git push -u origin {} failed (project added successfully): {}",
                 request.project_name,
-                request.worktree_name,
+                branch_name,
                 stderr
             );
         }
         Err(e) => {
             log::warn!(
-                "[worktree] Project '{}': git push -u origin {} failed to execute (project added successfully): {}",
+                "[worktree] Project '{}': git push -u origin {} failed to execute: {}",
                 request.project_name,
-                request.worktree_name,
+                branch_name,
                 e
             );
         }

@@ -17,11 +17,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { RefreshCw, Search, Mic, Eye, EyeOff, Settings, Globe, Info, Trash2, Wrench, FolderOpen, Link2, Folder, FileText, ChevronRight, ChevronDown, Star } from 'lucide-react';
+import { RefreshCw, Search, Mic, Eye, EyeOff, Settings, Globe, Info, Trash2, Wrench, FolderOpen, Brain, Link2, Folder, FileText, ChevronRight, ChevronDown, Star, Copy, Check } from 'lucide-react';
 import { BackIcon, PlusIcon, TrashIcon } from './Icons';
 import { BranchCombobox } from './BranchCombobox';
 import type { WorkspaceRef, WorkspaceConfig, ProjectConfig, ScannedFolder, VaultStatus, VaultItemChild } from '../types';
-import { getAppVersion, getAppIcon, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, voiceStart, voiceStop, isTauri, getRemoteBranches, openLink, callBackend, loadWorkspaceConfigByPath, saveWorkspaceConfigByPath, getVaultStatus, vaultLink, listVaultItemChildren, getCommitPrefixConfig, setCommitPrefixConfig, getGitUserGlobalConfig, setGitUserGlobalConfig, getSkipGitHooks, setSkipGitHooks as saveSkipGitHooks } from '../lib/backend';
+import { getAppVersion, getAppIcon, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, voiceStart, voiceStop, isTauri, getRemoteBranches, openLink, callBackend, loadWorkspaceConfigByPath, saveWorkspaceConfigByPath, getVaultStatus, vaultLink, listVaultItemChildren, getCommitPrefixConfig, setCommitPrefixConfig, getGitUserGlobalConfig, setGitUserGlobalConfig, getSkipGitHooks, setSkipGitHooks as saveSkipGitHooks, cloudGetStatus, cloudStartPairing, cloudCheckPairingStatus, cloudApprovePairing, cloudRejectPairing, cloudDisconnect } from '../lib/backend';
+import type { CloudStatus, PairingStatus } from '../lib/backend';
 
 // ==================== VaultItemTree (recursive) ====================
 interface VaultItemTreeProps {
@@ -130,6 +131,76 @@ const VaultItemTree: FC<VaultItemTreeProps> = ({
   );
 };
 
+// ==================== CopyableCommand ====================
+const CopyableCommand: FC<{ command: string; step: number }> = ({ command, step }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(command);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="flex items-center gap-1.5 group">
+      <span className="text-[10px] text-amber-400/60 font-medium shrink-0">{step}.</span>
+      <code className="text-[11px] text-slate-300 bg-slate-800 px-2 py-0.5 rounded font-mono select-all break-all flex-1">
+        {command}
+      </code>
+      <button
+        type="button"
+        className="shrink-0 p-0.5 text-slate-500 hover:text-amber-400 transition-colors opacity-0 group-hover:opacity-100"
+        onClick={handleCopy}
+        title="Copy"
+      >
+        {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+      </button>
+    </div>
+  );
+};
+
+// ==================== MemoryHookGuide ====================
+const MemoryHookGuide: FC = () => {
+  const { t } = useTranslation();
+
+  return (
+    <div className="mt-4 bg-amber-500/5 border border-amber-500/20 rounded-lg p-4">
+      <div className="flex items-start gap-3">
+        <Brain className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+        <div className="min-w-0">
+          <h3 className="text-sm font-medium text-amber-300">
+            {t('settings.memoryHookTitle', 'Memory Hook 插件')}
+          </h3>
+          <p className="text-xs text-slate-400 mt-1 space-y-0.5">
+            <span className="block">{t('settings.memoryHookDesc', '安装 Claude Code 插件以增强知识库集成：')}</span>
+            <span className="block text-amber-400/70">
+              <strong>MemoryInject</strong> — {t('settings.memoryInjectDesc', '会话开始时自动注入知识库上下文')}
+            </span>
+            <span className="block text-amber-400/70">
+              <strong>/memory-sync</strong> — {t('settings.memorySyncDesc', '压缩时临时归档会话记录')}
+            </span>
+            <span className="block text-amber-400/70">
+              <strong>/memory-archive</strong> — {t('settings.memoryArchiveDesc', '需求结束时全局归档到知识库')}
+            </span>
+          </p>
+          <div className="mt-2.5 space-y-1.5">
+            <CopyableCommand step={1} command="claude plugin marketplace add guoyongchang/worktree-manager-obsidian-bridge" />
+            <CopyableCommand step={2} command="claude plugin install worktree-manager-memory-hook@worktree-manager-obsidian-bridge" />
+          </div>
+          <button
+            type="button"
+            className="mt-2.5 text-[11px] text-amber-400 hover:text-amber-300 transition-colors flex items-center gap-1"
+            onClick={() => openLink('https://github.com/guoyongchang/worktree-manager-obsidian-bridge')}
+          >
+            GitHub
+            <ChevronRight className="w-3 h-3" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ==================== VaultSettingsSection ====================
 const VaultSettingsSection: FC = () => {
   const { t } = useTranslation();
@@ -221,14 +292,17 @@ const VaultSettingsSection: FC = () => {
     }
   }, [status?.vault_path]);
 
-  const handleDisconnect = useCallback(async () => {
-    if (!window.confirm(t('settings.vaultDisconnectConfirm', '确定要断开 Vault 吗？这将移除所有软链接。'))) {
+  const handleDisconnect = useCallback(async (keepSymlinks = false) => {
+    const msg = keepSymlinks
+      ? t('settings.vaultSoftDisconnectConfirm', '断开 Vault 配置但保留本地软链接，确定？')
+      : t('settings.vaultDisconnectConfirm', '确定要断开 Vault 吗？这将移除所有软链接。');
+    if (!window.confirm(msg)) {
       return;
     }
     setError(null);
     setLinking(true);
     try {
-      await vaultLink(null);
+      await vaultLink(null, keepSymlinks);
       setStatus({ connected: false, vault_path: null, synced_items: [] });
     } catch (e) {
       setError(String(e));
@@ -312,10 +386,17 @@ const VaultSettingsSection: FC = () => {
               </Button>
               <Button
                 variant="ghost" size="sm" disabled={linking}
-                onClick={handleDisconnect}
+                onClick={() => handleDisconnect(false)}
                 className="text-red-400 hover:text-red-300"
               >
                 {t('settings.vaultDisconnect', '断开')}
+              </Button>
+              <Button
+                variant="ghost" size="sm" disabled={linking}
+                onClick={() => handleDisconnect(true)}
+                className="text-orange-400 hover:text-orange-300"
+              >
+                {t('settings.vaultSoftDisconnect', '断开(保留链接)')}
               </Button>
             </div>
           </>
@@ -354,6 +435,9 @@ const VaultSettingsSection: FC = () => {
           </>
         )}
       </div>
+
+      {/* Memory Hook Plugin Guide */}
+      <MemoryHookGuide />
     </div>
   );
 };
@@ -372,7 +456,7 @@ interface SettingsViewProps {
   onRemoveWorkspace?: (path: string) => void;
 }
 
-type SettingsSection = 'workspaces' | 'vault' | 'tools' | 'share' | 'commit' | 'voice' | 'dev' | 'about';
+type SettingsSection = 'workspaces' | 'vault' | 'tools' | 'share' | 'commit' | 'voice' | 'cloud' | 'about';
 
 export const SettingsView: FC<SettingsViewProps> = ({
   workspaceConfig,
@@ -595,6 +679,12 @@ export const SettingsView: FC<SettingsViewProps> = ({
   const [voiceRefineEnabled, setVoiceRefineEnabled] = useState(true);
   const [voiceRefineLoaded, setVoiceRefineLoaded] = useState(false);
 
+  // Cloud connection state
+  const [cloudStatus, setCloudStatus] = useState<CloudStatus | null>(null)
+  const [pairingCode, setPairingCode] = useState<string | null>(null)
+  const [pairingStatus, setPairingStatus] = useState<PairingStatus | null>(null)
+  const pairingIntervalRef = useRef<NodeJS.Timeout | null>(null)
+
   // DEV settings
   const [devConsoleEnabled, setDevConsoleEnabled] = useState(() => localStorage.getItem('dev-console-enabled') === 'true');
 
@@ -792,6 +882,18 @@ export const SettingsView: FC<SettingsViewProps> = ({
   // Cleanup mic test on unmount
   useEffect(() => stopMicTest, [stopMicTest]);
 
+  // Load cloud status on mount
+  useEffect(() => {
+    cloudGetStatus().then(setCloudStatus).catch(() => {})
+  }, [])
+
+  // Cleanup pairing interval on unmount
+  useEffect(() => {
+    return () => {
+      if (pairingIntervalRef.current) clearInterval(pairingIntervalRef.current)
+    }
+  }, [])
+
   // Load commit prefix & git user global config
   useEffect(() => {
     getCommitPrefixConfig()
@@ -817,15 +919,57 @@ export const SettingsView: FC<SettingsViewProps> = ({
       .catch(() => setSkipGitHooksLoaded(true));
   }, []);
 
+  // ==================== Cloud connection handlers ====================
+  const handleStartPairing = async () => {
+    try {
+      const info = await cloudStartPairing()
+      setPairingCode(info.code)
+      const interval = setInterval(async () => {
+        try {
+          const status = await cloudCheckPairingStatus()
+          setPairingStatus(status)
+          if (status.status === 'expired') {
+            clearInterval(interval)
+            pairingIntervalRef.current = null
+            setPairingCode(null)
+          }
+        } catch { /* ignore */ }
+      }, 3000)
+      pairingIntervalRef.current = interval
+    } catch (e: any) {
+      console.error('Pairing failed:', e)
+    }
+  }
+
+  const handleCloudApprove = async () => {
+    await cloudApprovePairing()
+    if (pairingIntervalRef.current) clearInterval(pairingIntervalRef.current)
+    setPairingCode(null)
+    setPairingStatus(null)
+    setCloudStatus(await cloudGetStatus())
+  }
+
+  const handleCloudReject = async () => {
+    await cloudRejectPairing()
+    if (pairingIntervalRef.current) clearInterval(pairingIntervalRef.current)
+    setPairingCode(null)
+    setPairingStatus(null)
+  }
+
+  const handleCloudDisconnect = async () => {
+    await cloudDisconnect()
+    setCloudStatus(await cloudGetStatus())
+  }
+
   // ==================== Menu items ====================
   const menuItems = [
     { id: 'workspaces' as SettingsSection, label: t('settings.workspaceConfig'), icon: <Settings className="w-3.5 h-3.5" /> },
-    { id: 'vault' as SettingsSection, label: t('settings.vaultNav', 'Vault'), icon: <Link2 className="w-3.5 h-3.5" /> },
+    { id: 'vault' as SettingsSection, label: t('settings.vaultNav'), icon: <Brain className="w-3.5 h-3.5 text-amber-400" /> },
     { id: 'tools' as SettingsSection, label: t('settings.toolsNav', '工具'), icon: <Wrench className="w-3.5 h-3.5" /> },
     ...(isTauri() ? [{ id: 'share' as SettingsSection, label: t('settings.externalShareNav', '外网分享'), icon: <Globe className="w-3.5 h-3.5" /> }] : []),
     { id: 'commit' as SettingsSection, label: t('settings.commitNav', '提交设置'), icon: <FileText className="w-3.5 h-3.5" /> },
     { id: 'voice' as SettingsSection, label: t('settings.voiceNav'), icon: <Mic className="w-3.5 h-3.5" /> },
-    ...(isTauri() ? [{ id: 'dev' as SettingsSection, label: 'DEV', icon: <Wrench className="w-3.5 h-3.5" /> }] : []),
+    // { id: 'cloud' as SettingsSection, label: t('settings.cloudNav', '云端连接'), icon: <Link2 className="w-3.5 h-3.5" /> },
     { id: 'about' as SettingsSection, label: t('settings.about'), icon: <Info className="w-3.5 h-3.5" /> },
   ];
 
@@ -858,7 +1002,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
       {/* Main: left menu + right content */}
       <div className="flex flex-1 min-h-0">
         {/* Left sidebar */}
-        <div className="w-36 shrink-0 border-r border-slate-700/50 py-2 overflow-y-auto">
+        <div className="w-48 shrink-0 border-r border-slate-700/50 py-2 overflow-y-auto">
           <nav className="space-y-0.5 px-2">
             {menuItems.map(item => (
               <button
@@ -1726,21 +1870,56 @@ export const SettingsView: FC<SettingsViewProps> = ({
               </div>
             )}
 
-            {/* ==================== DEV ==================== */}
-            {activeSection === 'dev' && isTauri() && (
-              <div>
-                <h2 className="text-lg font-medium mb-4">Developer Settings</h2>
-                <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 space-y-4">
-                  {/* Developer Console Toggle */}
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <label className="text-sm text-slate-400">Enable Developer Console (F12)</label>
-                      <p className="text-xs text-slate-500">Press F12 to open browser developer tools</p>
+            {/* ==================== Cloud (hidden from menu) ==================== */}
+            {activeSection === 'cloud' && (
+              <div className="space-y-4">
+                <h2 className="text-lg font-medium mb-4">{t('settings.cloudTitle', '云端连接')}</h2>
+                <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4">
+                  {cloudStatus?.connected ? (
+                    <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-green-700 dark:text-green-300">{t('settings.cloudConnected', '已连接')}</p>
+                          <p className="text-xs text-muted-foreground">{cloudStatus.server_url}</p>
+                        </div>
+                        <Button variant="outline" size="sm" onClick={handleCloudDisconnect}>{t('settings.cloudDisconnect', '断开连接')}</Button>
+                      </div>
+                      {(cloudStatus.username || cloudStatus.user_email) && (
+                        <div className="text-xs text-muted-foreground space-y-0.5 pt-1 border-t border-green-200/30">
+                          {cloudStatus.username && (
+                            <p>{t('settings.cloudUsername', '用户名')}: <span className="text-slate-300">{cloudStatus.username}</span></p>
+                          )}
+                          {cloudStatus.user_email && (
+                            <p>{t('settings.cloudEmail', '邮箱')}: <span className="text-slate-300">{cloudStatus.user_email}</span></p>
+                          )}
+                          {cloudStatus.token_expires_at && (
+                            <p>{t('settings.cloudTokenExpiry', 'Token 有效期至')}: <span className="text-slate-300">{new Date(cloudStatus.token_expires_at).toLocaleString()}</span></p>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <button type="button" onClick={() => { const newVal = !devConsoleEnabled; setDevConsoleEnabled(newVal); localStorage.setItem('dev-console-enabled', String(newVal)); }}
-                      className={`relative inline-flex h-5 w-8 items-center rounded-full transition-colors ${devConsoleEnabled ? 'bg-blue-500' : 'bg-slate-600'}`}
-                    ><span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${devConsoleEnabled ? 'translate-x-3.5' : 'translate-x-0.5'}`} /></button>
-                  </div>
+                  ) : pairingCode ? (
+                    <div className="space-y-3 p-4 border border-slate-700/50 rounded-lg">
+                      <p className="text-sm text-muted-foreground">{t('settings.cloudPairingHint', '请在 WMS 管理后台输入以下配对码：')}</p>
+                      <p className="text-3xl font-mono font-bold text-center tracking-wider">{pairingCode}</p>
+                      {pairingStatus?.status === 'claimed' && (
+                        <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded">
+                          <p className="text-sm">{t('settings.cloudPairingRequest', '用户')} <strong>{pairingStatus.user_email || pairingStatus.username}</strong> {t('settings.cloudPairingRequestSuffix', '请求连接此设备')}</p>
+                          <div className="flex gap-2 mt-2">
+                            <Button size="sm" onClick={handleCloudApprove}>{t('settings.cloudApprove', '同意')}</Button>
+                            <Button size="sm" variant="outline" onClick={handleCloudReject}>{t('settings.cloudReject', '拒绝')}</Button>
+                          </div>
+                        </div>
+                      )}
+                      <Button variant="ghost" size="sm" onClick={handleCloudReject}>{t('settings.cloudCancelPairing', '取消配对')}</Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-sm text-muted-foreground">服务端 <code className="bg-slate-700/50 px-1.5 py-0.5 rounded text-xs">https://wms.kirov-opensource.com/</code></p>
+                      <p className="text-sm text-muted-foreground">设备名称 <code className="bg-slate-700/50 px-1.5 py-0.5 rounded text-xs">自动获取 hostname</code></p>
+                      <Button onClick={handleStartPairing}>{t('settings.cloudStartPairing', '开始配对')}</Button>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1772,6 +1951,17 @@ export const SettingsView: FC<SettingsViewProps> = ({
                       <RefreshCw className={`w-4 h-4 ${checkingUpdate ? 'animate-spin' : ''}`} />
                       {checkingUpdate ? t('settings.checkingUpdate') : t('settings.checkUpdate')}
                     </Button>
+                  )}
+                  {isTauri() && (
+                    <div className="flex items-center justify-between mt-4 pt-4 border-t border-slate-700/50">
+                      <div>
+                        <label className="text-sm text-slate-400">DevTools (F12)</label>
+                        <p className="text-xs text-slate-500">{t('settings.devToolsDesc', 'Press F12 to open developer tools')}</p>
+                      </div>
+                      <button type="button" onClick={() => { const newVal = !devConsoleEnabled; setDevConsoleEnabled(newVal); localStorage.setItem('dev-console-enabled', String(newVal)); }}
+                        className={`relative inline-flex h-5 w-8 items-center rounded-full transition-colors ${devConsoleEnabled ? 'bg-blue-500' : 'bg-slate-600'}`}
+                      ><span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${devConsoleEnabled ? 'translate-x-3.5' : 'translate-x-0.5'}`} /></button>
+                    </div>
                   )}
                 </div>
               </div>
