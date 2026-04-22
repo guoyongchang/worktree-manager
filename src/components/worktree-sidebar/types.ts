@@ -48,4 +48,8 @@ export interface WorktreeSidebarProps {
   onQuickShare?: () => void;
   occupation?: MainWorkspaceOccupation | null;
   hasNgrokToken?: boolean;
+  batchArchiveModalOpen: boolean;
+  onToggleBatchArchiveModal: () => void;
+  onBatchRestore: (names: string[]) => Promise<void>;
+  onBatchDelete: (names: string[]) => Promise<void>;
 }

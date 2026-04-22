@@ -46,6 +46,7 @@ import {
 } from '../Icons';
 import type { WorktreeSidebarProps } from './types';
 import { ShareBar } from './ShareBar';
+import { BatchArchiveModal } from '../BatchArchiveModal';
 
 // --- Search utilities ---
 
@@ -114,6 +115,10 @@ interface ExpandedSidebarProps extends Omit<WorktreeSidebarProps, 'worktrees'> {
   onTouchMove: () => void;
   sidebarWidth: number;
   setSidebarWidth: (width: number) => void;
+  batchArchiveModalOpen: boolean;
+  onToggleBatchArchiveModal: () => void;
+  onBatchRestore: (names: string[]) => Promise<void>;
+  onBatchDelete: (names: string[]) => Promise<void>;
 }
 
 export const ExpandedSidebar: FC<ExpandedSidebarProps> = ({
@@ -164,6 +169,10 @@ export const ExpandedSidebar: FC<ExpandedSidebarProps> = ({
   updaterState,
   workspaces,
   connectedClients = [],
+  batchArchiveModalOpen,
+  onToggleBatchArchiveModal,
+  onBatchRestore,
+  onBatchDelete,
 }) => {
   const { t } = useTranslation();
   const [appVersion, setAppVersion] = useState('');
@@ -336,6 +345,7 @@ export const ExpandedSidebar: FC<ExpandedSidebarProps> = ({
           onContextMenu={onContextMenu}
           onSelectWorktree={onSelectWorktree}
           onToggleArchived={onToggleArchived}
+          onToggleBatchArchiveModal={onToggleBatchArchiveModal}
           onTouchEnd={onTouchEnd}
           onTouchMove={onTouchMove}
           onTouchStart={onTouchStart}
@@ -392,6 +402,14 @@ export const ExpandedSidebar: FC<ExpandedSidebarProps> = ({
             </svg>
           </div>
         </div>
+
+        <BatchArchiveModal
+          open={batchArchiveModalOpen}
+          archivedWorktrees={archivedWorktrees}
+          onClose={onToggleBatchArchiveModal}
+          onRestore={onBatchRestore}
+          onDelete={onBatchDelete}
+        />
 
         <Dialog open={!!switchConfirmPath} onOpenChange={(open) => !open && setSwitchConfirmPath(null)}>
           <DialogContent className="max-w-[400px]">
@@ -557,6 +575,7 @@ const WorktreeList: FC<{
   onContextMenu: WorktreeSidebarProps['onContextMenu'];
   onSelectWorktree: WorktreeSidebarProps['onSelectWorktree'];
   onToggleArchived: WorktreeSidebarProps['onToggleArchived'];
+  onToggleBatchArchiveModal: () => void;
   onTouchEnd: () => void;
   onTouchMove: () => void;
   onTouchStart: (e: TouchEvent, worktree: WorktreeListItem) => void;
@@ -573,6 +592,7 @@ const WorktreeList: FC<{
   onContextMenu,
   onSelectWorktree,
   onToggleArchived,
+  onToggleBatchArchiveModal,
   onTouchEnd,
   onTouchMove,
   onTouchStart,
@@ -711,7 +731,20 @@ const WorktreeList: FC<{
         <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider group-hover:text-slate-400 transition-colors">
           {t('sidebar.archive')} ({archivedWorktrees.length})
         </span>
-        <ChevronIcon expanded={showArchived} className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-400 transition-colors" />
+        <div className="flex items-center gap-1">
+          {showArchived && archivedWorktrees.length > 0 && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleBatchArchiveModal();
+              }}
+              className="text-[10px] px-2 py-0.5 rounded bg-slate-700/50 text-slate-400 hover:text-slate-200 hover:bg-slate-700 transition-colors"
+            >
+              {t('sidebar.manageArchive')}
+            </button>
+          )}
+          <ChevronIcon expanded={showArchived} className="w-3.5 h-3.5 text-slate-500 group-hover:text-slate-400 transition-colors" />
+        </div>
       </div>
 
       {showArchived && sortedArchivedWorktrees.map((worktree) => (

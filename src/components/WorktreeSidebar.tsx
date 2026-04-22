@@ -46,6 +46,10 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
   occupation,
   hasNgrokToken = false,
   refreshing = false,
+  batchArchiveModalOpen,
+  onToggleBatchArchiveModal,
+  onBatchRestore,
+  onBatchDelete,
 }) => {
   const _isTauri = isTauri();
   const activeWorktrees = worktrees.filter((worktree) => {
@@ -145,6 +149,10 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
       switchingWorkspace={switchingWorkspace}
       updaterState={updaterState}
       workspaces={workspaces}
+      batchArchiveModalOpen={batchArchiveModalOpen}
+      onToggleBatchArchiveModal={onToggleBatchArchiveModal}
+      onBatchRestore={onBatchRestore}
+      onBatchDelete={onBatchDelete}
     />
   );
 };

@@ -91,6 +91,12 @@ export interface UseWorkspaceActionsReturn {
   handleDeleteArchivedWorktree: () => Promise<void>;
   handleRestoreWorktree: () => Promise<void>;
 
+  // Batch archive
+  batchArchiveModalOpen: boolean;
+  setBatchArchiveModalOpen: (v: boolean) => void;
+  handleBatchRestore: (names: string[]) => Promise<void>;
+  handleBatchDelete: (names: string[]) => Promise<void>;
+
   // Editor
   selectedEditor: EditorType;
   setSelectedEditor: (v: EditorType) => void;
@@ -149,6 +155,7 @@ export function useWorkspaceActions(
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [archiveModal, setArchiveModal] = useState<ArchiveModalState | null>(null);
   const [deleteConfirmWorktree, setDeleteConfirmWorktree] = useState<WorktreeListItem | null>(null);
+  const [batchArchiveModalOpen, setBatchArchiveModalOpen] = useState(false);
 
   // Editor selection — prefer user's saved preference, fallback to first detected (non-hidden) editor
   const [selectedEditor, setSelectedEditor] = useState<EditorType>(() => {
@@ -522,6 +529,39 @@ export function useWorkspaceActions(
     }
   }, [workspace, selectedWorktree]);
 
+  // Batch archive operations
+  const handleBatchRestore = useCallback(async (names: string[]) => {
+    setRestoringWorktree(true);
+    try {
+      for (const name of names) {
+        try {
+          await workspace.restoreWorktree(name);
+        } catch (e) {
+          workspace.setError(`${name}: ${String(e)}`);
+        }
+      }
+      setBatchArchiveModalOpen(false);
+    } finally {
+      setRestoringWorktree(false);
+    }
+  }, [workspace]);
+
+  const handleBatchDelete = useCallback(async (names: string[]) => {
+    setDeletingArchived(true);
+    try {
+      for (const name of names) {
+        try {
+          await workspace.deleteArchivedWorktree(name);
+        } catch (e) {
+          workspace.setError(`${name}: ${String(e)}`);
+        }
+      }
+      setBatchArchiveModalOpen(false);
+    } finally {
+      setDeletingArchived(false);
+    }
+  }, [workspace]);
+
   // Editor
   const handleOpenInEditor = useCallback((path: string, editor?: EditorType) => {
     const editorId = editor || selectedEditor;
@@ -638,6 +678,11 @@ export function useWorkspaceActions(
     setDeleteConfirmWorktree,
     handleDeleteArchivedWorktree,
     handleRestoreWorktree,
+
+    batchArchiveModalOpen,
+    setBatchArchiveModalOpen,
+    handleBatchRestore,
+    handleBatchDelete,
 
     selectedEditor,
     setSelectedEditor,

@@ -270,6 +270,10 @@ function App() {
                   onQuickShare={share.handleQuickShare}
                   hasNgrokToken={share.hasNgrokToken}
                   occupation={mainOccupation.occupation}
+                  batchArchiveModalOpen={actions.batchArchiveModalOpen}
+                  onToggleBatchArchiveModal={() => actions.setBatchArchiveModalOpen(!actions.batchArchiveModalOpen)}
+                  onBatchRestore={actions.handleBatchRestore}
+                  onBatchDelete={actions.handleBatchDelete}
                 />
               )}
 
