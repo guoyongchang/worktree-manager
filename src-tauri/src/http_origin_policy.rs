@@ -13,7 +13,13 @@ fn is_loopback_origin(origin: &url::Url) -> bool {
 }
 
 fn is_private_lan_origin(origin: &url::Url) -> bool {
-    matches!(origin.host(), Some(url::Host::Ipv4(ipv4)) if ipv4.is_private())
+    matches!(origin.host(), Some(url::Host::Ipv4(ipv4)) if ipv4.is_private() || is_cgnat(ipv4))
+}
+
+/// Carrier-grade NAT range (100.64.0.0/10), used by Tailscale, etc.
+fn is_cgnat(ip: std::net::Ipv4Addr) -> bool {
+    let octets = ip.octets();
+    octets[0] == 100 && (64..128).contains(&octets[1])
 }
 
 fn same_origin(left: &url::Url, right: &url::Url) -> bool {
@@ -59,7 +65,13 @@ mod tests {
         assert!(is_allowed_origin("http://192.168.1.8:3000", None));
         assert!(is_allowed_origin("http://10.0.0.8", None));
         assert!(is_allowed_origin("http://172.16.5.4", None));
+        // CGNAT / Tailscale
+        assert!(is_allowed_origin("https://100.96.211.238:64896", None));
+        assert!(is_allowed_origin("http://100.64.0.1:3000", None));
+        assert!(is_allowed_origin("http://100.127.255.254", None));
 
+        assert!(!is_allowed_origin("http://100.63.255.255", None)); // below CGNAT
+        assert!(!is_allowed_origin("http://100.128.0.0", None)); // above CGNAT
         assert!(!is_allowed_origin("https://localhost.evil.example", None));
         assert!(!is_allowed_origin("https://127.0.0.1.evil.example", None));
         assert!(!is_allowed_origin("https://192.168.1.8.evil.example", None));
