@@ -23,9 +23,9 @@ use super::{
     h_get_locked_worktrees, h_get_main_occupation, h_get_main_workspace_status,
     h_get_mirror_sources, h_get_ngrok_token, h_get_opened_workspaces, h_get_remote_branches,
     h_get_share_info, h_get_share_state, h_get_shell_integration_enabled, h_get_skip_git_hooks,
-    h_get_terminal_state, h_get_voice_refine_enabled, h_get_workspace_config, h_kick_client,
-    h_list_vault_item_children, h_list_workspaces, h_list_worktrees,
-    h_load_workspace_config_by_path, h_lock_worktree, h_merge_to_base_branch,
+    h_get_terminal_state, h_get_voice_refine_enabled, h_get_workspace_config,
+    h_import_external_project, h_kick_client, h_list_vault_item_children, h_list_workspaces,
+    h_list_worktrees, h_load_workspace_config_by_path, h_lock_worktree, h_merge_to_base_branch,
     h_merge_to_test_branch, h_open_devtools, h_open_in_editor, h_open_in_terminal, h_open_log_dir,
     h_open_workspace_window, h_pty_close, h_pty_close_by_path, h_pty_create, h_pty_exists,
     h_pty_read, h_pty_resize, h_pty_write, h_push_to_remote, h_remove_project_from_config,
@@ -182,6 +182,10 @@ pub(super) fn build_api_router(cert_pem: Option<String>) -> Router {
             post(h_scan_existing_projects),
         )
         .route("/api/add_existing_project", post(h_add_existing_project))
+        .route(
+            "/api/import_external_project",
+            post(h_import_external_project),
+        )
         .route(
             "/api/remove_project_from_config",
             post(h_remove_project_from_config),

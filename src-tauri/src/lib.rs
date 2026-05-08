@@ -19,8 +19,8 @@ pub use utils::normalize_path;
 
 // Re-exports of _impl functions used by http_server
 pub use commands::git::{
-    add_existing_project_impl, clone_project_impl, remove_project_from_config_impl,
-    scan_existing_projects_impl, switch_branch_internal,
+    add_existing_project_impl, clone_project_impl, import_external_project_impl,
+    remove_project_from_config_impl, scan_existing_projects_impl, switch_branch_internal,
 };
 pub use commands::sharing::{kick_client_internal, start_ngrok_tunnel_internal};
 pub use commands::system::{
@@ -182,6 +182,7 @@ pub fn run() {
             clone_project,
             scan_existing_projects,
             add_existing_project,
+            import_external_project,
             remove_project_from_config,
             sync_with_base_branch,
             push_to_remote,

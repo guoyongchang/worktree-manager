@@ -352,6 +352,120 @@ pub(crate) async fn add_existing_project(
     .await
 }
 
+// ==================== 导入外部项目到 projects/ ====================
+
+pub fn import_external_project_impl(
+    window_label: &str,
+    source_path: String,
+) -> Result<crate::types::ExistingProjectInfo, String> {
+    let (workspace_path, config) =
+        get_window_workspace_config(window_label).ok_or("No workspace selected")?;
+
+    let source = PathBuf::from(&source_path);
+    if !source.exists() {
+        return Err(format!("Path does not exist: {}", source_path));
+    }
+    if !source.join(".git").exists() {
+        return Err("Selected folder is not a git repository (no .git found)".to_string());
+    }
+
+    let folder_name = source
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or("Cannot determine folder name from path")?
+        .to_string();
+
+    let projects_dir = PathBuf::from(&workspace_path).join("projects");
+    let dest = projects_dir.join(&folder_name);
+
+    // Check if already exists in projects/
+    if dest.exists() {
+        let is_registered = config.projects.iter().any(|p| p.name == folder_name);
+        // Get current branch
+        let current_branch = git_command()
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .current_dir(&dest)
+            .output()
+            .ok()
+            .and_then(|o| {
+                if o.status.success() {
+                    Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| "unknown".to_string());
+        return Ok(crate::types::ExistingProjectInfo {
+            name: folder_name,
+            current_branch,
+            is_registered,
+        });
+    }
+
+    // Ensure projects/ dir exists
+    std::fs::create_dir_all(&projects_dir)
+        .map_err(|e| format!("Failed to create projects directory: {}", e))?;
+
+    // Copy the project directory
+    log::info!(
+        "[git] Importing external project from '{}' to '{}'",
+        source_path,
+        dest.display()
+    );
+    copy_dir_recursive(&source, &dest).map_err(|e| format!("Failed to copy project: {}", e))?;
+
+    // Get current branch of the copied project
+    let current_branch = git_command()
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(&dest)
+        .output()
+        .ok()
+        .and_then(|o| {
+            if o.status.success() {
+                Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+
+    log::info!(
+        "[git] Successfully imported project '{}' (branch: {})",
+        folder_name,
+        current_branch
+    );
+
+    Ok(crate::types::ExistingProjectInfo {
+        name: folder_name,
+        current_branch,
+        is_registered: false,
+    })
+}
+
+fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path)?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) async fn import_external_project(
+    window: tauri::Window,
+    source_path: String,
+) -> Result<crate::types::ExistingProjectInfo, String> {
+    let label = window.label().to_string();
+    blocking(move || import_external_project_impl(&label, source_path)).await
+}
+
 pub fn remove_project_from_config_impl(window_label: &str, name: String) -> Result<(), String> {
     let (workspace_path, mut config) =
         get_window_workspace_config(window_label).ok_or("No workspace selected")?;

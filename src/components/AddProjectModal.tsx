@@ -21,7 +21,7 @@ import {
 import { BranchCombobox } from './BranchCombobox';
 import { GitBranchIcon, RefreshIcon } from './Icons';
 import type { ScannedFolder } from '../types';
-import { scanExistingProjects, addExistingProject, type ExistingProjectInfo } from '@/lib/backend';
+import { scanExistingProjects, addExistingProject, importExternalProject, openDirectoryDialog, type ExistingProjectInfo } from '@/lib/backend';
 
 interface AddProjectModalProps {
   open: boolean;
@@ -111,6 +111,7 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
   const [existingTestBranch, setExistingTestBranch] = useState('test');
   const [existingMergeStrategy, setExistingMergeStrategy] = useState('merge');
   const [addingExisting, setAddingExisting] = useState(false);
+  const [importingExternal, setImportingExternal] = useState(false);
 
   const extractProjectName = (url: string): string => {
     const trimmed = url.trim();
@@ -175,6 +176,28 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
     setExistingTestBranch('test');
     setExistingMergeStrategy('merge');
     setAddingExisting(false);
+    setImportingExternal(false);
+  };
+
+  const handleBrowseProject = async () => {
+    try {
+      const selectedPath = await openDirectoryDialog(t('addExistingProject.browseTitle'));
+      if (!selectedPath) return;
+
+      setImportingExternal(true);
+      setExistingError(null);
+      const imported = await importExternalProject(selectedPath);
+
+      // Reload list so the imported project appears
+      await loadExistingProjects();
+      // Auto-select the imported project
+      setSelectedExisting(imported.name);
+      setExistingBaseBranch(imported.current_branch);
+    } catch (e) {
+      setExistingError(String(e));
+    } finally {
+      setImportingExternal(false);
+    }
   };
 
   const handleSubmit = async () => {
@@ -509,6 +532,27 @@ export const AddProjectModal: FC<AddProjectModalProps> = ({
             {mode === 'existing' && (
               <>
                 <div className="p-5 space-y-3 overflow-y-auto">
+                  {/* Browse external project button */}
+                  <button
+                    onClick={handleBrowseProject}
+                    disabled={importingExternal}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border border-dashed border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-500 hover:bg-slate-800/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {importingExternal ? (
+                      <>
+                        <RefreshIcon className="w-4 h-4 animate-spin" />
+                        <span className="text-sm">{t('addExistingProject.importing')}</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <path d="M1 3.5C1 2.67 1.67 2 2.5 2H6l1 1.5h6.5c.83 0 1.5.67 1.5 1.5v7c0 .83-.67 1.5-1.5 1.5h-11C1.67 13.5 1 12.83 1 12V3.5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+                        </svg>
+                        <span className="text-sm">{t('addExistingProject.browse')}</span>
+                      </>
+                    )}
+                  </button>
+
                   {existingError && (
                     <div className="p-3 bg-red-900/30 border border-red-800/50 rounded-lg">
                       <div className="text-red-300 text-sm">{existingError}</div>

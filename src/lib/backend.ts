@@ -541,6 +541,11 @@ export async function addExistingProject(name: string, baseBranch: string, testB
   return callBackend<void>('add_existing_project', { name, baseBranch, testBranch, mergeStrategy });
 }
 
+/** Import an external git project into workspace projects/ directory */
+export async function importExternalProject(sourcePath: string): Promise<ExistingProjectInfo> {
+  return callBackend<ExistingProjectInfo>('import_external_project', { sourcePath });
+}
+
 /** Remove a project from workspace config (does not delete files) */
 export async function removeProjectFromConfig(name: string): Promise<void> {
   return callBackend<void>('remove_project_from_config', { name });

@@ -47,6 +47,7 @@ use crate::{
     get_main_workspace_status_impl,
     get_workspace_config_impl,
     git_ops,
+    import_external_project_impl,
     list_worktrees_impl,
     load_workspace_config,
     lock_worktree_impl,
@@ -357,6 +358,16 @@ async fn h_add_existing_project(headers: HeaderMap, Json(args): Json<Value>) -> 
         test_branch,
         merge_strategy,
     ))
+}
+
+async fn h_import_external_project(headers: HeaderMap, Json(args): Json<Value>) -> Response {
+    let sid = session_id(&headers);
+    let source_path = args["sourcePath"]
+        .as_str()
+        .or_else(|| args["source_path"].as_str())
+        .unwrap_or("")
+        .to_string();
+    result_json(import_external_project_impl(&sid, source_path))
 }
 
 async fn h_remove_project_from_config(headers: HeaderMap, Json(args): Json<Value>) -> Response {
