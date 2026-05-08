@@ -143,7 +143,7 @@ fn filetime_to_string(value: windows_sys::Win32::Foundation::FILETIME) -> String
 
 #[cfg(target_os = "windows")]
 fn query_restart_manager(paths: &[PathBuf]) -> Result<Vec<LockedProcessInfo>, String> {
-    use windows_sys::Win32::Foundation::{ERROR_MORE_DATA, ERROR_SUCCESS};
+    use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_MORE_DATA, ERROR_SUCCESS};
     use windows_sys::Win32::System::RestartManager::{
         RmEndSession, RmGetList, RmRegisterResources, RmStartSession, CCH_RM_SESSION_KEY,
         RM_PROCESS_INFO,
@@ -152,6 +152,10 @@ fn query_restart_manager(paths: &[PathBuf]) -> Result<Vec<LockedProcessInfo>, St
     let mut session = 0u32;
     let mut session_key = vec![0u16; (CCH_RM_SESSION_KEY + 1) as usize];
     let start_result = unsafe { RmStartSession(&mut session, 0, session_key.as_mut_ptr()) };
+    if start_result == ERROR_ACCESS_DENIED {
+        log::warn!("Restart Manager RmStartSession returned ACCESS_DENIED – skipping lock check");
+        return Ok(Vec::new());
+    }
     if start_result != ERROR_SUCCESS {
         return Err(format!("Restart Manager start failed: {}", start_result));
     }
@@ -174,6 +178,10 @@ fn query_restart_manager(paths: &[PathBuf]) -> Result<Vec<LockedProcessInfo>, St
                 std::ptr::null(),
             )
         };
+        if register_result == ERROR_ACCESS_DENIED {
+            log::warn!("Restart Manager RmRegisterResources returned ACCESS_DENIED – skipping");
+            return Ok(Vec::new());
+        }
         if register_result != ERROR_SUCCESS {
             return Err(format!(
                 "Restart Manager resource registration failed: {}",
@@ -194,6 +202,15 @@ fn query_restart_manager(paths: &[PathBuf]) -> Result<Vec<LockedProcessInfo>, St
             )
         };
         if first_result == ERROR_SUCCESS && needed == 0 {
+            return Ok(Vec::new());
+        }
+        if first_result == ERROR_ACCESS_DENIED {
+            // Insufficient privileges to query locked processes (e.g. files held by
+            // elevated or system processes).  Treat as "no known locks" so that
+            // archiving is not blocked by the check itself.
+            log::warn!(
+                "Restart Manager RmGetList returned ACCESS_DENIED – skipping lock check for this batch"
+            );
             return Ok(Vec::new());
         }
         if first_result != ERROR_MORE_DATA && first_result != ERROR_SUCCESS {
@@ -217,6 +234,10 @@ fn query_restart_manager(paths: &[PathBuf]) -> Result<Vec<LockedProcessInfo>, St
                 &mut reboot_reasons,
             )
         };
+        if second_result == ERROR_ACCESS_DENIED {
+            log::warn!("Restart Manager RmGetList (2nd call) returned ACCESS_DENIED – skipping");
+            return Ok(Vec::new());
+        }
         if second_result != ERROR_SUCCESS {
             return Err(format!(
                 "Restart Manager process query failed: {}",
