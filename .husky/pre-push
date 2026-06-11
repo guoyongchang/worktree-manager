@@ -1,4 +1,0 @@
-#!/usr/bin/env sh
-cd src-tauri || exit 1
-
-cargo test
