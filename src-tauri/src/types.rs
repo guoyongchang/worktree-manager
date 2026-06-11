@@ -1,0 +1,563 @@
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
+
+// ==================== 分享状态 ====================
+
+#[derive(Default)]
+pub struct ShareState {
+    pub active: bool,
+    pub workspace_path: Option<String>,
+    pub port: u16,
+    pub auth_key: Option<Vec<u8>>,  // PBKDF2 derived key (32 bytes)
+    pub auth_salt: Option<Vec<u8>>, // PBKDF2 salt (16 bytes)
+    pub shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
+    pub ngrok_url: Option<String>,
+    pub ngrok_task: Option<tokio::task::JoinHandle<()>>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct ConnectedClient {
+    pub session_id: String,
+    pub ip: String,
+    pub user_agent: String,
+    pub authenticated_at: String,
+    pub last_active: String,
+    pub ws_connected: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TerminalState {
+    pub activated_terminals: Vec<String>,
+    pub active_terminal_tab: Option<String>,
+    pub terminal_visible: bool,
+    pub client_id: Option<String>,
+    pub session_id: Option<String>, // PTY session ID for per-session resize gating
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct ShareStateInfo {
+    pub active: bool,
+    pub urls: Vec<String>,
+    pub ngrok_url: Option<String>,
+    pub workspace_path: Option<String>,
+    pub current_workspace_name: Option<String>,
+}
+
+// Auth rate limiter: per-IP sliding window (max 5 attempts per 60 seconds)
+pub struct AuthRateLimiter {
+    attempts: HashMap<String, Vec<Instant>>,
+}
+
+impl Default for AuthRateLimiter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AuthRateLimiter {
+    pub fn new() -> Self {
+        Self {
+            attempts: HashMap::new(),
+        }
+    }
+
+    /// Returns true if the request is allowed, false if rate-limited.
+    pub fn check_and_record(&mut self, ip: &str) -> bool {
+        let window = Duration::from_secs(60);
+        let max_attempts = 5;
+        let now = Instant::now();
+
+        let attempts = self.attempts.entry(ip.to_string()).or_default();
+        // Remove expired entries
+        attempts.retain(|t| now.duration_since(*t) < window);
+
+        if attempts.len() >= max_attempts {
+            return false;
+        }
+        attempts.push(now);
+        true
+    }
+
+    /// Clean up stale entries (call periodically)
+    pub fn cleanup(&mut self) {
+        let window = Duration::from_secs(60);
+        let now = Instant::now();
+        self.attempts.retain(|_, attempts| {
+            attempts.retain(|t| now.duration_since(*t) < window);
+            !attempts.is_empty()
+        });
+    }
+}
+
+// Nonce cache for challenge-response authentication (one-time use, 60s TTL)
+pub struct NonceCache {
+    entries: HashMap<String, (Instant, Vec<u8>)>, // nonce_hex -> (created_at, nonce_bytes)
+}
+
+impl Default for NonceCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl NonceCache {
+    pub fn new() -> Self {
+        Self {
+            entries: HashMap::new(),
+        }
+    }
+
+    /// Generate new nonce, store and return hex encoding
+    pub fn generate(&mut self) -> Result<String, String> {
+        use ring::rand::{SecureRandom, SystemRandom};
+        let rng = SystemRandom::new();
+        let mut nonce = vec![0u8; 32];
+        rng.fill(&mut nonce)
+            .map_err(|_| "Failed to generate nonce")?;
+        let nonce_hex = hex::encode(&nonce);
+        self.entries
+            .insert(nonce_hex.clone(), (Instant::now(), nonce));
+        Ok(nonce_hex)
+    }
+
+    /// Consume nonce (one-time use), return bytes
+    pub fn consume(&mut self, nonce_hex: &str) -> Option<Vec<u8>> {
+        self.cleanup();
+        self.entries.remove(nonce_hex).map(|(_, bytes)| bytes)
+    }
+
+    /// Clean up expired nonces (TTL: 60 seconds)
+    pub fn cleanup(&mut self) {
+        let now = Instant::now();
+        self.entries
+            .retain(|_, (created, _)| now.duration_since(*created) < Duration::from_secs(60));
+    }
+}
+
+// ==================== 配置结构 ====================
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct CloudConfig {
+    #[serde(default)]
+    pub server_url: Option<String>,
+    #[serde(default)]
+    pub access_token: Option<String>,
+    #[serde(default)]
+    pub refresh_token: Option<String>,
+    #[serde(default)]
+    pub device_name: Option<String>,
+}
+
+// 全局配置：存储在 ~/.config/worktree-manager/global.json
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GlobalConfig {
+    pub workspaces: Vec<WorkspaceRef>,
+    pub current_workspace: Option<String>, // 当前选中的 workspace 路径
+    #[serde(default)]
+    pub ngrok_token: Option<String>,
+    #[serde(default)]
+    pub last_share_port: Option<u16>, // 上次使用的分享端口
+    #[serde(default)]
+    pub share_password: Option<String>, // 上次使用的分享口令
+    #[serde(default)]
+    pub dashscope_api_key: Option<String>,
+    #[serde(default)]
+    pub dashscope_base_url: Option<String>,
+    #[serde(default = "default_true")]
+    pub voice_refine_enabled: bool,
+    #[serde(default)]
+    pub voice_refine_base_url: Option<String>,
+    #[serde(default)]
+    pub voice_asr_model: Option<String>,
+    #[serde(default)]
+    pub voice_refine_model: Option<String>,
+    #[serde(default = "default_prefix_templates")]
+    pub commit_prefix_templates: Vec<String>,
+    #[serde(default = "default_true")]
+    pub commit_prefix_enabled: bool,
+    #[serde(default)]
+    pub default_prefix_index: usize,
+    #[serde(default)]
+    pub git_user_name: Option<String>,
+    #[serde(default)]
+    pub git_user_email: Option<String>,
+    #[serde(default)]
+    pub skip_git_hooks: bool,
+    #[serde(default = "default_true")]
+    pub shell_integration_enabled: bool,
+    #[serde(default)]
+    pub custom_mirrors: Vec<CustomMirror>,
+    #[serde(default)]
+    pub cloud: CloudConfig,
+    // NEW: commit AI 独立key
+    #[serde(default)]
+    pub commit_ai_api_key: Option<String>,
+    // NEW: AI生成开关
+    #[serde(default = "default_true")]
+    pub commit_ai_enabled: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CustomMirror {
+    pub name: String,
+    pub url: String, // 前缀，如 "https://ghproxy.net/"
+}
+
+fn default_true() -> bool {
+    true
+}
+
+pub fn default_prefix_templates() -> Vec<String> {
+    vec!["[{{worktree-name}}]".to_string()]
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct WorkspaceRef {
+    pub name: String,
+    pub path: String,
+}
+
+impl Default for GlobalConfig {
+    fn default() -> Self {
+        Self {
+            workspaces: vec![],
+            current_workspace: None,
+            ngrok_token: None,
+            last_share_port: None,
+            share_password: None,
+            dashscope_api_key: None,
+            dashscope_base_url: None,
+            voice_refine_enabled: true,
+            voice_refine_base_url: None,
+            voice_asr_model: None,
+            voice_refine_model: None,
+            commit_prefix_templates: default_prefix_templates(),
+            commit_prefix_enabled: true,
+            default_prefix_index: 0,
+            git_user_name: None,
+            git_user_email: None,
+            skip_git_hooks: false,
+            shell_integration_enabled: true,
+            custom_mirrors: vec![],
+            cloud: CloudConfig::default(),
+            commit_ai_api_key: None,
+            commit_ai_enabled: true,
+        }
+    }
+}
+
+// Workspace 配置：存储在 {workspace_root}/.worktree-manager.json
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct WorkspaceConfig {
+    pub name: String,
+    pub worktrees_dir: String, // 相对路径，如 "worktrees"
+    pub projects: Vec<ProjectConfig>,
+    #[serde(default = "default_linked_workspace_items")]
+    pub linked_workspace_items: Vec<String>, // 要链接到每个 worktree 的全局文件/文件夹
+    #[serde(default)]
+    pub vault_linked_workspace_items: Vec<String>, // vault 挂载时自动填充，也需链接到 worktree
+    #[serde(default = "default_uat_branch")]
+    pub uat_branch: String, // UAT 分支名，默认 "uat"
+    #[serde(default)]
+    pub archived_worktrees: Vec<String>, // archived worktree names
+    #[serde(default)]
+    pub worktree_colors: HashMap<String, WorktreeColor>, // worktree_name -> color
+    #[serde(default)]
+    pub tags: Vec<TagDefinition>,
+}
+
+pub fn default_uat_branch() -> String {
+    "uat".to_string()
+}
+
+pub fn default_linked_workspace_items() -> Vec<String> {
+    vec![]
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum WorktreeColor {
+    Red,
+    Orange,
+    Yellow,
+    Green,
+    Blue,
+    Purple,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TagDefinition {
+    pub id: String,
+    pub name: String,
+    pub color: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ProjectConfig {
+    pub name: String,
+    pub base_branch: String,
+    pub test_branch: String,
+    pub merge_strategy: String,
+    #[serde(default)]
+    pub linked_folders: Vec<String>, // 要链接的文件夹列表
+    #[serde(default)]
+    pub commit_prefix_index: Option<usize>,
+    #[serde(default)]
+    pub git_user_name: Option<String>,
+    #[serde(default)]
+    pub git_user_email: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+impl Default for WorkspaceConfig {
+    fn default() -> Self {
+        Self {
+            name: "New Workspace".to_string(),
+            worktrees_dir: "worktrees".to_string(),
+            projects: vec![],
+            linked_workspace_items: default_linked_workspace_items(),
+            vault_linked_workspace_items: vec![],
+            uat_branch: default_uat_branch(),
+            archived_worktrees: vec![],
+            worktree_colors: HashMap::new(),
+            tags: vec![],
+        }
+    }
+}
+
+// ==================== 数据结构 ====================
+
+#[derive(Debug, Serialize)]
+pub struct WorktreeListItem {
+    pub name: String,
+    /// Display name from mapping.json (for non-ASCII aliased worktrees)
+    pub display_name: Option<String>,
+    pub path: String,
+    pub is_archived: bool,
+    pub color: Option<WorktreeColor>,
+    pub projects: Vec<ProjectStatus>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProjectStatus {
+    pub name: String,
+    pub path: String,
+    pub current_branch: String,
+    pub base_branch: String,
+    pub test_branch: String,
+    pub has_uncommitted: bool,
+    pub uncommitted_count: usize,
+    pub is_merged_to_test: bool,
+    pub is_merged_to_base: bool,
+    pub ahead_of_base: usize,
+    pub behind_base: usize,
+    pub ahead_of_test: usize,
+    pub unpushed_commits: usize,
+    pub remote_url: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MainWorkspaceStatus {
+    pub path: String,
+    pub name: String,
+    pub projects: Vec<MainProjectStatus>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MainProjectStatus {
+    pub name: String,
+    pub path: String,
+    pub current_branch: String,
+    pub has_uncommitted: bool,
+    pub uncommitted_count: usize,
+    pub is_merged_to_test: bool,
+    pub is_merged_to_base: bool,
+    pub ahead_of_base: usize,
+    pub behind_base: usize,
+    pub ahead_of_test: usize,
+    pub unpushed_commits: usize,
+    pub base_branch: String,
+    pub test_branch: String,
+    pub linked_folders: Vec<String>,
+}
+
+// ==================== Vault 子项 ====================
+
+#[derive(Debug, Serialize)]
+pub struct VaultItemChild {
+    pub name: String,
+    pub item_type: String, // "file" | "directory"
+}
+
+// ==================== 智能软链接扫描 ====================
+
+#[derive(Debug, Serialize, Clone)]
+pub struct ScannedFolder {
+    pub relative_path: String, // e.g. "packages/web/node_modules"
+    pub display_name: String,  // e.g. "node_modules"
+    pub size_bytes: u64,
+    pub size_display: String, // e.g. "256.3 MB"
+    pub is_recommended: bool, // 推荐预选
+}
+
+// ==================== Worktree 操作数据结构 ====================
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateWorktreeRequest {
+    pub name: String,
+    /// Optional English folder alias (for non-ASCII names that may break IDEs)
+    #[serde(default, alias = "folderName")]
+    pub folder_name: Option<String>,
+    pub projects: Vec<CreateProjectRequest>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateProjectRequest {
+    pub name: String,
+    pub base_branch: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WorktreeArchiveStatus {
+    pub name: String,
+    pub can_archive: bool,
+    pub warnings: Vec<String>,
+    pub errors: Vec<String>,
+    pub projects: Vec<crate::git_ops::BranchStatus>,
+    #[serde(default)]
+    pub locked_processes: Vec<LockedProcessInfo>,
+    #[serde(default)]
+    pub lock_check_supported: bool,
+    #[serde(default)]
+    pub lock_check_error: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct LockedProcessInfo {
+    pub pid: u32,
+    pub process_start_time: String,
+    pub name: String,
+    pub application_type: String,
+    pub restartable: bool,
+}
+
+// ==================== 向已有 Worktree 添加项目 ====================
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AddProjectToWorktreeRequest {
+    pub worktree_name: String,
+    pub project_name: String,
+    pub base_branch: String,
+}
+
+// ==================== Git 操作 ====================
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SwitchBranchRequest {
+    pub project_path: String,
+    pub branch: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CloneProjectRequest {
+    pub name: String,
+    pub repo_url: String,
+    pub base_branch: String,
+    pub test_branch: String,
+    pub merge_strategy: String,
+    pub linked_folders: Vec<String>,
+}
+
+// ==================== 扫描已有项目 ====================
+
+#[derive(Debug, Serialize)]
+pub struct ExistingProjectInfo {
+    pub name: String,
+    pub current_branch: String,
+    pub is_registered: bool,
+}
+
+// ==================== 编辑器 ====================
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OpenEditorRequest {
+    pub path: String,
+    pub editor: String,
+}
+
+// ==================== 部署到主工作区 ====================
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MainWorkspaceOccupation {
+    pub worktree_name: String,
+    pub original_branches: HashMap<String, String>, // project_name → original_branch (main)
+    #[serde(default)]
+    pub worktree_branches: HashMap<String, String>, // project_name → branch (worktree)
+    pub deployed_at: String,                        // ISO8601
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DeployToMainResult {
+    pub success: bool,
+    pub switched_projects: Vec<String>,
+    pub failed_projects: Vec<DeployProjectError>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DeployProjectError {
+    pub project_name: String,
+    pub error: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AuthRateLimiter, NonceCache, WorkspaceConfig};
+    use serial_test::serial;
+
+    #[serial]
+    #[test]
+    fn auth_rate_limiter_allows_first_five_attempts_and_blocks_sixth() {
+        let mut limiter = AuthRateLimiter::new();
+
+        for attempt in 1..=6 {
+            let allowed = limiter.check_and_record("127.0.0.1");
+            assert_eq!(
+                allowed,
+                attempt < 6,
+                "unexpected result at attempt {attempt}"
+            );
+        }
+    }
+
+    #[serial]
+    #[test]
+    fn nonce_cache_consumes_nonce_only_once() {
+        let mut cache = NonceCache::new();
+        let nonce = cache.generate().unwrap();
+
+        let first = cache.consume(&nonce);
+        let second = cache.consume(&nonce);
+
+        assert!(first.is_some());
+        assert!(second.is_none());
+    }
+
+    #[serial]
+    #[test]
+    fn workspace_config_deserializes_missing_vault_linked_items_as_empty() {
+        let config: WorkspaceConfig = serde_json::from_str(
+            r#"{
+                "name": "demo",
+                "worktrees_dir": "worktrees",
+                "projects": [],
+                "linked_workspace_items": ["CLAUDE.md"]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.linked_workspace_items, vec!["CLAUDE.md"]);
+        assert!(config.vault_linked_workspace_items.is_empty());
+    }
+}

@@ -1,0 +1,26 @@
+{
+  "name": "@worktree-manager/mcp",
+  "version": "1.0.1",
+  "description": "MCP server for Worktree Manager",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/guoyongchang/worktree-manager"
+  },
+  "type": "module",
+  "bin": {
+    "worktree-manager-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublish": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "axios": "^1.7.0",
+    "chokidar": "^3.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0"
+  }
+}

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/app-icon.svg" />
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <!-- PWA: standalone mode (no Safari address bar when added to home screen) -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Worktree" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#0f172a" />
+  <script>
+    (function(){var t=localStorage.getItem('theme');if(t)document.documentElement.setAttribute('data-theme',t)})();
+  </script>
+  <title>Worktree Manager</title>
+</head>
+
+<body>
+  <div id="root"></div>
+  <script>
+    window.onerror = function (msg, url, line, col, err) {
+      var el = document.getElementById('root');
+      if (el && !el.hasChildNodes()) {
+        el.style.cssText = 'padding:1rem;font-family:monospace;color:#ef4444;white-space:pre-wrap';
+        el.textContent = msg + '\n  at ' + url + ':' + line + ':' + col;
+      }
+    };
+    window.addEventListener('unhandledrejection', function (e) {
+      var el = document.getElementById('root');
+      if (el && !el.hasChildNodes()) {
+        el.style.cssText = 'padding:1rem;font-family:monospace;color:#ef4444;white-space:pre-wrap';
+        el.textContent = 'Unhandled rejection: ' + (e.reason && e.reason.message || e.reason || e);
+      }
+    });
+  </script>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+
+</html>
