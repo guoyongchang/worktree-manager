@@ -83,18 +83,22 @@ fn fixed_wide_to_string(value: &[u16]) -> String {
 
 #[cfg(target_os = "windows")]
 fn rm_app_type_name(value: i32) -> String {
-    use windows_sys::Win32::System::RestartManager::{
-        RmConsole, RmCritical, RmExplorer, RmMainWindow, RmOtherWindow, RmService,
-    };
+    use windows_sys::Win32::System::RestartManager as rm;
 
-    match value {
-        RmMainWindow => "main_window",
-        RmOtherWindow => "other_window",
-        RmService => "service",
-        RmExplorer => "explorer",
-        RmConsole => "console",
-        RmCritical => "critical",
-        _ => "unknown",
+    if value == rm::RmMainWindow {
+        "main_window"
+    } else if value == rm::RmOtherWindow {
+        "other_window"
+    } else if value == rm::RmService {
+        "service"
+    } else if value == rm::RmExplorer {
+        "explorer"
+    } else if value == rm::RmConsole {
+        "console"
+    } else if value == rm::RmCritical {
+        "critical"
+    } else {
+        "unknown"
     }
     .to_string()
 }

@@ -138,7 +138,10 @@ mod tests {
     use once_cell::sync::Lazy;
     use serial_test::serial;
     use std::sync::{Mutex, MutexGuard};
-    use std::time::{Duration, Instant};
+    #[cfg(not(target_os = "windows"))]
+    use std::time::Duration;
+    #[cfg(not(target_os = "windows"))]
+    use std::time::Instant;
 
     static PTY_COMMAND_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 

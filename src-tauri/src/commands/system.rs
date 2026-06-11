@@ -1895,6 +1895,7 @@ mod tests {
             Self { key, previous }
         }
 
+        #[allow(dead_code)]
         fn remove(key: &'static str) -> Self {
             let previous = std::env::var_os(key);
             std::env::remove_var(key);
@@ -1950,6 +1951,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     fn shell_quote(path: &Path) -> String {
         format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
     }
