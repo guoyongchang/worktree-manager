@@ -1469,7 +1469,7 @@ pub fn set_git_path_internal(path: &str) {
 }
 
 pub fn terminate_process_impl(pid: u32) -> Result<(), String> {
-    if pid == 0 {
+    if pid == 0 || pid > i32::MAX as u32 {
         return Err("Invalid process id".to_string());
     }
     if pid == std::process::id() {
@@ -2424,6 +2424,10 @@ mod tests {
             Err("Invalid process id".to_string())
         );
         assert_eq!(
+            terminate_process_impl(u32::MAX),
+            Err("Invalid process id".to_string())
+        );
+        assert_eq!(
             terminate_process_impl(std::process::id()),
             Err("Refusing to terminate the current app process".to_string())
         );
@@ -2856,7 +2860,10 @@ mod tests {
     #[serial]
     #[test]
     fn terminate_process_reports_os_error_for_nonexistent_process() {
-        let impossible_pid = u32::MAX;
+        // Use a high-but-valid PID that is extremely unlikely to exist.
+        // Do NOT use u32::MAX (4294967295) — on Linux, `kill` interprets it as
+        // -1 (i32 overflow), which sends SIGTERM to ALL processes and kills the CI runner.
+        let impossible_pid = 4_000_000;
         assert_ne!(impossible_pid, std::process::id());
 
         let err = terminate_process_impl(impossible_pid).unwrap_err();
