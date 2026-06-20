@@ -1,6 +1,6 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { ListToolsRequestSchema, CallToolRequestSchema, type CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { HttpTransport } from './transport/http.js';
 import { ConfigTransport } from './transport/config.js';
 import { buildCoreHandlers, CORE_TOOLS } from './tools/core.js';
@@ -74,11 +74,11 @@ export class WorktreeMcpServer {
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
       const handler = this.handlers[name];
-      if (!handler) return errorResult(`Unknown tool: ${name}`) as unknown as CallToolResult;
+      if (!handler) return errorResult(`Unknown tool: ${name}`);
       try {
-        return await handler((args ?? {}) as Record<string, unknown>) as unknown as CallToolResult;
+        return await handler((args ?? {}) as Record<string, unknown>);
       } catch (e) {
-        return errorResult(`Error: ${e instanceof Error ? e.message : String(e)}`) as unknown as CallToolResult;
+        return errorResult(`Error: ${e instanceof Error ? e.message : String(e)}`);
       }
     });
 

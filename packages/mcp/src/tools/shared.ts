@@ -1,8 +1,7 @@
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+
 // 工具调用返回结构（MCP CallTool 的 content 形态）
-export interface ToolResult {
-  content: Array<{ type: 'text'; text: string }>;
-  isError?: boolean;
-}
+export type ToolResult = CallToolResult;
 
 // 单个工具的处理函数：接收 arguments，返回 ToolResult
 export type ToolHandler = (args: Record<string, unknown>) => Promise<ToolResult>;
