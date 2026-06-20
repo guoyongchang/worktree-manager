@@ -3920,6 +3920,7 @@ mod http_server_coverage_tests {
         config.voice_refine_base_url = Some("https://example.test/v1".to_string());
         config.voice_asr_model = Some("asr-model".to_string());
         config.voice_refine_model = Some("refine-model".to_string());
+        config.commit_ai_model = Some("commit-model".to_string());
         config.commit_prefix_templates = vec!["feat({{worktree-name}}):".to_string()];
         config.commit_prefix_enabled = false;
         config.default_prefix_index = 0;
@@ -3957,6 +3958,7 @@ mod http_server_coverage_tests {
             ),
             (h_get_voice_asr_model().await, json!("asr-model")),
             (h_get_voice_refine_model().await, json!("refine-model")),
+            (h_get_commit_ai_model().await, json!("commit-model")),
             (h_get_skip_git_hooks().await, json!(true)),
             (h_get_shell_integration_enabled().await, json!(false)),
         ];
@@ -5084,6 +5086,12 @@ mod http_server_coverage_tests {
             StatusCode::NO_CONTENT
         );
         assert_eq!(
+            h_set_commit_ai_model(Json(json!({"model": "commit-model-temp"})))
+                .await
+                .status(),
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
             json_response(h_get_dashscope_base_url().await).await.1,
             json!("wss://dash.example/ws")
         );
@@ -5102,6 +5110,10 @@ mod http_server_coverage_tests {
         assert_eq!(
             json_response(h_get_voice_refine_model().await).await.1,
             json!("refine-temp")
+        );
+        assert_eq!(
+            json_response(h_get_commit_ai_model().await).await.1,
+            json!("commit-model-temp")
         );
 
         let mcp = McpConfig {
