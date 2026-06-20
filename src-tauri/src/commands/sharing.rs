@@ -82,10 +82,7 @@ pub async fn start_sharing_internal(
             "[sharing] Rejected: port {} conflicts with MCP server",
             port
         );
-        return Err(format!(
-            "端口 {} 已被 MCP 服务占用，请更换其他端口",
-            port
-        ));
+        return Err(format!("端口 {} 已被 MCP 服务占用，请更换其他端口", port));
     }
 
     // Check if already sharing
