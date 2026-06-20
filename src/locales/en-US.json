@@ -175,6 +175,8 @@
   "settings.commitAiKeyPlaceholder": "sk-...",
   "settings.commitAiKeyMaskedPlaceholder": "Key already set (enter new key to replace)",
   "settings.commitAiKeyHint": "Requires a separate Dashscope API Key, distinct from voice Key",
+  "settings.commitAiModel": "Generation Model",
+  "settings.commitAiModelHint": "Leave empty to use default: qwen3.7-max",
   "settings.prefixEnabled": "Enable commit prefix",
   "settings.prefixEnabledDesc": "Automatically add prefix in commit dialog",
   "settings.skipGitHooks": "Skip Git Hooks",
