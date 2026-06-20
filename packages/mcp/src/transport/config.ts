@@ -26,13 +26,24 @@ export interface Transport extends BaseTransport {
   }): Promise<unknown>;
   archiveWorktree(name: string): Promise<unknown>;
   deleteArchivedWorktree(name: string): Promise<unknown>;
-  getBranchDiffStats(projectPath: string, baseBranch: string): Promise<unknown>;
+  getBranchDiffStats(projectPath: string, baseBranch: string, testBranch?: string): Promise<unknown>;
   getChangedFiles(projectPath: string): Promise<unknown>;
   getRemoteBranches(projectPath: string): Promise<unknown>;
-  commitAll(projectPath: string, message: string): Promise<unknown>;
+  commitAll(
+    projectPath: string,
+    message: string,
+    authorName?: string,
+    authorEmail?: string,
+    skipHooks?: boolean
+  ): Promise<unknown>;
   pushToRemote(projectPath: string): Promise<unknown>;
   switchBranch(projectPath: string, branchName: string): Promise<unknown>;
   fetchProjectRemote(projectPath: string): Promise<unknown>;
+  // 新增写/同步方法
+  pullCurrentBranch(projectPath: string): Promise<unknown>;
+  syncWithBase(projectPath: string, baseBranch: string): Promise<unknown>;
+  mergeToTest(projectPath: string, testBranch: string): Promise<unknown>;
+  mergeToBase(projectPath: string, baseBranch: string): Promise<unknown>;
 }
 
 export class ConfigTransport implements BaseTransport {
