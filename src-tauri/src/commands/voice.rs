@@ -133,6 +133,35 @@ pub(crate) fn check_commit_ai_api_key() -> bool {
         .unwrap_or(false)
 }
 
+// commit message 生成模型默认值（None 时回退）。与 voice_refine 默认保持一致。
+const DEFAULT_COMMIT_AI_MODEL: &str = "qwen3.7-max";
+
+#[allow(dead_code)]
+pub(crate) fn get_commit_ai_model_inner() -> Result<Option<String>, String> {
+    let config = load_global_config();
+    Ok(config.commit_ai_model)
+}
+
+#[allow(dead_code)]
+pub(crate) fn set_commit_ai_model_inner(model: String) -> Result<(), String> {
+    let mut config = load_global_config();
+    config.commit_ai_model = if model.is_empty() { None } else { Some(model) };
+    save_global_config_internal(&config)?;
+    Ok(())
+}
+
+#[tauri::command]
+#[allow(dead_code)]
+pub(crate) async fn get_commit_ai_model() -> Result<Option<String>, String> {
+    get_commit_ai_model_inner()
+}
+
+#[tauri::command]
+#[allow(dead_code)]
+pub(crate) async fn set_commit_ai_model(model: String) -> Result<(), String> {
+    set_commit_ai_model_inner(model)
+}
+
 // ==================== Dashscope Base URL Commands ====================
 
 const DEFAULT_DASHSCOPE_WS_URL: &str = "wss://dashscope.aliyuncs.com/api-ws/v1/inference/";
@@ -1494,6 +1523,25 @@ mod tests {
         assert_eq!(get_voice_refine_model_inner().unwrap(), None);
         assert_eq!(get_commit_ai_api_key_inner().unwrap(), None);
         assert!(!check_commit_ai_api_key());
+    }
+
+    #[test]
+    fn commit_ai_model_inner_round_trips_and_clears() {
+        let _home = TempHomeGuard::new();
+
+        // 默认未配置
+        assert_eq!(get_commit_ai_model_inner().unwrap(), None);
+
+        // 设置后可读回
+        set_commit_ai_model_inner("qwen-max".to_string()).unwrap();
+        assert_eq!(
+            get_commit_ai_model_inner().unwrap(),
+            Some("qwen-max".to_string())
+        );
+
+        // 空串清空为 None
+        set_commit_ai_model_inner(String::new()).unwrap();
+        assert_eq!(get_commit_ai_model_inner().unwrap(), None);
     }
 
     #[serial]
