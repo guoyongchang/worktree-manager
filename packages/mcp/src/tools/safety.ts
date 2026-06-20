@@ -32,9 +32,10 @@ export function evaluateMergeGate(input: MergeGateInput, opts: MergeGateOpts): M
 
 // 从工具入参解析门控选项
 export function gateOptsFromArgs(args: Record<string, unknown>): MergeGateOpts {
+  const n = args?.max_ahead;
   return {
-    max_ahead: typeof args?.max_ahead === 'number' ? (args.max_ahead as number) : DEFAULT_MAX_AHEAD,
-    require_clean_worktree: args?.require_clean_worktree === false ? false : true,
+    max_ahead: typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : DEFAULT_MAX_AHEAD,
+    require_clean_worktree: args?.require_clean_worktree !== false,
     force: args?.force === true,
   };
 }

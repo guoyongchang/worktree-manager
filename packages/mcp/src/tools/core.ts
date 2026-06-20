@@ -38,6 +38,8 @@ export function buildCoreHandlers(transport: BaseTransport): Record<string, Tool
       const pjIdx = segs.indexOf('projects');
       const project_name = pjIdx >= 0 && segs.length > pjIdx + 1 ? segs[pjIdx + 1] : null;
       // 结构 <ws>/<worktrees_dir>/<worktree>/projects/<project> → worktree = projects 前一段；主工作区 <ws>/projects/... 无 worktree
+      // 假设标准单层 worktrees_dir 布局；多段 worktrees_dir 时该位置推导可能不准
+      // （list_workspaces 不返回 worktrees_dir 配置，暂按单层处理）。
       const worktree_name = pjIdx >= 2 ? segs[pjIdx - 1] : null;
       return textResult({ workspace: best, worktree_name, project_name, matched_by: 'prefix' });
     },

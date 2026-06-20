@@ -35,3 +35,20 @@ test('gateOptsFromArgs honors overrides', () => {
   const o = gateOptsFromArgs({ max_ahead: 10, require_clean_worktree: false, force: true });
   assert.deepEqual(o, { max_ahead: 10, require_clean_worktree: false, force: true });
 });
+
+test('allows merge exactly at threshold boundary', () => {
+  const r = evaluateMergeGate({ ahead: 50, changed_files: 0 }, { max_ahead: 50, require_clean_worktree: true, force: false });
+  assert.equal(r.allow, true);
+});
+
+test('gateOptsFromArgs honors partial input (only max_ahead)', () => {
+  const o = gateOptsFromArgs({ max_ahead: 10 });
+  assert.equal(o.max_ahead, 10);
+  assert.equal(o.require_clean_worktree, true);
+  assert.equal(o.force, false);
+});
+
+test('gateOptsFromArgs falls back on invalid max_ahead (NaN/negative)', () => {
+  assert.equal(gateOptsFromArgs({ max_ahead: NaN }).max_ahead, DEFAULT_MAX_AHEAD);
+  assert.equal(gateOptsFromArgs({ max_ahead: -1 }).max_ahead, DEFAULT_MAX_AHEAD);
+});

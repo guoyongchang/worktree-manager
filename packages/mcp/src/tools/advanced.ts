@@ -1,5 +1,5 @@
 import type { Transport } from '../transport/http.js';
-import { type ToolHandler, textResult } from './shared.js';
+import { type ToolHandler, textResult, errorResult } from './shared.js';
 import { evaluateMergeGate, gateOptsFromArgs } from './safety.js';
 import type { BranchDiffStats } from '../types.js';
 
@@ -82,15 +82,9 @@ export function buildAdvancedHandlers(transport: Transport): Record<string, Tool
         const pushed = await transport.pushToRemote(projectPath);
         return textResult({ committed, pushed });
       } catch (e) {
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `已提交但推送失败（需手动 push）。\ncommit: ${JSON.stringify(committed)}\npush error: ${e instanceof Error ? e.message : String(e)}`,
-            },
-          ],
-          isError: true,
-        };
+        return errorResult(
+          `已提交但推送失败（需手动 push）。\ncommit: ${JSON.stringify(committed)}\npush error: ${e instanceof Error ? e.message : String(e)}`
+        );
       }
     },
 
@@ -106,7 +100,7 @@ export function buildAdvancedHandlers(transport: Transport): Record<string, Tool
         { ahead: stats.ahead_of_test, changed_files: stats.changed_files },
         gateOptsFromArgs(args)
       );
-      if (!gate.allow) return { content: [{ type: 'text', text: `合并到 test 被拦截：${gate.reason}` }], isError: true };
+      if (!gate.allow) return errorResult(`合并到 test 被拦截：${gate.reason}`);
       return textResult(await transport.mergeToTest(projectPath, testBranch));
     },
 
@@ -119,7 +113,7 @@ export function buildAdvancedHandlers(transport: Transport): Record<string, Tool
         { ahead: stats.ahead, changed_files: stats.changed_files },
         gateOptsFromArgs(args)
       );
-      if (!gate.allow) return { content: [{ type: 'text', text: `合并到 base 被拦截：${gate.reason}` }], isError: true };
+      if (!gate.allow) return errorResult(`合并到 base 被拦截：${gate.reason}`);
       return textResult(await transport.mergeToBase(projectPath, baseBranch));
     },
   };
