@@ -8,6 +8,9 @@ import { buildDetailsHandlers, DETAILS_TOOLS } from './tools/details.js';
 import { buildAdvancedHandlers, ADVANCED_TOOLS } from './tools/advanced.js';
 import { type ToolHandler, errorResult } from './tools/shared.js';
 import type { CapabilityLevel } from './types.js';
+import { readFileSync, existsSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
 
 export class WorktreeMcpServer {
   private server: Server | null = null;
@@ -47,8 +50,23 @@ export class WorktreeMcpServer {
       }
     );
 
+    // 读取 mcp.json 的 capability_level（缺省 details）
+    this.capabilityLevel = this.loadCapabilityLevel();
+
     // Register tools based on capability level
     this.registerTools();
+  }
+
+  private loadCapabilityLevel(): CapabilityLevel {
+    try {
+      const p = join(homedir(), '.config', 'worktree-manager', 'mcp.json');
+      if (existsSync(p)) {
+        const cfg = JSON.parse(readFileSync(p, 'utf-8'));
+        const lvl = cfg?.capability_level;
+        if (lvl === 'core' || lvl === 'details' || lvl === 'advanced') return lvl;
+      }
+    } catch {}
+    return 'details';
   }
 
   private registerTools(): void {
