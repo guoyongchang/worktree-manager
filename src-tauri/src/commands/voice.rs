@@ -863,7 +863,13 @@ pub(crate) async fn generate_commit_message(diff: String) -> Result<String, Stri
         serde_json::json!({"role": "user", "content": trimmed}),
     ];
 
-    let result = call_ai_chat(messages, None, 0.3, "commit_ai").await?;
+    // 读取用户所选模型；未配置时回退默认（与 voice_refine 一致）。
+    let config = crate::config::load_global_config();
+    let commit_model = config
+        .commit_ai_model
+        .as_deref()
+        .unwrap_or(DEFAULT_COMMIT_AI_MODEL);
+    let result = call_ai_chat(messages, Some(commit_model), 0.3, "commit_ai").await?;
     Ok(if result.is_empty() {
         "chore: update".to_string()
     } else {
