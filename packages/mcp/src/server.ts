@@ -1,17 +1,19 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { ListToolsRequestSchema, CallToolRequestSchema, type CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { HttpTransport } from './transport/http.js';
 import { ConfigTransport } from './transport/config.js';
-import { registerCoreTools, CORE_TOOLS } from './tools/core.js';
-import { registerDetailsTools, DETAILS_TOOLS } from './tools/details.js';
-import { registerAdvancedTools, ADVANCED_TOOLS } from './tools/advanced.js';
+import { buildCoreHandlers, CORE_TOOLS } from './tools/core.js';
+import { buildDetailsHandlers, DETAILS_TOOLS } from './tools/details.js';
+import { buildAdvancedHandlers, ADVANCED_TOOLS } from './tools/advanced.js';
+import { type ToolHandler, errorResult } from './tools/shared.js';
 import type { CapabilityLevel } from './types.js';
 
 export class WorktreeMcpServer {
   private server: Server | null = null;
   private transport: HttpTransport | ConfigTransport | null = null;
   private capabilityLevel: CapabilityLevel = 'core';
+  private handlers: Record<string, ToolHandler> = {};
 
   constructor() {}
 
@@ -51,44 +53,37 @@ export class WorktreeMcpServer {
 
   private registerTools(): void {
     if (!this.server || !this.transport) return;
-
     const transport = this.transport;
+    const httpOnly = transport instanceof HttpTransport;
 
-    // Core tools always registered
-    registerCoreTools(this.server, transport);
+    // 按 capability + transport 聚合 handler map（高层覆盖不再丢失低层）
+    let handlers: Record<string, ToolHandler> = { ...buildCoreHandlers(transport) };
+    let tools: any[] = [...CORE_TOOLS];
 
-    // Details tools - only available with HTTP transport
-    if (this.capabilityLevel === 'details' || this.capabilityLevel === 'advanced') {
-      if (transport instanceof HttpTransport) {
-        registerDetailsTools(this.server, transport);
-      }
+    if ((this.capabilityLevel === 'details' || this.capabilityLevel === 'advanced') && httpOnly) {
+      handlers = { ...handlers, ...buildDetailsHandlers(transport) };
+      tools = tools.concat(DETAILS_TOOLS);
     }
-
-    // Advanced tools - only available with HTTP transport
-    if (this.capabilityLevel === 'advanced') {
-      if (transport instanceof HttpTransport) {
-        registerAdvancedTools(this.server, transport);
-      }
+    if (this.capabilityLevel === 'advanced' && httpOnly) {
+      handlers = { ...handlers, ...buildAdvancedHandlers(transport) };
+      tools = tools.concat(ADVANCED_TOOLS);
     }
+    this.handlers = handlers;
 
-    // Set tool list handler
-    this.server.setRequestHandler(
-      ListToolsRequestSchema,
-      async () => {
-        let tools: any[] = [...CORE_TOOLS];
-        if (this.capabilityLevel === 'details' || this.capabilityLevel === 'advanced') {
-          if (transport instanceof HttpTransport) {
-            tools = tools.concat(DETAILS_TOOLS);
-          }
-        }
-        if (this.capabilityLevel === 'advanced') {
-          if (transport instanceof HttpTransport) {
-            tools = tools.concat(ADVANCED_TOOLS);
-          }
-        }
-        return { tools };
+    // 单一 CallTool dispatcher
+    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      const { name, arguments: args } = request.params;
+      const handler = this.handlers[name];
+      if (!handler) return errorResult(`Unknown tool: ${name}`) as unknown as CallToolResult;
+      try {
+        return await handler((args ?? {}) as Record<string, unknown>) as unknown as CallToolResult;
+      } catch (e) {
+        return errorResult(`Error: ${e instanceof Error ? e.message : String(e)}`) as unknown as CallToolResult;
       }
-    );
+    });
+
+    // 单一 ListTools
+    this.server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
   }
 
   setCapabilityLevel(level: CapabilityLevel): void {

@@ -1,103 +1,54 @@
-import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { Transport } from '../transport/http.js';
+import { type ToolHandler, textResult } from './shared.js';
 
-export function registerAdvancedTools(
-  server: Server,
-  transport: Transport
-): void {
-  server.setRequestHandler(
-    CallToolRequestSchema,
-    async (request) => {
-      const { name, arguments: args } = request.params;
+export function buildAdvancedHandlers(transport: Transport): Record<string, ToolHandler> {
+  return {
+    worktree_create: async (args) => {
+      const name = args?.name as string;
+      const projects = args?.projects as Array<{ name: string; base_branch?: string }>;
+      const folder_name = args?.folder_name as string | undefined;
+      if (!name || !projects) throw new Error('name and projects are required');
+      return textResult(await transport.createWorktree({ name, projects, folder_name }));
+    },
 
-      if (name === 'worktree_create') {
-        const name = args?.name as string;
-        const projects = args?.projects as Array<{ name: string; base_branch?: string }>;
-        const folder_name = args?.folder_name as string | undefined;
-        if (!name || !projects) {
-          throw new Error('name and projects are required');
-        }
-        const result = await transport.createWorktree({ name, projects, folder_name });
-        return {
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-        };
-      }
+    worktree_archive: async (args) => {
+      const name = args?.name as string;
+      if (!name) throw new Error('name is required');
+      return textResult(await transport.archiveWorktree(name));
+    },
 
-      if (name === 'worktree_archive') {
-        const name = args?.name as string;
-        if (!name) {
-          throw new Error('name is required');
-        }
-        const result = await transport.archiveWorktree(name);
-        return {
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-        };
-      }
+    worktree_delete_archived: async (args) => {
+      const name = args?.name as string;
+      if (!name) throw new Error('name is required');
+      return textResult(await transport.deleteArchivedWorktree(name));
+    },
 
-      if (name === 'worktree_delete_archived') {
-        const name = args?.name as string;
-        if (!name) {
-          throw new Error('name is required');
-        }
-        const result = await transport.deleteArchivedWorktree(name);
-        return {
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-        };
-      }
+    git_commit: async (args) => {
+      const projectPath = args?.project_path as string;
+      const message = args?.message as string;
+      if (!projectPath || !message) throw new Error('project_path and message are required');
+      return textResult(await transport.commitAll(projectPath, message));
+    },
 
-      if (name === 'git_commit') {
-        const projectPath = args?.project_path as string;
-        const message = args?.message as string;
-        if (!projectPath || !message) {
-          throw new Error('project_path and message are required');
-        }
-        const result = await transport.commitAll(projectPath, message);
-        return {
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-        };
-      }
+    git_push: async (args) => {
+      const projectPath = args?.project_path as string;
+      if (!projectPath) throw new Error('project_path is required');
+      return textResult(await transport.pushToRemote(projectPath));
+    },
 
-      if (name === 'git_push') {
-        const projectPath = args?.project_path as string;
-        if (!projectPath) {
-          throw new Error('project_path is required');
-        }
-        const result = await transport.pushToRemote(projectPath);
-        return {
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-        };
-      }
+    git_switch_branch: async (args) => {
+      const projectPath = args?.project_path as string;
+      const branchName = args?.branch_name as string;
+      if (!projectPath || !branchName) throw new Error('project_path and branch_name are required');
+      return textResult(await transport.switchBranch(projectPath, branchName));
+    },
 
-      if (name === 'git_switch_branch') {
-        const projectPath = args?.project_path as string;
-        const branchName = args?.branch_name as string;
-        if (!projectPath || !branchName) {
-          throw new Error('project_path and branch_name are required');
-        }
-        const result = await transport.switchBranch(projectPath, branchName);
-        return {
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-        };
-      }
-
-      if (name === 'git_fetch') {
-        const projectPath = args?.project_path as string;
-        if (!projectPath) {
-          throw new Error('project_path is required');
-        }
-        const result = await transport.fetchProjectRemote(projectPath);
-        return {
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-        };
-      }
-
-      return {
-        content: [{ type: 'text', text: `Unknown tool: ${name}` }],
-        isError: true,
-      };
-    }
-  );
+    git_fetch: async (args) => {
+      const projectPath = args?.project_path as string;
+      if (!projectPath) throw new Error('project_path is required');
+      return textResult(await transport.fetchProjectRemote(projectPath));
+    },
+  };
 }
 
 export const ADVANCED_TOOLS = [

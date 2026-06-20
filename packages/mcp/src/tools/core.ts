@@ -1,59 +1,23 @@
-import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { BaseTransport } from '../transport/config.js';
+import { type ToolHandler, textResult } from './shared.js';
 
-export function registerCoreTools(server: Server, transport: BaseTransport): void {
-  server.setRequestHandler(
-    CallToolRequestSchema,
-    async (request) => {
-      const { name, arguments: args } = request.params;
+export function buildCoreHandlers(transport: BaseTransport): Record<string, ToolHandler> {
+  return {
+    workspace_list: async () => textResult(await transport.listWorkspaces()),
 
-      if (name === 'workspace_list') {
-        const result = await transport.listWorkspaces();
-        return {
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-        };
-      }
+    workspace_get_current: async () => textResult(await transport.getCurrentWorkspace()),
 
-      if (name === 'workspace_get_current') {
-        const result = await transport.getCurrentWorkspace();
-        return {
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-        };
-      }
+    worktree_list: async (args) =>
+      textResult(await transport.listWorktrees(args?.include_archived === true)),
 
-      if (name === 'worktree_list') {
-        const includeArchived = args?.include_archived === true;
-        const result = await transport.listWorktrees(includeArchived);
-        return {
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-        };
-      }
+    worktree_get_status: async (args) => {
+      const name = args?.name as string;
+      if (!name) throw new Error('worktree name is required');
+      return textResult(await transport.checkWorktreeStatus(name));
+    },
 
-      if (name === 'worktree_get_status') {
-        const name = args?.name as string;
-        if (!name) {
-          throw new Error('worktree name is required');
-        }
-        const status = await transport.checkWorktreeStatus(name);
-        return {
-          content: [{ type: 'text', text: JSON.stringify(status, null, 2) }],
-        };
-      }
-
-      if (name === 'workspace_get_status') {
-        const result = await transport.getMainWorkspaceStatus();
-        return {
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-        };
-      }
-
-      return {
-        content: [{ type: 'text', text: `Unknown tool: ${name}` }],
-        isError: true,
-      };
-    }
-  );
+    workspace_get_status: async () => textResult(await transport.getMainWorkspaceStatus()),
+  };
 }
 
 export const CORE_TOOLS = [
