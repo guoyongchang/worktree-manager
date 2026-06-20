@@ -196,6 +196,9 @@ pub struct GlobalConfig {
     // NEW: AI生成开关
     #[serde(default = "default_true")]
     pub commit_ai_enabled: bool,
+    // NEW: commit message 生成模型（None 时回退 DEFAULT_COMMIT_AI_MODEL）
+    #[serde(default)]
+    pub commit_ai_model: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -243,6 +246,7 @@ impl Default for GlobalConfig {
             cloud: CloudConfig::default(),
             commit_ai_api_key: None,
             commit_ai_enabled: true,
+            commit_ai_model: None,
         }
     }
 }
