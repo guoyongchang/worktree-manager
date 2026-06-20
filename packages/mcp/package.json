@@ -12,6 +12,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "test": "tsc && node --test dist/tools/safety.test.js",
     "prepublish": "npm run build"
   },
   "dependencies": {
