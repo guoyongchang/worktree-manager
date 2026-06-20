@@ -62,11 +62,21 @@ function writeMcpConfig(): void {
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
+    // 保留已有 capability_level（用户或桌面端设置过的），缺省 details
+    let capabilityLevel = 'details';
+    try {
+      if (existsSync(MCP_CONFIG_PATH)) {
+        const existing = JSON.parse(readFileSync(MCP_CONFIG_PATH, 'utf-8'));
+        if (['core', 'details', 'advanced'].includes(existing?.capability_level)) {
+          capabilityLevel = existing.capability_level;
+        }
+      }
+    } catch {}
     const mcpConfig = {
       version: '1.0.0',
       http_port: 42819,
       installed_at: new Date().toISOString(),
-      capability_level: 'core',
+      capability_level: capabilityLevel,
     };
     writeFileSync(MCP_CONFIG_PATH, JSON.stringify(mcpConfig, null, 2));
   } catch (e) {

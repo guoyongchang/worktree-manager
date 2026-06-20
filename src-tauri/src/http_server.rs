@@ -3150,12 +3150,16 @@ pub fn save_mcp_config(config: &McpConfig) -> Result<(), String> {
 pub async fn start_mcp_server(port: u16) -> Result<(), String> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
 
-    // Save MCP config
+    // Save MCP config（保留已有 capability_level，缺省 details；不覆盖用户设置）
+    let capability_level = load_mcp_config()
+        .map(|c| c.capability_level)
+        .filter(|l| matches!(l.as_str(), "core" | "details" | "advanced"))
+        .unwrap_or_else(|| "details".to_string());
     let config = McpConfig {
         version: env!("CARGO_PKG_VERSION").to_string(),
         http_port: port,
         installed_at: chrono::Utc::now().to_rfc3339(),
-        capability_level: "core".to_string(),
+        capability_level,
     };
     save_mcp_config(&config)?;
 
