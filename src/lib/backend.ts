@@ -698,6 +698,14 @@ export async function checkCommitAiApiKey(): Promise<boolean> {
   return callBackend<boolean>('check_commit_ai_api_key');
 }
 
+export async function getCommitAiModel(): Promise<string | null> {
+  return callBackend<string | null>('get_commit_ai_model');
+}
+
+export async function setCommitAiModel(model: string): Promise<void> {
+  return callBackend<void>('set_commit_ai_model', { model });
+}
+
 // ---------------------------------------------------------------------------
 // Commit Prefix & Git User Config API
 // ---------------------------------------------------------------------------
