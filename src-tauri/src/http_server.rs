@@ -2186,6 +2186,15 @@ async fn h_set_voice_refine_model(Json(args): Json<Value>) -> Response {
     result_ok(crate::commands::voice::set_voice_refine_model_inner(model))
 }
 
+async fn h_get_commit_ai_model() -> Response {
+    result_json(crate::commands::voice::get_commit_ai_model_inner())
+}
+
+async fn h_set_commit_ai_model(Json(args): Json<Value>) -> Response {
+    let model = args["model"].as_str().unwrap_or("").to_string();
+    result_ok(crate::commands::voice::set_commit_ai_model_inner(model))
+}
+
 async fn h_list_dashscope_models() -> Response {
     result_json(crate::commands::voice::list_dashscope_models_inner().await)
 }

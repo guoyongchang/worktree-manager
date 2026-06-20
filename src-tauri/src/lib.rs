@@ -562,6 +562,8 @@ pub fn run() {
             set_commit_ai_enabled,
             get_commit_ai_enabled,
             check_commit_ai_api_key,
+            get_commit_ai_model,
+            set_commit_ai_model,
             voice_start,
             voice_send_audio,
             voice_stop,
