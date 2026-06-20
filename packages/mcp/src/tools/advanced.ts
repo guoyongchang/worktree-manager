@@ -1,5 +1,7 @@
 import type { Transport } from '../transport/http.js';
 import { type ToolHandler, textResult } from './shared.js';
+import { evaluateMergeGate, gateOptsFromArgs } from './safety.js';
+import type { BranchDiffStats } from '../types.js';
 
 export function buildAdvancedHandlers(transport: Transport): Record<string, ToolHandler> {
   return {
@@ -90,6 +92,35 @@ export function buildAdvancedHandlers(transport: Transport): Record<string, Tool
           isError: true,
         };
       }
+    },
+
+    merge_to_test: async (args) => {
+      const projectPath = args?.project_path as string;
+      const baseBranch = args?.base_branch as string;
+      const testBranch = args?.test_branch as string;
+      if (!projectPath || !baseBranch || !testBranch) {
+        throw new Error('project_path, base_branch and test_branch are required');
+      }
+      const stats = (await transport.getBranchDiffStats(projectPath, baseBranch, testBranch)) as BranchDiffStats;
+      const gate = evaluateMergeGate(
+        { ahead: stats.ahead_of_test, changed_files: stats.changed_files },
+        gateOptsFromArgs(args)
+      );
+      if (!gate.allow) return { content: [{ type: 'text', text: `合并到 test 被拦截：${gate.reason}` }], isError: true };
+      return textResult(await transport.mergeToTest(projectPath, testBranch));
+    },
+
+    merge_to_base: async (args) => {
+      const projectPath = args?.project_path as string;
+      const baseBranch = args?.base_branch as string;
+      if (!projectPath || !baseBranch) throw new Error('project_path and base_branch are required');
+      const stats = (await transport.getBranchDiffStats(projectPath, baseBranch)) as BranchDiffStats;
+      const gate = evaluateMergeGate(
+        { ahead: stats.ahead, changed_files: stats.changed_files },
+        gateOptsFromArgs(args)
+      );
+      if (!gate.allow) return { content: [{ type: 'text', text: `合并到 base 被拦截：${gate.reason}` }], isError: true };
+      return textResult(await transport.mergeToBase(projectPath, baseBranch));
     },
   };
 }
@@ -229,6 +260,37 @@ export const ADVANCED_TOOLS = [
         skip_hooks: { type: 'boolean' },
       },
       required: ['project_path', 'message'],
+    },
+  },
+  {
+    name: 'merge_to_test',
+    description: 'Merge the current branch into the test branch, guarded by a "not too many commits" threshold. Blocks if ahead_of_test > max_ahead (default 50) or worktree is dirty, unless force:true. Requires advanced capability.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_path: { type: 'string' },
+        base_branch: { type: 'string', description: 'Needed to compute ahead/behind stats' },
+        test_branch: { type: 'string' },
+        max_ahead: { type: 'number', description: 'Max commits ahead of test allowed (default 50)' },
+        require_clean_worktree: { type: 'boolean', description: 'Block if uncommitted changes (default true)' },
+        force: { type: 'boolean', description: 'Bypass all guards' },
+      },
+      required: ['project_path', 'base_branch', 'test_branch'],
+    },
+  },
+  {
+    name: 'merge_to_base',
+    description: 'Merge the current branch into the base branch, guarded by a "not too many commits" threshold. Blocks if ahead (of base) > max_ahead (default 50) or worktree is dirty, unless force:true. Requires advanced capability.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_path: { type: 'string' },
+        base_branch: { type: 'string' },
+        max_ahead: { type: 'number', description: 'Max commits ahead of base allowed (default 50)' },
+        require_clean_worktree: { type: 'boolean', description: 'Block if uncommitted changes (default true)' },
+        force: { type: 'boolean', description: 'Bypass all guards' },
+      },
+      required: ['project_path', 'base_branch'],
     },
   },
 ];
