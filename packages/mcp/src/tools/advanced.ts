@@ -48,6 +48,49 @@ export function buildAdvancedHandlers(transport: Transport): Record<string, Tool
       if (!projectPath) throw new Error('project_path is required');
       return textResult(await transport.fetchProjectRemote(projectPath));
     },
+
+    sync_base: async (args) => {
+      const projectPath = args?.project_path as string;
+      const baseBranch = args?.base_branch as string;
+      if (!projectPath || !baseBranch) throw new Error('project_path and base_branch are required');
+      return textResult(await transport.syncWithBase(projectPath, baseBranch));
+    },
+
+    pull: async (args) => {
+      const projectPath = args?.project_path as string;
+      if (!projectPath) throw new Error('project_path is required');
+      return textResult(await transport.pullCurrentBranch(projectPath));
+    },
+
+    push: async (args) => {
+      const projectPath = args?.project_path as string;
+      if (!projectPath) throw new Error('project_path is required');
+      return textResult(await transport.pushToRemote(projectPath));
+    },
+
+    commit_and_push: async (args) => {
+      const projectPath = args?.project_path as string;
+      const message = args?.message as string;
+      if (!projectPath || !message) throw new Error('project_path and message are required');
+      const authorName = args?.author_name as string | undefined;
+      const authorEmail = args?.author_email as string | undefined;
+      const skipHooks = typeof args?.skip_hooks === 'boolean' ? (args.skip_hooks as boolean) : undefined;
+      const committed = await transport.commitAll(projectPath, message, authorName, authorEmail, skipHooks);
+      try {
+        const pushed = await transport.pushToRemote(projectPath);
+        return textResult({ committed, pushed });
+      } catch (e) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `已提交但推送失败（需手动 push）。\ncommit: ${JSON.stringify(committed)}\npush error: ${e instanceof Error ? e.message : String(e)}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    },
   };
 }
 
@@ -141,6 +184,51 @@ export const ADVANCED_TOOLS = [
         project_path: { type: 'string' },
       },
       required: ['project_path'],
+    },
+  },
+  {
+    name: 'sync_base',
+    description: 'Sync the latest base branch into the current branch (fetch origin/base + merge). Requires advanced capability.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_path: { type: 'string' },
+        base_branch: { type: 'string' },
+      },
+      required: ['project_path', 'base_branch'],
+    },
+  },
+  {
+    name: 'pull',
+    description: 'git pull the current branch from origin. Requires advanced capability.',
+    inputSchema: {
+      type: 'object',
+      properties: { project_path: { type: 'string' } },
+      required: ['project_path'],
+    },
+  },
+  {
+    name: 'push',
+    description: 'Push the current branch to origin. Requires advanced capability.',
+    inputSchema: {
+      type: 'object',
+      properties: { project_path: { type: 'string' } },
+      required: ['project_path'],
+    },
+  },
+  {
+    name: 'commit_and_push',
+    description: 'Stage all changes, commit with message, then push. Non-atomic: if commit succeeds but push fails, returns isError with a "committed but not pushed" message. Requires advanced capability.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_path: { type: 'string' },
+        message: { type: 'string' },
+        author_name: { type: 'string' },
+        author_email: { type: 'string' },
+        skip_hooks: { type: 'boolean' },
+      },
+      required: ['project_path', 'message'],
     },
   },
 ];
