@@ -28,7 +28,7 @@ import { BackIcon, PlusIcon, TrashIcon } from './Icons';
 import { useTheme } from '../hooks/useTheme';
 import { BranchCombobox } from './BranchCombobox';
 import type { WorkspaceRef, WorkspaceConfig, ProjectConfig, ScannedFolder, VaultStatus, VaultItemChild, FailedVaultItem, TagDefinition } from '../types';
-import { getAppVersion, getAppIcon, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, getVoiceAsrModel, setVoiceAsrModel as saveVoiceAsrModel, getVoiceRefineModel, setVoiceRefineModel as saveVoiceRefineModel, voiceStart, voiceStop, voiceRefineText, isTauri, getPlatform, getRemoteBranches, openLink, callBackend, loadWorkspaceConfigByPath, saveWorkspaceConfigByPath, getVaultStatus, vaultLink, listVaultItemChildren, getCommitPrefixConfig, setCommitPrefixConfig, getGitUserGlobalConfig, setGitUserGlobalConfig, getSkipGitHooks, setSkipGitHooks as saveSkipGitHooks, getShellIntegrationEnabled, setShellIntegrationEnabled as saveShellIntegrationEnabled, cloudGetStatus, cloudStartPairing, cloudCheckPairingStatus, cloudApprovePairing, cloudRejectPairing, cloudDisconnect, getCommitAiApiKey, setCommitAiApiKey as saveCommitAiApiKey, setCommitAiEnabled as saveCommitAiEnabled, getCommitAiEnabled, listDashscopeModels, getVoiceRefineBaseUrl, setVoiceRefineBaseUrl as saveVoiceRefineBaseUrl } from '../lib/backend';
+import { getAppVersion, getAppIcon, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, getVoiceAsrModel, setVoiceAsrModel as saveVoiceAsrModel, getVoiceRefineModel, setVoiceRefineModel as saveVoiceRefineModel, voiceStart, voiceStop, voiceRefineText, isTauri, getPlatform, getRemoteBranches, openLink, callBackend, loadWorkspaceConfigByPath, saveWorkspaceConfigByPath, getVaultStatus, vaultLink, listVaultItemChildren, getCommitPrefixConfig, setCommitPrefixConfig, getGitUserGlobalConfig, setGitUserGlobalConfig, getSkipGitHooks, setSkipGitHooks as saveSkipGitHooks, getShellIntegrationEnabled, setShellIntegrationEnabled as saveShellIntegrationEnabled, cloudGetStatus, cloudStartPairing, cloudCheckPairingStatus, cloudApprovePairing, cloudRejectPairing, cloudDisconnect, getCommitAiApiKey, setCommitAiApiKey as saveCommitAiApiKey, setCommitAiEnabled as saveCommitAiEnabled, getCommitAiEnabled, getCommitAiModel, setCommitAiModel as saveCommitAiModel, listDashscopeModels, getVoiceRefineBaseUrl, setVoiceRefineBaseUrl as saveVoiceRefineBaseUrl } from '../lib/backend';
 import type { CloudStatus, PairingStatus } from '../lib/backend';
 
 const isWindowsPowerShellId = (id?: string) => id === 'powershell' || id === 'pwsh';
@@ -753,6 +753,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
   const [commitAiSaving, setCommitAiSaving] = useState(false);
   const [commitAiSaved, setCommitAiSaved] = useState(false);
   const [commitAiError, setCommitAiError] = useState<string | null>(null);
+  const [commitAiModel, setCommitAiModel] = useState('');
   const [commitAiEnabled, setCommitAiEnabled] = useState(true);
 
   // Cloud connection state
@@ -1067,6 +1068,10 @@ export const SettingsView: FC<SettingsViewProps> = ({
 
     getCommitAiEnabled()
       .then(v => setCommitAiEnabled(v))
+      .catch(() => {});
+
+    getCommitAiModel()
+      .then(m => setCommitAiModel(m || ''))
       .catch(() => {});
   }, []);
 
@@ -2264,6 +2269,19 @@ export const SettingsView: FC<SettingsViewProps> = ({
                         </div>
                         {commitAiError && <p className="text-sm text-[var(--color-error)] mt-1">{commitAiError}</p>}
                         <p className="text-xs text-[var(--color-text-muted)] mt-1">{t('settings.commitAiKeyHint', '需要独立的 Dashscope API Key，与语音 Key 分离')}</p>
+                      </div>
+                      <div>
+                        <label className="block text-sm text-[var(--color-text-secondary)] mb-1">{t('settings.commitAiModel', '生成模型')}</label>
+                        <BranchCombobox
+                          value={commitAiModel}
+                          onChange={(v) => { setCommitAiModel(v); saveCommitAiModel(v.trim()); }}
+                          onLoadBranches={async () => {
+                            const models = await listDashscopeModels();
+                            return models.filter(m => m.includes('qwen'));
+                          }}
+                          placeholder="qwen3.7-max"
+                        />
+                        <p className="text-xs text-[var(--color-text-muted)] mt-1">{t('settings.commitAiModelHint', '留空使用默认模型 qwen3.7-max')}</p>
                       </div>
                     </div>
                   </div>
