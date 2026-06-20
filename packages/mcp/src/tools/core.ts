@@ -17,6 +17,30 @@ export function buildCoreHandlers(transport: BaseTransport): Record<string, Tool
     },
 
     workspace_get_status: async () => textResult(await transport.getMainWorkspaceStatus()),
+
+    get_active_workspace: async (args) => {
+      const cwd = args?.cwd as string;
+      if (!cwd) throw new Error('cwd is required');
+      const wsResult = (await transport.listWorkspaces()) as { workspaces?: Array<{ name: string; path: string }> };
+      const workspaces = wsResult?.workspaces ?? [];
+      const norm = (p: string) => p.replace(/\/+$/, '');
+      const inside = (child: string, parent: string) => child === parent || child.startsWith(parent + '/');
+      let best: { name: string; path: string } | null = null;
+      for (const w of workspaces) {
+        const wp = norm(w.path);
+        if (inside(cwd, wp) && (!best || wp.length > norm(best.path).length)) best = w;
+      }
+      if (!best) {
+        return textResult({ workspace: null, worktree_name: null, project_name: null, matched_by: 'prefix' });
+      }
+      const rel = cwd.slice(norm(best.path).length).replace(/^\/+/, '');
+      const segs = rel.split('/').filter(Boolean);
+      const pjIdx = segs.indexOf('projects');
+      const project_name = pjIdx >= 0 && segs.length > pjIdx + 1 ? segs[pjIdx + 1] : null;
+      // 结构 <ws>/<worktrees_dir>/<worktree>/projects/<project> → worktree = projects 前一段；主工作区 <ws>/projects/... 无 worktree
+      const worktree_name = pjIdx >= 2 ? segs[pjIdx - 1] : null;
+      return textResult({ workspace: best, worktree_name, project_name, matched_by: 'prefix' });
+    },
   };
 }
 
@@ -68,6 +92,17 @@ export const CORE_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {},
+    },
+  },
+  {
+    name: 'get_active_workspace',
+    description: 'Resolve which workspace (and worktree/project, if any) a given absolute directory belongs to, by longest-prefix match against configured workspace paths. Pass the current shell working directory as cwd.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: 'Absolute path of the current working directory' },
+      },
+      required: ['cwd'],
     },
   },
 ];
