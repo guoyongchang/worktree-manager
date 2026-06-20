@@ -28,11 +28,28 @@ export interface ProjectStatus {
   behind_base: number;
 }
 
-// Branch diff stats
+// Branch diff stats（对齐后端 git_ops.rs BranchDiffStats）
 export interface BranchDiffStats {
-  ahead: number;
-  behind: number;
-  changed_files: number;
+  ahead: number;            // 领先 base 的提交数
+  behind: number;           // 落后 base 的提交数
+  changed_files: number;    // 工作区变更文件数
+  unpushed_commits: number; // 未推送提交数
+  ahead_of_test: number;    // 领先 test 的提交数
+}
+
+// get_active_workspace 返回
+export interface ActiveWorkspaceResult {
+  workspace: WorkspaceRef | null;
+  worktree_name: string | null;
+  project_name: string | null;
+  matched_by: 'prefix';
+}
+
+// 合并阈值门控参数
+export interface MergeGateOpts {
+  max_ahead: number;
+  require_clean_worktree: boolean;
+  force: boolean;
 }
 
 // Changed file
