@@ -38,6 +38,7 @@ fn is_localhost_only_path(path: &str) -> bool {
             | "/api/set_ngrok_token"
             | "/api/start_ngrok_tunnel"
             | "/api/stop_ngrok_tunnel"
+            | "/api/auto_register_tunnel"
             | "/api/get_last_share_password"
             | "/api/get_dashscope_api_key"
             | "/api/set_dashscope_api_key"
