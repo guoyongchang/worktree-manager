@@ -38,6 +38,9 @@ fn is_localhost_only_path(path: &str) -> bool {
             | "/api/set_ngrok_token"
             | "/api/start_ngrok_tunnel"
             | "/api/stop_ngrok_tunnel"
+            | "/api/start_wms_tunnel"
+            | "/api/stop_wms_tunnel"
+            | "/api/wms_manual_reconnect"
             | "/api/auto_register_tunnel"
             | "/api/get_last_share_password"
             | "/api/get_dashscope_api_key"
@@ -150,15 +153,6 @@ pub(super) async fn auth_middleware(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("web-default")
         .to_string();
-
-    // Mobile clients arriving via WMS tunnel carry a "mobile-" prefixed session ID.
-    // Auto-inject them into AUTHENTICATED_SESSIONS so they bypass the password challenge.
-    if sid.starts_with("mobile-") {
-        if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() {
-            sessions.insert(sid.clone());
-        }
-        return next.run(request).await;
-    }
 
     let is_authenticated = AUTHENTICATED_SESSIONS
         .lock()

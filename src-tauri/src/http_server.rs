@@ -1581,15 +1581,6 @@ async fn h_ws_upgrade(
         .unwrap_or(false);
 
     if needs_auth {
-        // Mobile clients arriving via WMS tunnel (loopback + "mobile-" session) are
-        // auto-authenticated so they don't need to complete the password challenge.
-        let is_tunnel_mobile = addr.ip().is_loopback() && sid.starts_with("mobile-");
-        if is_tunnel_mobile {
-            if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() {
-                sessions.insert(sid.clone());
-            }
-        }
-
         let is_authenticated = AUTHENTICATED_SESSIONS
             .lock()
             .map(|sessions| sessions.contains(&sid))
