@@ -59,6 +59,7 @@ export function WorkspaceCell({ initialWorkspacePath, closable, onClose }: Works
     voice,
     openSettings,
     initialSettingsSection,
+    settingsNavNonce,
     handleSaveConfig,
     handleTerminalTabContextMenu,
   } = useAppShellState(t, initialWorkspacePath);
@@ -129,7 +130,8 @@ export function WorkspaceCell({ initialWorkspacePath, closable, onClose }: Works
               workspaces={workspace.workspaces}
               currentWorkspace={workspace.currentWorkspace}
               onRemoveWorkspace={workspace.removeWorkspace}
-              initialSection={initialSettingsSection as 'workspaces' | 'appearance' | 'tools' | 'share' | 'commit' | 'voice' | 'cloud' | 'about'}
+              initialSection={initialSettingsSection}
+              settingsNavNonce={settingsNavNonce}
             />
           )}
         </div>

@@ -16,6 +16,7 @@ import { useVoiceInput } from "./useVoiceInput";
 import { callBackend, isTauri, setWindowTitle, getShareInfo, clearSessionId } from "../lib/backend";
 import { getWebSocketManager } from "../lib/websocket";
 import { useCellContext } from '../contexts/CellContext';
+import type { SettingsSection } from "../components/SettingsView";
 import type { ViewMode, TerminalTabMenuState, WorkspaceConfig, WorktreeListItem } from "../types";
 
 export interface UseAppShellStateReturn {
@@ -49,8 +50,9 @@ export interface UseAppShellStateReturn {
   wasKicked: boolean;
   setWasKicked: React.Dispatch<React.SetStateAction<boolean>>;
   voice: ReturnType<typeof useVoiceInput>;
-  openSettings: (section?: string) => void;
-  initialSettingsSection: string | undefined;
+  openSettings: (section?: SettingsSection) => void;
+  initialSettingsSection: SettingsSection | undefined;
+  settingsNavNonce: number;
   handleSaveConfig: (config: WorkspaceConfig) => Promise<void>;
   handleTerminalTabContextMenu: (e: React.MouseEvent, path: string, name: string) => void;
 }
@@ -74,7 +76,8 @@ export function useAppShellState(t: TFunction, initialWorkspacePath?: string, sh
   const [selectedWorktree, setSelectedWorktree] = useState<WorktreeListItem | null>(null);
   const [wsConnected, setWsConnected] = useState(true);
   const [wasKicked, setWasKicked] = useState(false);
-  const [initialSettingsSection, setInitialSettingsSection] = useState<string | undefined>(undefined);
+  const [initialSettingsSection, setInitialSettingsSection] = useState<SettingsSection | undefined>(undefined);
+  const [settingsNavNonce, setSettingsNavNonce] = useState(0);
 
   const modals = useModals();
   const share = useShareFeature(workspace.setError);
@@ -231,8 +234,11 @@ export function useAppShellState(t: TFunction, initialWorkspacePath?: string, sh
     [],
   );
 
-  const openSettings = useCallback((section?: string) => {
+  const openSettings = useCallback((section?: SettingsSection) => {
     setInitialSettingsSection(section);
+    // Bump the nonce so SettingsView re-navigates even when section is unchanged
+    // (e.g. clicking "Go to Login" again while already on the cloud tab).
+    if (section) setSettingsNavNonce((n) => n + 1);
     setViewMode("settings");
   }, []);
 
@@ -337,6 +343,7 @@ export function useAppShellState(t: TFunction, initialWorkspacePath?: string, sh
     voice,
     openSettings,
     initialSettingsSection,
+    settingsNavNonce,
     handleSaveConfig,
     handleTerminalTabContextMenu,
   };
