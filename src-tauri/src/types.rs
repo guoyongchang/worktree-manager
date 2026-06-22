@@ -22,7 +22,6 @@ pub struct ShareState {
     pub wms_reconnect_state:
         Option<std::sync::Arc<std::sync::Mutex<crate::wms_tunnel::WmsTunnelReconnectState>>>,
     pub wms_manual_reconnect_tx: Option<tokio::sync::mpsc::UnboundedSender<()>>,
-    pub wms_auto_started_lan: bool,
 }
 
 #[derive(Debug, Serialize, Clone)]
