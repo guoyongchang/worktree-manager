@@ -1,7 +1,3 @@
-// Items in this module will be fully used in Phase 2 (sharing commands).
-// Suppress dead_code warnings while Phase 1 is in place.
-#![allow(dead_code)]
-
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
