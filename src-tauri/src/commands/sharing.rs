@@ -525,41 +525,23 @@ pub(crate) async fn update_share_password(password: String) -> Result<(), String
 #[allow(dead_code)]
 const DEFAULT_WMS_SERVER_URL: &str = "https://wms.kirov-opensource.com";
 
-/// Helper: call /api/auth/refresh and return the new access_token.
-/// Mirrors the private `refresh_access_token` in cloud_client.rs.
+/// Outcome of a device auto-registration: whether the device was registered under
+/// the logged-in user (authenticated) or anonymously (fell back).
 #[allow(dead_code)]
-async fn refresh_access_token_internal(
-    server_url: &str,
-    refresh_token: &str,
-) -> Result<String, String> {
-    let url = format!("{}/api/auth/refresh", server_url.trim_end_matches('/'));
-    let client = reqwest::Client::new();
-    let resp = client
-        .post(&url)
-        .json(&serde_json::json!({ "refresh_token": refresh_token }))
-        .send()
-        .await
-        .map_err(|e| format!("refresh 请求失败: {}", e))?;
-    if !resp.status().is_success() {
-        return Err("refresh token 已过期或无效".to_string());
-    }
-    #[derive(serde::Deserialize)]
-    struct R {
-        access_token: String,
-    }
-    let data: R = resp
-        .json()
-        .await
-        .map_err(|e| format!("解析 refresh 响应失败: {}", e))?;
-    Ok(data.access_token)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegistrationMode {
+    Authenticated,
+    Anonymous,
 }
 
 /// Auto-register the current device with the WMS server.
 /// Writes tunnel_token, subdomain, device_id, and server_url back to CloudConfig.
 /// If access_token is set, sends it as Bearer for authenticated registration.
 /// On 401, tries to refresh once using refresh_token; if refresh fails, falls back to anonymous.
+/// Returns whether the final registration was authenticated or anonymous so callers
+/// can detect a silent auth downgrade (logged-in but token+refresh both expired).
 #[allow(dead_code)]
-pub async fn auto_register_tunnel_internal() -> Result<(), String> {
+pub async fn auto_register_tunnel_internal() -> Result<RegistrationMode, String> {
     let mut config = load_global_config();
 
     // Generate device_id if not yet assigned
@@ -620,22 +602,30 @@ pub async fn auto_register_tunnel_internal() -> Result<(), String> {
     let access_token = config.cloud.access_token.clone();
     let refresh_token = config.cloud.refresh_token.clone();
 
+    // Track whether the final successful request was authenticated or anonymous.
+    let attempted_authenticated = access_token.is_some();
+    let mut mode = if attempted_authenticated {
+        RegistrationMode::Authenticated
+    } else {
+        RegistrationMode::Anonymous
+    };
+
     let resp = build_request(access_token.as_deref())
         .send()
         .await
         .map_err(|e| format!("设备注册请求失败: {}", e))?;
 
-    // On 401: try refresh once, then retry; if refresh fails, fall back to anonymous
+    // On 401: try refresh once, then retry; if refresh fails, fall back to anonymous.
     let resp = if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
-        if let (Some(ref rt), Some(su)) = (refresh_token, Some(server_url.as_str())) {
+        if let Some(rt) = refresh_token.as_deref() {
             log::info!("[wms-tunnel] Registration got 401, attempting token refresh");
-            match refresh_access_token_internal(su, rt).await {
+            match crate::cloud_client::refresh_access_token(&server_url, rt).await {
                 Ok(new_token) => {
                     // Persist new access_token
                     let mut cfg = load_global_config();
                     cfg.cloud.access_token = Some(new_token.clone());
                     let _ = save_global_config_internal(&cfg);
-                    // Retry with new token
+                    // Retry with new token (still authenticated)
                     build_request(Some(&new_token))
                         .send()
                         .await
@@ -646,6 +636,7 @@ pub async fn auto_register_tunnel_internal() -> Result<(), String> {
                         "[wms-tunnel] Token refresh failed ({}), falling back to anonymous registration",
                         e
                     );
+                    mode = RegistrationMode::Anonymous;
                     build_request(None)
                         .send()
                         .await
@@ -655,6 +646,7 @@ pub async fn auto_register_tunnel_internal() -> Result<(), String> {
         } else {
             // No refresh token available, fall back to anonymous
             log::info!("[wms-tunnel] No refresh token available, retrying anonymously");
+            mode = RegistrationMode::Anonymous;
             build_request(None)
                 .send()
                 .await
@@ -676,7 +668,8 @@ pub async fn auto_register_tunnel_internal() -> Result<(), String> {
         .map_err(|e| format!("解析注册响应失败: {}", e))?;
 
     log::info!(
-        "[wms-tunnel] Device registered: subdomain={}, token_len={}",
+        "[wms-tunnel] Device registered ({:?}): subdomain={}, token_len={}",
+        mode,
         result.subdomain,
         result.token.len()
     );
@@ -688,43 +681,13 @@ pub async fn auto_register_tunnel_internal() -> Result<(), String> {
     config.cloud.subdomain = Some(result.subdomain);
     save_global_config_internal(&config)?;
 
-    Ok(())
+    Ok(mode)
 }
 
 #[allow(dead_code)]
 #[tauri::command]
 pub(crate) async fn auto_register_tunnel() -> Result<(), String> {
-    auto_register_tunnel_internal().await
-}
-
-/// Destroy current device registration: stop tunnel if running, clear tunnel credentials,
-/// regenerate device_id. Does NOT clear access_token (login state is managed by cloud_disconnect).
-#[allow(dead_code)]
-pub(crate) async fn destroy_current_device_registration() -> Result<(), String> {
-    log::info!("[wms-tunnel] Destroying current device registration");
-
-    // Check if WMS tunnel is running (drop MutexGuard before async)
-    let tunnel_running = SHARE_STATE
-        .lock()
-        .map(|s| s.wms_url.is_some())
-        .unwrap_or(false);
-
-    if tunnel_running {
-        stop_wms_tunnel_internal().await?;
-    }
-
-    // Clear tunnel credentials and regenerate device_id; do NOT touch access_token
-    let mut config = load_global_config();
-    config.cloud.tunnel_token = None;
-    config.cloud.subdomain = None;
-    config.cloud.device_id = Some(uuid::Uuid::new_v4().to_string());
-    save_global_config_internal(&config)?;
-
-    log::info!(
-        "[wms-tunnel] Device registration destroyed, new device_id: {:?}",
-        config.cloud.device_id
-    );
-    Ok(())
+    auto_register_tunnel_internal().await.map(|_| ())
 }
 
 #[allow(dead_code)]
@@ -766,7 +729,7 @@ pub async fn start_wms_tunnel_internal(window: Option<tauri::Window>) -> Result<
         return Err("WMS 隧道需要先登录云账号（设置 → 账号）".to_string());
     }
 
-    // Auto-register if tunnel_token/subdomain missing
+    // Auto-register if tunnel_token/subdomain missing.
     {
         let cfg = load_global_config();
         let has_token = cfg
@@ -777,7 +740,17 @@ pub async fn start_wms_tunnel_internal(window: Option<tauri::Window>) -> Result<
         let has_subdomain = cfg.cloud.subdomain.as_ref().is_some_and(|s| !s.is_empty());
         if !has_token || !has_subdomain {
             log::info!("[wms-tunnel] tunnel_token/subdomain missing, auto-registering...");
-            auto_register_tunnel_internal().await?;
+            let mode = auto_register_tunnel_internal().await?;
+            // The login gate above guaranteed access_token.is_some(). If registration
+            // nonetheless fell back to anonymous, the access_token AND refresh_token both
+            // failed -- treat this as an expired session rather than silently exposing an
+            // anonymous (device:xxx) public tunnel while the UI still shows "logged in".
+            if mode == RegistrationMode::Anonymous {
+                log::warn!(
+                    "[wms-tunnel] Rejected: registration downgraded to anonymous despite login"
+                );
+                return Err("登录已过期，请重新登录".to_string());
+            }
         }
     }
 
