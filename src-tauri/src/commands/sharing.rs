@@ -519,15 +519,11 @@ pub(crate) async fn update_share_password(password: String) -> Result<(), String
 }
 
 // ==================== WMS 隧道分享命令 ====================
-// NOTE: These functions are not yet wired into generate_handler! (Phase 3).
-// Suppress dead_code until Phase 3 registers them.
 
-#[allow(dead_code)]
 const DEFAULT_WMS_SERVER_URL: &str = "https://wms.kirov-opensource.com";
 
 /// Outcome of a device auto-registration: whether the device was registered under
 /// the logged-in user (authenticated) or anonymously (fell back).
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RegistrationMode {
     Authenticated,
@@ -540,7 +536,6 @@ pub enum RegistrationMode {
 /// On 401, tries to refresh once using refresh_token; if refresh fails, falls back to anonymous.
 /// Returns whether the final registration was authenticated or anonymous so callers
 /// can detect a silent auth downgrade (logged-in but token+refresh both expired).
-#[allow(dead_code)]
 pub async fn auto_register_tunnel_internal() -> Result<RegistrationMode, String> {
     let mut config = load_global_config();
 
@@ -684,23 +679,20 @@ pub async fn auto_register_tunnel_internal() -> Result<RegistrationMode, String>
     Ok(mode)
 }
 
-#[allow(dead_code)]
 #[tauri::command]
 pub(crate) async fn auto_register_tunnel() -> Result<(), String> {
     auto_register_tunnel_internal().await.map(|_| ())
 }
 
-#[allow(dead_code)]
 #[tauri::command]
-pub(crate) async fn start_wms_tunnel(window: tauri::Window) -> Result<String, String> {
-    start_wms_tunnel_internal(Some(window)).await
+pub(crate) async fn start_wms_tunnel(_window: tauri::Window) -> Result<String, String> {
+    start_wms_tunnel_internal().await
 }
 
 /// Internal function for starting WMS tunnel, callable from both Tauri command and HTTP handler.
 /// Requires LAN sharing to already be active (active=true, password set).
 /// If tunnel_token/subdomain not configured, auto-registers first.
-#[allow(dead_code)]
-pub async fn start_wms_tunnel_internal(window: Option<tauri::Window>) -> Result<String, String> {
+pub async fn start_wms_tunnel_internal() -> Result<String, String> {
     log::info!("[wms-tunnel] Starting WMS tunnel");
 
     // Check preconditions: not already running, and LAN sharing is active
@@ -786,9 +778,6 @@ pub async fn start_wms_tunnel_internal(window: Option<tauri::Window>) -> Result<
     let reconnect_state_clone = reconnect_state.clone();
     let (manual_reconnect_tx, manual_reconnect_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
 
-    // Suppress unused variable warning for window — it was kept for API symmetry
-    let _ = window;
-
     log::info!("[wms-tunnel] Spawning tunnel task");
     let wms_handle = crate::state::TOKIO_RT.spawn(async move {
         crate::wms_tunnel::run_tunnel(
@@ -833,7 +822,6 @@ pub async fn start_wms_tunnel_internal(window: Option<tauri::Window>) -> Result<
     }
 }
 
-#[allow(dead_code)]
 #[tauri::command]
 pub(crate) async fn stop_wms_tunnel() -> Result<(), String> {
     stop_wms_tunnel_internal().await
@@ -842,7 +830,6 @@ pub(crate) async fn stop_wms_tunnel() -> Result<(), String> {
 /// Internal function for stopping WMS tunnel.
 /// Clears all wms_* fields in SHARE_STATE and sends shutdown signal.
 /// If wms_auto_started_lan is set, also stops LAN sharing.
-#[allow(dead_code)]
 pub async fn stop_wms_tunnel_internal() -> Result<(), String> {
     log::info!("[wms-tunnel] Stopping WMS tunnel");
     let (shutdown_tx, task_handle, should_stop_lan) = {
@@ -886,7 +873,6 @@ pub async fn stop_wms_tunnel_internal() -> Result<(), String> {
 }
 
 /// Internal function for HTTP server to trigger manual reconnect.
-#[allow(dead_code)]
 pub fn wms_manual_reconnect_internal() -> Result<(), String> {
     let state = SHARE_STATE
         .lock()
@@ -908,7 +894,6 @@ pub fn wms_manual_reconnect_internal() -> Result<(), String> {
     Ok(())
 }
 
-#[allow(dead_code)]
 #[tauri::command]
 pub(crate) async fn wms_manual_reconnect() -> Result<(), String> {
     wms_manual_reconnect_internal()

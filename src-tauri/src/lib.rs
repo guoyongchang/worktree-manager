@@ -426,6 +426,11 @@ pub fn run() {
                                     if let Err(e) = stop_ngrok_tunnel().await {
                                         log::warn!("Failed to stop ngrok tunnel on close: {}", e);
                                     }
+                                    if let Err(e) =
+                                        crate::commands::sharing::stop_wms_tunnel_internal().await
+                                    {
+                                        log::warn!("Failed to stop WMS tunnel on close: {}", e);
+                                    }
                                     if let Err(e) = stop_sharing().await {
                                         log::warn!("Failed to stop sharing on close: {}", e);
                                     }
@@ -543,6 +548,11 @@ pub fn run() {
             get_last_share_password,
             start_ngrok_tunnel,
             stop_ngrok_tunnel,
+            // WMS 隧道
+            start_wms_tunnel,
+            stop_wms_tunnel,
+            wms_manual_reconnect,
+            auto_register_tunnel,
             // 语音识别 (Dashscope)
             get_dashscope_api_key,
             set_dashscope_api_key,
