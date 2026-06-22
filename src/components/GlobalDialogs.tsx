@@ -18,6 +18,7 @@ import {
   UpToDateToast,
 } from './UpdaterDialogs';
 import { UpdateCheckerDialog } from './UpdateCheckerDialog';
+import type { SettingsSection } from './SettingsView';
 import type { UseUpdaterReturn } from '../hooks/useUpdater';
 import type { UseShareFeatureReturn } from '../hooks/useShareFeature';
 import type { WorktreeListItem } from '../types';
@@ -28,7 +29,7 @@ interface GlobalDialogsProps {
   share: UseShareFeatureReturn;
   showShortcutHelp: boolean;
   onSetShowShortcutHelp: (v: boolean) => void;
-  onOpenSettings: (section?: string) => void;
+  onOpenSettings: (section?: SettingsSection) => void;
   deleteConfirmWorktree: WorktreeListItem | null;
   onSetDeleteConfirmWorktree: (v: WorktreeListItem | null) => void;
   onDeleteArchivedWorktree: () => Promise<void>;

@@ -398,6 +398,8 @@ const WorkspaceVaultSection: FC = () => {
 
 
 
+export type SettingsSection = 'workspaces' | 'appearance' | 'tools' | 'share' | 'commit' | 'voice' | 'cloud' | 'about';
+
 interface SettingsViewProps {
   workspaceConfig: WorkspaceConfig;
   configPath: string;
@@ -411,9 +413,8 @@ interface SettingsViewProps {
   currentWorkspace?: WorkspaceRef | null;
   onRemoveWorkspace?: (path: string) => void;
   initialSection?: SettingsSection;
+  settingsNavNonce?: number;
 }
-
-type SettingsSection = 'workspaces' | 'appearance' | 'tools' | 'share' | 'commit' | 'voice' | 'cloud' | 'about';
 
 // ==================== AppearanceSettingsSection ====================
 const THEME_I18N_KEY: Record<string, string> = {
@@ -491,11 +492,20 @@ export const SettingsView: FC<SettingsViewProps> = ({
   currentWorkspace = null,
   onRemoveWorkspace,
   initialSection,
+  settingsNavNonce,
 }) => {
   const { t, i18n } = useTranslation();
 
   // Section navigation
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection ?? 'workspaces');
+
+  // SettingsView is permanently mounted (toggled via display:none), so the
+  // initial useState only applies on first mount. To support navigating to a
+  // section on demand (and re-navigating to the same section on repeated
+  // requests), watch a self-incrementing nonce alongside initialSection.
+  useEffect(() => {
+    if (initialSection) setActiveSection(initialSection);
+  }, [initialSection, settingsNavNonce]);
 
   // ==================== Workspace editing state ====================
   // Which workspace is selected for editing (defaults to current)

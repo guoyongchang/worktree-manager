@@ -370,17 +370,29 @@ const WmsTunnelRow: FC<{
 }> = ({ url, connected, reconnecting, reconnectAttempt, nextRetrySecs, loading, password, onToggle, onManualReconnect }) => {
   const { t } = useTranslation();
 
-  // Status text when tunnel is running
+  // Status text + tone when tunnel is running
   let statusText: string | null = null;
+  let statusTone: 'connected' | 'reconnecting' | 'disconnected' | null = null;
   if (url) {
     if (reconnecting) {
       statusText = nextRetrySecs > 0
         ? t('share.wmsRetryIn', { seconds: nextRetrySecs })
         : t('share.wmsReconnecting');
+      statusTone = 'reconnecting';
     } else if (!connected) {
       statusText = t('share.wmsDisconnected');
+      statusTone = 'disconnected';
+    } else {
+      statusText = t('share.wmsConnected');
+      statusTone = 'connected';
     }
   }
+  const statusColorClass =
+    statusTone === 'connected'
+      ? 'text-emerald-400'
+      : statusTone === 'reconnecting'
+        ? 'text-[var(--color-warning)]'
+        : 'text-[var(--color-error)]';
 
   if (!url) {
     return (
@@ -424,7 +436,7 @@ const WmsTunnelRow: FC<{
       </div>
       {statusText && (
         <div className="flex items-center gap-2 pl-[60px]">
-          <span className={`text-[10px] ${reconnecting ? 'text-[var(--color-warning)]' : 'text-[var(--color-error)]'}`}>
+          <span className={`text-[10px] ${statusColorClass}`}>
             {reconnecting && reconnectAttempt > 0 ? `#${reconnectAttempt} ` : ''}{statusText}
           </span>
           {reconnecting && (
