@@ -427,6 +427,31 @@ pub(crate) async fn get_share_state() -> Result<ShareStateInfo, String> {
             .as_ref()
             .map(|p| crate::normalize_path(p)),
         current_workspace_name,
+        // WMS tunnel fields (populated in Task 2.2; defaults until then)
+        wms_url: state.wms_url.clone(),
+        wms_connected: state
+            .wms_connected
+            .as_ref()
+            .map(|f| f.load(std::sync::atomic::Ordering::Relaxed))
+            .unwrap_or(false),
+        wms_reconnecting: state
+            .wms_reconnect_state
+            .as_ref()
+            .and_then(|s| s.lock().ok())
+            .map(|s| s.reconnecting)
+            .unwrap_or(false),
+        wms_reconnect_attempt: state
+            .wms_reconnect_state
+            .as_ref()
+            .and_then(|s| s.lock().ok())
+            .map(|s| s.attempt)
+            .unwrap_or(0),
+        wms_next_retry_secs: state
+            .wms_reconnect_state
+            .as_ref()
+            .and_then(|s| s.lock().ok())
+            .map(|s| s.next_retry_secs())
+            .unwrap_or(0),
     })
 }
 
