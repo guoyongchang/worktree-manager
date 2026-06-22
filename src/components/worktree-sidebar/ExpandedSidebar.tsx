@@ -172,6 +172,8 @@ export const ExpandedSidebar: FC<ExpandedSidebarProps> = ({
   onToggleArchived,
   onToggleCollapsed,
   onToggleNgrok,
+  onToggleWms,
+  onWmsManualReconnect,
   onTouchEnd,
   onTouchMove,
   onTouchStart,
@@ -182,6 +184,12 @@ export const ExpandedSidebar: FC<ExpandedSidebarProps> = ({
   shareNgrokUrl,
   sharePassword = '',
   shareUrls = [],
+  shareWmsUrl = null,
+  wmsConnected = false,
+  wmsReconnecting = false,
+  wmsReconnectAttempt = 0,
+  wmsNextRetrySecs = 0,
+  wmsLoading = false,
   showArchived,
   showWorkspaceMenu,
   sidebarWidth,
@@ -413,6 +421,14 @@ export const ExpandedSidebar: FC<ExpandedSidebarProps> = ({
             hasLastConfig={hasLastConfig}
             onQuickShare={onQuickShare}
             hasNgrokToken={hasNgrokToken}
+            wmsUrl={shareWmsUrl}
+            wmsConnected={wmsConnected}
+            wmsReconnecting={wmsReconnecting}
+            wmsReconnectAttempt={wmsReconnectAttempt}
+            wmsNextRetrySecs={wmsNextRetrySecs}
+            wmsLoading={wmsLoading}
+            onToggleWms={onToggleWms}
+            onWmsManualReconnect={onWmsManualReconnect}
           />
         )}
 

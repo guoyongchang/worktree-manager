@@ -50,6 +50,15 @@ export interface WorktreeSidebarProps {
   onQuickShare?: () => void;
   occupation?: MainWorkspaceOccupation | null;
   hasNgrokToken?: boolean;
+  // WMS tunnel
+  shareWmsUrl?: string | null;
+  wmsConnected?: boolean;
+  wmsReconnecting?: boolean;
+  wmsReconnectAttempt?: number;
+  wmsNextRetrySecs?: number;
+  wmsLoading?: boolean;
+  onToggleWms?: () => void;
+  onWmsManualReconnect?: () => void;
   batchArchiveModalOpen: boolean;
   onToggleBatchArchiveModal: () => void;
   onBatchRestore: (names: string[]) => Promise<void>;
