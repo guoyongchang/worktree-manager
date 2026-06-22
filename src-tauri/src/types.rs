@@ -147,6 +147,13 @@ pub struct CloudConfig {
     pub refresh_token: Option<String>,
     #[serde(default)]
     pub device_name: Option<String>,
+    // NEW: WMS 隧道分享所需
+    #[serde(default)]
+    pub tunnel_token: Option<String>,
+    #[serde(default)]
+    pub subdomain: Option<String>,
+    #[serde(default)]
+    pub device_id: Option<String>,
 }
 
 // 全局配置：存储在 ~/.config/worktree-manager/global.json
