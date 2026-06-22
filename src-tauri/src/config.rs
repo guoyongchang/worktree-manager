@@ -278,11 +278,30 @@ mod tests {
             object.get("dashscope_api_key"),
             Some(&Value::String("my-dashscope".to_string()))
         );
+        // Verify old top-level wms_* fields no longer exist (they've been migrated to cloud.*)
         assert!(!object.contains_key("wms_server_url"));
         assert!(!object.contains_key("wms_token"));
         assert!(!object.contains_key("wms_subdomain"));
         assert!(!object.contains_key("wms_jwt"));
+        // device_id is now under cloud.device_id (not a top-level field)
         assert!(!object.contains_key("device_id"));
+        // Verify new tunnel fields are present under cloud subobject
+        let cloud = object
+            .get("cloud")
+            .and_then(|v| v.as_object())
+            .expect("cloud subobject should be present");
+        assert!(
+            cloud.contains_key("tunnel_token"),
+            "cloud.tunnel_token should be serialized"
+        );
+        assert!(
+            cloud.contains_key("subdomain"),
+            "cloud.subdomain should be serialized"
+        );
+        assert!(
+            cloud.contains_key("device_id"),
+            "cloud.device_id should be serialized"
+        );
         assert!(
             object.get("commit_prefix_enabled").is_some(),
             "commit_prefix_enabled should be serialized"
