@@ -10,6 +10,7 @@ pub mod state;
 pub(crate) mod tls;
 pub mod types;
 pub mod utils;
+pub(crate) mod wms_tunnel;
 
 // Re-exports used by http_server and other modules
 pub use config::*;
