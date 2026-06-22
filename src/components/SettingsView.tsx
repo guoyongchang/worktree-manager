@@ -410,6 +410,7 @@ interface SettingsViewProps {
   workspaces?: WorkspaceRef[];
   currentWorkspace?: WorkspaceRef | null;
   onRemoveWorkspace?: (path: string) => void;
+  initialSection?: SettingsSection;
 }
 
 type SettingsSection = 'workspaces' | 'appearance' | 'tools' | 'share' | 'commit' | 'voice' | 'cloud' | 'about';
@@ -489,11 +490,12 @@ export const SettingsView: FC<SettingsViewProps> = ({
   workspaces = [],
   currentWorkspace = null,
   onRemoveWorkspace,
+  initialSection,
 }) => {
   const { t, i18n } = useTranslation();
 
   // Section navigation
-  const [activeSection, setActiveSection] = useState<SettingsSection>('workspaces');
+  const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection ?? 'workspaces');
 
   // ==================== Workspace editing state ====================
   // Which workspace is selected for editing (defaults to current)
@@ -1134,7 +1136,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
     ...(isTauri() ? [{ id: 'share' as SettingsSection, label: t('settings.externalShareNav', '外网分享'), icon: <Globe className="w-3.5 h-3.5" />, group: 'advanced' as const }] : []),
     { id: 'commit' as SettingsSection, label: t('settings.commitNav', '提交设置'), icon: <FileText className="w-3.5 h-3.5" />, group: 'advanced' },
     { id: 'voice' as SettingsSection, label: t('settings.voiceNav'), icon: <Mic className="w-3.5 h-3.5" />, group: 'advanced' },
-    // { id: 'cloud' as SettingsSection, label: t('settings.cloudNav', '云端连接'), icon: <Link2 className="w-3.5 h-3.5" /> },
+    { id: 'cloud' as SettingsSection, label: t('settings.cloudNav', '账号'), icon: <Link2 className="w-3.5 h-3.5" />, group: 'advanced' as const },
     // Info group
     { id: 'about' as SettingsSection, label: t('settings.about'), icon: <Info className="w-3.5 h-3.5" />, group: 'info' },
   ];

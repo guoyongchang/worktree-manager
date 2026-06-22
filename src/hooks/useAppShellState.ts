@@ -49,7 +49,8 @@ export interface UseAppShellStateReturn {
   wasKicked: boolean;
   setWasKicked: React.Dispatch<React.SetStateAction<boolean>>;
   voice: ReturnType<typeof useVoiceInput>;
-  openSettings: () => void;
+  openSettings: (section?: string) => void;
+  initialSettingsSection: string | undefined;
   handleSaveConfig: (config: WorkspaceConfig) => Promise<void>;
   handleTerminalTabContextMenu: (e: React.MouseEvent, path: string, name: string) => void;
 }
@@ -73,6 +74,7 @@ export function useAppShellState(t: TFunction, initialWorkspacePath?: string, sh
   const [selectedWorktree, setSelectedWorktree] = useState<WorktreeListItem | null>(null);
   const [wsConnected, setWsConnected] = useState(true);
   const [wasKicked, setWasKicked] = useState(false);
+  const [initialSettingsSection, setInitialSettingsSection] = useState<string | undefined>(undefined);
 
   const modals = useModals();
   const share = useShareFeature(workspace.setError);
@@ -229,7 +231,8 @@ export function useAppShellState(t: TFunction, initialWorkspacePath?: string, sh
     [],
   );
 
-  const openSettings = useCallback(() => {
+  const openSettings = useCallback((section?: string) => {
+    setInitialSettingsSection(section);
     setViewMode("settings");
   }, []);
 
@@ -333,6 +336,7 @@ export function useAppShellState(t: TFunction, initialWorkspacePath?: string, sh
     setWasKicked,
     voice,
     openSettings,
+    initialSettingsSection,
     handleSaveConfig,
     handleTerminalTabContextMenu,
   };

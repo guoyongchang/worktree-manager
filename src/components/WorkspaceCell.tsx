@@ -58,6 +58,7 @@ export function WorkspaceCell({ initialWorkspacePath, closable, onClose }: Works
     updater,
     voice,
     openSettings,
+    initialSettingsSection,
     handleSaveConfig,
     handleTerminalTabContextMenu,
   } = useAppShellState(t, initialWorkspacePath);
@@ -128,6 +129,7 @@ export function WorkspaceCell({ initialWorkspacePath, closable, onClose }: Works
               workspaces={workspace.workspaces}
               currentWorkspace={workspace.currentWorkspace}
               onRemoveWorkspace={workspace.removeWorkspace}
+              initialSection={initialSettingsSection as 'workspaces' | 'appearance' | 'tools' | 'share' | 'commit' | 'voice' | 'cloud' | 'about'}
             />
           )}
         </div>
@@ -179,6 +181,14 @@ export function WorkspaceCell({ initialWorkspacePath, closable, onClose }: Works
               hasLastConfig={share.hasLastConfig}
               onQuickShare={share.handleQuickShare}
               hasNgrokToken={share.hasNgrokToken}
+              shareWmsUrl={share.shareWmsUrl}
+              wmsConnected={share.wmsConnected}
+              wmsReconnecting={share.wmsReconnecting}
+              wmsReconnectAttempt={share.wmsReconnectAttempt}
+              wmsNextRetrySecs={share.wmsNextRetrySecs}
+              wmsLoading={share.wmsLoading}
+              onToggleWms={share.handleToggleWms}
+              onWmsManualReconnect={share.handleWmsManualReconnect}
               occupation={mainOccupation.occupation}
               batchArchiveModalOpen={actions.batchArchiveModalOpen}
               onToggleBatchArchiveModal={() => actions.setBatchArchiveModalOpen(!actions.batchArchiveModalOpen)}
