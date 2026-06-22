@@ -14,6 +14,15 @@ pub struct ShareState {
     pub shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
     pub ngrok_url: Option<String>,
     pub ngrok_task: Option<tokio::task::JoinHandle<()>>,
+    // === WMS 隧道分享字段 ===
+    pub wms_url: Option<String>,
+    pub wms_task: Option<tokio::task::JoinHandle<()>>,
+    pub wms_shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
+    pub wms_connected: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    pub wms_reconnect_state:
+        Option<std::sync::Arc<std::sync::Mutex<crate::wms_tunnel::WmsTunnelReconnectState>>>,
+    pub wms_manual_reconnect_tx: Option<tokio::sync::mpsc::UnboundedSender<()>>,
+    pub wms_auto_started_lan: bool,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -42,6 +51,12 @@ pub struct ShareStateInfo {
     pub ngrok_url: Option<String>,
     pub workspace_path: Option<String>,
     pub current_workspace_name: Option<String>,
+    // === WMS 隧道状态（前端可见快照）===
+    pub wms_url: Option<String>,
+    pub wms_connected: bool,
+    pub wms_reconnecting: bool,
+    pub wms_reconnect_attempt: u32,
+    pub wms_next_retry_secs: u32,
 }
 
 // Auth rate limiter: per-IP sliding window (max 5 attempts per 60 seconds)
