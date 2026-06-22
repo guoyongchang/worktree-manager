@@ -71,7 +71,7 @@ function getApiBase(): string {
 // Commands that may legitimately take a long time (git clone, worktree create, etc.)
 const LONG_RUNNING_COMMANDS = new Set([
   'create_worktree', 'archive_worktree', 'restore_worktree', 'delete_archived_worktree',
-  'clone_project', 'deploy_to_main', 'start_sharing', 'start_ngrok_tunnel',
+  'clone_project', 'deploy_to_main', 'start_sharing', 'start_ngrok_tunnel', 'start_wms_tunnel',
   'fetch_project_remote', 'sync_with_base_branch', 'sync_all_projects_to_base',
   'push_to_remote', 'pull_current_branch', 'push_sync_to_base_branch', 'merge_base_branch',
   'download_update_via_mirror',
@@ -228,6 +228,11 @@ export interface ShareState {
   urls: string[];
   ngrok_url?: string;
   workspace_path?: string;
+  wms_url?: string;
+  wms_connected: boolean;
+  wms_reconnecting: boolean;
+  wms_reconnect_attempt: number;
+  wms_next_retry_secs: number;
 }
 
 export interface ShareInfo {
@@ -249,6 +254,21 @@ export async function startNgrokTunnel(): Promise<string> {
 /** Stop ngrok tunnel (LAN sharing continues). */
 export async function stopNgrokTunnel(): Promise<void> {
   return callBackend<void>('stop_ngrok_tunnel');
+}
+
+/** Start WMS tunnel for the current sharing session. Returns the public URL. */
+export async function startWmsTunnel(): Promise<string> {
+  return callBackend<string>('start_wms_tunnel');
+}
+
+/** Stop WMS tunnel (LAN sharing continues). */
+export async function stopWmsTunnel(): Promise<void> {
+  return callBackend<void>('stop_wms_tunnel');
+}
+
+/** Trigger a manual reconnect of the WMS tunnel. */
+export async function wmsManualReconnect(): Promise<void> {
+  return callBackend<void>('wms_manual_reconnect');
 }
 
 /** Stop sharing (shuts down the HTTP server). */
