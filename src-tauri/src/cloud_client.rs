@@ -142,7 +142,10 @@ pub async fn cloud_ai_chat(
     }
 }
 
-async fn refresh_access_token(server_url: &str, refresh_token: &str) -> Result<String, CloudError> {
+pub(crate) async fn refresh_access_token(
+    server_url: &str,
+    refresh_token: &str,
+) -> Result<String, CloudError> {
     let url = format!("{}/api/auth/refresh", server_url.trim_end_matches('/'));
     let client = reqwest::Client::new();
     let resp = client
