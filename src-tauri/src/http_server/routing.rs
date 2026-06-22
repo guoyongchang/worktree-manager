@@ -40,13 +40,12 @@ use super::{
     h_set_voice_asr_model, h_set_voice_refine_base_url, h_set_voice_refine_enabled,
     h_set_voice_refine_model, h_set_window_workspace, h_speed_test_single_mirror,
     h_start_ngrok_tunnel, h_start_sharing, h_start_wms_tunnel, h_stop_ngrok_tunnel, h_stop_sharing,
-    h_stop_wms_tunnel, h_switch_branch,
-    h_switch_workspace, h_sync_all_projects_to_base, h_sync_with_base_branch,
-    h_terminate_worktree_locking_process, h_test_mirror_speed, h_unlock_worktree,
-    h_unregister_window, h_update_share_password, h_update_worktree_color, h_vault_link,
-    h_vault_status, h_voice_is_active, h_voice_refine_text, h_voice_send_audio, h_voice_start,
-    h_voice_stop, h_wms_manual_reconnect, h_ws_upgrade, is_allowed_origin, load_mcp_config,
-    save_mcp_config, McpConfig,
+    h_stop_wms_tunnel, h_switch_branch, h_switch_workspace, h_sync_all_projects_to_base,
+    h_sync_with_base_branch, h_terminate_worktree_locking_process, h_test_mirror_speed,
+    h_unlock_worktree, h_unregister_window, h_update_share_password, h_update_worktree_color,
+    h_vault_link, h_vault_status, h_voice_is_active, h_voice_refine_text, h_voice_send_audio,
+    h_voice_start, h_voice_stop, h_wms_manual_reconnect, h_ws_upgrade, is_allowed_origin,
+    load_mcp_config, save_mcp_config, McpConfig,
 };
 
 pub(super) fn build_cors_layer() -> CorsLayer {

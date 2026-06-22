@@ -688,7 +688,7 @@ pub(crate) async fn auto_register_tunnel() -> Result<(), String> {
 }
 
 #[tauri::command]
-pub(crate) async fn start_wms_tunnel(_window: tauri::Window) -> Result<String, String> {
+pub(crate) async fn start_wms_tunnel() -> Result<String, String> {
     start_wms_tunnel_internal().await
 }
 
@@ -832,22 +832,21 @@ pub(crate) async fn stop_wms_tunnel() -> Result<(), String> {
 
 /// Internal function for stopping WMS tunnel.
 /// Clears all wms_* fields in SHARE_STATE and sends shutdown signal.
-/// If wms_auto_started_lan is set, also stops LAN sharing.
+/// LAN sharing is independent: it is always started manually first, so stopping the
+/// WMS tunnel never tears down LAN sharing.
 pub async fn stop_wms_tunnel_internal() -> Result<(), String> {
     log::info!("[wms-tunnel] Stopping WMS tunnel");
-    let (shutdown_tx, task_handle, should_stop_lan) = {
+    let (shutdown_tx, task_handle) = {
         let mut state = SHARE_STATE
             .lock()
             .map_err(|_| "Internal state error".to_string())?;
         let tx = state.wms_shutdown_tx.take();
         let handle = state.wms_task.take();
-        let auto_lan = state.wms_auto_started_lan;
         state.wms_url = None;
         state.wms_connected = None;
         state.wms_reconnect_state = None;
         state.wms_manual_reconnect_tx = None;
-        state.wms_auto_started_lan = false;
-        (tx, handle, auto_lan)
+        (tx, handle)
     };
 
     if let Some(tx) = shutdown_tx {
@@ -863,13 +862,6 @@ pub async fn stop_wms_tunnel_internal() -> Result<(), String> {
         }
     } else {
         log::info!("[wms-tunnel] No active tunnel task, stopped");
-    }
-
-    if should_stop_lan {
-        log::info!("[wms-tunnel] Auto-stopping LAN sharing (was auto-started by WMS)");
-        if let Err(e) = stop_sharing_internal() {
-            log::warn!("[wms-tunnel] Failed to auto-stop LAN sharing: {}", e);
-        }
     }
 
     Ok(())
