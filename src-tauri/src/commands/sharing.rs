@@ -423,6 +423,17 @@ pub(crate) async fn get_share_state() -> Result<ShareStateInfo, String> {
         .as_ref()
         .map(|path| crate::config::load_workspace_config(path).name);
 
+    // WMS: take a single consistent snapshot from wms_reconnect_state
+    let (wms_reconnecting, wms_reconnect_attempt, wms_next_retry_secs) = if let Some(rs) = state
+        .wms_reconnect_state
+        .as_ref()
+        .and_then(|arc| arc.lock().ok())
+    {
+        (rs.reconnecting, rs.attempt, rs.next_retry_secs())
+    } else {
+        (false, 0, 0)
+    };
+
     Ok(ShareStateInfo {
         active: state.active,
         urls,
@@ -432,31 +443,15 @@ pub(crate) async fn get_share_state() -> Result<ShareStateInfo, String> {
             .as_ref()
             .map(|p| crate::normalize_path(p)),
         current_workspace_name,
-        // WMS tunnel fields (populated in Task 2.2; defaults until then)
         wms_url: state.wms_url.clone(),
         wms_connected: state
             .wms_connected
             .as_ref()
             .map(|f| f.load(std::sync::atomic::Ordering::Relaxed))
             .unwrap_or(false),
-        wms_reconnecting: state
-            .wms_reconnect_state
-            .as_ref()
-            .and_then(|s| s.lock().ok())
-            .map(|s| s.reconnecting)
-            .unwrap_or(false),
-        wms_reconnect_attempt: state
-            .wms_reconnect_state
-            .as_ref()
-            .and_then(|s| s.lock().ok())
-            .map(|s| s.attempt)
-            .unwrap_or(0),
-        wms_next_retry_secs: state
-            .wms_reconnect_state
-            .as_ref()
-            .and_then(|s| s.lock().ok())
-            .map(|s| s.next_retry_secs())
-            .unwrap_or(0),
+        wms_reconnecting,
+        wms_reconnect_attempt,
+        wms_next_retry_secs,
     })
 }
 
