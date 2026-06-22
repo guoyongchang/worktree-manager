@@ -1393,6 +1393,31 @@ async fn h_get_last_share_password() -> Response {
     result_json(crate::commands::sharing::get_last_share_password().await)
 }
 
+// -- WMS tunnel --
+
+async fn h_start_wms_tunnel() -> Response {
+    match crate::commands::sharing::start_wms_tunnel_internal().await {
+        Ok(url) => Json(json!(url)).into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+async fn h_stop_wms_tunnel() -> Response {
+    result_ok(crate::commands::sharing::stop_wms_tunnel_internal().await)
+}
+
+async fn h_wms_manual_reconnect() -> Response {
+    result_ok(crate::commands::sharing::wms_manual_reconnect_internal())
+}
+
+async fn h_auto_register_tunnel() -> Response {
+    result_ok(
+        crate::commands::sharing::auto_register_tunnel_internal()
+            .await
+            .map(|_| ()),
+    )
+}
+
 // -- Misc --
 
 async fn h_get_terminal_state(Json(args): Json<Value>) -> Response {

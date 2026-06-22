@@ -8,8 +8,8 @@ use tower_http::cors::CorsLayer;
 
 use super::{
     h_add_existing_project, h_add_project_to_worktree, h_add_workspace, h_archive_worktree,
-    h_auth_challenge, h_auth_verify, h_broadcast_terminal_state, h_cert_pem,
-    h_check_commit_ai_api_key, h_check_dashscope_api_key, h_check_mirror_update,
+    h_auth_challenge, h_auth_verify, h_auto_register_tunnel, h_broadcast_terminal_state,
+    h_cert_pem, h_check_commit_ai_api_key, h_check_dashscope_api_key, h_check_mirror_update,
     h_check_remote_branch_exists, h_check_worktree_status, h_clone_project,
     h_cloud_approve_pairing, h_cloud_check_pairing_status, h_cloud_disconnect, h_cloud_get_status,
     h_cloud_reject_pairing, h_cloud_start_pairing, h_commit_all, h_create_pull_request,
@@ -40,12 +40,13 @@ use super::{
     h_set_shell_integration_enabled, h_set_skip_git_hooks, h_set_voice_asr_model,
     h_set_voice_refine_base_url, h_set_voice_refine_enabled, h_set_voice_refine_model,
     h_set_window_workspace, h_speed_test_single_mirror, h_start_ngrok_tunnel, h_start_sharing,
-    h_stop_ngrok_tunnel, h_stop_sharing, h_switch_branch, h_switch_workspace,
-    h_sync_all_projects_to_base, h_sync_with_base_branch, h_terminate_worktree_locking_process,
-    h_test_mirror_speed, h_unlock_worktree, h_unregister_window, h_update_share_password,
-    h_update_worktree_color, h_vault_link, h_vault_status, h_voice_is_active, h_voice_refine_text,
-    h_voice_send_audio, h_voice_start, h_voice_stop, h_ws_upgrade, is_allowed_origin,
-    load_mcp_config, save_mcp_config, McpConfig,
+    h_start_wms_tunnel, h_stop_ngrok_tunnel, h_stop_sharing, h_stop_wms_tunnel, h_switch_branch,
+    h_switch_workspace, h_sync_all_projects_to_base, h_sync_with_base_branch,
+    h_terminate_worktree_locking_process, h_test_mirror_speed, h_unlock_worktree,
+    h_unregister_window, h_update_share_password, h_update_worktree_color, h_vault_link,
+    h_vault_status, h_voice_is_active, h_voice_refine_text, h_voice_send_audio, h_voice_start,
+    h_voice_stop, h_wms_manual_reconnect, h_ws_upgrade, is_allowed_origin, load_mcp_config,
+    save_mcp_config, McpConfig,
 };
 
 pub(super) fn build_cors_layer() -> CorsLayer {
@@ -266,6 +267,10 @@ pub(super) fn build_api_router(cert_pem: Option<String>) -> Router {
         )
         .route("/api/start_ngrok_tunnel", post(h_start_ngrok_tunnel))
         .route("/api/stop_ngrok_tunnel", post(h_stop_ngrok_tunnel))
+        .route("/api/start_wms_tunnel", post(h_start_wms_tunnel))
+        .route("/api/stop_wms_tunnel", post(h_stop_wms_tunnel))
+        .route("/api/wms_manual_reconnect", post(h_wms_manual_reconnect))
+        .route("/api/auto_register_tunnel", post(h_auto_register_tunnel))
         .route("/api/voice_start", post(h_voice_start))
         .route("/api/voice_send_audio", post(h_voice_send_audio))
         .route("/api/voice_stop", post(h_voice_stop))
