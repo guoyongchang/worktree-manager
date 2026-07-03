@@ -297,6 +297,43 @@ fn remove_session_running_file() {
     }
 }
 
+fn install_shutdown_signal_handler() {
+    tauri::async_runtime::spawn(async {
+        let reason = wait_for_shutdown_signal().await;
+        log::warn!("=== app terminated by OS signal: {} ===", reason);
+        remove_session_running_file();
+        std::process::exit(1);
+    });
+}
+
+#[cfg(unix)]
+async fn wait_for_shutdown_signal() -> &'static str {
+    use tokio::signal::unix::{signal, SignalKind};
+    let mut sigterm = signal(SignalKind::terminate()).expect("register SIGTERM");
+    let mut sighup = signal(SignalKind::hangup()).expect("register SIGHUP");
+    let mut sigint = signal(SignalKind::interrupt()).expect("register SIGINT");
+    tokio::select! {
+        _ = sigterm.recv() => "SIGTERM",
+        _ = sighup.recv()  => "SIGHUP",
+        _ = sigint.recv()  => "SIGINT",
+    }
+}
+
+#[cfg(windows)]
+async fn wait_for_shutdown_signal() -> &'static str {
+    use tokio::signal::windows;
+    let mut ctrl_c = windows::ctrl_c().expect("register ctrl_c");
+    let mut ctrl_close = windows::ctrl_close().expect("register ctrl_close");
+    let mut ctrl_shutdown = windows::ctrl_shutdown().expect("register ctrl_shutdown");
+    let mut ctrl_logoff = windows::ctrl_logoff().expect("register ctrl_logoff");
+    tokio::select! {
+        _ = ctrl_c.recv()        => "CTRL_C",
+        _ = ctrl_close.recv()    => "CTRL_CLOSE",
+        _ = ctrl_shutdown.recv() => "CTRL_SHUTDOWN",
+        _ = ctrl_logoff.recv()   => "CTRL_LOGOFF",
+    }
+}
+
 fn install_panic_hook() {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -329,6 +366,7 @@ fn install_panic_hook() {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     install_panic_hook();
+    install_shutdown_signal_handler();
     detect_startup_crash_report();
     write_session_running_file();
 
