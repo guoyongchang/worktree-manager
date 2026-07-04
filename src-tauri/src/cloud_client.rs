@@ -17,6 +17,15 @@ impl CloudError {
     pub fn is_auth_failed(&self) -> bool {
         matches!(self, Self::AuthExpired)
     }
+
+    pub fn is_provider_unconfigured(&self) -> bool {
+        matches!(
+            self,
+            Self::Http(500 | 503, msg)
+                if msg.contains("No AI provider configured")
+                    || msg.contains("AI provider not configured")
+        )
+    }
 }
 
 impl std::fmt::Display for CloudError {

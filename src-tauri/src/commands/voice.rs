@@ -741,6 +741,12 @@ pub(crate) async fn call_ai_chat(
             Err(e) if e.is_network_error() => {
                 log::warn!("Cloud AI failed (network), falling back to local: {}", e);
             }
+            Err(e) if e.is_provider_unconfigured() => {
+                log::warn!(
+                    "Cloud AI provider is not configured, falling back to local: {}",
+                    e
+                );
+            }
             Err(e) => {
                 return Err(format!("云端 AI 请求失败: {}", e));
             }
@@ -1152,6 +1158,45 @@ mod tests {
             Err(err) => return Err(format!("local bind unavailable: {}", err)),
         };
         let addr = listener.local_addr().expect("chat addr");
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        Ok(format!("http://{}", addr))
+    }
+
+    async fn spawn_cloud_ai_server(
+        status: StatusCode,
+        response: Value,
+        captures: Arc<Mutex<Vec<HttpCapture>>>,
+    ) -> Result<String, String> {
+        let app = Router::new()
+            .route(
+                "/api/ai/v1/chat/completions",
+                post(
+                    move |headers: HeaderMap,
+                          State(captures): State<Arc<Mutex<Vec<HttpCapture>>>>,
+                          Json(body): Json<Value>| {
+                        let response = response.clone();
+                        async move {
+                            captures
+                                .lock()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                                .push(HttpCapture {
+                                    authorization: header_value(&headers, "authorization"),
+                                    content_type: header_value(&headers, "content-type"),
+                                    body: Some(body),
+                                });
+                            (status, Json(response))
+                        }
+                    },
+                ),
+            )
+            .with_state(captures);
+        let listener = match TcpListener::bind("127.0.0.1:0").await {
+            Ok(listener) => listener,
+            Err(err) => return Err(format!("local bind unavailable: {}", err)),
+        };
+        let addr = listener.local_addr().expect("cloud ai addr");
         tokio::spawn(async move {
             let _ = axum::serve(listener, app).await;
         });
@@ -1670,6 +1715,63 @@ mod tests {
         assert_eq!(body["model"], "qwen-unit");
         assert_eq!(body["messages"], Value::Array(messages));
         assert_eq!(body["temperature"], 0.25);
+    }
+
+    #[serial]
+    #[tokio::test]
+    async fn call_ai_chat_falls_back_to_local_when_cloud_provider_is_not_configured() {
+        let cloud_captures = Arc::new(Mutex::new(Vec::new()));
+        let local_captures = Arc::new(Mutex::new(Vec::new()));
+        let Ok(cloud_url) = spawn_cloud_ai_server(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({ "error": "No AI provider configured" }),
+            cloud_captures.clone(),
+        )
+        .await
+        else {
+            return;
+        };
+        let Ok(local_base_url) = spawn_chat_server(
+            StatusCode::OK,
+            json!({
+                "choices": [
+                    { "message": { "content": "local refined text" } }
+                ]
+            }),
+            local_captures.clone(),
+        )
+        .await
+        else {
+            return;
+        };
+        let mut config = crate::types::GlobalConfig::default();
+        config.cloud.server_url = Some(cloud_url);
+        config.cloud.access_token = Some("cloud-access".to_string());
+        config.dashscope_api_key = Some("dash-key".to_string());
+        config.voice_refine_base_url = Some(format!("{}/", local_base_url));
+        let _config = ConfigCacheGuard::with_global_config(config);
+
+        let messages = vec![json!({"role": "user", "content": "<raw>hello</raw>"})];
+        let content = call_ai_chat(messages.clone(), Some("qwen-unit"), 0.25, "voice_refine")
+            .await
+            .unwrap();
+
+        assert_eq!(content, "local refined text");
+        let cloud_capture = cloud_captures.lock().unwrap().first().cloned().unwrap();
+        assert_eq!(
+            cloud_capture.authorization.as_deref(),
+            Some("Bearer cloud-access")
+        );
+        assert_eq!(cloud_capture.body.unwrap()["purpose"], "voice_refine");
+        let local_capture = local_captures.lock().unwrap().first().cloned().unwrap();
+        assert_eq!(
+            local_capture.authorization.as_deref(),
+            Some("Bearer dash-key")
+        );
+        assert_eq!(
+            local_capture.body.unwrap()["messages"],
+            Value::Array(messages)
+        );
     }
 
     #[serial]
