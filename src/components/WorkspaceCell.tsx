@@ -265,6 +265,7 @@ export function WorkspaceCell({ initialWorkspacePath, closable, onClose }: Works
               isKeyHeld={voice.isKeyHeld}
               analyserNode={voice.analyserNode}
               onToggleVoice={voice.toggleVoice}
+              onStartRecording={voice.startRecording}
               onStopRecording={voice.stopRecording}
               staging={voice.staging}
               clientId={terminalHook.clientId}

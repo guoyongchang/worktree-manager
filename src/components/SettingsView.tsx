@@ -197,6 +197,12 @@ export const WorkspaceVaultSection: FC = () => {
   const [showFailedItems, setShowFailedItems] = useState(false);
 
   const loadStatus = useCallback(async () => {
+    if (!isTauri()) {
+      setVaultStatus(null);
+      setError(null);
+      setLoading(false);
+      return;
+    }
     try {
       const s = await getVaultStatus();
       setVaultStatus(s);
@@ -566,6 +572,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
 
   // Load vault status
   useEffect(() => {
+    if (!isTauri()) return;
     getVaultStatus().then(setVaultStatus).catch(() => setVaultStatus(null));
   }, []);
 

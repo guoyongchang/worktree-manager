@@ -59,6 +59,7 @@ interface MobileWorktreeDetailProps {
     isKeyHeld?: boolean;
     analyserNode?: AnalyserNode | null;
     onToggleVoice?: () => void;
+    onStartRecording?: () => void;
     onStopRecording?: () => void;
     staging?: StagingState | null;
 }
@@ -109,6 +110,7 @@ export const MobileWorktreeDetail: FC<MobileWorktreeDetailProps> = ({
     isKeyHeld,
     analyserNode,
     onToggleVoice,
+    onStartRecording,
     onStopRecording,
     staging,
 }) => {
@@ -448,6 +450,7 @@ export const MobileWorktreeDetail: FC<MobileWorktreeDetailProps> = ({
                                     isKeyHeld={isKeyHeld}
                                     analyserNode={analyserNode}
                                     onToggleVoice={onToggleVoice}
+                                    onStartRecording={onStartRecording}
                                     onStopRecording={onStopRecording}
                                     staging={staging}
                                     clientId={clientId}
