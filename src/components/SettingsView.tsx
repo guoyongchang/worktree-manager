@@ -35,6 +35,13 @@ const isWindowsPowerShellId = (id?: string) => id === 'powershell' || id === 'pw
 
 import { TAG_PRESET_COLORS } from '../constants';
 
+const formatCloudTokenExpiryUtc = (value: string) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const iso = date.toISOString();
+  return `${iso.slice(0, 10)} ${iso.slice(11, 19)} UTC`;
+};
+
 // ==================== VaultItemTree (recursive) ====================
 interface VaultItemTreeProps {
   vaultPath: string;
@@ -2431,35 +2438,35 @@ export const SettingsView: FC<SettingsViewProps> = ({
                 <h2 className="text-lg font-medium mb-4">{t('settings.cloudTitle', '云端连接')}</h2>
                 <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)]/50 rounded-lg p-4">
                   {cloudStatus?.connected ? (
-                    <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg space-y-2">
+                    <div className="p-3 bg-[var(--color-success)]/10 border border-[var(--color-success)]/30 rounded-lg space-y-2 text-[var(--color-text-primary)]">
                       <div className="flex items-center justify-between">
                         <div>
-                          <p className="text-sm font-medium text-green-700 dark:text-green-300">{t('settings.cloudConnected', '已连接')}</p>
-                          <p className="text-xs text-muted-foreground">{cloudStatus.server_url}</p>
+                          <p className="text-sm font-medium text-[var(--color-success)]">{t('settings.cloudConnected', '已连接')}</p>
+                          <p className="text-xs text-[var(--color-text-secondary)]">{cloudStatus.server_url}</p>
                         </div>
                         <Button variant="outline" size="sm" onClick={handleCloudDisconnect}>{t('settings.cloudDisconnect', '断开连接')}</Button>
                       </div>
                       {(cloudStatus.username || cloudStatus.user_email) && (
-                        <div className="text-xs text-muted-foreground space-y-0.5 pt-1 border-t border-green-200/30">
+                        <div className="text-xs text-[var(--color-text-secondary)] space-y-0.5 pt-1 border-t border-[var(--color-success)]/20">
                           {cloudStatus.username && (
-                            <p>{t('settings.cloudUsername', '用户名')}: <span className="text-[var(--color-text-secondary)]">{cloudStatus.username}</span></p>
+                            <p>{t('settings.cloudUsername', '用户名')}: <span className="text-[var(--color-text-primary)]">{cloudStatus.username}</span></p>
                           )}
                           {cloudStatus.user_email && (
-                            <p>{t('settings.cloudEmail', '邮箱')}: <span className="text-[var(--color-text-secondary)]">{cloudStatus.user_email}</span></p>
+                            <p>{t('settings.cloudEmail', '邮箱')}: <span className="text-[var(--color-text-primary)]">{cloudStatus.user_email}</span></p>
                           )}
                           {cloudStatus.token_expires_at && (
-                            <p>{t('settings.cloudTokenExpiry', 'Token 有效期至')}: <span className="text-[var(--color-text-secondary)]">{new Date(cloudStatus.token_expires_at).toLocaleString()}</span></p>
+                            <p>{t('settings.cloudTokenExpiry', 'Token 有效期至')}: <span className="text-[var(--color-text-primary)]">{formatCloudTokenExpiryUtc(cloudStatus.token_expires_at)}</span></p>
                           )}
                         </div>
                       )}
                     </div>
                   ) : pairingCode ? (
-                    <div className="space-y-3 p-4 border border-[var(--color-border)]/50 rounded-lg">
-                      <p className="text-sm text-muted-foreground">{t('settings.cloudPairingHint', '请在 WMS 管理后台输入以下配对码：')}</p>
-                      <p className="text-3xl font-mono font-bold text-center tracking-wider">{pairingCode}</p>
+                    <div className="space-y-3 p-4 bg-[var(--color-bg-base)]/35 border border-[var(--color-border)]/50 rounded-lg text-[var(--color-text-primary)]">
+                      <p className="text-sm text-[var(--color-text-secondary)]">{t('settings.cloudPairingHint', '请在 WMS 管理后台输入以下配对码：')}</p>
+                      <p className="text-3xl font-mono font-bold text-center tracking-wider text-[var(--color-text-primary)]">{pairingCode}</p>
                       {pairingStatus?.status === 'claimed' && (
-                        <div className="p-3 bg-yellow-50 dark:bg-[var(--color-warning)]/10 rounded">
-                          <p className="text-sm">{t('settings.cloudPairingRequest', '用户')} <strong>{pairingStatus.user_email || pairingStatus.username}</strong> {t('settings.cloudPairingRequestSuffix', '请求连接此设备')}</p>
+                        <div className="p-3 bg-[var(--color-warning)]/10 border border-[var(--color-warning)]/30 rounded text-[var(--color-text-primary)]">
+                          <p className="text-sm">{t('settings.cloudPairingRequest', '用户')} <strong className="text-[var(--color-warning)]">{pairingStatus.user_email || pairingStatus.username}</strong> {t('settings.cloudPairingRequestSuffix', '请求连接此设备')}</p>
                           <div className="flex gap-2 mt-2">
                             <Button size="sm" onClick={handleCloudApprove}>{t('settings.cloudApprove', '同意')}</Button>
                             <Button size="sm" variant="outline" onClick={handleCloudReject}>{t('settings.cloudReject', '拒绝')}</Button>
@@ -2470,8 +2477,8 @@ export const SettingsView: FC<SettingsViewProps> = ({
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      <p className="text-sm text-muted-foreground">服务端 <code className="bg-[var(--color-bg-elevated)]/50 px-1.5 py-0.5 rounded text-xs">https://wms.kirov-opensource.com/</code></p>
-                      <p className="text-sm text-muted-foreground">设备名称 <code className="bg-[var(--color-bg-elevated)]/50 px-1.5 py-0.5 rounded text-xs">自动获取 hostname</code></p>
+                      <p className="text-sm text-[var(--color-text-secondary)]">服务端 <code className="bg-[var(--color-bg-elevated)]/70 border border-[var(--color-border)]/40 text-[var(--color-text-primary)] px-1.5 py-0.5 rounded text-xs">https://wms.kirov-opensource.com/</code></p>
+                      <p className="text-sm text-[var(--color-text-secondary)]">设备名称 <code className="bg-[var(--color-bg-elevated)]/70 border border-[var(--color-border)]/40 text-[var(--color-text-primary)] px-1.5 py-0.5 rounded text-xs">自动获取 hostname</code></p>
                       <Button onClick={handleStartPairing}>{t('settings.cloudStartPairing', '开始配对')}</Button>
                     </div>
                   )}
