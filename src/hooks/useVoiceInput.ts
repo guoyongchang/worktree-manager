@@ -42,6 +42,34 @@ export interface UseVoiceInputReturn {
   stopRecording: () => void;
 }
 
+export interface FinalVoiceTextUpdate {
+  staging: StagingState;
+  rawTextForRefine: string | null;
+}
+
+export function appendFinalVoiceText(
+  prev: StagingState | null,
+  finalText: string,
+  refineEnabled: boolean,
+): FinalVoiceTextUpdate | null {
+  const trimmed = finalText.trim();
+  if (!prev || !trimmed) return null;
+
+  const rawText = prev.rawText ? prev.rawText + trimmed : trimmed;
+
+  return {
+    staging: {
+      ...prev,
+      rawText,
+      interimText: '',
+      refinedText: '',
+      isRefining: refineEnabled,
+      refineFailed: false,
+    },
+    rawTextForRefine: refineEnabled ? rawText : null,
+  };
+}
+
 function float32ToBase64Pcm(samples: Float32Array): string {
   const buffer = new ArrayBuffer(samples.length * 2);
   const view = new DataView(buffer);
@@ -102,11 +130,28 @@ export function useVoiceInput(
   // Keep stagingRef in sync
   useEffect(() => { stagingRef.current = staging; }, [staging]);
 
+  const replaceStaging = useCallback((next: StagingState | null) => {
+    stagingRef.current = next;
+    setStaging(next);
+  }, []);
+
+  const updateStaging = useCallback((updater: (prev: StagingState | null) => StagingState | null) => {
+    setStaging(prev => {
+      const next = updater(prev);
+      stagingRef.current = next;
+      return next;
+    });
+  }, []);
+
   // ---- AI 文本优化（500ms 防抖）----
   const triggerRefine = useCallback((rawText: string) => {
     // Clear previous timer
     if (refineTimerRef.current) {
       clearTimeout(refineTimerRef.current);
+    }
+    if (refineAbortRef.current) {
+      refineAbortRef.current.abort();
+      refineAbortRef.current = null;
     }
 
     refineTimerRef.current = setTimeout(async () => {
@@ -117,12 +162,12 @@ export function useVoiceInput(
       const abort = new AbortController();
       refineAbortRef.current = abort;
 
-      setStaging(prev => prev ? { ...prev, isRefining: true } : prev);
+      updateStaging(prev => prev ? { ...prev, isRefining: true, refineFailed: false } : prev);
 
       try {
         const refined = await voiceRefineText(rawText);
         if (abort.signal.aborted) return;
-        setStaging(prev => prev ? {
+        updateStaging(prev => prev ? {
           ...prev,
           refinedText: refined,
           isRefining: false,
@@ -130,27 +175,27 @@ export function useVoiceInput(
         } : prev);
       } catch {
         if (abort.signal.aborted) return;
-        setStaging(prev => prev ? {
+        updateStaging(prev => prev ? {
           ...prev,
           isRefining: false,
           refineFailed: true,
         } : prev);
       }
     }, 500);
-  }, []);
+  }, [updateStaging]);
 
   // ---- 最终发送 ----
   const finalizeStagingAndSend = useCallback(() => {
     const s = stagingRef.current;
     if (!s || !s.rawText.trim()) {
-      setStaging(null);
+      replaceStaging(null);
       return;
     }
     // Prefer refined text if available and not failed
     const textToSend = (s.refinedText && !s.refineFailed) ? s.refinedText : s.rawText;
     onTranscribedRef.current(textToSend);
-    setStaging(null);
-  }, []);
+    replaceStaging(null);
+  }, [replaceStaging]);
 
   // ---- 清理 staging 状态 ----
   const clearStaging = useCallback(() => {
@@ -163,8 +208,8 @@ export function useVoiceInput(
       refineAbortRef.current = null;
     }
     pendingSendRef.current = false;
-    setStaging(null);
-  }, []);
+    replaceStaging(null);
+  }, [replaceStaging]);
 
   // ---- 释放全部音频资源 ----
   const cleanupAudio = useCallback(() => {
@@ -286,7 +331,7 @@ export function useVoiceInput(
       busyRef.current = false;
       console.log('[voice] enterReady finally, busyRef reset to false');
     }
-  }, [cleanupAudio]);
+  }, [cleanupAudio, setVoiceStatus]);
 
   // ---- 退出 ready 状态：释放麦克风 ----
   const exitReady = useCallback(async () => {
@@ -315,7 +360,7 @@ export function useVoiceInput(
       await voiceStart(sampleRateRef.current);
       isStreamingRef.current = true;
       // 初始化暂存区
-      setStaging({
+      replaceStaging({
         rawText: '',
         interimText: '',
         refinedText: '',
@@ -334,7 +379,7 @@ export function useVoiceInput(
       setVoiceStatus('ready');
     }
     // Note: busyRef is managed by startRecording, not here
-  }, [setVoiceStatus]);
+  }, [replaceStaging, setVoiceStatus]);
 
   // ---- 停止录音：关闭音频发送，断开 Dashscope，回到 ready ----
   const stopStreaming = useCallback(async () => {
@@ -348,7 +393,7 @@ export function useVoiceInput(
       setVoiceStatus('ready');
       console.log('[voice] stopStreaming → status=ready');
     }
-  }, []);
+  }, [setVoiceStatus]);
 
   // ---- toggleVoice：麦克风按钮点击，切换 idle ↔ ready ----
   const toggleVoice = useCallback(() => {
@@ -382,20 +427,16 @@ export function useVoiceInput(
             if (trimmed === lastFinalRef.current) break;
             lastFinalRef.current = trimmed;
             // 累积到暂存区 rawText，然后触发 AI 优化
-            setStaging(prev => {
-              if (!prev) return prev;
-              const newRaw = prev.rawText ? prev.rawText + trimmed : trimmed;
-              return { ...prev, rawText: newRaw, interimText: '' };
-            });
+            const update = appendFinalVoiceText(stagingRef.current, trimmed, refineEnabledRef.current);
+            if (!update) break;
+            replaceStaging(update.staging);
             // 副作用放在 setter 外面 — 仅在用户开启 AI 优化时触发
-            if (refineEnabledRef.current) {
-              const currentRaw = stagingRef.current?.rawText ?? '';
-              const newRawForRefine = currentRaw ? currentRaw + trimmed : trimmed;
-              triggerRefine(newRawForRefine);
+            if (update.rawTextForRefine) {
+              triggerRefine(update.rawTextForRefine);
             }
           } else if (!isFinal && text) {
             // interim → 更新暂存区灰色文本
-            setStaging(prev => prev ? { ...prev, interimText: text } : prev);
+            updateStaging(prev => prev ? { ...prev, interimText: text } : prev);
           }
           break;
         }
@@ -459,7 +500,7 @@ export function useVoiceInput(
     }
 
     return () => { unlisten.forEach(fn => fn()); };
-  }, [triggerRefine, finalizeStagingAndSend]);
+  }, [triggerRefine, finalizeStagingAndSend, replaceStaging, setVoiceStatus, updateStaging]);
 
   // ---- Alt+V 按住说话 ----
   useEffect(() => {
