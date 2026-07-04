@@ -126,11 +126,9 @@ pub(crate) async fn get_commit_ai_enabled() -> bool {
 #[allow(dead_code)]
 pub(crate) fn check_commit_ai_api_key() -> bool {
     let config = crate::config::load_global_config();
-    config
-        .commit_ai_api_key
-        .as_ref()
-        .map(|k| !k.is_empty())
-        .unwrap_or(false)
+    config.commit_ai_enabled
+        && (non_empty_config_value(&config.commit_ai_api_key).is_some()
+            || non_empty_config_value(&config.dashscope_api_key).is_some())
 }
 
 // commit message 生成模型默认值（None 时回退）。与 voice_refine 默认保持一致。
@@ -221,6 +219,33 @@ pub(crate) async fn set_voice_refine_enabled(enabled: bool) -> Result<(), String
 
 const DEFAULT_REFINE_BASE_URL: &str = "https://dashscope.aliyuncs.com/compatible-mode/v1";
 
+fn non_empty_config_value(value: &Option<String>) -> Option<String> {
+    value
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+fn resolve_local_chat_config(
+    config: &crate::types::GlobalConfig,
+    purpose: &str,
+) -> Result<(String, String), String> {
+    let api_key = if purpose == "commit_ai" {
+        non_empty_config_value(&config.commit_ai_api_key)
+            .or_else(|| non_empty_config_value(&config.dashscope_api_key))
+            .ok_or("未配置 AI API Key，请在模型管理中配置")?
+    } else {
+        non_empty_config_value(&config.dashscope_api_key)
+            .ok_or("未配置 AI 能力（无云端连接且无本地 API Key）")?
+    };
+
+    let base_url = non_empty_config_value(&config.voice_refine_base_url)
+        .unwrap_or_else(|| DEFAULT_REFINE_BASE_URL.to_string());
+
+    Ok((api_key, base_url))
+}
+
 pub(crate) fn get_voice_refine_base_url_inner() -> Result<Option<String>, String> {
     let config = load_global_config();
     Ok(config.voice_refine_base_url)
@@ -291,41 +316,16 @@ pub(crate) async fn set_voice_refine_model(model: String) -> Result<(), String> 
 
 // ==================== Dashscope Models List ====================
 
-/// List available models. `purpose == Some("commit_ai")` resolves the key/base_url from
-/// the commit-AI credential set (commit_ai_api_key + dashscope_base_url), matching how
-/// commit messages are actually generated in `call_ai_chat`; otherwise the voice set is
-/// used (dashscope_api_key + voice_refine_base_url). Each falls back to the other key so
-/// the dropdown isn't empty when only one key is configured.
+/// List available OpenAI-compatible chat models using the same local resolver as
+/// `call_ai_chat`, so commit and voice-refine dropdowns do not drift.
 pub(crate) async fn list_dashscope_models_inner(
     purpose: Option<&str>,
 ) -> Result<Vec<String>, String> {
     let config = load_global_config();
-    let (api_key, base_url) = if purpose == Some("commit_ai") {
-        let key = config
-            .commit_ai_api_key
-            .clone()
-            .filter(|k| !k.is_empty())
-            .or_else(|| config.dashscope_api_key.clone().filter(|k| !k.is_empty()))
-            .ok_or("未配置 Commit AI API Key")?;
-        let base = config
-            .dashscope_base_url
-            .clone()
-            .filter(|u| !u.is_empty())
-            .or_else(|| config.voice_refine_base_url.clone())
-            .unwrap_or_else(|| DEFAULT_REFINE_BASE_URL.to_string());
-        (key, base)
-    } else {
-        let key = config
-            .dashscope_api_key
-            .clone()
-            .filter(|k| !k.is_empty())
-            .ok_or("未配置 Dashscope API Key")?;
-        let base = config
-            .voice_refine_base_url
-            .clone()
-            .unwrap_or_else(|| DEFAULT_REFINE_BASE_URL.to_string());
-        (key, base)
-    };
+    let (api_key, base_url) = resolve_local_chat_config(
+        &config,
+        purpose.filter(|p| !p.is_empty()).unwrap_or("voice_refine"),
+    )?;
     let url = format!("{}/models", base_url.trim_end_matches('/'));
 
     let client = reqwest::Client::new();
@@ -753,26 +753,9 @@ pub(crate) async fn call_ai_chat(
         }
     }
 
-    // Fallback: local Dashscope
+    // Fallback: local OpenAI-compatible provider
     let config = crate::config::load_global_config();
-    // Use commit_ai_api_key for commit_ai purpose, dashscope_api_key for others
-    let (api_key, base_url) = if purpose == "commit_ai" {
-        let key = config
-            .commit_ai_api_key
-            .ok_or("未配置 Commit AI API Key，请在设置中配置")?;
-        let url = config
-            .dashscope_base_url
-            .unwrap_or_else(|| DEFAULT_REFINE_BASE_URL.to_string());
-        (key, url)
-    } else {
-        let key = config
-            .dashscope_api_key
-            .ok_or("未配置 AI 能力（无云端连接且无本地 API Key）")?;
-        let url = config
-            .voice_refine_base_url
-            .unwrap_or_else(|| DEFAULT_REFINE_BASE_URL.to_string());
-        (key, url)
-    };
+    let (api_key, base_url) = resolve_local_chat_config(&config, purpose)?;
 
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
     let body = serde_json::json!({
@@ -898,13 +881,17 @@ pub(crate) async fn generate_commit_message(diff: String) -> Result<String, Stri
         return Err("No diff provided".to_string());
     }
 
+    let config = crate::config::load_global_config();
+    if !config.commit_ai_enabled {
+        return Err("Commit AI 已关闭".to_string());
+    }
+
     let messages = vec![
         serde_json::json!({"role": "system", "content": COMMIT_MSG_SYSTEM_PROMPT}),
         serde_json::json!({"role": "user", "content": trimmed}),
     ];
 
     // 读取用户所选模型；未配置时回退默认（与 voice_refine 一致）。
-    let config = crate::config::load_global_config();
     let commit_model = config
         .commit_ai_model
         .as_deref()
@@ -1590,7 +1577,7 @@ mod tests {
             get_commit_ai_api_key_inner().unwrap(),
             Some("commit-key".to_string())
         );
-        assert!(check_commit_ai_api_key());
+        assert!(!check_commit_ai_api_key());
         assert!(!crate::config::load_global_config().commit_ai_enabled);
 
         set_dashscope_api_key_inner(String::new()).unwrap();
@@ -1776,7 +1763,7 @@ mod tests {
 
     #[serial]
     #[tokio::test]
-    async fn call_ai_chat_commit_ai_uses_commit_key_and_dashscope_base_url() {
+    async fn call_ai_chat_commit_ai_prefers_legacy_commit_key_with_chat_base_url() {
         let captures = Arc::new(Mutex::new(Vec::new()));
         let Ok(base_url) = spawn_chat_server(
             StatusCode::OK,
@@ -1794,7 +1781,7 @@ mod tests {
         };
         let mut config = crate::types::GlobalConfig::default();
         config.commit_ai_api_key = Some("commit-key".to_string());
-        config.dashscope_base_url = Some(format!("{}/", base_url));
+        config.voice_refine_base_url = Some(format!("{}/", base_url));
         let _config = ConfigCacheGuard::with_global_config(config);
 
         let content = call_ai_chat(
@@ -1810,6 +1797,96 @@ mod tests {
         let capture = captures.lock().unwrap().first().cloned().unwrap();
         assert_eq!(capture.authorization.as_deref(), Some("Bearer commit-key"));
         assert_eq!(capture.body.unwrap()["model"], "qwen-turbo-latest");
+    }
+
+    #[serial]
+    #[tokio::test]
+    async fn call_ai_chat_commit_ai_can_use_unified_local_api_key() {
+        let captures = Arc::new(Mutex::new(Vec::new()));
+        let Ok(base_url) = spawn_chat_server(
+            StatusCode::OK,
+            json!({
+                "choices": [
+                    { "message": { "content": "fix(ai): use unified key" } }
+                ]
+            }),
+            captures.clone(),
+        )
+        .await
+        else {
+            return;
+        };
+        let mut config = crate::types::GlobalConfig::default();
+        config.dashscope_api_key = Some("unified-key".to_string());
+        config.voice_refine_base_url = Some(format!("{}/", base_url));
+        let _config = ConfigCacheGuard::with_global_config(config);
+
+        let content = call_ai_chat(
+            vec![json!({"role": "user", "content": "diff"})],
+            None,
+            0.3,
+            "commit_ai",
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(content, "fix(ai): use unified key");
+        let capture = captures.lock().unwrap().first().cloned().unwrap();
+        assert_eq!(capture.authorization.as_deref(), Some("Bearer unified-key"));
+    }
+
+    #[serial]
+    #[tokio::test]
+    async fn call_ai_chat_commit_ai_uses_chat_base_url_not_asr_websocket_url() {
+        let captures = Arc::new(Mutex::new(Vec::new()));
+        let Ok(base_url) = spawn_chat_server(
+            StatusCode::OK,
+            json!({
+                "choices": [
+                    { "message": { "content": "fix(ai): use chat endpoint" } }
+                ]
+            }),
+            captures.clone(),
+        )
+        .await
+        else {
+            return;
+        };
+        let mut config = crate::types::GlobalConfig::default();
+        config.commit_ai_api_key = Some("commit-key".to_string());
+        config.dashscope_base_url =
+            Some("wss://dashscope.aliyuncs.com/api-ws/v1/inference/".to_string());
+        config.voice_refine_base_url = Some(format!("{}/", base_url));
+        let _config = ConfigCacheGuard::with_global_config(config);
+
+        let content = call_ai_chat(
+            vec![json!({"role": "user", "content": "diff"})],
+            None,
+            0.3,
+            "commit_ai",
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(content, "fix(ai): use chat endpoint");
+        let capture = captures.lock().unwrap().first().cloned().unwrap();
+        assert_eq!(capture.authorization.as_deref(), Some("Bearer commit-key"));
+    }
+
+    #[serial]
+    #[tokio::test]
+    async fn generate_commit_message_respects_disabled_commit_ai() {
+        let mut config = crate::types::GlobalConfig::default();
+        config.commit_ai_enabled = false;
+        config.dashscope_api_key = Some("unified-key".to_string());
+        let _config = ConfigCacheGuard::with_global_config(config);
+
+        assert_eq!(
+            generate_commit_message("diff --git a/file b/file".to_string())
+                .await
+                .unwrap_err(),
+            "Commit AI 已关闭"
+        );
     }
 
     #[serial]

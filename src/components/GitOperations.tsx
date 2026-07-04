@@ -41,6 +41,7 @@ import {
   commitAll,
   generateCommitMessage,
   checkCommitAiApiKey,
+  getCommitAiEnabled,
   getCommitPrefixConfig,
   getGitUserGlobalConfig,
   setGitUserConfig,
@@ -373,8 +374,7 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
     setContent('');
     setGeneratingMessage(true);
     try {
-      // Check API key first - if no key, skip all AI generation
-      const hasKey = await checkCommitAiApiKey();
+      const commitAiEnabled = await getCommitAiEnabled();
 
       let config: { templates: string[]; enabled: boolean; default_index: number };
       try {
@@ -403,12 +403,12 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
       console.log('[commit] computedPrefix:', computedPrefix);
       setPrefix(computedPrefix);
 
-      if (hasKey) {
+      if (commitAiEnabled && (await checkCommitAiApiKey())) {
         const diff = await getGitDiff(projectPath);
         const msg = await generateCommitMessage(diff);
         setContent(msg);
       }
-      // If no key, leave content empty with placeholder - no error thrown
+      // If AI is disabled or no key is configured, leave content empty with placeholder.
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes('No changes')) {
@@ -427,6 +427,10 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
   const handleRegenerateMessage = async () => {
     setGeneratingMessage(true);
     try {
+      const commitAiEnabled = await getCommitAiEnabled();
+      if (!commitAiEnabled) {
+        return;
+      }
       const hasKey = await checkCommitAiApiKey();
       if (!hasKey) {
         // No API key - nothing to regenerate, just clear generating state
