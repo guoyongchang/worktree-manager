@@ -62,15 +62,15 @@ export const SettingsToggle: FC<SettingsToggleProps> = ({
     aria-label={ariaLabel}
     disabled={disabled}
     onClick={() => onChange(!checked)}
-    className={`relative inline-flex h-6 w-10 shrink-0 items-center rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/40 disabled:cursor-not-allowed disabled:opacity-60 ${
+    className={`relative inline-flex h-5 w-8 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/40 disabled:cursor-not-allowed disabled:opacity-60 ${
       checked
-        ? 'border-[var(--color-accent)] bg-[var(--color-accent)]'
-        : 'border-[var(--color-border)] bg-[var(--color-bg-elevated)]'
+        ? 'bg-[var(--color-accent)]'
+        : 'bg-[var(--color-text-muted)]'
     }`}
   >
     <span
-      className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
-        checked ? 'translate-x-5' : 'translate-x-1'
+      className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${
+        checked ? 'translate-x-3.5' : 'translate-x-0.5'
       }`}
     />
   </button>
@@ -1801,13 +1801,15 @@ export const SettingsView: FC<SettingsViewProps> = ({
                       <label className="text-sm text-[var(--color-text-secondary)]">{t('settings.shellIntegration')}</label>
                       <p className="text-xs text-[var(--color-text-muted)]">{t('settings.shellIntegrationDesc')}</p>
                     </div>
-                    <button type="button"
-                      onClick={() => { const newVal = !shellIntegrationEnabled; setShellIntegrationEnabled(newVal); saveShellIntegrationEnabled(newVal).catch(() => {}); }}
+                    <SettingsToggle
+                      checked={shellIntegrationEnabled}
                       disabled={!shellIntegrationLoaded}
-                      className={`relative inline-flex h-5 w-8 items-center rounded-full transition-colors ${shellIntegrationEnabled ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-text-muted)]'}`}
-                    >
-                      <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${shellIntegrationEnabled ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
-                    </button>
+                      ariaLabel={t('settings.shellIntegration')}
+                      onChange={(newVal) => {
+                        setShellIntegrationEnabled(newVal);
+                        saveShellIntegrationEnabled(newVal).catch(() => {});
+                      }}
+                    />
                   </div>
                 </div>
 
@@ -2023,17 +2025,15 @@ export const SettingsView: FC<SettingsViewProps> = ({
                       <label className="text-sm text-[var(--color-text-secondary)]">{t('settings.showSplitButton', '显示分屏按钮')}</label>
                       <p className="text-xs text-[var(--color-text-muted)]">{t('settings.showSplitButtonDesc', '在右下角显示分屏快捷按钮，用于添加多工作区面板')}</p>
                     </div>
-                    <button type="button"
-                      onClick={() => {
-                        const next = !showSplitButton;
+                    <SettingsToggle
+                      checked={showSplitButton}
+                      ariaLabel={t('settings.showSplitButton', '显示分屏按钮')}
+                      onChange={(next) => {
                         setShowSplitButton(next);
                         localStorage.setItem('show_split_button', JSON.stringify(next));
                         window.dispatchEvent(new Event('split-button-changed'));
                       }}
-                      className={`relative inline-flex h-5 w-8 items-center rounded-full transition-colors ${showSplitButton ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-text-muted)]'}`}
-                    >
-                      <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${showSplitButton ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
-                    </button>
+                    />
                   </div>
                 </div>
               </div>
@@ -2434,12 +2434,11 @@ export const SettingsView: FC<SettingsViewProps> = ({
                       <label className="text-sm text-[var(--color-text-secondary)]">{t('settings.prefixEnabled', '启用提交前缀')}</label>
                       <p className="text-xs text-[var(--color-text-muted)]">{t('settings.prefixEnabledDesc', '在 commit message 前自动添加前缀')}</p>
                     </div>
-                    <button type="button"
-                      onClick={() => setPrefixEnabled(v => !v)}
-                      className={`relative inline-flex h-5 w-8 items-center rounded-full transition-colors ${prefixEnabled ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-text-muted)]'}`}
-                    >
-                      <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${prefixEnabled ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
-                    </button>
+                    <SettingsToggle
+                      checked={prefixEnabled}
+                      ariaLabel={t('settings.prefixEnabled', '启用提交前缀')}
+                      onChange={setPrefixEnabled}
+                    />
                   </div>
 
                   {/* Skip Git Hooks */}
@@ -2448,13 +2447,15 @@ export const SettingsView: FC<SettingsViewProps> = ({
                       <label className="text-sm text-[var(--color-text-secondary)]">{t('settings.skipGitHooks', '跳过 Git Hooks')}</label>
                       <p className="text-xs text-[var(--color-text-muted)]">{t('settings.skipGitHooksDesc', '提交时跳过 pre-commit / commit-msg hooks')}</p>
                     </div>
-                    <button type="button"
-                      onClick={() => { const newVal = !skipGitHooks; setSkipGitHooks(newVal); saveSkipGitHooks(newVal).catch(() => {}); }}
+                    <SettingsToggle
+                      checked={skipGitHooks}
                       disabled={!skipGitHooksLoaded}
-                      className={`relative inline-flex h-5 w-8 items-center rounded-full transition-colors ${skipGitHooks ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-text-muted)]'}`}
-                    >
-                      <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${skipGitHooks ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
-                    </button>
+                      ariaLabel={t('settings.skipGitHooks', '跳过 Git Hooks')}
+                      onChange={(newVal) => {
+                        setSkipGitHooks(newVal);
+                        saveSkipGitHooks(newVal).catch(() => {});
+                      }}
+                    />
                   </div>
 
                   {/* 模板列表 */}
@@ -2640,9 +2641,15 @@ export const SettingsView: FC<SettingsViewProps> = ({
                         <label className="text-sm text-[var(--color-text-secondary)]">DevTools (F12)</label>
                         <p className="text-xs text-[var(--color-text-muted)]">{t('settings.devToolsDesc', 'Press F12 to open developer tools')}</p>
                       </div>
-                      <button type="button" onClick={() => { const newVal = !devConsoleEnabled; setDevConsoleEnabled(newVal); localStorage.setItem('dev-console-enabled', String(newVal)); window.dispatchEvent(new Event('dev-console-enabled-changed')); }}
-                        className={`relative inline-flex h-5 w-8 items-center rounded-full transition-colors ${devConsoleEnabled ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-text-muted)]'}`}
-                      ><span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${devConsoleEnabled ? 'translate-x-3.5' : 'translate-x-0.5'}`} /></button>
+                      <SettingsToggle
+                        checked={devConsoleEnabled}
+                        ariaLabel="DevTools (F12)"
+                        onChange={(newVal) => {
+                          setDevConsoleEnabled(newVal);
+                          localStorage.setItem('dev-console-enabled', String(newVal));
+                          window.dispatchEvent(new Event('dev-console-enabled-changed'));
+                        }}
+                      />
                     </div>
                   )}
                 </div>

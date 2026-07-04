@@ -38,14 +38,14 @@ describe('WorkspaceVaultSection', () => {
 });
 
 describe('SettingsToggle', () => {
-  it('uses stable switch dimensions and accessibility semantics', () => {
+  it('uses the compact dimensions shared by settings switches', () => {
     const onChange = vi.fn();
 
     render(<SettingsToggle checked={true} onChange={onChange} ariaLabel="AI 精炼" />);
 
     const toggle = screen.getByRole('switch', { name: 'AI 精炼' });
     expect(toggle).toHaveAttribute('aria-checked', 'true');
-    expect(toggle).toHaveClass('h-6', 'w-10', 'shrink-0');
-    expect(toggle.firstElementChild).toHaveClass('h-4', 'w-4', 'translate-x-5');
+    expect(toggle).toHaveClass('h-5', 'w-8', 'shrink-0');
+    expect(toggle.firstElementChild).toHaveClass('h-3', 'w-3', 'translate-x-3.5');
   });
 });
