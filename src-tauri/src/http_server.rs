@@ -3970,7 +3970,7 @@ mod http_server_coverage_tests {
             (h_get_dashscope_api_key().await, json!("dash...-key")),
             (h_get_commit_ai_api_key().await, json!("comm...-key")),
             (h_check_dashscope_api_key().await, json!(true)),
-            (h_check_commit_ai_api_key().await, json!(true)),
+            (h_check_commit_ai_api_key().await, json!(false)),
             (h_get_commit_ai_enabled().await, json!(false)),
             (
                 h_get_dashscope_base_url().await,
@@ -4104,7 +4104,7 @@ mod http_server_coverage_tests {
         assert_text_contains(
             h_list_dashscope_models(Json(json!({}))).await,
             StatusCode::BAD_REQUEST,
-            "Dashscope API Key",
+            "未配置 AI 能力",
         )
         .await;
         let (status, cloud_status) = json_response(h_cloud_get_status().await).await;
