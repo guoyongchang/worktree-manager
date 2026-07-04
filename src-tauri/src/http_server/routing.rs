@@ -8,8 +8,8 @@ use tower_http::cors::CorsLayer;
 
 use super::{
     h_add_existing_project, h_add_project_to_worktree, h_add_workspace, h_archive_worktree,
-    h_auth_challenge, h_auth_verify, h_auto_register_tunnel, h_broadcast_terminal_state,
-    h_cert_pem, h_check_commit_ai_api_key, h_check_dashscope_api_key, h_check_mirror_update,
+    h_auth_challenge, h_auth_verify, h_broadcast_terminal_state, h_cert_pem,
+    h_check_commit_ai_api_key, h_check_dashscope_api_key, h_check_mirror_update,
     h_check_remote_branch_exists, h_check_worktree_status, h_clone_project,
     h_cloud_approve_pairing, h_cloud_check_pairing_status, h_cloud_disconnect, h_cloud_get_status,
     h_cloud_reject_pairing, h_cloud_start_pairing, h_commit_all, h_create_pull_request,
@@ -270,7 +270,6 @@ pub(super) fn build_api_router(cert_pem: Option<String>) -> Router {
         .route("/api/start_wms_tunnel", post(h_start_wms_tunnel))
         .route("/api/stop_wms_tunnel", post(h_stop_wms_tunnel))
         .route("/api/wms_manual_reconnect", post(h_wms_manual_reconnect))
-        .route("/api/auto_register_tunnel", post(h_auto_register_tunnel))
         .route("/api/voice_start", post(h_voice_start))
         .route("/api/voice_send_audio", post(h_voice_send_audio))
         .route("/api/voice_stop", post(h_voice_stop))

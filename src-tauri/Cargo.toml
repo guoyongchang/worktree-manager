@@ -65,7 +65,18 @@ dirs = "6"
 libc = "=0.2.180"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_System_RestartManager"] }
+windows-sys = { version = "=0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_System_RestartManager",
+    # Native crash capture (windows_crash.rs): SEH filter + stderr redirect
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Console",
+    "Win32_System_Kernel",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_LibraryLoader",
+] }
 windows-icons = "=0.3.0"
 
 [dev-dependencies]

@@ -1,4 +1,4 @@
-import type { MergeGateOpts } from '../types.js';
+import type { BranchDiffStats, MergeGateOpts } from '../types.js';
 
 export const DEFAULT_MAX_AHEAD = 50;
 
@@ -25,6 +25,36 @@ export function evaluateMergeGate(input: MergeGateInput, opts: MergeGateOpts): M
     return {
       allow: false,
       reason: `领先目标分支 ${input.ahead} 个提交，超过阈值 ${opts.max_ahead}，疑似分支选错或需人工确认（确属预期可传 force:true）`,
+    };
+  }
+  return { allow: true };
+}
+
+export interface DiffCertaintyOpts {
+  fetched: boolean; // 本次是否已执行 fetch（fetch_first），刷新过本地 ref
+  force: boolean;
+}
+
+// 后端 BranchDiffStats 无法区分「无法计算 diff」（目标/base ref 不存在或未 fetch → 全 0）
+// 与「确实无差异」（也是全 0）。若直接放行会 fail-open：把「算不出」误判为「差异为 0」。
+// 保守策略（fail-closed）：所有 stats 均为 0 时视为「不确定」，除非本次已 fetch（fetched=true）
+// 或显式 force，否则拒绝合并并提示用户先 fetch_first / sync。
+export function evaluateDiffCertainty(
+  stats: BranchDiffStats,
+  opts: DiffCertaintyOpts
+): MergeGateResult {
+  if (opts.force) return { allow: true };
+  const allZero =
+    stats.ahead === 0 &&
+    stats.behind === 0 &&
+    stats.changed_files === 0 &&
+    stats.unpushed_commits === 0 &&
+    stats.ahead_of_test === 0;
+  if (allZero && !opts.fetched) {
+    return {
+      allow: false,
+      reason:
+        '无法确认分支差异：所有 diff 统计均为 0，可能是目标分支/base 的 ref 未 fetch 或不存在（后端无法区分「算不出」与「确实无差异」）。请带 fetch_first:true 重试，或先手动 fetch/sync 后再合并（确属预期可传 force:true 跳过）',
     };
   }
   return { allow: true };

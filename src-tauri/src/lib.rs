@@ -10,6 +10,8 @@ pub mod state;
 pub(crate) mod tls;
 pub mod types;
 pub mod utils;
+#[cfg(windows)]
+mod windows_crash;
 pub(crate) mod wms_tunnel;
 
 // Re-exports used by http_server and other modules
@@ -370,6 +372,20 @@ pub fn run() {
     detect_startup_crash_report();
     write_session_running_file();
 
+    // Windows: also capture native faults (access violations, WebView2 crashes, ...) that
+    // bypass the Rust panic hook, so an abnormal exit records a reason, not just the fact.
+    // Installed after detect_startup_crash_report so it doesn't clobber the previous
+    // session's pending crash detail before it is read.
+    #[cfg(windows)]
+    if let Some(dir) = crash_log_dir() {
+        let _ = std::fs::create_dir_all(&dir);
+        windows_crash::install(
+            &dir.join(CRASH_LOG_FILE),
+            &dir.join(PENDING_ERROR_LOG_FILE),
+            &dir.join("worktree-manager-stderr.log"),
+        );
+    }
+
     // Install rustls CryptoProvider before any TLS usage (required by rustls 0.23+)
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
@@ -590,7 +606,6 @@ pub fn run() {
             start_wms_tunnel,
             stop_wms_tunnel,
             wms_manual_reconnect,
-            auto_register_tunnel,
             // 语音识别 (Dashscope)
             get_dashscope_api_key,
             set_dashscope_api_key,

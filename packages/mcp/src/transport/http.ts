@@ -4,6 +4,7 @@ import type { Transport } from './config.js';
 
 const DEFAULT_PORT = 42819;
 const WRITE_TIMEOUT = 60000; // 写/网络操作（merge/push/pull/sync/commit）用更长超时
+const FETCH_TIMEOUT = 30000; // git fetch 真实耗时 3-6s，默认 5s 易超时
 
 export { Transport } from './config.js';
 
@@ -130,7 +131,11 @@ export class HttpTransport implements Transport {
   }
 
   async fetchProjectRemote(projectPath: string): Promise<unknown> {
-    const res = await this.client.post('/fetch_project_remote', { path: projectPath });
+    const res = await this.client.post(
+      '/fetch_project_remote',
+      { path: projectPath },
+      { timeout: FETCH_TIMEOUT }
+    );
     return res.data;
   }
 

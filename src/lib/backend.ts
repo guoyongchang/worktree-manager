@@ -690,8 +690,8 @@ export async function setVoiceRefineModel(model: string): Promise<void> {
   return callBackend<void>('set_voice_refine_model', { model });
 }
 
-export async function listDashscopeModels(): Promise<string[]> {
-  return callBackend<string[]>('list_dashscope_models');
+export async function listDashscopeModels(purpose?: string): Promise<string[]> {
+  return callBackend<string[]>('list_dashscope_models', purpose ? { purpose } : {});
 }
 
 export async function checkDashscopeApiKey(): Promise<boolean> {

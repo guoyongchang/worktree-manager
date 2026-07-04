@@ -15,6 +15,9 @@ pub struct ShareState {
     pub ngrok_url: Option<String>,
     pub ngrok_task: Option<tokio::task::JoinHandle<()>>,
     // === WMS 隧道分享字段 ===
+    /// True while a WMS tunnel is being started, to close the check-then-act race between
+    /// the precondition check and the point where `wms_url` gets set.
+    pub wms_starting: bool,
     pub wms_url: Option<String>,
     pub wms_task: Option<tokio::task::JoinHandle<()>>,
     pub wms_shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
@@ -168,6 +171,11 @@ pub struct CloudConfig {
     pub subdomain: Option<String>,
     #[serde(default)]
     pub device_id: Option<String>,
+    /// How the stored tunnel_token/subdomain were obtained: "authenticated" (registered
+    /// under the logged-in account) or "anonymous" (fallback). Used to prevent reusing
+    /// stale anonymous credentials once the user is logged in.
+    #[serde(default)]
+    pub tunnel_registered_as: Option<String>,
 }
 
 // 全局配置：存储在 ~/.config/worktree-manager/global.json

@@ -24,10 +24,12 @@ export function buildDetailsHandlers(transport: Transport): Record<string, ToolH
 
     list_projects: async (args) => {
       const worktreeName = args?.worktree_name as string | undefined;
-      const result = (await transport.listWorktrees(false)) as {
-        worktrees?: Array<{ name: string; projects?: Array<Record<string, unknown>> }>;
-      };
-      const worktrees = result?.worktrees ?? [];
+      // HTTP 模式返回裸数组，ConfigTransport 返回 {worktrees:[...]}，两种形状都要兼容
+      type WorktreeItem = { name: string; projects?: Array<Record<string, unknown>> };
+      const raw = await transport.listWorktrees(false);
+      const worktrees: WorktreeItem[] = Array.isArray(raw)
+        ? (raw as WorktreeItem[])
+        : ((raw as { worktrees?: WorktreeItem[] })?.worktrees ?? []);
       const filtered = worktreeName ? worktrees.filter((w) => w.name === worktreeName) : worktrees;
       const projects = filtered.flatMap((w) =>
         (w.projects ?? []).map((p) => ({

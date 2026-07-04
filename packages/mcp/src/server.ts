@@ -1,16 +1,31 @@
+import axios from 'axios';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { HttpTransport } from './transport/http.js';
-import { ConfigTransport } from './transport/config.js';
+import { ConfigTransport, readCapabilityLevel } from './transport/config.js';
 import { buildCoreHandlers, CORE_TOOLS } from './tools/core.js';
 import { buildDetailsHandlers, DETAILS_TOOLS } from './tools/details.js';
 import { buildAdvancedHandlers, ADVANCED_TOOLS } from './tools/advanced.js';
 import { type ToolHandler, errorResult } from './tools/shared.js';
 import type { CapabilityLevel } from './types.js';
-import { readFileSync, existsSync } from 'fs';
-import { join } from 'path';
-import { homedir } from 'os';
+
+// 从错误里提取给用户看的信息。axios 错误优先透传后端响应体（后端 400 里的真实 git 报错），
+// 否则回退到 error.message。
+function extractErrorMessage(e: unknown): string {
+  if (axios.isAxiosError(e)) {
+    const data = e.response?.data;
+    if (typeof data === 'string' && data) return data;
+    if (data && typeof data === 'object') {
+      const obj = data as Record<string, unknown>;
+      const msg = obj.error ?? obj.message;
+      if (typeof msg === 'string' && msg) return msg;
+      return JSON.stringify(data);
+    }
+    return e.message;
+  }
+  return e instanceof Error ? e.message : String(e);
+}
 
 export class WorktreeMcpServer {
   private server: Server | null = null;
@@ -50,23 +65,11 @@ export class WorktreeMcpServer {
       }
     );
 
-    // 读取 mcp.json 的 capability_level（缺省 details）
-    this.capabilityLevel = this.loadCapabilityLevel();
+    // 读取 mcp.json 的 capability_level（缺省 details，共享自 transport/config）
+    this.capabilityLevel = readCapabilityLevel();
 
     // Register tools based on capability level
     this.registerTools();
-  }
-
-  private loadCapabilityLevel(): CapabilityLevel {
-    try {
-      const p = join(homedir(), '.config', 'worktree-manager', 'mcp.json');
-      if (existsSync(p)) {
-        const cfg = JSON.parse(readFileSync(p, 'utf-8'));
-        const lvl = cfg?.capability_level;
-        if (lvl === 'core' || lvl === 'details' || lvl === 'advanced') return lvl;
-      }
-    } catch {}
-    return 'details';
   }
 
   private registerTools(): void {
@@ -96,7 +99,7 @@ export class WorktreeMcpServer {
       try {
         return await handler((args ?? {}) as Record<string, unknown>);
       } catch (e) {
-        return errorResult(`Error: ${e instanceof Error ? e.message : String(e)}`);
+        return errorResult(`Error: ${extractErrorMessage(e)}`);
       }
     });
 
@@ -105,7 +108,10 @@ export class WorktreeMcpServer {
   }
 
   setCapabilityLevel(level: CapabilityLevel): void {
+    if (level === this.capabilityLevel) return;
     this.capabilityLevel = level;
+    // 重新注册工具，让 capability 切换真正生效（否则 handlers/tools 仍是旧集合，setter 形同死代码）
+    if (this.server && this.transport) this.registerTools();
   }
 
   async run(): Promise<void> {

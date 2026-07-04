@@ -228,6 +228,11 @@ pub(crate) async fn cloud_start_pairing() -> Result<DeviceCodeResponse, String> 
         // Clear any existing tokens on new pairing
         config.cloud.access_token = None;
         config.cloud.refresh_token = None;
+        // Clear tunnel credentials so a new account doesn't inherit the previous device's
+        // tunnel_token/subdomain.
+        config.cloud.tunnel_token = None;
+        config.cloud.subdomain = None;
+        config.cloud.tunnel_registered_as = None;
         save_global_config_internal(&config)?;
     }
 
@@ -414,6 +419,11 @@ pub(crate) async fn cloud_disconnect() -> Result<(), String> {
     let mut config = load_global_config();
     config.cloud.access_token = None;
     config.cloud.refresh_token = None;
+    // Clear tunnel credentials too: a logged-out account must not keep a usable
+    // tunnel_token/subdomain that could bring up a public tunnel on the next start.
+    config.cloud.tunnel_token = None;
+    config.cloud.subdomain = None;
+    config.cloud.tunnel_registered_as = None;
     save_global_config_internal(&config)?;
 
     // Also clear any in-progress pairing

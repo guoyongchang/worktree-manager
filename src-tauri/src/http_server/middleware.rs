@@ -16,6 +16,9 @@ fn is_forwarded_remote_request(headers: &HeaderMap) -> bool {
     headers.contains_key("x-forwarded-for")
         || headers.contains_key("forwarded")
         || headers.contains_key("x-real-ip")
+        // Requests proxied in from the WMS tunnel arrive from a loopback address but carry
+        // this marker; treat them as remote so host-only operations stay blocked.
+        || headers.contains_key(crate::wms_tunnel::TUNNEL_MARKER_HEADER)
 }
 
 fn is_localhost_only_path(path: &str) -> bool {
@@ -41,7 +44,6 @@ fn is_localhost_only_path(path: &str) -> bool {
             | "/api/start_wms_tunnel"
             | "/api/stop_wms_tunnel"
             | "/api/wms_manual_reconnect"
-            | "/api/auto_register_tunnel"
             | "/api/get_last_share_password"
             | "/api/get_dashscope_api_key"
             | "/api/set_dashscope_api_key"

@@ -157,15 +157,14 @@ Write tools that can trigger destructive git operations. See the [Trust Boundary
 | `git_switch_branch` | Switch to a different branch |
 | `git_fetch` | Fetch from remote origin |
 | `sync_base` | Sync the latest base branch into the current branch (fetch + merge) |
-| `pull` | `git pull` the current branch from origin |
-| `push` | Push the current branch to origin |
+| `pull` | `git pull` the current branch from origin (fetch + merge; unlike `git_fetch`, which only downloads refs) |
 | `commit_and_push` | Stage, commit, then push in one step (non-atomic — see note) |
-| `merge_to_test` | Merge current branch into the test branch (guarded by threshold) |
-| `merge_to_base` | Merge current branch into the base branch (guarded by threshold) |
+| `merge_to_test` | Merge current branch into the test branch (guarded by threshold + unverifiable-diff check) |
+| `merge_to_base` | Merge current branch into the base branch (guarded by threshold + unverifiable-diff check) |
 
 #### `commit_and_push` — Non-Atomic Behavior
 
-If the commit succeeds but the push fails, the tool returns `isError: true` with a "committed but not pushed" message. The commit is **not** rolled back. You can then call `push` separately.
+If the commit succeeds but the push fails, the tool returns `isError: true` with a "committed but not pushed" message. The commit is **not** rolled back. You can then call `git_push` separately.
 
 ---
 
@@ -199,6 +198,10 @@ Thresholds are **not** persisted — pass them as arguments each time:
 
 - `merge_to_test`: the `ahead_of_test` field from `get_branch_status` is used as the "ahead" count
 - `merge_to_base`: the `ahead` field (commits ahead of `origin/<base_branch>`) is used
+
+### Unverifiable-Diff Guard (fail-closed)
+
+The backend returns all diff stats as `0` both when there is genuinely no diff **and** when it cannot compute one (e.g. the target/base ref was never fetched) — the two cases are indistinguishable. To avoid merging blindly, the gate **blocks** when every stat is `0` and no fetch was performed in the same call. Pass `fetch_first: true` to refresh refs first (recommended), or `force: true` to override.
 
 ### Bypassing the Gate
 

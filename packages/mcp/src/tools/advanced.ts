@@ -1,6 +1,6 @@
 import type { Transport } from '../transport/http.js';
 import { type ToolHandler, textResult, errorResult } from './shared.js';
-import { evaluateMergeGate, gateOptsFromArgs } from './safety.js';
+import { evaluateMergeGate, evaluateDiffCertainty, gateOptsFromArgs } from './safety.js';
 import type { BranchDiffStats } from '../types.js';
 
 export function buildAdvancedHandlers(transport: Transport): Record<string, ToolHandler> {
@@ -64,12 +64,6 @@ export function buildAdvancedHandlers(transport: Transport): Record<string, Tool
       return textResult(await transport.pullCurrentBranch(projectPath));
     },
 
-    push: async (args) => {
-      const projectPath = args?.project_path as string;
-      if (!projectPath) throw new Error('project_path is required');
-      return textResult(await transport.pushToRemote(projectPath));
-    },
-
     commit_and_push: async (args) => {
       const projectPath = args?.project_path as string;
       const message = args?.message as string;
@@ -95,7 +89,13 @@ export function buildAdvancedHandlers(transport: Transport): Record<string, Tool
       if (!projectPath || !baseBranch || !testBranch) {
         throw new Error('project_path, base_branch and test_branch are required');
       }
+      const fetchFirst = args?.fetch_first === true;
+      const force = args?.force === true;
+      if (fetchFirst) await transport.fetchProjectRemote(projectPath);
       const stats = (await transport.getBranchDiffStats(projectPath, baseBranch, testBranch)) as BranchDiffStats;
+      // fail-closed：diff 全 0 且未 fetch 时视为「算不出」，拒绝而非放行
+      const certainty = evaluateDiffCertainty(stats, { fetched: fetchFirst, force });
+      if (!certainty.allow) return errorResult(`合并到 test 被拦截：${certainty.reason}`);
       const gate = evaluateMergeGate(
         { ahead: stats.ahead_of_test, changed_files: stats.changed_files },
         gateOptsFromArgs(args)
@@ -108,7 +108,13 @@ export function buildAdvancedHandlers(transport: Transport): Record<string, Tool
       const projectPath = args?.project_path as string;
       const baseBranch = args?.base_branch as string;
       if (!projectPath || !baseBranch) throw new Error('project_path and base_branch are required');
+      const fetchFirst = args?.fetch_first === true;
+      const force = args?.force === true;
+      if (fetchFirst) await transport.fetchProjectRemote(projectPath);
       const stats = (await transport.getBranchDiffStats(projectPath, baseBranch)) as BranchDiffStats;
+      // fail-closed：diff 全 0 且未 fetch 时视为「算不出」，拒绝而非放行
+      const certainty = evaluateDiffCertainty(stats, { fetched: fetchFirst, force });
+      if (!certainty.allow) return errorResult(`合并到 base 被拦截：${certainty.reason}`);
       const gate = evaluateMergeGate(
         { ahead: stats.ahead, changed_files: stats.changed_files },
         gateOptsFromArgs(args)
@@ -225,16 +231,7 @@ export const ADVANCED_TOOLS = [
   },
   {
     name: 'pull',
-    description: 'git pull the current branch from origin. Requires advanced capability.',
-    inputSchema: {
-      type: 'object',
-      properties: { project_path: { type: 'string' } },
-      required: ['project_path'],
-    },
-  },
-  {
-    name: 'push',
-    description: 'Push the current branch to origin. Requires advanced capability.',
+    description: 'git pull the current branch from origin (fetch + merge into working branch). Unlike git_fetch (which only downloads refs without touching the working tree), this updates the checked-out branch. To push, use git_push. Requires advanced capability.',
     inputSchema: {
       type: 'object',
       properties: { project_path: { type: 'string' } },
@@ -258,7 +255,7 @@ export const ADVANCED_TOOLS = [
   },
   {
     name: 'merge_to_test',
-    description: 'Merge the current branch into the test branch, guarded by a "not too many commits" threshold. Blocks if ahead_of_test > max_ahead (default 50) or worktree is dirty, unless force:true. Requires advanced capability.',
+    description: 'Merge the current branch into the test branch, guarded by a "not too many commits" threshold. Blocks if ahead_of_test > max_ahead (default 50) or worktree is dirty. Also blocks (fail-closed) when all diff stats are 0 and no fetch was done, since the backend cannot tell "no diff" from "could not compute" (e.g. test ref not fetched) — pass fetch_first:true. All guards bypassable with force:true. Requires advanced capability.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -267,14 +264,15 @@ export const ADVANCED_TOOLS = [
         test_branch: { type: 'string' },
         max_ahead: { type: 'number', description: 'Max commits ahead of test allowed (default 50)' },
         require_clean_worktree: { type: 'boolean', description: 'Block if uncommitted changes (default true)' },
-        force: { type: 'boolean', description: 'Bypass all guards' },
+        fetch_first: { type: 'boolean', description: 'Fetch remote before computing diff. Recommended: without it, if the test ref is stale/unfetched all diff stats read 0 and the merge is blocked as "unverifiable"' },
+        force: { type: 'boolean', description: 'Bypass all guards (threshold + unverifiable-diff check)' },
       },
       required: ['project_path', 'base_branch', 'test_branch'],
     },
   },
   {
     name: 'merge_to_base',
-    description: 'Merge the current branch into the base branch, guarded by a "not too many commits" threshold. Blocks if ahead (of base) > max_ahead (default 50) or worktree is dirty, unless force:true. Requires advanced capability.',
+    description: 'Merge the current branch into the base branch, guarded by a "not too many commits" threshold. Blocks if ahead (of base) > max_ahead (default 50) or worktree is dirty. Also blocks (fail-closed) when all diff stats are 0 and no fetch was done, since the backend cannot tell "no diff" from "could not compute" (e.g. base ref not fetched) — pass fetch_first:true. All guards bypassable with force:true. Requires advanced capability.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -282,7 +280,8 @@ export const ADVANCED_TOOLS = [
         base_branch: { type: 'string' },
         max_ahead: { type: 'number', description: 'Max commits ahead of base allowed (default 50)' },
         require_clean_worktree: { type: 'boolean', description: 'Block if uncommitted changes (default true)' },
-        force: { type: 'boolean', description: 'Bypass all guards' },
+        fetch_first: { type: 'boolean', description: 'Fetch remote before computing diff. Recommended: without it, if the base ref is stale/unfetched all diff stats read 0 and the merge is blocked as "unverifiable"' },
+        force: { type: 'boolean', description: 'Bypass all guards (threshold + unverifiable-diff check)' },
       },
       required: ['project_path', 'base_branch'],
     },
