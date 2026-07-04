@@ -862,6 +862,37 @@ async fn run_single_tunnel_session(
     Ok(())
 }
 
+const PEER_STABLE_SESSION: std::time::Duration = std::time::Duration::from_secs(30);
+const PEER_MAX_BACKOFF_SECS: u64 = 30;
+
+struct PeerReconnectPolicy {
+    backoff_secs: u64,
+}
+
+impl Default for PeerReconnectPolicy {
+    fn default() -> Self {
+        Self { backoff_secs: 1 }
+    }
+}
+
+impl PeerReconnectPolicy {
+    fn backoff_secs(&self) -> u64 {
+        self.backoff_secs
+    }
+
+    fn record_session_end(&mut self, elapsed: std::time::Duration) {
+        if elapsed >= PEER_STABLE_SESSION {
+            self.backoff_secs = 1;
+        } else {
+            self.record_connect_failure();
+        }
+    }
+
+    fn record_connect_failure(&mut self) {
+        self.backoff_secs = (self.backoff_secs * 2).min(PEER_MAX_BACKOFF_SECS);
+    }
+}
+
 async fn run_tunnel_to_peer(
     local_port: u16,
     peer: TunnelPeerCandidate,
@@ -879,7 +910,48 @@ async fn run_tunnel_to_peer(
         peer.public_base_url,
         peer.public_ws_url
     );
-    run_single_tunnel_session(local_port, ws_url, shutdown_rx, connected_flag).await
+
+    let mut policy = PeerReconnectPolicy::default();
+    loop {
+        if *shutdown_rx.borrow() {
+            return Ok(());
+        }
+
+        let session_start = std::time::Instant::now();
+        match run_single_tunnel_session(
+            local_port,
+            ws_url.clone(),
+            shutdown_rx.clone(),
+            connected_flag.clone(),
+        )
+        .await
+        {
+            Ok(()) if *shutdown_rx.borrow() => return Ok(()),
+            Ok(()) => {
+                policy.record_session_end(session_start.elapsed());
+                log::warn!(
+                    "[wms-tunnel] Peer tunnel disconnected: id={}, retrying in {}s",
+                    peer.id,
+                    policy.backoff_secs()
+                );
+            }
+            Err(e) => {
+                policy.record_connect_failure();
+                log::warn!(
+                    "[wms-tunnel] Peer tunnel connect failed: id={}, error={}, retrying in {}s",
+                    peer.id,
+                    e,
+                    policy.backoff_secs()
+                );
+            }
+        }
+
+        let mut peer_shutdown = shutdown_rx.clone();
+        tokio::select! {
+            _ = tokio::time::sleep(std::time::Duration::from_secs(policy.backoff_secs())) => {}
+            _ = peer_shutdown.changed() => return Ok(()),
+        }
+    }
 }
 
 /// Run the WMS tunnel client with automatic reconnection.
@@ -1286,6 +1358,33 @@ mod tests {
             url,
             "wss://167.235.103.66:8443/tunnel/connect?token=tok%20en&subdomain=bliss-kind-drift&peer_id=eu-1"
         );
+    }
+
+    #[test]
+    fn peer_reconnect_policy_escalates_unstable_disconnects_and_caps() {
+        let mut policy = PeerReconnectPolicy::default();
+        assert_eq!(policy.backoff_secs(), 1);
+
+        policy.record_session_end(std::time::Duration::from_secs(1));
+        assert_eq!(policy.backoff_secs(), 2);
+
+        policy.record_session_end(std::time::Duration::from_secs(1));
+        assert_eq!(policy.backoff_secs(), 4);
+
+        for _ in 0..10 {
+            policy.record_session_end(std::time::Duration::from_secs(1));
+        }
+        assert_eq!(policy.backoff_secs(), 30);
+    }
+
+    #[test]
+    fn peer_reconnect_policy_resets_after_stable_session() {
+        let mut policy = PeerReconnectPolicy::default();
+        policy.record_session_end(std::time::Duration::from_secs(1));
+        assert_eq!(policy.backoff_secs(), 2);
+
+        policy.record_session_end(std::time::Duration::from_secs(30));
+        assert_eq!(policy.backoff_secs(), 1);
     }
 
     #[test]
