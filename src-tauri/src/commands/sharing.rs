@@ -820,6 +820,7 @@ pub async fn start_wms_tunnel_internal() -> Result<String, String> {
         .subdomain
         .clone()
         .ok_or("注册后未获得 subdomain".to_string())?;
+    let access_token = config.cloud.access_token.clone().filter(|t| !t.is_empty());
     let token = config.cloud.tunnel_token.clone().filter(|t| !t.is_empty());
 
     log::info!(
@@ -843,9 +844,10 @@ pub async fn start_wms_tunnel_internal() -> Result<String, String> {
 
     log::info!("[wms-tunnel] Spawning tunnel task");
     let wms_handle = crate::state::TOKIO_RT.spawn(async move {
-        crate::wms_tunnel::run_tunnel(
+        crate::wms_tunnel::run_tunnel_pool(
             port,
             server_url,
+            access_token,
             token,
             subdomain,
             url_tx,

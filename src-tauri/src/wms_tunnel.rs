@@ -22,6 +22,27 @@ struct TunnelDiscoveryResponse {
     /// Server-recommended heartbeat interval (informational, reserved for future use)
     #[serde(default)]
     heartbeat_interval_secs: Option<u64>,
+    #[serde(default)]
+    routing_mode: Option<String>,
+    #[serde(default)]
+    desktop_max_peer_connections: Option<usize>,
+    #[serde(default)]
+    center_peer_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TunnelPeerCandidate {
+    pub id: String,
+    pub tunnel_ws_url: String,
+    pub public_base_url: String,
+    pub public_ws_url: String,
+    pub region: String,
+    pub weight: i32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct TunnelPeerCandidatesResponse {
+    peers: Vec<TunnelPeerCandidate>,
 }
 
 /// Resolved tunnel connection parameters.
@@ -139,6 +160,63 @@ fn resolve_tunnel_config(
         };
 
     ResolvedTunnelConfig { ws_url, public_url }
+}
+
+fn peer_tunnel_ws_url(peer: &TunnelPeerCandidate, token: Option<&str>, subdomain: &str) -> String {
+    let separator = if peer.tunnel_ws_url.contains('?') {
+        '&'
+    } else {
+        '?'
+    };
+    match token {
+        Some(token) => format!(
+            "{}{}token={}&subdomain={}&peer_id={}",
+            peer.tunnel_ws_url,
+            separator,
+            urlencoding::encode(token),
+            urlencoding::encode(subdomain),
+            urlencoding::encode(&peer.id),
+        ),
+        None => format!(
+            "{}{}subdomain={}&peer_id={}",
+            peer.tunnel_ws_url,
+            separator,
+            urlencoding::encode(subdomain),
+            urlencoding::encode(&peer.id),
+        ),
+    }
+}
+
+async fn fetch_tunnel_peers(
+    server_url: &str,
+    access_token: Option<&str>,
+    subdomain: &str,
+) -> Vec<TunnelPeerCandidate> {
+    let url = format!(
+        "{}/api/tunnel/peers?subdomain={}",
+        server_url.trim_end_matches('/'),
+        urlencoding::encode(subdomain)
+    );
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+    {
+        Ok(client) => client,
+        Err(_) => return Vec::new(),
+    };
+    let mut req = client.get(&url);
+    if let Some(token) = access_token {
+        req = req.bearer_auth(token);
+    }
+
+    match req.send().await {
+        Ok(resp) if resp.status().is_success() => resp
+            .json::<TunnelPeerCandidatesResponse>()
+            .await
+            .map(|body| body.peers)
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    }
 }
 
 // ==================== Reconnection state shared with frontend ====================
@@ -754,6 +832,56 @@ async fn run_tunnel_session(
     *shutdown_rx.borrow()
 }
 
+async fn run_single_tunnel_session(
+    local_port: u16,
+    ws_url: String,
+    shutdown_rx: tokio::sync::watch::Receiver<bool>,
+    connected_flag: Arc<AtomicBool>,
+) -> Result<(), String> {
+    const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+    log::info!(
+        "[wms-tunnel] Connecting peer session to: {}",
+        redact_ws_url(&ws_url)
+    );
+
+    let mut shutdown = shutdown_rx.clone();
+    let ws_stream = tokio::select! {
+        result = tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async(&ws_url)) => {
+            match result {
+                Ok(Ok((stream, _))) => stream,
+                Ok(Err(e)) => return Err(format!("WMS Peer 连接失败: {}", e)),
+                Err(_) => return Err("WMS Peer 连接超时".to_string()),
+            }
+        }
+        _ = shutdown.changed() => return Ok(()),
+    };
+
+    connected_flag.store(true, Ordering::Relaxed);
+    let _shutdown_requested = run_tunnel_session(local_port, ws_stream, &shutdown_rx).await;
+    connected_flag.store(false, Ordering::Relaxed);
+    Ok(())
+}
+
+async fn run_tunnel_to_peer(
+    local_port: u16,
+    peer: TunnelPeerCandidate,
+    token: Option<String>,
+    subdomain: String,
+    shutdown_rx: tokio::sync::watch::Receiver<bool>,
+    connected_flag: Arc<AtomicBool>,
+) -> Result<(), String> {
+    let ws_url = peer_tunnel_ws_url(&peer, token.as_deref(), &subdomain);
+    log::info!(
+        "[wms-tunnel] Starting peer tunnel: id={}, region={}, weight={}, public_base_url={}, public_ws_url={}",
+        peer.id,
+        peer.region,
+        peer.weight,
+        peer.public_base_url,
+        peer.public_ws_url
+    );
+    run_single_tunnel_session(local_port, ws_url, shutdown_rx, connected_flag).await
+}
+
 /// Run the WMS tunnel client with automatic reconnection.
 ///
 /// Connects to the WMS server via WebSocket and proxies HTTP/WS requests to `localhost:{local_port}`.
@@ -953,6 +1081,77 @@ pub async fn run_tunnel(
     log::info!("[wms-tunnel] Tunnel stopped");
 }
 
+#[allow(clippy::too_many_arguments)]
+pub async fn run_tunnel_pool(
+    local_port: u16,
+    server_url: String,
+    access_token: Option<String>,
+    tunnel_token: Option<String>,
+    subdomain: String,
+    url_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    shutdown_rx: tokio::sync::watch::Receiver<bool>,
+    connected_flag: Arc<AtomicBool>,
+    reconnect_state: Arc<std::sync::Mutex<WmsTunnelReconnectState>>,
+    manual_reconnect_rx: mpsc::UnboundedReceiver<()>,
+) {
+    let discovery = discover_tunnel_config(&server_url).await;
+    let max_peer_connections = discovery
+        .as_ref()
+        .and_then(|d| d.desktop_max_peer_connections)
+        .unwrap_or(1)
+        .max(1);
+    let center_peer_id = discovery
+        .as_ref()
+        .and_then(|d| d.center_peer_id.as_deref())
+        .unwrap_or("center")
+        .to_string();
+
+    let center_handle = tokio::spawn(run_tunnel(
+        local_port,
+        server_url.clone(),
+        tunnel_token.clone(),
+        subdomain.clone(),
+        url_tx,
+        shutdown_rx.clone(),
+        connected_flag,
+        reconnect_state,
+        manual_reconnect_rx,
+    ));
+
+    let mut peer_handles = Vec::new();
+    if max_peer_connections > 1 {
+        let mut peers = fetch_tunnel_peers(&server_url, access_token.as_deref(), &subdomain).await;
+        peers.retain(|peer| peer.id != center_peer_id);
+        peers.sort_by(|a, b| a.weight.cmp(&b.weight).then_with(|| a.id.cmp(&b.id)));
+
+        for peer in peers.into_iter().take(max_peer_connections - 1) {
+            let peer_flag = Arc::new(AtomicBool::new(false));
+            let peer_shutdown = shutdown_rx.clone();
+            let peer_token = tunnel_token.clone();
+            let peer_subdomain = subdomain.clone();
+            peer_handles.push(tokio::spawn(async move {
+                if let Err(e) = run_tunnel_to_peer(
+                    local_port,
+                    peer,
+                    peer_token,
+                    peer_subdomain,
+                    peer_shutdown,
+                    peer_flag,
+                )
+                .await
+                {
+                    log::warn!("[wms-tunnel] Peer tunnel ended: {}", e);
+                }
+            }));
+        }
+    }
+
+    let _ = center_handle.await;
+    for handle in peer_handles {
+        handle.abort();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1038,6 +1237,9 @@ mod tests {
             tunnel_ws_path: Some("/custom/ws".to_string()),
             tunnel_domain_template: Some("{subdomain}.tunnel.example.com".to_string()),
             heartbeat_interval_secs: None,
+            routing_mode: None,
+            desktop_max_peer_connections: None,
+            center_peer_id: None,
         };
         let resolved = resolve_tunnel_config(
             "https://wms.example.com",
@@ -1051,6 +1253,39 @@ mod tests {
         );
         // template lacks protocol + trailing slash → both are added
         assert_eq!(resolved.public_url, "https://abc.tunnel.example.com/");
+    }
+
+    #[test]
+    fn discovery_deserializes_multi_peer_fields() {
+        let json = r#"{
+            "tunnel_ws_path": "/tunnel/connect",
+            "tunnel_domain_template": "https://tunnel.example/t/{subdomain}/",
+            "heartbeat_interval_secs": 30,
+            "routing_mode": "multi_peer",
+            "desktop_max_peer_connections": 4,
+            "center_peer_id": "center"
+        }"#;
+        let config: TunnelDiscoveryResponse = serde_json::from_str(json).expect("parse");
+        assert_eq!(config.routing_mode.as_deref(), Some("multi_peer"));
+        assert_eq!(config.desktop_max_peer_connections, Some(4));
+        assert_eq!(config.center_peer_id.as_deref(), Some("center"));
+    }
+
+    #[test]
+    fn peer_candidate_builds_ws_url_with_peer_id() {
+        let peer = TunnelPeerCandidate {
+            id: "eu-1".to_string(),
+            tunnel_ws_url: "wss://167.235.103.66:8443/tunnel/connect".to_string(),
+            public_base_url: "https://167.235.103.66:8443".to_string(),
+            public_ws_url: "wss://167.235.103.66:8443".to_string(),
+            region: "eu".to_string(),
+            weight: 10,
+        };
+        let url = peer_tunnel_ws_url(&peer, Some("tok en"), "bliss-kind-drift");
+        assert_eq!(
+            url,
+            "wss://167.235.103.66:8443/tunnel/connect?token=tok%20en&subdomain=bliss-kind-drift&peer_id=eu-1"
+        );
     }
 
     #[test]
