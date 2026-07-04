@@ -6,22 +6,34 @@ use crate::types::{GlobalConfig, MainWorkspaceOccupation, WorkspaceConfig};
 
 // ==================== 配置路径 ====================
 
+fn global_config_dir_name_for_profile(debug_assertions: bool) -> &'static str {
+    if debug_assertions {
+        "worktree-manager-dev"
+    } else {
+        "worktree-manager"
+    }
+}
+
+fn global_config_dir_name() -> &'static str {
+    global_config_dir_name_for_profile(cfg!(debug_assertions))
+}
+
 pub(crate) fn get_global_config_path() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
         if let Ok(appdata) = std::env::var("APPDATA") {
             return PathBuf::from(appdata)
-                .join("worktree-manager")
+                .join(global_config_dir_name())
                 .join("global.json");
         }
         if let Ok(userprofile) = std::env::var("USERPROFILE") {
             return PathBuf::from(userprofile)
                 .join(".config")
-                .join("worktree-manager")
+                .join(global_config_dir_name())
                 .join("global.json");
         }
         PathBuf::from(".")
-            .join("worktree-manager")
+            .join(global_config_dir_name())
             .join("global.json")
     }
     #[cfg(not(target_os = "windows"))]
@@ -29,7 +41,7 @@ pub(crate) fn get_global_config_path() -> PathBuf {
         let home = std::env::var("HOME").unwrap_or_default();
         PathBuf::from(home)
             .join(".config")
-            .join("worktree-manager")
+            .join(global_config_dir_name())
             .join("global.json")
     }
 }
@@ -245,6 +257,24 @@ mod tests {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         *cache = None;
+    }
+
+    #[serial]
+    #[test]
+    fn debug_build_uses_development_global_config_directory() {
+        assert_eq!(
+            global_config_dir_name_for_profile(true),
+            "worktree-manager-dev"
+        );
+    }
+
+    #[serial]
+    #[test]
+    fn release_build_keeps_production_global_config_directory() {
+        assert_eq!(
+            global_config_dir_name_for_profile(false),
+            "worktree-manager"
+        );
     }
 
     #[serial]

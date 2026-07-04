@@ -151,7 +151,7 @@ const VaultItemTree: FC<VaultItemTreeProps> = ({
 
 
 // ==================== WorkspaceVaultSection ====================
-const WorkspaceVaultSection: FC = () => {
+export const WorkspaceVaultSection: FC = () => {
   const { t } = useTranslation();
   const [vaultStatus, setVaultStatus] = useState<VaultStatus | null>(null);
   const [inputPath, setInputPath] = useState('');
@@ -377,9 +377,13 @@ const WorkspaceVaultSection: FC = () => {
         </>
       ) : (
         /* Not connected */
-        <div className="flex gap-2">
-          <div className="w-2 h-2 rounded-full bg-[var(--color-text-muted)] mt-2 shrink-0" />
-          <span className="text-xs text-[var(--color-text-muted)] mr-2">{t('settings.vaultNotConnected', '未连接')}</span>
+        <div className="flex items-center gap-2">
+          <div data-testid="vault-disconnected-status" className="flex items-center gap-2 w-28 shrink-0">
+            <div data-testid="vault-status-dot" className="w-2 h-2 rounded-full bg-[var(--color-text-muted)] shrink-0" />
+            <span className="text-xs text-[var(--color-text-muted)] truncate">
+              {t('settings.vaultNotConnected', '未连接')}
+            </span>
+          </div>
           <Input
             type="text"
             value={inputPath}

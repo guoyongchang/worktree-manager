@@ -178,7 +178,9 @@ pub struct CloudConfig {
     pub tunnel_registered_as: Option<String>,
 }
 
-// 全局配置：存储在 ~/.config/worktree-manager/global.json
+// 全局配置：
+// - release: ~/.config/worktree-manager/global.json
+// - debug/dev: ~/.config/worktree-manager-dev/global.json
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct GlobalConfig {
     pub workspaces: Vec<WorkspaceRef>,
