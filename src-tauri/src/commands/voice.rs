@@ -144,8 +144,13 @@ pub(crate) fn get_commit_ai_model_inner() -> Result<Option<String>, String> {
 
 #[allow(dead_code)]
 pub(crate) fn set_commit_ai_model_inner(model: String) -> Result<(), String> {
+    let trimmed = model.trim();
     let mut config = load_global_config();
-    config.commit_ai_model = if model.is_empty() { None } else { Some(model) };
+    config.commit_ai_model = if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    };
     save_global_config_internal(&config)?;
     Ok(())
 }
@@ -286,12 +291,41 @@ pub(crate) async fn set_voice_refine_model(model: String) -> Result<(), String> 
 
 // ==================== Dashscope Models List ====================
 
-pub(crate) async fn list_dashscope_models_inner() -> Result<Vec<String>, String> {
+/// List available models. `purpose == Some("commit_ai")` resolves the key/base_url from
+/// the commit-AI credential set (commit_ai_api_key + dashscope_base_url), matching how
+/// commit messages are actually generated in `call_ai_chat`; otherwise the voice set is
+/// used (dashscope_api_key + voice_refine_base_url). Each falls back to the other key so
+/// the dropdown isn't empty when only one key is configured.
+pub(crate) async fn list_dashscope_models_inner(
+    purpose: Option<&str>,
+) -> Result<Vec<String>, String> {
     let config = load_global_config();
-    let api_key = config.dashscope_api_key.ok_or("未配置 Dashscope API Key")?;
-    let base_url = config
-        .voice_refine_base_url
-        .unwrap_or_else(|| DEFAULT_REFINE_BASE_URL.to_string());
+    let (api_key, base_url) = if purpose == Some("commit_ai") {
+        let key = config
+            .commit_ai_api_key
+            .clone()
+            .filter(|k| !k.is_empty())
+            .or_else(|| config.dashscope_api_key.clone().filter(|k| !k.is_empty()))
+            .ok_or("未配置 Commit AI API Key")?;
+        let base = config
+            .dashscope_base_url
+            .clone()
+            .filter(|u| !u.is_empty())
+            .or_else(|| config.voice_refine_base_url.clone())
+            .unwrap_or_else(|| DEFAULT_REFINE_BASE_URL.to_string());
+        (key, base)
+    } else {
+        let key = config
+            .dashscope_api_key
+            .clone()
+            .filter(|k| !k.is_empty())
+            .ok_or("未配置 Dashscope API Key")?;
+        let base = config
+            .voice_refine_base_url
+            .clone()
+            .unwrap_or_else(|| DEFAULT_REFINE_BASE_URL.to_string());
+        (key, base)
+    };
     let url = format!("{}/models", base_url.trim_end_matches('/'));
 
     let client = reqwest::Client::new();
@@ -323,8 +357,8 @@ pub(crate) async fn list_dashscope_models_inner() -> Result<Vec<String>, String>
 }
 
 #[tauri::command]
-pub(crate) async fn list_dashscope_models() -> Result<Vec<String>, String> {
-    list_dashscope_models_inner().await
+pub(crate) async fn list_dashscope_models(purpose: Option<String>) -> Result<Vec<String>, String> {
+    list_dashscope_models_inner(purpose.as_deref()).await
 }
 
 // ==================== Voice Session Commands ====================
@@ -1531,6 +1565,7 @@ mod tests {
         assert!(!check_commit_ai_api_key());
     }
 
+    #[serial]
     #[test]
     fn commit_ai_model_inner_round_trips_and_clears() {
         let _home = TempHomeGuard::new();
@@ -1572,7 +1607,7 @@ mod tests {
         };
         let _config = ConfigCacheGuard::with_dashscope(format!("{}/", base_url), "dash-key");
 
-        let models = list_dashscope_models_inner().await.unwrap();
+        let models = list_dashscope_models_inner(None).await.unwrap();
 
         assert_eq!(models, vec!["qwen-a".to_string(), "qwen-b".to_string()]);
         let capture = captures.lock().unwrap().first().cloned().unwrap();
@@ -1596,7 +1631,7 @@ mod tests {
         };
         let _config = ConfigCacheGuard::with_dashscope(base_url, "dash-key");
 
-        let err = list_dashscope_models_inner().await.unwrap_err();
+        let err = list_dashscope_models_inner(None).await.unwrap_err();
 
         assert!(err.starts_with("Models API error:"));
         assert!(err.contains("bad key"));

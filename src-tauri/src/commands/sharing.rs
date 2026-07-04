@@ -332,8 +332,9 @@ pub(crate) async fn stop_ngrok_tunnel() -> Result<(), String> {
 pub fn stop_sharing_internal() -> Result<(), String> {
     log::info!("[sharing] Stopping LAN sharing");
 
-    // Single lock scope: check active, stop ngrok, extract shutdown_tx, and reset state
-    let shutdown_tx = {
+    // Single lock scope: check active, stop ngrok + WMS tunnel, extract shutdown channels,
+    // and reset state
+    let (shutdown_tx, wms_shutdown_tx, wms_task) = {
         let mut state = SHARE_STATE
             .lock()
             .map_err(|_| "Internal state error".to_string())?;
@@ -351,6 +352,17 @@ pub fn stop_sharing_internal() -> Result<(), String> {
         }
         state.ngrok_url = None;
 
+        // Tear down the WMS tunnel too: otherwise the public tunnel keeps forwarding to a
+        // now-released local port after sharing stops (an unauthenticated public exposure),
+        // and the state is left inconsistent (active=false but wms_url=Some).
+        let wms_tx = state.wms_shutdown_tx.take();
+        let wms_handle = state.wms_task.take();
+        state.wms_url = None;
+        state.wms_connected = None;
+        state.wms_reconnect_state = None;
+        state.wms_manual_reconnect_tx = None;
+        state.wms_starting = false;
+
         // Extract shutdown_tx and reset all state atomically
         let tx = state.shutdown_tx.take();
         state.active = false;
@@ -358,8 +370,18 @@ pub fn stop_sharing_internal() -> Result<(), String> {
         state.port = 0;
         state.auth_key = None;
         state.auth_salt = None;
-        tx
+        (tx, wms_tx, wms_handle)
     };
+
+    // Signal + abort the WMS tunnel outside the lock (abort is immediate; no await needed).
+    if let Some(tx) = wms_shutdown_tx {
+        let _ = tx.send(true);
+        log::info!("[sharing] WMS tunnel shutdown signal sent");
+    }
+    if let Some(handle) = wms_task {
+        handle.abort();
+        log::info!("[sharing] WMS tunnel task aborted");
+    }
 
     // Stop HTTP server (outside SHARE_STATE lock to avoid holding it during send)
     if let Some(tx) = shutdown_tx {
@@ -669,24 +691,51 @@ pub async fn auto_register_tunnel_internal() -> Result<RegistrationMode, String>
         result.token.len()
     );
 
-    // Save tunnel credentials back to CloudConfig
+    // Save tunnel credentials back to CloudConfig, recording HOW they were obtained so a
+    // later start won't silently reuse stale anonymous credentials while logged in.
     let mut config = load_global_config();
     config.cloud.server_url = Some(server_url);
     config.cloud.tunnel_token = Some(result.token);
     config.cloud.subdomain = Some(result.subdomain);
+    config.cloud.tunnel_registered_as = Some(
+        match mode {
+            RegistrationMode::Authenticated => "authenticated",
+            RegistrationMode::Anonymous => "anonymous",
+        }
+        .to_string(),
+    );
     save_global_config_internal(&config)?;
 
     Ok(mode)
 }
 
-#[tauri::command]
-pub(crate) async fn auto_register_tunnel() -> Result<(), String> {
-    auto_register_tunnel_internal().await.map(|_| ())
+/// Clear persisted tunnel credentials (token/subdomain/registration mode).
+/// Called on logout, on re-pairing, and after an anonymous downgrade is rejected, so a
+/// stale or anonymous credential can never be reused to bring up a public tunnel.
+pub fn clear_tunnel_credentials() -> Result<(), String> {
+    let mut config = load_global_config();
+    config.cloud.tunnel_token = None;
+    config.cloud.subdomain = None;
+    config.cloud.tunnel_registered_as = None;
+    save_global_config_internal(&config)
 }
 
 #[tauri::command]
 pub(crate) async fn start_wms_tunnel() -> Result<String, String> {
     start_wms_tunnel_internal().await
+}
+
+/// RAII guard that clears the `wms_starting` flag on every exit path of
+/// `start_wms_tunnel_internal`, so a failed start never leaves the tunnel wedged as
+/// "starting".
+struct WmsStartingGuard;
+
+impl Drop for WmsStartingGuard {
+    fn drop(&mut self) {
+        if let Ok(mut state) = SHARE_STATE.lock() {
+            state.wms_starting = false;
+        }
+    }
 }
 
 /// Internal function for starting WMS tunnel, callable from both Tauri command and HTTP handler.
@@ -695,13 +744,14 @@ pub(crate) async fn start_wms_tunnel() -> Result<String, String> {
 pub async fn start_wms_tunnel_internal() -> Result<String, String> {
     log::info!("[wms-tunnel] Starting WMS tunnel");
 
-    // Check preconditions: not already running, and LAN sharing is active
+    // Check preconditions and atomically claim the "starting" slot in one lock scope, so
+    // two concurrent starts can't both pass the check and spawn duplicate tunnels.
     let port = {
-        let state = SHARE_STATE
+        let mut state = SHARE_STATE
             .lock()
             .map_err(|_| "Internal state error".to_string())?;
-        if state.wms_url.is_some() {
-            log::warn!("[wms-tunnel] Rejected: WMS tunnel already running");
+        if state.wms_url.is_some() || state.wms_starting {
+            log::warn!("[wms-tunnel] Rejected: WMS tunnel already running or starting");
             return Err("WMS 隧道已在运行".to_string());
         }
         if !state.active {
@@ -711,8 +761,11 @@ pub async fn start_wms_tunnel_internal() -> Result<String, String> {
                     .to_string(),
             );
         }
+        state.wms_starting = true;
         state.port
     };
+    // From here on, any early return clears wms_starting via the guard's Drop.
+    let _starting_guard = WmsStartingGuard;
 
     // Login gate: WMS tunnel requires a logged-in cloud account
     let config = load_global_config();
@@ -721,7 +774,9 @@ pub async fn start_wms_tunnel_internal() -> Result<String, String> {
         return Err("WMS 隧道需要先登录云账号（设置 → 账号）".to_string());
     }
 
-    // Auto-register if tunnel_token/subdomain missing.
+    // Auto-register if tunnel_token/subdomain missing OR the stored credentials were
+    // obtained anonymously (a prior expired-session fallback). Reusing stale anonymous
+    // credentials while logged in would silently expose an anonymous public tunnel.
     {
         let cfg = load_global_config();
         let has_token = cfg
@@ -730,17 +785,24 @@ pub async fn start_wms_tunnel_internal() -> Result<String, String> {
             .as_ref()
             .is_some_and(|t| !t.is_empty());
         let has_subdomain = cfg.cloud.subdomain.as_ref().is_some_and(|s| !s.is_empty());
-        if !has_token || !has_subdomain {
-            log::info!("[wms-tunnel] tunnel_token/subdomain missing, auto-registering...");
+        let registered_authenticated =
+            cfg.cloud.tunnel_registered_as.as_deref() == Some("authenticated");
+        if !has_token || !has_subdomain || !registered_authenticated {
+            log::info!(
+                "[wms-tunnel] Registering device (missing or non-authenticated credentials)..."
+            );
             let mode = auto_register_tunnel_internal().await?;
             // The login gate above guaranteed access_token.is_some(). If registration
             // nonetheless fell back to anonymous, the access_token AND refresh_token both
             // failed -- treat this as an expired session rather than silently exposing an
             // anonymous (device:xxx) public tunnel while the UI still shows "logged in".
+            // Clear the anonymous credentials that auto_register just persisted so they
+            // can't be reused on the next start.
             if mode == RegistrationMode::Anonymous {
                 log::warn!(
                     "[wms-tunnel] Rejected: registration downgraded to anonymous despite login"
                 );
+                let _ = clear_tunnel_credentials();
                 return Err("登录已过期，请重新登录".to_string());
             }
         }
@@ -768,7 +830,8 @@ pub async fn start_wms_tunnel_internal() -> Result<String, String> {
         port
     );
 
-    let (url_tx, url_rx) = std::sync::mpsc::channel::<Result<String, String>>();
+    // oneshot + async timeout: never block a tokio worker with a synchronous recv_timeout.
+    let (url_tx, url_rx) = tokio::sync::oneshot::channel::<Result<String, String>>();
     let (wms_shutdown_tx, wms_shutdown_rx) = tokio::sync::watch::channel(false);
     let connected_flag = Arc::new(AtomicBool::new(false));
     let connected_flag_clone = connected_flag.clone();
@@ -795,8 +858,8 @@ pub async fn start_wms_tunnel_internal() -> Result<String, String> {
     });
 
     log::info!("[wms-tunnel] Waiting for tunnel URL (timeout: 30s)");
-    match url_rx.recv_timeout(std::time::Duration::from_secs(30)) {
-        Ok(Ok(wms_url)) => {
+    match tokio::time::timeout(std::time::Duration::from_secs(30), url_rx).await {
+        Ok(Ok(Ok(wms_url))) => {
             let mut state = SHARE_STATE
                 .lock()
                 .map_err(|_| "Internal state error".to_string())?;
@@ -809,12 +872,18 @@ pub async fn start_wms_tunnel_internal() -> Result<String, String> {
             log::info!("[wms-tunnel] Tunnel started successfully: {}", wms_url);
             Ok(wms_url)
         }
-        Ok(Err(e)) => {
+        Ok(Ok(Err(e))) => {
             log::error!("[wms-tunnel] Tunnel startup error: {}", e);
             wms_handle.abort();
             Err(e)
         }
-        Err(_) => {
+        Ok(Err(_recv)) => {
+            // Sender dropped without sending (task ended early); treat as failure.
+            log::error!("[wms-tunnel] Tunnel task ended before reporting a URL");
+            wms_handle.abort();
+            Err("WMS 隧道启动失败".to_string())
+        }
+        Err(_elapsed) => {
             log::error!("[wms-tunnel] Tunnel startup timed out after 30s");
             wms_handle.abort();
             Err("WMS 隧道启动超时".to_string())
@@ -843,6 +912,7 @@ pub async fn stop_wms_tunnel_internal() -> Result<(), String> {
         state.wms_connected = None;
         state.wms_reconnect_state = None;
         state.wms_manual_reconnect_tx = None;
+        state.wms_starting = false;
         (tx, handle)
     };
 
@@ -853,9 +923,16 @@ pub async fn stop_wms_tunnel_internal() -> Result<(), String> {
 
     if let Some(handle) = task_handle {
         log::info!("[wms-tunnel] Waiting for graceful shutdown (timeout: 3s)");
+        // abort_handle first: if graceful shutdown times out we must actively abort,
+        // otherwise dropping the JoinHandle just detaches the task (leaving it running,
+        // still bound to the subdomain and able to race a freshly started tunnel).
+        let abort_handle = handle.abort_handle();
         match tokio::time::timeout(std::time::Duration::from_secs(3), handle).await {
             Ok(_) => log::info!("[wms-tunnel] Tunnel stopped gracefully"),
-            Err(_) => log::warn!("[wms-tunnel] Graceful shutdown timed out, task will be dropped"),
+            Err(_) => {
+                log::warn!("[wms-tunnel] Graceful shutdown timed out, aborting task");
+                abort_handle.abort();
+            }
         }
     } else {
         log::info!("[wms-tunnel] No active tunnel task, stopped");

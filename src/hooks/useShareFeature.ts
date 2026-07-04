@@ -211,6 +211,12 @@ export function useShareFeature(
     try {
       const url = await startWmsTunnel();
       setShareWmsUrl(url);
+      // The backend only returns the URL once the first connection has succeeded, so mark
+      // connected optimistically to avoid a red "disconnected" flash before the next poll.
+      setWmsConnected(true);
+      setWmsReconnecting(false);
+      setWmsReconnectAttempt(0);
+      setWmsNextRetrySecs(0);
     } catch (e) {
       setError(String(e));
     } finally {

@@ -2286,9 +2286,12 @@ export const SettingsView: FC<SettingsViewProps> = ({
                         <label className="block text-sm text-[var(--color-text-secondary)] mb-1">{t('settings.commitAiModel', '生成模型')}</label>
                         <BranchCombobox
                           value={commitAiModel}
-                          onChange={(v) => { setCommitAiModel(v); saveCommitAiModel(v.trim()); }}
+                          onChange={(v) => setCommitAiModel(v)}
+                          onCommit={(v) => {
+                            saveCommitAiModel(v.trim()).catch((e) => setCommitAiError(String(e)));
+                          }}
                           onLoadBranches={async () => {
-                            const models = await listDashscopeModels();
+                            const models = await listDashscopeModels('commit_ai');
                             return models.filter(m => m.includes('qwen'));
                           }}
                           placeholder="qwen3.7-max"

@@ -1396,10 +1396,7 @@ async fn h_get_last_share_password() -> Response {
 // -- WMS tunnel --
 
 async fn h_start_wms_tunnel() -> Response {
-    match crate::commands::sharing::start_wms_tunnel_internal().await {
-        Ok(url) => Json(json!(url)).into_response(),
-        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
-    }
+    result_json(crate::commands::sharing::start_wms_tunnel_internal().await)
 }
 
 async fn h_stop_wms_tunnel() -> Response {
@@ -1408,14 +1405,6 @@ async fn h_stop_wms_tunnel() -> Response {
 
 async fn h_wms_manual_reconnect() -> Response {
     result_ok(crate::commands::sharing::wms_manual_reconnect_internal())
-}
-
-async fn h_auto_register_tunnel() -> Response {
-    result_ok(
-        crate::commands::sharing::auto_register_tunnel_internal()
-            .await
-            .map(|_| ()),
-    )
 }
 
 // -- Misc --
@@ -2216,12 +2205,19 @@ async fn h_get_commit_ai_model() -> Response {
 }
 
 async fn h_set_commit_ai_model(Json(args): Json<Value>) -> Response {
-    let model = args["model"].as_str().unwrap_or("").to_string();
-    result_ok(crate::commands::voice::set_commit_ai_model_inner(model))
+    // Match the IPC command: a missing/non-string `model` is a client error, not a silent
+    // clear of the user's configured model. An explicit "" still clears (as via IPC).
+    let Some(model) = args.get("model").and_then(|v| v.as_str()) else {
+        return (StatusCode::BAD_REQUEST, "model must be a string").into_response();
+    };
+    result_ok(crate::commands::voice::set_commit_ai_model_inner(
+        model.to_string(),
+    ))
 }
 
-async fn h_list_dashscope_models() -> Response {
-    result_json(crate::commands::voice::list_dashscope_models_inner().await)
+async fn h_list_dashscope_models(Json(args): Json<Value>) -> Response {
+    let purpose = args.get("purpose").and_then(|v| v.as_str());
+    result_json(crate::commands::voice::list_dashscope_models_inner(purpose).await)
 }
 
 // -- Cloud connection --
@@ -4106,7 +4102,7 @@ mod http_server_coverage_tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(refined, json!(""));
         assert_text_contains(
-            h_list_dashscope_models().await,
+            h_list_dashscope_models(Json(json!({}))).await,
             StatusCode::BAD_REQUEST,
             "Dashscope API Key",
         )

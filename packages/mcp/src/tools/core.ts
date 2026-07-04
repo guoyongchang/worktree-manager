@@ -1,5 +1,38 @@
 import type { BaseTransport } from '../transport/config.js';
 import { type ToolHandler, textResult } from './shared.js';
+import type { ActiveWorkspaceResult, WorkspaceRef } from '../types.js';
+
+// 纯函数：从 cwd 与工作区列表推导所属 workspace/worktree/project（最长前缀匹配）。
+// 路径统一把反斜杠归一化为 '/' 再比较，避免 Windows 路径匹配失败。
+export function deriveActiveWorkspace(
+  cwd: string,
+  workspaces: WorkspaceRef[]
+): ActiveWorkspaceResult {
+  const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '');
+  const inside = (child: string, parent: string) =>
+    child === parent || child.startsWith(parent + '/');
+  const normCwd = norm(cwd);
+  let best: WorkspaceRef | null = null;
+  let bestLen = -1;
+  for (const w of workspaces) {
+    const wp = norm(w.path);
+    if (inside(normCwd, wp) && wp.length > bestLen) {
+      best = w;
+      bestLen = wp.length;
+    }
+  }
+  if (!best) {
+    return { workspace: null, worktree_name: null, project_name: null, matched_by: 'prefix' };
+  }
+  const rel = normCwd.slice(bestLen).replace(/^\/+/, '');
+  const segs = rel.split('/').filter(Boolean);
+  const pjIdx = segs.indexOf('projects');
+  const project_name = pjIdx >= 0 && segs.length > pjIdx + 1 ? segs[pjIdx + 1] : null;
+  // 结构 <ws>/<worktrees_dir>/<worktree>/projects/<project> → worktree = projects 前一段；
+  // 主工作区 <ws>/projects/... 无 worktree（list_workspaces 不返回 worktrees_dir，按单层处理）。
+  const worktree_name = pjIdx >= 2 ? segs[pjIdx - 1] : null;
+  return { workspace: best, worktree_name, project_name, matched_by: 'prefix' };
+}
 
 export function buildCoreHandlers(transport: BaseTransport): Record<string, ToolHandler> {
   return {
@@ -21,27 +54,12 @@ export function buildCoreHandlers(transport: BaseTransport): Record<string, Tool
     get_active_workspace: async (args) => {
       const cwd = args?.cwd as string;
       if (!cwd) throw new Error('cwd is required');
-      const wsResult = (await transport.listWorkspaces()) as { workspaces?: Array<{ name: string; path: string }> };
-      const workspaces = wsResult?.workspaces ?? [];
-      const norm = (p: string) => p.replace(/\/+$/, '');
-      const inside = (child: string, parent: string) => child === parent || child.startsWith(parent + '/');
-      let best: { name: string; path: string } | null = null;
-      for (const w of workspaces) {
-        const wp = norm(w.path);
-        if (inside(cwd, wp) && (!best || wp.length > norm(best.path).length)) best = w;
-      }
-      if (!best) {
-        return textResult({ workspace: null, worktree_name: null, project_name: null, matched_by: 'prefix' });
-      }
-      const rel = cwd.slice(norm(best.path).length).replace(/^\/+/, '');
-      const segs = rel.split('/').filter(Boolean);
-      const pjIdx = segs.indexOf('projects');
-      const project_name = pjIdx >= 0 && segs.length > pjIdx + 1 ? segs[pjIdx + 1] : null;
-      // 结构 <ws>/<worktrees_dir>/<worktree>/projects/<project> → worktree = projects 前一段；主工作区 <ws>/projects/... 无 worktree
-      // 假设标准单层 worktrees_dir 布局；多段 worktrees_dir 时该位置推导可能不准
-      // （list_workspaces 不返回 worktrees_dir 配置，暂按单层处理）。
-      const worktree_name = pjIdx >= 2 ? segs[pjIdx - 1] : null;
-      return textResult({ workspace: best, worktree_name, project_name, matched_by: 'prefix' });
+      // HTTP 模式返回裸数组，ConfigTransport 返回 {workspaces:[...]}，两种形状都要兼容
+      const raw = await transport.listWorkspaces();
+      const workspaces: WorkspaceRef[] = Array.isArray(raw)
+        ? (raw as WorkspaceRef[])
+        : ((raw as { workspaces?: WorkspaceRef[] })?.workspaces ?? []);
+      return textResult(deriveActiveWorkspace(cwd, workspaces));
     },
   };
 }

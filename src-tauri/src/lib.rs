@@ -590,7 +590,6 @@ pub fn run() {
             start_wms_tunnel,
             stop_wms_tunnel,
             wms_manual_reconnect,
-            auto_register_tunnel,
             // 语音识别 (Dashscope)
             get_dashscope_api_key,
             set_dashscope_api_key,
