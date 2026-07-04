@@ -6,6 +6,7 @@
  */
 
 import { getSessionId } from './backend';
+import { getRoutedWebSocketUrl } from './tunnelRoute';
 
 type PtyCallback = (data: string) => void;
 type LockCallback = (locks: Record<string, string>) => void;
@@ -58,7 +59,8 @@ class WebSocketManager {
     // Detect tunnel path prefix (e.g., /t/guo) for proxy routing
     const tunnelMatch = location.pathname.match(/^(\/t\/[^/]+)/);
     const basePath = tunnelMatch ? tunnelMatch[1] : '';
-    const url = `${protocol}//${location.host}${basePath}/ws?session_id=${encodeURIComponent(this.sessionId)}`;
+    const routedUrl = getRoutedWebSocketUrl(this.sessionId);
+    const url = routedUrl ?? `${protocol}//${location.host}${basePath}/ws?session_id=${encodeURIComponent(this.sessionId)}`;
     console.log('[ws] connecting to', url);
 
     try {

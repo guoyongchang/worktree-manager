@@ -1,4 +1,6 @@
 // Environment detection
+import { getRouteToken, getRoutedApiBase } from './tunnelRoute';
+
 export function getPlatform(): 'mac' | 'windows' | 'linux' {
   const ua = navigator.userAgent;
   if (/Mac|iPhone|iPad|iPod/i.test(ua)) return 'mac';
@@ -61,6 +63,10 @@ function getBasePath(): string {
 
 /** In dev mode Vite proxies /api to the Rust server; in prod the same origin serves both. */
 function getApiBase(): string {
+  return getRoutedApiBase() ?? `${getBasePath()}/api`;
+}
+
+function getCenterApiBase(): string {
   return `${getBasePath()}/api`;
 }
 
@@ -113,11 +119,13 @@ export async function callBackend<T = unknown>(
   const controller = new AbortController();
   const timerId = setTimeout(() => controller.abort(), timeoutMs);
   const useGet = GET_COMMANDS.has(command);
+  const routeToken = getRouteToken();
   const res = await fetch(`${getApiBase()}/${command}`, {
     method: useGet ? 'GET' : 'POST',
     headers: {
       ...(useGet ? {} : { 'Content-Type': 'application/json' }),
       'X-Session-Id': getSessionId(),
+      ...(routeToken ? { Authorization: `Bearer ${routeToken}` } : {}),
     },
     body: useGet ? undefined : JSON.stringify(args ?? {}),
     signal: controller.signal,
@@ -329,7 +337,7 @@ export async function kickClient(sessionId: string): Promise<void> {
 
 /** Browser mode: fetch info about the shared workspace from the HTTP server. */
 export async function getShareInfo(): Promise<ShareInfo> {
-  const res = await fetch(`${getApiBase()}/get_share_info`);
+  const res = await fetch(`${getCenterApiBase()}/get_share_info`);
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || `HTTP ${res.status}`);
@@ -340,7 +348,7 @@ export async function getShareInfo(): Promise<ShareInfo> {
 /** Browser mode: authenticate with challenge-response protocol. */
 export async function authenticate(password: string): Promise<void> {
   // Step 1: Request challenge (nonce + salt)
-  const challengeRes = await fetch(`${getApiBase()}/auth/challenge`, {
+  const challengeRes = await fetch(`${getCenterApiBase()}/auth/challenge`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
   });
@@ -387,7 +395,7 @@ export async function authenticate(password: string): Promise<void> {
   );
 
   // Step 4: Send proof for verification
-  const verifyRes = await fetch(`${getApiBase()}/auth/verify`, {
+  const verifyRes = await fetch(`${getCenterApiBase()}/auth/verify`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
