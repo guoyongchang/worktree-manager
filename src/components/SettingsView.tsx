@@ -42,6 +42,40 @@ const formatCloudTokenExpiryUtc = (value: string) => {
   return `${iso.slice(0, 10)} ${iso.slice(11, 19)} UTC`;
 };
 
+interface SettingsToggleProps {
+  checked: boolean;
+  disabled?: boolean;
+  ariaLabel: string;
+  onChange: (checked: boolean) => void;
+}
+
+export const SettingsToggle: FC<SettingsToggleProps> = ({
+  checked,
+  disabled = false,
+  ariaLabel,
+  onChange,
+}) => (
+  <button
+    type="button"
+    role="switch"
+    aria-checked={checked}
+    aria-label={ariaLabel}
+    disabled={disabled}
+    onClick={() => onChange(!checked)}
+    className={`relative inline-flex h-6 w-10 shrink-0 items-center rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/40 disabled:cursor-not-allowed disabled:opacity-60 ${
+      checked
+        ? 'border-[var(--color-accent)] bg-[var(--color-accent)]'
+        : 'border-[var(--color-border)] bg-[var(--color-bg-elevated)]'
+    }`}
+  >
+    <span
+      className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+        checked ? 'translate-x-5' : 'translate-x-1'
+      }`}
+    />
+  </button>
+);
+
 // ==================== VaultItemTree (recursive) ====================
 interface VaultItemTreeProps {
   vaultPath: string;
@@ -2263,18 +2297,19 @@ export const SettingsView: FC<SettingsViewProps> = ({
 
                       <div className="space-y-2">
                         <div className="flex items-start justify-between gap-3">
-                          <div>
+                          <div className="min-w-0">
                             <p className="text-sm text-[var(--color-text-secondary)]">{t('settings.voiceRefineTitle')}</p>
                             <p className="text-xs text-[var(--color-text-muted)]">{t('settings.voiceRefineDesc')}</p>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => { const newVal = !voiceRefineEnabled; setVoiceRefineEnabled(newVal); saveVoiceRefineEnabled(newVal).catch(() => { }); }}
+                          <SettingsToggle
+                            checked={voiceRefineEnabled}
                             disabled={!voiceRefineLoaded}
-                            className={`relative inline-flex h-5 w-8 items-center rounded-full transition-colors ${voiceRefineEnabled ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-text-muted)]'}`}
-                          >
-                            <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${voiceRefineEnabled ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
-                          </button>
+                            ariaLabel={t('settings.voiceRefineTitle')}
+                            onChange={(newVal) => {
+                              setVoiceRefineEnabled(newVal);
+                              saveVoiceRefineEnabled(newVal).catch(() => {});
+                            }}
+                          />
                         </div>
                         <BranchCombobox
                           value={voiceRefineModel}
@@ -2312,18 +2347,19 @@ export const SettingsView: FC<SettingsViewProps> = ({
 
                       <div className="space-y-2">
                         <div className="flex items-start justify-between gap-3">
-                          <div>
+                          <div className="min-w-0">
                             <p className="text-sm text-[var(--color-text-secondary)]">{t('settings.commitAiLabel', 'AI 生成 commit message')}</p>
                             <p className="text-xs text-[var(--color-text-muted)]">{t('settings.commitAiDesc', '根据 diff 自动生成提交信息')}</p>
                           </div>
-                          <button
-                            type="button"
-                            onClick={async () => { const newVal = !commitAiEnabled; setCommitAiEnabled(newVal); await saveCommitAiEnabled(newVal); }}
+                          <SettingsToggle
+                            checked={commitAiEnabled}
                             disabled={!commitAiKeyLoaded}
-                            className={`relative inline-flex h-5 w-8 items-center rounded-full transition-colors ${commitAiEnabled ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-text-muted)]'}`}
-                          >
-                            <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${commitAiEnabled ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
-                          </button>
+                            ariaLabel={t('settings.commitAiLabel', 'AI 生成 commit message')}
+                            onChange={(newVal) => {
+                              setCommitAiEnabled(newVal);
+                              saveCommitAiEnabled(newVal).catch((e) => setCommitAiError(String(e)));
+                            }}
+                          />
                         </div>
                         <BranchCombobox
                           value={commitAiModel}
