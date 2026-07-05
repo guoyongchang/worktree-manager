@@ -8,7 +8,15 @@ export interface UseBrowserAuthReturn {
   setBrowserLoginPassword: (value: string) => void;
   browserLoginError: string | null;
   browserLoggingIn: boolean;
+  browserRouteSelectionPending: boolean;
   handleBrowserLogin: () => Promise<void>;
+  completeBrowserRouteSelection: () => void;
+  cancelBrowserRouteSelection: () => void;
+}
+
+async function prepareTunnelRoute(): Promise<void> {
+  if (isTauri()) return;
+  await ensureTunnelRoute().catch(() => null);
 }
 
 export function useBrowserAuth(): UseBrowserAuthReturn {
@@ -16,6 +24,7 @@ export function useBrowserAuth(): UseBrowserAuthReturn {
   const [browserLoginPassword, setBrowserLoginPassword] = useState('');
   const [browserLoginError, setBrowserLoginError] = useState<string | null>(null);
   const [browserLoggingIn, setBrowserLoggingIn] = useState(false);
+  const [browserRouteSelectionPending, setBrowserRouteSelectionPending] = useState(false);
 
   // Validate stored session on startup (avoids re-auth on refresh)
   // Also checks URL params/fragments for auto-authentication
@@ -45,7 +54,8 @@ export function useBrowserAuth(): UseBrowserAuthReturn {
       );
 
       authenticate(urlPwd)
-        .then(() => {
+        .then(async () => {
+          await prepareTunnelRoute();
           // Full page reload to reset all singletons (WebSocket, etc.) with new session ID
           window.location.replace(
             window.location.pathname + window.location.search
@@ -58,23 +68,29 @@ export function useBrowserAuth(): UseBrowserAuthReturn {
     }
 
     // Validate existing session from sessionStorage
+    let cancelled = false;
     const sid = getSessionId();
     if (!sid) return;
-    callBackend('list_workspaces')
-      .then(() => setBrowserAuthenticated(true))
-      .catch(() => {
+
+    const validateStoredSession = async () => {
+      try {
+        await prepareTunnelRoute();
+        await callBackend('list_workspaces');
+        if (!cancelled) setBrowserAuthenticated(true);
+      } catch {
         // Session invalid or expired, clear it and show login page
-        if (getSessionId() === sid) {
+        if (!cancelled && getSessionId() === sid) {
           clearSessionId();
           setBrowserAuthenticated(false);
         }
-      });
-  }, []);
+      }
+    };
+    void validateStoredSession();
 
-  useEffect(() => {
-    if (isTauri() || !browserAuthenticated) return;
-    void ensureTunnelRoute();
-  }, [browserAuthenticated]);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleBrowserLogin = useCallback(async () => {
     if (!browserLoginPassword.trim()) return;
@@ -82,10 +98,9 @@ export function useBrowserAuth(): UseBrowserAuthReturn {
     setBrowserLoginError(null);
     try {
       await authenticate(browserLoginPassword.trim());
-      // Full page reload to reset all singletons (WebSocket, etc.) with new session ID
-      // Preserve the current pathname (e.g. /t/{subdomain}/) so tunnel proxy paths are kept
-      window.location.replace(window.location.pathname || '/');
-      return; // Page is about to reload, skip cleanup
+      setBrowserRouteSelectionPending(true);
+      setBrowserLoggingIn(false);
+      return;
     } catch (e) {
       const errorMsg = String(e);
       // Provide user-friendly error messages
@@ -102,12 +117,26 @@ export function useBrowserAuth(): UseBrowserAuthReturn {
     }
   }, [browserLoginPassword]);
 
+  const completeBrowserRouteSelection = useCallback(() => {
+    setBrowserRouteSelectionPending(false);
+    setBrowserAuthenticated(true);
+  }, []);
+
+  const cancelBrowserRouteSelection = useCallback(() => {
+    clearSessionId();
+    setBrowserRouteSelectionPending(false);
+    setBrowserAuthenticated(false);
+  }, []);
+
   return {
     browserAuthenticated,
     browserLoginPassword,
     setBrowserLoginPassword,
     browserLoginError,
     browserLoggingIn,
+    browserRouteSelectionPending,
     handleBrowserLogin,
+    completeBrowserRouteSelection,
+    cancelBrowserRouteSelection,
   };
 }

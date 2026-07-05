@@ -17,6 +17,7 @@ import {
   MobileWorktreeDetail,
   WorkspaceGrid,
   WorkspaceCell,
+  TunnelRouteSelector,
 } from "./components";
 import { useAppShellState } from "./hooks/useAppShellState";
 import { Input } from "@/components/ui/input";
@@ -124,37 +125,47 @@ function App() {
   if (!isTauri() && !browserAuth.browserAuthenticated) {
     return (
       <div className="min-h-screen bg-[var(--color-bg-base)] text-[var(--color-text-primary)] flex items-center justify-center">
-        <div className="w-80 space-y-4">
-          <div className="text-center space-y-2">
-            <div className="w-10 h-10 mx-auto bg-[var(--color-accent)]/20 rounded-lg flex items-center justify-center mb-3">
-              <RefreshIcon className="w-5 h-5 text-[var(--color-accent)]" />
-            </div>
-            <h1 className="text-xl font-semibold">Worktree Manager</h1>
-            {shareWorkspaceName && (
-              <p className="text-sm text-[var(--color-accent)]">{t('app.loginWorkspaceName', { name: shareWorkspaceName })}</p>
-            )}
-            <p className="text-sm text-[var(--color-text-secondary)]">{t('app.loginPasswordLabel')}</p>
-          </div>
-          <form onSubmit={(e) => { e.preventDefault(); browserAuth.handleBrowserLogin(); }} className="space-y-3">
-            <Input
-              type="password"
-              placeholder={t('app.loginPasswordInput')}
-              value={browserAuth.browserLoginPassword}
-              onChange={(e) => browserAuth.setBrowserLoginPassword(e.target.value)}
-              autoFocus
-              className="bg-[var(--color-bg-surface)] border-[var(--color-border)]"
+        <div className="w-96 max-w-[calc(100vw-2rem)] space-y-4">
+          {browserAuth.browserRouteSelectionPending ? (
+            <TunnelRouteSelector
+              variant="gate"
+              onSelected={browserAuth.completeBrowserRouteSelection}
+              onCancel={browserAuth.cancelBrowserRouteSelection}
             />
-            {browserAuth.browserLoginError && (
-              <p className="text-sm text-[var(--color-error)]">{browserAuth.browserLoginError}</p>
-            )}
-            <Button
-              type="submit"
-              className="w-full"
-              disabled={browserAuth.browserLoggingIn || !browserAuth.browserLoginPassword.trim()}
-            >
-              {browserAuth.browserLoggingIn ? t('app.loginVerifying') : t('app.loginEnter')}
-            </Button>
-          </form>
+          ) : (
+            <>
+              <div className="text-center space-y-2">
+                <div className="w-10 h-10 mx-auto bg-[var(--color-accent)]/20 rounded-lg flex items-center justify-center mb-3">
+                  <RefreshIcon className="w-5 h-5 text-[var(--color-accent)]" />
+                </div>
+                <h1 className="text-xl font-semibold">Worktree Manager</h1>
+                {shareWorkspaceName && (
+                  <p className="text-sm text-[var(--color-accent)]">{t('app.loginWorkspaceName', { name: shareWorkspaceName })}</p>
+                )}
+                <p className="text-sm text-[var(--color-text-secondary)]">{t('app.loginPasswordLabel')}</p>
+              </div>
+              <form onSubmit={(e) => { e.preventDefault(); browserAuth.handleBrowserLogin(); }} className="space-y-3">
+                <Input
+                  type="password"
+                  placeholder={t('app.loginPasswordInput')}
+                  value={browserAuth.browserLoginPassword}
+                  onChange={(e) => browserAuth.setBrowserLoginPassword(e.target.value)}
+                  autoFocus
+                  className="bg-[var(--color-bg-surface)] border-[var(--color-border)]"
+                />
+                {browserAuth.browserLoginError && (
+                  <p className="text-sm text-[var(--color-error)]">{browserAuth.browserLoginError}</p>
+                )}
+                <Button
+                  type="submit"
+                  className="w-full"
+                  disabled={browserAuth.browserLoggingIn || !browserAuth.browserLoginPassword.trim()}
+                >
+                  {browserAuth.browserLoggingIn ? t('app.loginVerifying') : t('app.loginEnter')}
+                </Button>
+              </form>
+            </>
+          )}
         </div>
       </div>
     );
@@ -212,6 +223,15 @@ function App() {
           <div className="fixed top-0 left-0 right-0 z-40 bg-[var(--color-warning)]/10 text-[var(--color-warning)] text-xs py-1.5 px-4 text-center flex items-center justify-center gap-2">
             <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--color-warning)] animate-pulse" />
             {t('app.wsDisconnected')}
+          </div>
+        )}
+
+        {!isTauri() && browserAuth.browserAuthenticated && (
+          <div className="fixed top-3 right-3 z-50">
+            <TunnelRouteSelector
+              variant="compact"
+              onSelected={() => window.location.reload()}
+            />
           </div>
         )}
 

@@ -25,3 +25,4 @@ export { MobileWorktreeList } from './MobileWorktreeList';
 export { MobileWorktreeDetail } from './MobileWorktreeDetail';
 export { WorkspaceCell } from './WorkspaceCell';
 export { WorkspaceGrid } from './WorkspaceGrid';
+export { TunnelRouteSelector } from './TunnelRouteSelector';
