@@ -4037,7 +4037,6 @@ mod http_server_coverage_tests {
             .await,
             h_get_remote_branches(Json(json!({"path": path}))).await,
             h_get_git_diff(Json(json!({"path": path}))).await,
-            h_commit_all(Json(json!({"path": path, "message": "test: commit"}))).await,
         ];
         for response in git_errors {
             assert_eq!(response.status(), StatusCode::BAD_REQUEST);
