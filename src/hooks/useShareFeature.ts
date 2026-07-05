@@ -10,6 +10,10 @@ import {
   setNgrokToken,
   startNgrokTunnel,
   stopNgrokTunnel,
+  startWmsTunnel,
+  stopWmsTunnel,
+  wmsManualReconnect,
+  cloudGetStatus,
   getConnectedClients,
   kickClient,
   getLastSharePort,
@@ -41,6 +45,17 @@ export interface UseShareFeatureReturn {
   showShareDisclaimer: boolean;
   setShowShareDisclaimer: (show: boolean) => void;
   acceptShareDisclaimer: () => void;
+  // WMS tunnel
+  shareWmsUrl: string | null;
+  wmsConnected: boolean;
+  wmsReconnecting: boolean;
+  wmsReconnectAttempt: number;
+  wmsNextRetrySecs: number;
+  wmsLoading: boolean;
+  showWmsLoginDialog: boolean;
+  setShowWmsLoginDialog: (show: boolean) => void;
+  handleToggleWms: () => Promise<void>;
+  handleWmsManualReconnect: () => Promise<void>;
 }
 
 export function useShareFeature(
@@ -56,6 +71,15 @@ export function useShareFeature(
   const [savingNgrokToken, setSavingNgrokToken] = useState(false);
   const [connectedClients, setConnectedClients] = useState<ConnectedClient[]>([]);
   const [hasNgrokToken, setHasNgrokToken] = useState(false);
+
+  // WMS tunnel state
+  const [shareWmsUrl, setShareWmsUrl] = useState<string | null>(null);
+  const [wmsConnected, setWmsConnected] = useState(false);
+  const [wmsReconnecting, setWmsReconnecting] = useState(false);
+  const [wmsReconnectAttempt, setWmsReconnectAttempt] = useState(0);
+  const [wmsNextRetrySecs, setWmsNextRetrySecs] = useState(0);
+  const [wmsLoading, setWmsLoading] = useState(false);
+  const [showWmsLoginDialog, setShowWmsLoginDialog] = useState(false);
 
   // Sharing disclaimer (one-time per install)
   const [shareDisclaimerAccepted, setShareDisclaimerAccepted] = useState(() => localStorage.getItem('share_disclaimer_accepted') === 'true');
@@ -112,6 +136,14 @@ export function useShareFeature(
       if (shareNgrokUrl) {
         await stopNgrokTunnel();
       }
+      if (shareWmsUrl) {
+        await stopWmsTunnel();
+        setShareWmsUrl(null);
+        setWmsConnected(false);
+        setWmsReconnecting(false);
+        setWmsReconnectAttempt(0);
+        setWmsNextRetrySecs(0);
+      }
 
       await stopSharing();
       setShareActive(false);
@@ -121,7 +153,7 @@ export function useShareFeature(
     } catch (e) {
       setError(String(e));
     }
-  }, [setError, shareNgrokUrl]);
+  }, [setError, shareNgrokUrl, shareWmsUrl]);
 
   const handleToggleNgrok = useCallback(async () => {
     if (ngrokLoading) return;
@@ -146,6 +178,59 @@ export function useShareFeature(
       setNgrokLoading(false);
     }
   }, [setError, shareNgrokUrl, ngrokLoading]);
+
+  const handleToggleWms = useCallback(async () => {
+    if (wmsLoading) return;
+    if (shareWmsUrl) {
+      // Stop WMS tunnel
+      try {
+        await stopWmsTunnel();
+        setShareWmsUrl(null);
+        setWmsConnected(false);
+        setWmsReconnecting(false);
+        setWmsReconnectAttempt(0);
+        setWmsNextRetrySecs(0);
+      } catch (e) {
+        setError(String(e));
+      }
+      return;
+    }
+    // Check cloud login gate
+    try {
+      const status = await cloudGetStatus();
+      if (!status?.connected) {
+        setShowWmsLoginDialog(true);
+        return;
+      }
+    } catch {
+      setShowWmsLoginDialog(true);
+      return;
+    }
+    // Start WMS tunnel (backend enforces LAN share must be active)
+    setWmsLoading(true);
+    try {
+      const url = await startWmsTunnel();
+      setShareWmsUrl(url);
+      // The backend only returns the URL once the first connection has succeeded, so mark
+      // connected optimistically to avoid a red "disconnected" flash before the next poll.
+      setWmsConnected(true);
+      setWmsReconnecting(false);
+      setWmsReconnectAttempt(0);
+      setWmsNextRetrySecs(0);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setWmsLoading(false);
+    }
+  }, [setError, shareWmsUrl, wmsLoading]);
+
+  const handleWmsManualReconnect = useCallback(async () => {
+    try {
+      await wmsManualReconnect();
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [setError]);
 
   const handleUpdateSharePassword = useCallback(async (newPassword: string) => {
     try {
@@ -210,6 +295,13 @@ export function useShareFeature(
           if (state.ngrok_url) {
             setShareNgrokUrl(state.ngrok_url);
           }
+          if (state.wms_url) {
+            setShareWmsUrl(state.wms_url);
+            setWmsConnected(state.wms_connected);
+            setWmsReconnecting(state.wms_reconnecting);
+            setWmsReconnectAttempt(state.wms_reconnect_attempt);
+            setWmsNextRetrySecs(state.wms_next_retry_secs);
+          }
         }
       }).catch(() => { });
       getLastSharePassword().then(pwd => {
@@ -225,21 +317,33 @@ export function useShareFeature(
     }
   }, []);
 
-  // Poll connected clients while sharing is active (Tauri only).
+  // Poll connected clients and WMS state while sharing is active (Tauri only).
   useEffect(() => {
     if (!isTauri() || !shareActive) {
       setConnectedClients([]);
       return;
     }
+    // Use shorter interval when WMS tunnel is running and reconnecting
+    const intervalMs = (shareWmsUrl && wmsReconnecting) ? 2000 : 5000;
     const fetchStatus = () => {
       getConnectedClients()
         .then(setConnectedClients)
         .catch(() => { });
+      if (shareWmsUrl) {
+        getShareState()
+          .then(state => {
+            setWmsConnected(state.wms_connected);
+            setWmsReconnecting(state.wms_reconnecting);
+            setWmsReconnectAttempt(state.wms_reconnect_attempt);
+            setWmsNextRetrySecs(state.wms_next_retry_secs);
+          })
+          .catch(() => { });
+      }
     };
     fetchStatus();
-    const interval = setInterval(fetchStatus, 5000);
+    const interval = setInterval(fetchStatus, intervalMs);
     return () => clearInterval(interval);
-  }, [shareActive]);
+  }, [shareActive, shareWmsUrl, wmsReconnecting]);
 
   return {
     shareActive,
@@ -266,5 +370,16 @@ export function useShareFeature(
     showShareDisclaimer,
     setShowShareDisclaimer,
     acceptShareDisclaimer,
+    // WMS tunnel
+    shareWmsUrl,
+    wmsConnected,
+    wmsReconnecting,
+    wmsReconnectAttempt,
+    wmsNextRetrySecs,
+    wmsLoading,
+    showWmsLoginDialog,
+    setShowWmsLoginDialog,
+    handleToggleWms,
+    handleWmsManualReconnect,
   };
 }

@@ -1,4 +1,6 @@
 // Environment detection
+import { getRouteToken, getRoutedApiBase } from './tunnelRoute';
+
 export function getPlatform(): 'mac' | 'windows' | 'linux' {
   const ua = navigator.userAgent;
   if (/Mac|iPhone|iPad|iPod/i.test(ua)) return 'mac';
@@ -61,6 +63,10 @@ function getBasePath(): string {
 
 /** In dev mode Vite proxies /api to the Rust server; in prod the same origin serves both. */
 function getApiBase(): string {
+  return getRoutedApiBase() ?? `${getBasePath()}/api`;
+}
+
+function getCenterApiBase(): string {
   return `${getBasePath()}/api`;
 }
 
@@ -71,7 +77,7 @@ function getApiBase(): string {
 // Commands that may legitimately take a long time (git clone, worktree create, etc.)
 const LONG_RUNNING_COMMANDS = new Set([
   'create_worktree', 'archive_worktree', 'restore_worktree', 'delete_archived_worktree',
-  'clone_project', 'deploy_to_main', 'start_sharing', 'start_ngrok_tunnel',
+  'clone_project', 'deploy_to_main', 'start_sharing', 'start_ngrok_tunnel', 'start_wms_tunnel',
   'fetch_project_remote', 'sync_with_base_branch', 'sync_all_projects_to_base',
   'push_to_remote', 'pull_current_branch', 'push_sync_to_base_branch', 'merge_base_branch',
   'download_update_via_mirror',
@@ -113,11 +119,13 @@ export async function callBackend<T = unknown>(
   const controller = new AbortController();
   const timerId = setTimeout(() => controller.abort(), timeoutMs);
   const useGet = GET_COMMANDS.has(command);
+  const routeToken = getRouteToken();
   const res = await fetch(`${getApiBase()}/${command}`, {
     method: useGet ? 'GET' : 'POST',
     headers: {
       ...(useGet ? {} : { 'Content-Type': 'application/json' }),
       'X-Session-Id': getSessionId(),
+      ...(routeToken ? { Authorization: `Bearer ${routeToken}` } : {}),
     },
     body: useGet ? undefined : JSON.stringify(args ?? {}),
     signal: controller.signal,
@@ -228,6 +236,11 @@ export interface ShareState {
   urls: string[];
   ngrok_url?: string;
   workspace_path?: string;
+  wms_url?: string;
+  wms_connected: boolean;
+  wms_reconnecting: boolean;
+  wms_reconnect_attempt: number;
+  wms_next_retry_secs: number;
 }
 
 export interface ShareInfo {
@@ -249,6 +262,21 @@ export async function startNgrokTunnel(): Promise<string> {
 /** Stop ngrok tunnel (LAN sharing continues). */
 export async function stopNgrokTunnel(): Promise<void> {
   return callBackend<void>('stop_ngrok_tunnel');
+}
+
+/** Start WMS tunnel for the current sharing session. Returns the public URL. */
+export async function startWmsTunnel(): Promise<string> {
+  return callBackend<string>('start_wms_tunnel');
+}
+
+/** Stop WMS tunnel (LAN sharing continues). */
+export async function stopWmsTunnel(): Promise<void> {
+  return callBackend<void>('stop_wms_tunnel');
+}
+
+/** Trigger a manual reconnect of the WMS tunnel. */
+export async function wmsManualReconnect(): Promise<void> {
+  return callBackend<void>('wms_manual_reconnect');
 }
 
 /** Stop sharing (shuts down the HTTP server). */
@@ -309,7 +337,7 @@ export async function kickClient(sessionId: string): Promise<void> {
 
 /** Browser mode: fetch info about the shared workspace from the HTTP server. */
 export async function getShareInfo(): Promise<ShareInfo> {
-  const res = await fetch(`${getApiBase()}/get_share_info`);
+  const res = await fetch(`${getCenterApiBase()}/get_share_info`);
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || `HTTP ${res.status}`);
@@ -320,7 +348,7 @@ export async function getShareInfo(): Promise<ShareInfo> {
 /** Browser mode: authenticate with challenge-response protocol. */
 export async function authenticate(password: string): Promise<void> {
   // Step 1: Request challenge (nonce + salt)
-  const challengeRes = await fetch(`${getApiBase()}/auth/challenge`, {
+  const challengeRes = await fetch(`${getCenterApiBase()}/auth/challenge`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
   });
@@ -367,7 +395,7 @@ export async function authenticate(password: string): Promise<void> {
   );
 
   // Step 4: Send proof for verification
-  const verifyRes = await fetch(`${getApiBase()}/auth/verify`, {
+  const verifyRes = await fetch(`${getCenterApiBase()}/auth/verify`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -670,8 +698,8 @@ export async function setVoiceRefineModel(model: string): Promise<void> {
   return callBackend<void>('set_voice_refine_model', { model });
 }
 
-export async function listDashscopeModels(): Promise<string[]> {
-  return callBackend<string[]>('list_dashscope_models');
+export async function listDashscopeModels(purpose?: string): Promise<string[]> {
+  return callBackend<string[]>('list_dashscope_models', purpose ? { purpose } : {});
 }
 
 export async function checkDashscopeApiKey(): Promise<boolean> {
@@ -696,6 +724,14 @@ export async function getCommitAiEnabled(): Promise<boolean> {
 
 export async function checkCommitAiApiKey(): Promise<boolean> {
   return callBackend<boolean>('check_commit_ai_api_key');
+}
+
+export async function getCommitAiModel(): Promise<string | null> {
+  return callBackend<string | null>('get_commit_ai_model');
+}
+
+export async function setCommitAiModel(model: string): Promise<void> {
+  return callBackend<void>('set_commit_ai_model', { model });
 }
 
 // ---------------------------------------------------------------------------

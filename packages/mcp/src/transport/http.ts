@@ -3,6 +3,8 @@ import type { TransportMode } from '../types.js';
 import type { Transport } from './config.js';
 
 const DEFAULT_PORT = 42819;
+const WRITE_TIMEOUT = 60000; // 写/网络操作（merge/push/pull/sync/commit）用更长超时
+const FETCH_TIMEOUT = 30000; // git fetch 真实耗时 3-6s，默认 5s 易超时
 
 export { Transport } from './config.js';
 
@@ -86,11 +88,10 @@ export class HttpTransport implements Transport {
   }
 
   // Project/Git operations
-  async getBranchDiffStats(projectPath: string, baseBranch: string): Promise<unknown> {
-    const res = await this.client.post('/get_branch_diff_stats', {
-      path: projectPath,
-      base_branch: baseBranch,
-    });
+  async getBranchDiffStats(projectPath: string, baseBranch: string, testBranch?: string): Promise<unknown> {
+    const body: Record<string, unknown> = { path: projectPath, base_branch: baseBranch };
+    if (testBranch) body.test_branch = testBranch;
+    const res = await this.client.post('/get_branch_diff_stats', body);
     return res.data;
   }
 
@@ -104,13 +105,23 @@ export class HttpTransport implements Transport {
     return res.data;
   }
 
-  async commitAll(projectPath: string, message: string): Promise<unknown> {
-    const res = await this.client.post('/commit_all', { path: projectPath, message });
+  async commitAll(
+    projectPath: string,
+    message: string,
+    authorName?: string,
+    authorEmail?: string,
+    skipHooks?: boolean
+  ): Promise<unknown> {
+    const body: Record<string, unknown> = { path: projectPath, message };
+    if (authorName) body.author_name = authorName;
+    if (authorEmail) body.author_email = authorEmail;
+    if (typeof skipHooks === 'boolean') body.skip_hooks = skipHooks;
+    const res = await this.client.post('/commit_all', body, { timeout: WRITE_TIMEOUT });
     return res.data;
   }
 
   async pushToRemote(projectPath: string): Promise<unknown> {
-    const res = await this.client.post('/push_to_remote', { path: projectPath });
+    const res = await this.client.post('/push_to_remote', { path: projectPath }, { timeout: WRITE_TIMEOUT });
     return res.data;
   }
 
@@ -120,7 +131,43 @@ export class HttpTransport implements Transport {
   }
 
   async fetchProjectRemote(projectPath: string): Promise<unknown> {
-    const res = await this.client.post('/fetch_project_remote', { path: projectPath });
+    const res = await this.client.post(
+      '/fetch_project_remote',
+      { path: projectPath },
+      { timeout: FETCH_TIMEOUT }
+    );
+    return res.data;
+  }
+
+  async pullCurrentBranch(projectPath: string): Promise<unknown> {
+    const res = await this.client.post('/pull_current_branch', { path: projectPath }, { timeout: WRITE_TIMEOUT });
+    return res.data;
+  }
+
+  async syncWithBase(projectPath: string, baseBranch: string): Promise<unknown> {
+    const res = await this.client.post(
+      '/sync_with_base_branch',
+      { path: projectPath, base_branch: baseBranch },
+      { timeout: WRITE_TIMEOUT }
+    );
+    return res.data;
+  }
+
+  async mergeToTest(projectPath: string, testBranch: string): Promise<unknown> {
+    const res = await this.client.post(
+      '/merge_to_test_branch',
+      { path: projectPath, test_branch: testBranch },
+      { timeout: WRITE_TIMEOUT }
+    );
+    return res.data;
+  }
+
+  async mergeToBase(projectPath: string, baseBranch: string): Promise<unknown> {
+    const res = await this.client.post(
+      '/merge_to_base_branch',
+      { path: projectPath, base_branch: baseBranch },
+      { timeout: WRITE_TIMEOUT }
+    );
     return res.data;
   }
 }

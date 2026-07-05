@@ -81,6 +81,7 @@ function App() {
   } = useAppShellState(t, undefined, shellMode);
 
   useEffect(() => {
+    if (!isTauri()) return;
     let cancelled = false;
 
     callBackend<CrashReport | null>('get_crash_report')
@@ -293,6 +294,7 @@ function App() {
                   isKeyHeld={voice.isKeyHeld}
                   analyserNode={voice.analyserNode}
                   onToggleVoice={voice.toggleVoice}
+                  onStartRecording={voice.startRecording}
                   onStopRecording={voice.stopRecording}
                   staging={voice.staging}
                 />

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { WorktreeMcpServer } from './server.js';
+import { readCapabilityLevel } from './transport/config.js';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
@@ -62,11 +63,13 @@ function writeMcpConfig(): void {
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
+    // 保留已有 capability_level（用户或桌面端设置过的），缺省 details（共享自 transport/config）
+    const capabilityLevel = readCapabilityLevel('details');
     const mcpConfig = {
       version: '1.0.0',
       http_port: 42819,
       installed_at: new Date().toISOString(),
-      capability_level: 'core',
+      capability_level: capabilityLevel,
     };
     writeFileSync(MCP_CONFIG_PATH, JSON.stringify(mcpConfig, null, 2));
   } catch (e) {

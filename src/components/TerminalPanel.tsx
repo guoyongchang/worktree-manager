@@ -127,8 +127,9 @@ const FLOATING_BTN_MARGIN = 16; // 距离右边缘的默认间距
 const FloatingMicButton: FC<{
   voiceStatus: VoiceStatus;
   onToggleVoice?: () => void;
+  onStartRecording?: () => void;
   onStopRecording?: () => void;
-}> = ({ voiceStatus, onToggleVoice, onStopRecording }) => {
+}> = ({ voiceStatus, onToggleVoice, onStartRecording, onStopRecording }) => {
   const { t } = useTranslation();
   const [pos, setPos] = useState<{ x: number | null; y: number | null }>({ x: null, y: null });
   const posRef = useRef(pos);
@@ -153,22 +154,29 @@ const FloatingMicButton: FC<{
     };
   }, []);
 
+  const getDefaultPosition = useCallback(() => {
+    const parent = btnRef.current?.parentElement;
+    if (!parent) return { x: 0, y: 0 };
+    const pr = parent.getBoundingClientRect();
+    return constrain(
+      pr.width - FLOATING_BTN_SIZE - FLOATING_BTN_MARGIN,
+      pr.height - FLOATING_BTN_SIZE - 80,
+    );
+  }, [constrain]);
+
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     const touch = e.touches[0];
     const d = dragRef.current;
     const cur = posRef.current;
-    let currentX = cur.x;
-    if (currentX === null && btnRef.current?.parentElement) {
-      const pr = btnRef.current.parentElement.getBoundingClientRect();
-      currentX = pr.width - FLOATING_BTN_SIZE - FLOATING_BTN_MARGIN;
-      setPos(p => ({ ...p, x: currentX }));
-    }
+    const defaultPos = getDefaultPosition();
+    const currentX = cur.x ?? defaultPos.x;
+    const currentY = cur.y ?? defaultPos.y;
     d.startX = touch.clientX;
     d.startY = touch.clientY;
-    d.startPosX = currentX ?? 0;
-    d.startPosY = cur.y ?? 0;
+    d.startPosX = currentX;
+    d.startPosY = currentY;
     d.isDragging = false;
-  }, []);
+  }, [getDefaultPosition]);
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     const touch = e.touches[0];
@@ -189,12 +197,14 @@ const FloatingMicButton: FC<{
       console.log('[voice-ui] FloatingMicButton tapped, voiceStatus:', voiceStatus);
       if (voiceStatus === 'recording') {
         onStopRecording?.();
+      } else if (onStartRecording) {
+        onStartRecording();
       } else {
         onToggleVoice?.();
       }
     }
     dragRef.current.isDragging = false;
-  }, [voiceStatus, onToggleVoice, onStopRecording]);
+  }, [voiceStatus, onToggleVoice, onStartRecording, onStopRecording]);
 
   const isRecording = voiceStatus === 'recording';
 
@@ -279,6 +289,7 @@ interface TerminalPanelProps {
   isKeyHeld?: boolean;
   analyserNode?: AnalyserNode | null;
   onToggleVoice?: () => void;
+  onStartRecording?: () => void;
   onStopRecording?: () => void;
   staging?: StagingState | null;
   clientId?: string;
@@ -316,6 +327,7 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
   isKeyHeld = false,
   analyserNode,
   onToggleVoice,
+  onStartRecording,
   onStopRecording,
   staging,
   clientId,
@@ -872,6 +884,7 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
           <FloatingMicButton
             voiceStatus={voiceStatus}
             onToggleVoice={onToggleVoice}
+            onStartRecording={onStartRecording}
             onStopRecording={onStopRecording}
           />
         )}

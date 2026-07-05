@@ -759,7 +759,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
   }, []);
 
   useEffect(() => {
-    if (mainWorkspace) {
+    if (isTauri() && mainWorkspace) {
       getVaultStatus().then(setVaultStatus).catch(() => setVaultStatus(null));
     }
   }, [mainWorkspace]);

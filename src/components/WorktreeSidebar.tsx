@@ -58,6 +58,14 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
   onQuickShare,
   occupation,
   hasNgrokToken = false,
+  shareWmsUrl = null,
+  wmsConnected = false,
+  wmsReconnecting = false,
+  wmsReconnectAttempt = 0,
+  wmsNextRetrySecs = 0,
+  wmsLoading = false,
+  onToggleWms,
+  onWmsManualReconnect,
   refreshing = false,
   batchArchiveModalOpen,
   onToggleBatchArchiveModal,
@@ -197,6 +205,14 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
       shareNgrokUrl={shareNgrokUrl}
       sharePassword={sharePassword}
       shareUrls={shareUrls}
+      shareWmsUrl={shareWmsUrl}
+      wmsConnected={wmsConnected}
+      wmsReconnecting={wmsReconnecting}
+      wmsReconnectAttempt={wmsReconnectAttempt}
+      wmsNextRetrySecs={wmsNextRetrySecs}
+      wmsLoading={wmsLoading}
+      onToggleWms={onToggleWms}
+      onWmsManualReconnect={onWmsManualReconnect}
       showArchived={showArchived}
       showWorkspaceMenu={showWorkspaceMenu}
       sidebarWidth={sidebarWidth}

@@ -14,6 +14,17 @@ pub struct ShareState {
     pub shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
     pub ngrok_url: Option<String>,
     pub ngrok_task: Option<tokio::task::JoinHandle<()>>,
+    // === WMS 隧道分享字段 ===
+    /// True while a WMS tunnel is being started, to close the check-then-act race between
+    /// the precondition check and the point where `wms_url` gets set.
+    pub wms_starting: bool,
+    pub wms_url: Option<String>,
+    pub wms_task: Option<tokio::task::JoinHandle<()>>,
+    pub wms_shutdown_tx: Option<tokio::sync::watch::Sender<bool>>,
+    pub wms_connected: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    pub wms_reconnect_state:
+        Option<std::sync::Arc<std::sync::Mutex<crate::wms_tunnel::WmsTunnelReconnectState>>>,
+    pub wms_manual_reconnect_tx: Option<tokio::sync::mpsc::UnboundedSender<()>>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -42,6 +53,12 @@ pub struct ShareStateInfo {
     pub ngrok_url: Option<String>,
     pub workspace_path: Option<String>,
     pub current_workspace_name: Option<String>,
+    // === WMS 隧道状态（前端可见快照）===
+    pub wms_url: Option<String>,
+    pub wms_connected: bool,
+    pub wms_reconnecting: bool,
+    pub wms_reconnect_attempt: u32,
+    pub wms_next_retry_secs: u32,
 }
 
 // Auth rate limiter: per-IP sliding window (max 5 attempts per 60 seconds)
@@ -147,9 +164,23 @@ pub struct CloudConfig {
     pub refresh_token: Option<String>,
     #[serde(default)]
     pub device_name: Option<String>,
+    // NEW: WMS 隧道分享所需
+    #[serde(default)]
+    pub tunnel_token: Option<String>,
+    #[serde(default)]
+    pub subdomain: Option<String>,
+    #[serde(default)]
+    pub device_id: Option<String>,
+    /// How the stored tunnel_token/subdomain were obtained: "authenticated" (registered
+    /// under the logged-in account) or "anonymous" (fallback). Used to prevent reusing
+    /// stale anonymous credentials once the user is logged in.
+    #[serde(default)]
+    pub tunnel_registered_as: Option<String>,
 }
 
-// 全局配置：存储在 ~/.config/worktree-manager/global.json
+// 全局配置：
+// - release: ~/.config/worktree-manager/global.json
+// - debug/dev: ~/.config/worktree-manager-dev/global.json
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct GlobalConfig {
     pub workspaces: Vec<WorkspaceRef>,
@@ -196,6 +227,9 @@ pub struct GlobalConfig {
     // NEW: AI生成开关
     #[serde(default = "default_true")]
     pub commit_ai_enabled: bool,
+    // NEW: commit message 生成模型（None 时回退 DEFAULT_COMMIT_AI_MODEL）
+    #[serde(default)]
+    pub commit_ai_model: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -243,6 +277,7 @@ impl Default for GlobalConfig {
             cloud: CloudConfig::default(),
             commit_ai_api_key: None,
             commit_ai_enabled: true,
+            commit_ai_model: None,
         }
     }
 }

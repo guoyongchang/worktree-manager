@@ -10,6 +10,9 @@ pub mod state;
 pub(crate) mod tls;
 pub mod types;
 pub mod utils;
+#[cfg(windows)]
+mod windows_crash;
+pub(crate) mod wms_tunnel;
 
 // Re-exports used by http_server and other modules
 pub use config::*;
@@ -296,6 +299,43 @@ fn remove_session_running_file() {
     }
 }
 
+fn install_shutdown_signal_handler() {
+    tauri::async_runtime::spawn(async {
+        let reason = wait_for_shutdown_signal().await;
+        log::warn!("=== app terminated by OS signal: {} ===", reason);
+        remove_session_running_file();
+        std::process::exit(1);
+    });
+}
+
+#[cfg(unix)]
+async fn wait_for_shutdown_signal() -> &'static str {
+    use tokio::signal::unix::{signal, SignalKind};
+    let mut sigterm = signal(SignalKind::terminate()).expect("register SIGTERM");
+    let mut sighup = signal(SignalKind::hangup()).expect("register SIGHUP");
+    let mut sigint = signal(SignalKind::interrupt()).expect("register SIGINT");
+    tokio::select! {
+        _ = sigterm.recv() => "SIGTERM",
+        _ = sighup.recv()  => "SIGHUP",
+        _ = sigint.recv()  => "SIGINT",
+    }
+}
+
+#[cfg(windows)]
+async fn wait_for_shutdown_signal() -> &'static str {
+    use tokio::signal::windows;
+    let mut ctrl_c = windows::ctrl_c().expect("register ctrl_c");
+    let mut ctrl_close = windows::ctrl_close().expect("register ctrl_close");
+    let mut ctrl_shutdown = windows::ctrl_shutdown().expect("register ctrl_shutdown");
+    let mut ctrl_logoff = windows::ctrl_logoff().expect("register ctrl_logoff");
+    tokio::select! {
+        _ = ctrl_c.recv()        => "CTRL_C",
+        _ = ctrl_close.recv()    => "CTRL_CLOSE",
+        _ = ctrl_shutdown.recv() => "CTRL_SHUTDOWN",
+        _ = ctrl_logoff.recv()   => "CTRL_LOGOFF",
+    }
+}
+
 fn install_panic_hook() {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -328,8 +368,23 @@ fn install_panic_hook() {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     install_panic_hook();
+    install_shutdown_signal_handler();
     detect_startup_crash_report();
     write_session_running_file();
+
+    // Windows: also capture native faults (access violations, WebView2 crashes, ...) that
+    // bypass the Rust panic hook, so an abnormal exit records a reason, not just the fact.
+    // Installed after detect_startup_crash_report so it doesn't clobber the previous
+    // session's pending crash detail before it is read.
+    #[cfg(windows)]
+    if let Some(dir) = crash_log_dir() {
+        let _ = std::fs::create_dir_all(&dir);
+        windows_crash::install(
+            &dir.join(CRASH_LOG_FILE),
+            &dir.join(PENDING_ERROR_LOG_FILE),
+            &dir.join("worktree-manager-stderr.log"),
+        );
+    }
 
     // Install rustls CryptoProvider before any TLS usage (required by rustls 0.23+)
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
@@ -424,6 +479,11 @@ pub fn run() {
                                 let cleanup = async {
                                     if let Err(e) = stop_ngrok_tunnel().await {
                                         log::warn!("Failed to stop ngrok tunnel on close: {}", e);
+                                    }
+                                    if let Err(e) =
+                                        crate::commands::sharing::stop_wms_tunnel_internal().await
+                                    {
+                                        log::warn!("Failed to stop WMS tunnel on close: {}", e);
                                     }
                                     if let Err(e) = stop_sharing().await {
                                         log::warn!("Failed to stop sharing on close: {}", e);
@@ -542,6 +602,10 @@ pub fn run() {
             get_last_share_password,
             start_ngrok_tunnel,
             stop_ngrok_tunnel,
+            // WMS 隧道
+            start_wms_tunnel,
+            stop_wms_tunnel,
+            wms_manual_reconnect,
             // 语音识别 (Dashscope)
             get_dashscope_api_key,
             set_dashscope_api_key,
@@ -562,6 +626,8 @@ pub fn run() {
             set_commit_ai_enabled,
             get_commit_ai_enabled,
             check_commit_ai_api_key,
+            get_commit_ai_model,
+            set_commit_ai_model,
             voice_start,
             voice_send_audio,
             voice_stop,

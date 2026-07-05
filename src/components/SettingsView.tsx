@@ -28,12 +28,53 @@ import { BackIcon, PlusIcon, TrashIcon } from './Icons';
 import { useTheme } from '../hooks/useTheme';
 import { BranchCombobox } from './BranchCombobox';
 import type { WorkspaceRef, WorkspaceConfig, ProjectConfig, ScannedFolder, VaultStatus, VaultItemChild, FailedVaultItem, TagDefinition } from '../types';
-import { getAppVersion, getAppIcon, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, getVoiceAsrModel, setVoiceAsrModel as saveVoiceAsrModel, getVoiceRefineModel, setVoiceRefineModel as saveVoiceRefineModel, voiceStart, voiceStop, voiceRefineText, isTauri, getPlatform, getRemoteBranches, openLink, callBackend, loadWorkspaceConfigByPath, saveWorkspaceConfigByPath, getVaultStatus, vaultLink, listVaultItemChildren, getCommitPrefixConfig, setCommitPrefixConfig, getGitUserGlobalConfig, setGitUserGlobalConfig, getSkipGitHooks, setSkipGitHooks as saveSkipGitHooks, getShellIntegrationEnabled, setShellIntegrationEnabled as saveShellIntegrationEnabled, cloudGetStatus, cloudStartPairing, cloudCheckPairingStatus, cloudApprovePairing, cloudRejectPairing, cloudDisconnect, getCommitAiApiKey, setCommitAiApiKey as saveCommitAiApiKey, setCommitAiEnabled as saveCommitAiEnabled, getCommitAiEnabled, listDashscopeModels, getVoiceRefineBaseUrl, setVoiceRefineBaseUrl as saveVoiceRefineBaseUrl } from '../lib/backend';
+import { getAppVersion, getAppIcon, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, getVoiceAsrModel, setVoiceAsrModel as saveVoiceAsrModel, getVoiceRefineModel, setVoiceRefineModel as saveVoiceRefineModel, voiceStart, voiceStop, voiceRefineText, isTauri, getPlatform, getRemoteBranches, openLink, callBackend, loadWorkspaceConfigByPath, saveWorkspaceConfigByPath, getVaultStatus, vaultLink, listVaultItemChildren, getCommitPrefixConfig, setCommitPrefixConfig, getGitUserGlobalConfig, setGitUserGlobalConfig, getSkipGitHooks, setSkipGitHooks as saveSkipGitHooks, getShellIntegrationEnabled, setShellIntegrationEnabled as saveShellIntegrationEnabled, cloudGetStatus, cloudStartPairing, cloudCheckPairingStatus, cloudApprovePairing, cloudRejectPairing, cloudDisconnect, getCommitAiApiKey, setCommitAiApiKey as saveCommitAiApiKey, setCommitAiEnabled as saveCommitAiEnabled, getCommitAiEnabled, getCommitAiModel, setCommitAiModel as saveCommitAiModel, listDashscopeModels, getVoiceRefineBaseUrl, setVoiceRefineBaseUrl as saveVoiceRefineBaseUrl } from '../lib/backend';
 import type { CloudStatus, PairingStatus } from '../lib/backend';
 
 const isWindowsPowerShellId = (id?: string) => id === 'powershell' || id === 'pwsh';
 
 import { TAG_PRESET_COLORS } from '../constants';
+
+const formatCloudTokenExpiryUtc = (value: string) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const iso = date.toISOString();
+  return `${iso.slice(0, 10)} ${iso.slice(11, 19)} UTC`;
+};
+
+interface SettingsToggleProps {
+  checked: boolean;
+  disabled?: boolean;
+  ariaLabel: string;
+  onChange: (checked: boolean) => void;
+}
+
+export const SettingsToggle: FC<SettingsToggleProps> = ({
+  checked,
+  disabled = false,
+  ariaLabel,
+  onChange,
+}) => (
+  <button
+    type="button"
+    role="switch"
+    aria-checked={checked}
+    aria-label={ariaLabel}
+    disabled={disabled}
+    onClick={() => onChange(!checked)}
+    className={`relative inline-flex h-5 w-8 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/40 disabled:cursor-not-allowed disabled:opacity-60 ${
+      checked
+        ? 'bg-[var(--color-accent)]'
+        : 'bg-[var(--color-text-muted)]'
+    }`}
+  >
+    <span
+      className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${
+        checked ? 'translate-x-3.5' : 'translate-x-0.5'
+      }`}
+    />
+  </button>
+);
 
 // ==================== VaultItemTree (recursive) ====================
 interface VaultItemTreeProps {
@@ -144,7 +185,7 @@ const VaultItemTree: FC<VaultItemTreeProps> = ({
 
 
 // ==================== WorkspaceVaultSection ====================
-const WorkspaceVaultSection: FC = () => {
+export const WorkspaceVaultSection: FC = () => {
   const { t } = useTranslation();
   const [vaultStatus, setVaultStatus] = useState<VaultStatus | null>(null);
   const [inputPath, setInputPath] = useState('');
@@ -156,6 +197,12 @@ const WorkspaceVaultSection: FC = () => {
   const [showFailedItems, setShowFailedItems] = useState(false);
 
   const loadStatus = useCallback(async () => {
+    if (!isTauri()) {
+      setVaultStatus(null);
+      setError(null);
+      setLoading(false);
+      return;
+    }
     try {
       const s = await getVaultStatus();
       setVaultStatus(s);
@@ -370,9 +417,13 @@ const WorkspaceVaultSection: FC = () => {
         </>
       ) : (
         /* Not connected */
-        <div className="flex gap-2">
-          <div className="w-2 h-2 rounded-full bg-[var(--color-text-muted)] mt-2 shrink-0" />
-          <span className="text-xs text-[var(--color-text-muted)] mr-2">{t('settings.vaultNotConnected', '未连接')}</span>
+        <div className="flex items-center gap-2">
+          <div data-testid="vault-disconnected-status" className="flex items-center gap-2 w-28 shrink-0">
+            <div data-testid="vault-status-dot" className="w-2 h-2 rounded-full bg-[var(--color-text-muted)] shrink-0" />
+            <span className="text-xs text-[var(--color-text-muted)] truncate">
+              {t('settings.vaultNotConnected', '未连接')}
+            </span>
+          </div>
           <Input
             type="text"
             value={inputPath}
@@ -398,6 +449,8 @@ const WorkspaceVaultSection: FC = () => {
 
 
 
+export type SettingsSection = 'workspaces' | 'appearance' | 'models' | 'tools' | 'share' | 'commit' | 'voice' | 'cloud' | 'about';
+
 interface SettingsViewProps {
   workspaceConfig: WorkspaceConfig;
   configPath: string;
@@ -410,9 +463,9 @@ interface SettingsViewProps {
   workspaces?: WorkspaceRef[];
   currentWorkspace?: WorkspaceRef | null;
   onRemoveWorkspace?: (path: string) => void;
+  initialSection?: SettingsSection;
+  settingsNavNonce?: number;
 }
-
-type SettingsSection = 'workspaces' | 'appearance' | 'tools' | 'share' | 'commit' | 'voice' | 'cloud' | 'about';
 
 // ==================== AppearanceSettingsSection ====================
 const THEME_I18N_KEY: Record<string, string> = {
@@ -489,11 +542,21 @@ export const SettingsView: FC<SettingsViewProps> = ({
   workspaces = [],
   currentWorkspace = null,
   onRemoveWorkspace,
+  initialSection,
+  settingsNavNonce,
 }) => {
   const { t, i18n } = useTranslation();
 
   // Section navigation
-  const [activeSection, setActiveSection] = useState<SettingsSection>('workspaces');
+  const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection ?? 'workspaces');
+
+  // SettingsView is permanently mounted (toggled via display:none), so the
+  // initial useState only applies on first mount. To support navigating to a
+  // section on demand (and re-navigating to the same section on repeated
+  // requests), watch a self-incrementing nonce alongside initialSection.
+  useEffect(() => {
+    if (initialSection) setActiveSection(initialSection);
+  }, [initialSection, settingsNavNonce]);
 
   // ==================== Workspace editing state ====================
   // Which workspace is selected for editing (defaults to current)
@@ -509,6 +572,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
 
   // Load vault status
   useEffect(() => {
+    if (!isTauri()) return;
     getVaultStatus().then(setVaultStatus).catch(() => setVaultStatus(null));
   }, []);
 
@@ -733,7 +797,6 @@ export const SettingsView: FC<SettingsViewProps> = ({
   // Voice model config
   const [voiceAsrModel, setVoiceAsrModel] = useState('');
   const [voiceRefineModel, setVoiceRefineModel] = useState('');
-  const [voiceModelsLoaded, setVoiceModelsLoaded] = useState(false);
 
   // Refine base URL state
   const DEFAULT_REFINE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
@@ -753,6 +816,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
   const [commitAiSaving, setCommitAiSaving] = useState(false);
   const [commitAiSaved, setCommitAiSaved] = useState(false);
   const [commitAiError, setCommitAiError] = useState<string | null>(null);
+  const [commitAiModel, setCommitAiModel] = useState('');
   const [commitAiEnabled, setCommitAiEnabled] = useState(true);
 
   // Cloud connection state
@@ -988,7 +1052,6 @@ export const SettingsView: FC<SettingsViewProps> = ({
     getVoiceAsrModel().then(m => setVoiceAsrModel(m || '')).catch(() => {});
     getVoiceRefineModel().then(m => setVoiceRefineModel(m || '')).catch(() => {});
     getVoiceRefineBaseUrl().then(u => setRefineBaseUrl(u || '')).catch(() => {});
-    setVoiceModelsLoaded(true);
   }, [loadMicDevices]);
 
   // When navigating to voice section, request mic permission to get device labels
@@ -1068,6 +1131,10 @@ export const SettingsView: FC<SettingsViewProps> = ({
     getCommitAiEnabled()
       .then(v => setCommitAiEnabled(v))
       .catch(() => {});
+
+    getCommitAiModel()
+      .then(m => setCommitAiModel(m || ''))
+      .catch(() => {});
   }, []);
 
   // ==================== Cloud connection handlers ====================
@@ -1125,11 +1192,12 @@ export const SettingsView: FC<SettingsViewProps> = ({
     { id: 'workspaces' as SettingsSection, label: t('settings.workspaceConfig'), icon: <Settings className="w-3.5 h-3.5" />, group: 'common' },
     { id: 'appearance' as SettingsSection, label: t('settings.appearance'), icon: <Palette className="w-3.5 h-3.5" />, group: 'common' },
     // Advanced group
+    { id: 'models' as SettingsSection, label: t('settings.modelsNav', '模型管理'), icon: <Brain className="w-3.5 h-3.5" />, group: 'advanced' },
     { id: 'tools' as SettingsSection, label: t('settings.toolsNav', '工具'), icon: <Wrench className="w-3.5 h-3.5" />, group: 'advanced' },
     ...(isTauri() ? [{ id: 'share' as SettingsSection, label: t('settings.externalShareNav', '外网分享'), icon: <Globe className="w-3.5 h-3.5" />, group: 'advanced' as const }] : []),
     { id: 'commit' as SettingsSection, label: t('settings.commitNav', '提交设置'), icon: <FileText className="w-3.5 h-3.5" />, group: 'advanced' },
     { id: 'voice' as SettingsSection, label: t('settings.voiceNav'), icon: <Mic className="w-3.5 h-3.5" />, group: 'advanced' },
-    // { id: 'cloud' as SettingsSection, label: t('settings.cloudNav', '云端连接'), icon: <Link2 className="w-3.5 h-3.5" /> },
+    { id: 'cloud' as SettingsSection, label: t('settings.cloudNav', '账号'), icon: <Link2 className="w-3.5 h-3.5" />, group: 'advanced' as const },
     // Info group
     { id: 'about' as SettingsSection, label: t('settings.about'), icon: <Info className="w-3.5 h-3.5" />, group: 'info' },
   ];
@@ -1740,13 +1808,15 @@ export const SettingsView: FC<SettingsViewProps> = ({
                       <label className="text-sm text-[var(--color-text-secondary)]">{t('settings.shellIntegration')}</label>
                       <p className="text-xs text-[var(--color-text-muted)]">{t('settings.shellIntegrationDesc')}</p>
                     </div>
-                    <button type="button"
-                      onClick={() => { const newVal = !shellIntegrationEnabled; setShellIntegrationEnabled(newVal); saveShellIntegrationEnabled(newVal).catch(() => {}); }}
+                    <SettingsToggle
+                      checked={shellIntegrationEnabled}
                       disabled={!shellIntegrationLoaded}
-                      className={`relative inline-flex h-5 w-8 items-center rounded-full transition-colors ${shellIntegrationEnabled ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-text-muted)]'}`}
-                    >
-                      <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${shellIntegrationEnabled ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
-                    </button>
+                      ariaLabel={t('settings.shellIntegration')}
+                      onChange={(newVal) => {
+                        setShellIntegrationEnabled(newVal);
+                        saveShellIntegrationEnabled(newVal).catch(() => {});
+                      }}
+                    />
                   </div>
                 </div>
 
@@ -1962,17 +2032,15 @@ export const SettingsView: FC<SettingsViewProps> = ({
                       <label className="text-sm text-[var(--color-text-secondary)]">{t('settings.showSplitButton', '显示分屏按钮')}</label>
                       <p className="text-xs text-[var(--color-text-muted)]">{t('settings.showSplitButtonDesc', '在右下角显示分屏快捷按钮，用于添加多工作区面板')}</p>
                     </div>
-                    <button type="button"
-                      onClick={() => {
-                        const next = !showSplitButton;
+                    <SettingsToggle
+                      checked={showSplitButton}
+                      ariaLabel={t('settings.showSplitButton', '显示分屏按钮')}
+                      onChange={(next) => {
                         setShowSplitButton(next);
                         localStorage.setItem('show_split_button', JSON.stringify(next));
                         window.dispatchEvent(new Event('split-button-changed'));
                       }}
-                      className={`relative inline-flex h-5 w-8 items-center rounded-full transition-colors ${showSplitButton ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-text-muted)]'}`}
-                    >
-                      <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${showSplitButton ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
-                    </button>
+                    />
                   </div>
                 </div>
               </div>
@@ -2015,13 +2083,317 @@ export const SettingsView: FC<SettingsViewProps> = ({
               </div>
             )}
 
+            {/* ==================== Model Management ==================== */}
+            {activeSection === 'models' && dashscopeKeyLoaded && commitAiKeyLoaded && (
+              <div>
+                <h2 className="text-lg font-medium mb-4">{t('settings.modelsTitle', '模型管理')}</h2>
+                <div className="space-y-4">
+                  <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)]/50 rounded-lg p-4 space-y-4">
+                    <div>
+                      <h3 className="text-sm font-medium text-[var(--color-text-primary)]">{t('settings.localProviderTitle', '本地 Provider')}</h3>
+                      <p className="text-xs text-[var(--color-text-muted)] mt-1">{t('settings.localProviderDesc', '用于语音精炼和 commit message 的 OpenAI-compatible 配置；语音识别继续使用 Dashscope WebSocket。')}</p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm text-[var(--color-text-secondary)] mb-1">{t('settings.localApiKeyLabel', 'API Key')}</label>
+                      <div className="flex gap-2">
+                        <div className="relative flex-1">
+                          <Input
+                            type={showDashscopeKey ? 'text' : 'password'}
+                            value={dashscopeKey}
+                            onChange={(e) => { setDashscopeKey(e.target.value); setDashscopeSaved(false); }}
+                            placeholder={t('settings.dashscopeKeyPlaceholder')}
+                            className="w-full pr-9"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowDashscopeKey(v => !v)}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors"
+                          >
+                            {showDashscopeKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          disabled={dashscopeSaving}
+                          onClick={async () => {
+                            setDashscopeSaving(true);
+                            setDashscopeError(null);
+                            try {
+                              await saveDashscopeApiKey(dashscopeKey.trim());
+                              setDashscopeSaved(true);
+                              setTimeout(() => setDashscopeSaved(false), 2000);
+                            } catch (e) {
+                              setDashscopeError(String(e));
+                            } finally {
+                              setDashscopeSaving(false);
+                            }
+                          }}
+                        >
+                          {dashscopeSaving ? t('common.saving') : dashscopeSaved ? t('settings.savedSuccess') : t('common.save')}
+                        </Button>
+                      </div>
+                      {dashscopeError && <p className="text-sm text-[var(--color-error)] mt-1">{dashscopeError}</p>}
+                      <p className="text-xs text-[var(--color-text-muted)] mt-1">
+                        {t('settings.localApiKeyHint', 'Dashscope compatible-mode 和 realtime ASR 可以共用同一个 key。')}
+                        <button
+                          type="button"
+                          className="text-[var(--color-accent)] hover:text-[var(--color-accent)] ml-1 underline cursor-pointer transition-colors"
+                          onClick={() => openLink('https://dashscope.console.aliyun.com/apiKey')}
+                        >
+                          {t('settings.getApiKey')}
+                        </button>
+                      </p>
+                    </div>
+
+                    {(commitAiKeyMasked || commitAiKey) && (
+                      <div className="rounded-md border border-[var(--color-warning)]/30 bg-[var(--color-warning)]/10 p-3 flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-2">
+                          <AlertCircle className="w-4 h-4 text-[var(--color-warning)] mt-0.5 shrink-0" />
+                          <div>
+                            <p className="text-sm text-[var(--color-text-secondary)]">{t('settings.legacyCommitKeyTitle', '检测到旧版 Commit AI 专用 Key')}</p>
+                            <p className="text-xs text-[var(--color-text-muted)] mt-1">{t('settings.legacyCommitKeyDesc', '当前运行时会优先使用它。清除后 commit message 将使用上面的统一 API Key。')}</p>
+                          </div>
+                        </div>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          disabled={commitAiSaving}
+                          onClick={async () => {
+                            setCommitAiSaving(true);
+                            setCommitAiError(null);
+                            try {
+                              await saveCommitAiApiKey('');
+                              setCommitAiKey('');
+                              setCommitAiKeyMasked(false);
+                              setCommitAiSaved(true);
+                              setTimeout(() => setCommitAiSaved(false), 2000);
+                            } catch (e) {
+                              setCommitAiError(String(e));
+                            } finally {
+                              setCommitAiSaving(false);
+                            }
+                          }}
+                        >
+                          {commitAiSaving ? t('common.saving') : t('settings.clearLegacyOverride', '清除')}
+                        </Button>
+                      </div>
+                    )}
+                    {commitAiError && <p className="text-sm text-[var(--color-error)]">{commitAiError}</p>}
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-sm text-[var(--color-text-secondary)] mb-1">{t('settings.chatBaseUrlLabel', 'Chat Base URL')}</label>
+                        <div className="flex gap-2">
+                          <Input
+                            type="text"
+                            value={refineBaseUrl}
+                            onChange={(e) => { setRefineBaseUrl(e.target.value); setRefineUrlSaved(false); }}
+                            placeholder={DEFAULT_REFINE_URL}
+                            className="flex-1"
+                          />
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            disabled={refineUrlSaving}
+                            onClick={async () => {
+                              setRefineUrlSaving(true);
+                              setRefineUrlError(null);
+                              try {
+                                await saveVoiceRefineBaseUrl(refineBaseUrl.trim());
+                                setRefineUrlSaved(true);
+                                setTimeout(() => setRefineUrlSaved(false), 2000);
+                              } catch (e) {
+                                setRefineUrlError(String(e));
+                              } finally {
+                                setRefineUrlSaving(false);
+                              }
+                            }}
+                          >
+                            {refineUrlSaving ? t('common.saving') : refineUrlSaved ? t('settings.savedSuccess') : t('common.save')}
+                          </Button>
+                        </div>
+                        {refineUrlError && <p className="text-sm text-[var(--color-error)] mt-1">{refineUrlError}</p>}
+                        <p className="text-xs text-[var(--color-text-muted)] mt-1">{t('settings.chatBaseUrlHint', '用于 voice refine 和 commit message。')}</p>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm text-[var(--color-text-secondary)] mb-1">{t('settings.asrWsUrlLabel', 'ASR WebSocket URL')}</label>
+                        <div className="flex gap-2">
+                          <Input
+                            type="text"
+                            value={dashscopeUrl}
+                            onChange={(e) => { setDashscopeUrl(e.target.value); setDashscopeUrlSaved(false); }}
+                            placeholder={DEFAULT_DASHSCOPE_URL}
+                            className="flex-1"
+                          />
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            disabled={dashscopeUrlSaving}
+                            onClick={async () => {
+                              setDashscopeUrlSaving(true);
+                              setDashscopeUrlError(null);
+                              try {
+                                await saveDashscopeBaseUrl(dashscopeUrl.trim());
+                                setDashscopeUrlSaved(true);
+                                setTimeout(() => setDashscopeUrlSaved(false), 2000);
+                              } catch (e) {
+                                setDashscopeUrlError(String(e));
+                              } finally {
+                                setDashscopeUrlSaving(false);
+                              }
+                            }}
+                          >
+                            {dashscopeUrlSaving ? t('common.saving') : dashscopeUrlSaved ? t('settings.savedSuccess') : t('common.save')}
+                          </Button>
+                        </div>
+                        {dashscopeUrlError && <p className="text-sm text-[var(--color-error)] mt-1">{dashscopeUrlError}</p>}
+                        <p className="text-xs text-[var(--color-text-muted)] mt-1">{t('settings.asrWsUrlHint', '仅用于实时语音识别，不用于 chat/completions。')}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)]/50 rounded-lg p-4 space-y-4">
+                    <h3 className="text-sm font-medium text-[var(--color-text-primary)]">{t('settings.featureBindingsTitle', '功能绑定')}</h3>
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                      <div className="space-y-2">
+                        <div>
+                          <p className="text-sm text-[var(--color-text-secondary)]">{t('settings.voiceAsrTitle')}</p>
+                          <p className="text-xs text-[var(--color-text-muted)]">{t('settings.voiceAsrModelHint')}</p>
+                        </div>
+                        <BranchCombobox
+                          value={voiceAsrModel}
+                          onChange={(v) => { setVoiceAsrModel(v); saveVoiceAsrModel(v.trim()); }}
+                          onLoadBranches={async () => [
+                            'paraformer-realtime-v2',
+                            'paraformer-realtime-v1',
+                            'paraformer-realtime-8k-v2',
+                            'paraformer-realtime-8k-v1',
+                          ]}
+                          placeholder="paraformer-realtime-v2"
+                        />
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          disabled={dashscopeTesting || !dashscopeKey.trim()}
+                          onClick={async () => {
+                            setDashscopeTesting(true);
+                            setDashscopeTestResult(null);
+                            try {
+                              await saveDashscopeApiKey(dashscopeKey.trim());
+                              if (dashscopeUrl.trim()) await saveDashscopeBaseUrl(dashscopeUrl.trim());
+                              await voiceStart(16000);
+                              await voiceStop();
+                              setDashscopeTestResult({ ok: true, message: t('settings.connectionSuccess') });
+                            } catch (e) {
+                              setDashscopeTestResult({ ok: false, message: String(e) });
+                            } finally {
+                              setDashscopeTesting(false);
+                              setTimeout(() => setDashscopeTestResult(null), 4000);
+                            }
+                          }}
+                        >
+                          {dashscopeTesting ? t('settings.testing') : t('settings.testConnection')}
+                        </Button>
+                        {dashscopeTestResult && (
+                          <p className={`text-xs ${dashscopeTestResult.ok ? 'text-[var(--color-success)]' : 'text-[var(--color-error)]'}`}>{dashscopeTestResult.message}</p>
+                        )}
+                      </div>
+
+                      <div className="space-y-2">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm text-[var(--color-text-secondary)]">{t('settings.voiceRefineTitle')}</p>
+                            <p className="text-xs text-[var(--color-text-muted)]">{t('settings.voiceRefineDesc')}</p>
+                          </div>
+                          <SettingsToggle
+                            checked={voiceRefineEnabled}
+                            disabled={!voiceRefineLoaded}
+                            ariaLabel={t('settings.voiceRefineTitle')}
+                            onChange={(newVal) => {
+                              setVoiceRefineEnabled(newVal);
+                              saveVoiceRefineEnabled(newVal).catch(() => {});
+                            }}
+                          />
+                        </div>
+                        <BranchCombobox
+                          value={voiceRefineModel}
+                          onChange={(v) => { setVoiceRefineModel(v); saveVoiceRefineModel(v.trim()); }}
+                          onLoadBranches={async () => {
+                            const models = await listDashscopeModels();
+                            return models.filter(m => m.includes('qwen'));
+                          }}
+                          placeholder="qwen3.7-max"
+                        />
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          disabled={refineTesting || !dashscopeKey.trim()}
+                          onClick={async () => {
+                            setRefineTesting(true);
+                            setRefineTestResult(null);
+                            try {
+                              const result = await voiceRefineText('嗯那个就是我想说的就是这个功能还是蛮好用的然后呃我觉得可以的');
+                              setRefineTestResult({ ok: true, message: `${t('settings.refineTestSuccess')}: "${result}"` });
+                            } catch (e) {
+                              setRefineTestResult({ ok: false, message: String(e) });
+                            } finally {
+                              setRefineTesting(false);
+                              setTimeout(() => setRefineTestResult(null), 8000);
+                            }
+                          }}
+                        >
+                          {refineTesting ? t('settings.testing') : t('settings.testRefine')}
+                        </Button>
+                        {refineTestResult && (
+                          <p className={`text-xs ${refineTestResult.ok ? 'text-[var(--color-success)]' : 'text-[var(--color-error)]'}`}>{refineTestResult.message}</p>
+                        )}
+                      </div>
+
+                      <div className="space-y-2">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm text-[var(--color-text-secondary)]">{t('settings.commitAiLabel', 'AI 生成 commit message')}</p>
+                            <p className="text-xs text-[var(--color-text-muted)]">{t('settings.commitAiDesc', '根据 diff 自动生成提交信息')}</p>
+                          </div>
+                          <SettingsToggle
+                            checked={commitAiEnabled}
+                            disabled={!commitAiKeyLoaded}
+                            ariaLabel={t('settings.commitAiLabel', 'AI 生成 commit message')}
+                            onChange={(newVal) => {
+                              setCommitAiEnabled(newVal);
+                              saveCommitAiEnabled(newVal).catch((e) => setCommitAiError(String(e)));
+                            }}
+                          />
+                        </div>
+                        <BranchCombobox
+                          value={commitAiModel}
+                          onChange={(v) => setCommitAiModel(v)}
+                          onCommit={(v) => {
+                            saveCommitAiModel(v.trim()).catch((e) => setCommitAiError(String(e)));
+                          }}
+                          onLoadBranches={async () => {
+                            const models = await listDashscopeModels('commit_ai');
+                            return models.filter(m => m.includes('qwen'));
+                          }}
+                          placeholder="qwen3.7-max"
+                        />
+                        <p className="text-xs text-[var(--color-text-muted)]">{t('settings.commitAiModelHint', '留空使用默认模型 qwen3.7-max')}</p>
+                        {commitAiSaved && <p className="text-xs text-[var(--color-success)]">{t('settings.savedSuccess')}</p>}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* ==================== Voice ==================== */}
-            {activeSection === 'voice' && dashscopeKeyLoaded && (
+            {activeSection === 'voice' && (
               <div>
                 <h2 className="text-lg font-medium mb-4">{t('settings.voiceTitle')}</h2>
-                {/* Shared: API Key + Mic */}
-                <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)]/50 rounded-lg p-4 space-y-3 mb-4">
-                  {/* Microphone */}
+                <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)]/50 rounded-lg p-4 space-y-3">
                   <div>
                     <label className="block text-sm text-[var(--color-text-secondary)] mb-1">{t('settings.micDevice')}</label>
                     <div className="flex gap-2">
@@ -2051,160 +2423,10 @@ export const SettingsView: FC<SettingsViewProps> = ({
                       </div>
                     )}
                   </div>
-                  {/* Dashscope API Key */}
-                  <div>
-                    <label className="block text-sm text-[var(--color-text-secondary)] mb-1">{t('settings.dashscopeKeyLabel')}</label>
-                    <div className="flex gap-2">
-                      <div className="relative flex-1">
-                        <Input type={showDashscopeKey ? 'text' : 'password'} value={dashscopeKey}
-                          onChange={(e) => { setDashscopeKey(e.target.value); setDashscopeSaved(false); }}
-                          placeholder={t('settings.dashscopeKeyPlaceholder')} className="w-full pr-9"
-                        />
-                        <button type="button" onClick={() => setShowDashscopeKey(v => !v)}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors"
-                        >{showDashscopeKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button>
-                      </div>
-                      <Button variant="secondary" size="sm" disabled={dashscopeSaving}
-                        onClick={async () => { setDashscopeSaving(true); setDashscopeError(null); try { await saveDashscopeApiKey(dashscopeKey.trim()); setDashscopeSaved(true); setTimeout(() => setDashscopeSaved(false), 2000); } catch (e) { setDashscopeError(String(e)); } finally { setDashscopeSaving(false); } }}
-                      >{dashscopeSaving ? t('common.saving') : dashscopeSaved ? t('settings.savedSuccess') : t('common.save')}</Button>
-                    </div>
-                    {dashscopeError && <p className="text-sm text-[var(--color-error)] mt-1">{dashscopeError}</p>}
-                    <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                      {t('settings.voiceHint')}
-                      <button type="button" className="text-[var(--color-accent)] hover:text-[var(--color-accent)] ml-1 underline cursor-pointer transition-colors"
-                        onClick={() => openLink('https://dashscope.console.aliyun.com/apiKey')}
-                      >{t('settings.getApiKey')}</button>
-                    </p>
-                  </div>
+                  <p className="text-xs text-[var(--color-text-muted)]">
+                    {t('settings.voiceModelManagementHint', '语音识别和 AI 精炼模型请在「模型管理」中配置。')}
+                  </p>
                 </div>
-
-                {/* ASR Section */}
-                <h3 className="text-sm font-medium text-[var(--color-text-primary)] mb-2">{t('settings.voiceAsrTitle')}</h3>
-                <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)]/50 rounded-lg p-4 space-y-3 mb-4">
-                  {/* ASR WebSocket URL */}
-                  <div>
-                    <label className="block text-sm text-[var(--color-text-secondary)] mb-1">{t('settings.wsAddressLabel')}</label>
-                    <div className="flex gap-2">
-                      <Input type="text" value={dashscopeUrl}
-                        onChange={(e) => { setDashscopeUrl(e.target.value); setDashscopeUrlSaved(false); }}
-                        placeholder={DEFAULT_DASHSCOPE_URL} className="flex-1"
-                      />
-                      <Button variant="secondary" size="sm" disabled={dashscopeUrlSaving}
-                        onClick={async () => { setDashscopeUrlSaving(true); setDashscopeUrlError(null); try { await saveDashscopeBaseUrl(dashscopeUrl.trim()); setDashscopeUrlSaved(true); setTimeout(() => setDashscopeUrlSaved(false), 2000); } catch (e) { setDashscopeUrlError(String(e)); } finally { setDashscopeUrlSaving(false); } }}
-                      >{dashscopeUrlSaving ? t('common.saving') : dashscopeUrlSaved ? t('settings.savedSuccess') : t('common.save')}</Button>
-                      {dashscopeUrl && dashscopeUrl !== DEFAULT_DASHSCOPE_URL && (
-                        <Button variant="ghost" size="sm"
-                          onClick={async () => { setDashscopeUrl(''); setDashscopeUrlError(null); try { await saveDashscopeBaseUrl(''); setDashscopeUrlSaved(true); setTimeout(() => setDashscopeUrlSaved(false), 2000); } catch (e) { setDashscopeUrlError(String(e)); } }}
-                          className="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-                        >{t('settings.restoreDefault')}</Button>
-                      )}
-                    </div>
-                    {dashscopeUrlError && <p className="text-sm text-[var(--color-error)] mt-1">{dashscopeUrlError}</p>}
-                    <p className="text-xs text-[var(--color-text-muted)] mt-1">{t('settings.wsAddressHint', { url: DEFAULT_DASHSCOPE_URL })}</p>
-                  </div>
-                  {/* ASR Model */}
-                  {voiceModelsLoaded && (
-                    <div>
-                      <label className="block text-sm text-[var(--color-text-secondary)] mb-1">{t('settings.voiceAsrModel')}</label>
-                      <BranchCombobox
-                        value={voiceAsrModel}
-                        onChange={(v) => { setVoiceAsrModel(v); saveVoiceAsrModel(v.trim()); }}
-                        onLoadBranches={async () => [
-                          'paraformer-realtime-v2',
-                          'paraformer-realtime-v1',
-                          'paraformer-realtime-8k-v2',
-                          'paraformer-realtime-8k-v1',
-                        ]}
-                        placeholder="paraformer-realtime-v2"
-                      />
-                      <p className="text-xs text-[var(--color-text-muted)] mt-1">{t('settings.voiceAsrModelHint')}</p>
-                    </div>
-                  )}
-                  {/* ASR Test */}
-                  <div className="flex items-center gap-3">
-                    <Button variant="secondary" size="sm" disabled={dashscopeTesting || !dashscopeKey.trim()}
-                      onClick={async () => { setDashscopeTesting(true); setDashscopeTestResult(null); try { await saveDashscopeApiKey(dashscopeKey.trim()); if (dashscopeUrl.trim()) { await saveDashscopeBaseUrl(dashscopeUrl.trim()); } await voiceStart(16000); await voiceStop(); setDashscopeTestResult({ ok: true, message: t('settings.connectionSuccess') }); } catch (e) { setDashscopeTestResult({ ok: false, message: String(e) }); } finally { setDashscopeTesting(false); setTimeout(() => setDashscopeTestResult(null), 4000); } }}
-                    >
-                      {dashscopeTesting ? (<><div className="w-3 h-3 border border-[var(--color-accent)] border-t-transparent rounded-full animate-spin" />{t('settings.testing')}</>) : t('settings.testConnection')}
-                    </Button>
-                    {dashscopeTestResult && (
-                      <span className={`text-sm ${dashscopeTestResult.ok ? 'text-[var(--color-success)]' : 'text-[var(--color-error)]'}`}>{dashscopeTestResult.message}</span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Refine Section */}
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-sm font-medium text-[var(--color-text-primary)]">{t('settings.voiceRefineTitle')}</h3>
-                  <button type="button" onClick={() => { const newVal = !voiceRefineEnabled; setVoiceRefineEnabled(newVal); saveVoiceRefineEnabled(newVal).catch(() => { }); }}
-                    disabled={!voiceRefineLoaded}
-                    className={`relative inline-flex h-5 w-8 items-center rounded-full transition-colors ${voiceRefineEnabled ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-text-muted)]'}`}
-                  ><span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${voiceRefineEnabled ? 'translate-x-3.5' : 'translate-x-0.5'}`} /></button>
-                </div>
-                {voiceRefineEnabled && (
-                  <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)]/50 rounded-lg p-4 space-y-3">
-                    <p className="text-xs text-[var(--color-text-muted)]">{t('settings.voiceRefineDesc')}</p>
-                    {/* Refine Base URL */}
-                    <div>
-                      <label className="block text-sm text-[var(--color-text-secondary)] mb-1">{t('settings.refineBaseUrlLabel')}</label>
-                      <div className="flex gap-2">
-                        <Input type="text" value={refineBaseUrl}
-                          onChange={(e) => { setRefineBaseUrl(e.target.value); setRefineUrlSaved(false); }}
-                          placeholder={DEFAULT_REFINE_URL} className="flex-1"
-                        />
-                        <Button variant="secondary" size="sm" disabled={refineUrlSaving}
-                          onClick={async () => { setRefineUrlSaving(true); setRefineUrlError(null); try { await saveVoiceRefineBaseUrl(refineBaseUrl.trim()); setRefineUrlSaved(true); setTimeout(() => setRefineUrlSaved(false), 2000); } catch (e) { setRefineUrlError(String(e)); } finally { setRefineUrlSaving(false); } }}
-                        >{refineUrlSaving ? t('common.saving') : refineUrlSaved ? t('settings.savedSuccess') : t('common.save')}</Button>
-                        {refineBaseUrl && refineBaseUrl !== DEFAULT_REFINE_URL && (
-                          <Button variant="ghost" size="sm"
-                            onClick={async () => { setRefineBaseUrl(''); setRefineUrlError(null); try { await saveVoiceRefineBaseUrl(''); setRefineUrlSaved(true); setTimeout(() => setRefineUrlSaved(false), 2000); } catch (e) { setRefineUrlError(String(e)); } }}
-                            className="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-                          >{t('settings.restoreDefault')}</Button>
-                        )}
-                      </div>
-                      {refineUrlError && <p className="text-sm text-[var(--color-error)] mt-1">{refineUrlError}</p>}
-                      <p className="text-xs text-[var(--color-text-muted)] mt-1">{t('settings.refineBaseUrlHint', { url: DEFAULT_REFINE_URL })}</p>
-                    </div>
-                    {/* Refine Model */}
-                    {voiceModelsLoaded && (
-                      <div>
-                        <label className="block text-sm text-[var(--color-text-secondary)] mb-1">{t('settings.voiceRefineModel')}</label>
-                        <BranchCombobox
-                          value={voiceRefineModel}
-                          onChange={(v) => { setVoiceRefineModel(v); saveVoiceRefineModel(v.trim()); }}
-                          onLoadBranches={async () => {
-                            const models = await listDashscopeModels();
-                            return models.filter(m => m.includes('qwen'));
-                          }}
-                          placeholder="qwen3.7-max"
-                        />
-                        <p className="text-xs text-[var(--color-text-muted)] mt-1">{t('settings.voiceRefineModelHint')}</p>
-                      </div>
-                    )}
-                    {/* Refine Test */}
-                    <div className="flex items-center gap-3">
-                      <Button variant="secondary" size="sm" disabled={refineTesting || !dashscopeKey.trim()}
-                        onClick={async () => {
-                          setRefineTesting(true); setRefineTestResult(null);
-                          try {
-                            const result = await voiceRefineText('嗯那个就是我想说的就是这个功能还是蛮好用的然后呃我觉得可以的');
-                            setRefineTestResult({ ok: true, message: `${t('settings.refineTestSuccess')}: "${result}"` });
-                          } catch (e) {
-                            setRefineTestResult({ ok: false, message: String(e) });
-                          } finally {
-                            setRefineTesting(false);
-                            setTimeout(() => setRefineTestResult(null), 8000);
-                          }
-                        }}
-                      >
-                        {refineTesting ? (<><div className="w-3 h-3 border border-[var(--color-accent)] border-t-transparent rounded-full animate-spin" />{t('settings.testing')}</>) : t('settings.testRefine')}
-                      </Button>
-                      {refineTestResult && (
-                        <span className={`text-sm ${refineTestResult.ok ? 'text-[var(--color-success)]' : 'text-[var(--color-error)]'}`}>{refineTestResult.message}</span>
-                      )}
-                    </div>
-                  </div>
-                )}
               </div>
             )}
 
@@ -2213,73 +2435,17 @@ export const SettingsView: FC<SettingsViewProps> = ({
               <div>
                 <h2 className="text-lg font-medium mb-4">{t('settings.commitTitle', '提交设置')}</h2>
                 <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)]/50 rounded-lg p-4 space-y-4">
-                  {/* AI 助手 */}
-                  <div>
-                    <h3 className="text-sm font-medium text-[var(--color-text-primary)] mb-4">{t('settings.commitAiTitle', 'AI 助手')}</h3>
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <label className="block text-sm text-[var(--color-text-secondary)]">{t('settings.commitAiLabel', 'AI 生成 commit message')}</label>
-                          <p className="text-xs text-[var(--color-text-muted)]">{t('settings.commitAiDesc', '根据 diff 自动生成提交信息')}</p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={async () => { const newVal = !commitAiEnabled; setCommitAiEnabled(newVal); await saveCommitAiEnabled(newVal); }}
-                          disabled={!commitAiKeyLoaded}
-                          className={`relative inline-flex h-5 w-8 items-center rounded-full transition-colors ${commitAiEnabled ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-text-muted)]'}`}
-                        >
-                          <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${commitAiEnabled ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
-                        </button>
-                      </div>
-                      <div>
-                        <label className="block text-sm text-[var(--color-text-secondary)] mb-1">{t('settings.commitAiKeyLabel', 'Dashscope API Key')}</label>
-                        <div className="flex gap-2">
-                          <Input
-                            type="password"
-                            value={commitAiKey}
-                            onChange={(e) => { setCommitAiKey(e.target.value); setCommitAiKeyMasked(false); }}
-                            placeholder={commitAiKeyMasked ? t('settings.commitAiKeyMaskedPlaceholder', 'Key already set (enter new key to replace)') : t('settings.commitAiKeyPlaceholder', 'sk-...')}
-                            className="flex-1"
-                          />
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            disabled={commitAiSaving || (commitAiKeyMasked && !commitAiKey.trim())}
-                            onClick={async () => {
-                              setCommitAiSaving(true);
-                              setCommitAiError(null);
-                              try {
-                                await saveCommitAiApiKey(commitAiKey.trim());
-                                setCommitAiSaved(true);
-                                setTimeout(() => setCommitAiSaved(false), 2000);
-                              } catch (e) {
-                                setCommitAiError(String(e));
-                              } finally {
-                                setCommitAiSaving(false);
-                              }
-                            }}
-                          >
-                            {commitAiSaving ? t('common.saving') : commitAiSaved ? t('settings.savedSuccess') : t('common.save')}
-                          </Button>
-                        </div>
-                        {commitAiError && <p className="text-sm text-[var(--color-error)] mt-1">{commitAiError}</p>}
-                        <p className="text-xs text-[var(--color-text-muted)] mt-1">{t('settings.commitAiKeyHint', '需要独立的 Dashscope API Key，与语音 Key 分离')}</p>
-                      </div>
-                    </div>
-                  </div>
-
                   {/* 前缀开关 */}
                   <div className="flex items-center justify-between">
                     <div>
                       <label className="text-sm text-[var(--color-text-secondary)]">{t('settings.prefixEnabled', '启用提交前缀')}</label>
                       <p className="text-xs text-[var(--color-text-muted)]">{t('settings.prefixEnabledDesc', '在 commit message 前自动添加前缀')}</p>
                     </div>
-                    <button type="button"
-                      onClick={() => setPrefixEnabled(v => !v)}
-                      className={`relative inline-flex h-5 w-8 items-center rounded-full transition-colors ${prefixEnabled ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-text-muted)]'}`}
-                    >
-                      <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${prefixEnabled ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
-                    </button>
+                    <SettingsToggle
+                      checked={prefixEnabled}
+                      ariaLabel={t('settings.prefixEnabled', '启用提交前缀')}
+                      onChange={setPrefixEnabled}
+                    />
                   </div>
 
                   {/* Skip Git Hooks */}
@@ -2288,13 +2454,15 @@ export const SettingsView: FC<SettingsViewProps> = ({
                       <label className="text-sm text-[var(--color-text-secondary)]">{t('settings.skipGitHooks', '跳过 Git Hooks')}</label>
                       <p className="text-xs text-[var(--color-text-muted)]">{t('settings.skipGitHooksDesc', '提交时跳过 pre-commit / commit-msg hooks')}</p>
                     </div>
-                    <button type="button"
-                      onClick={() => { const newVal = !skipGitHooks; setSkipGitHooks(newVal); saveSkipGitHooks(newVal).catch(() => {}); }}
+                    <SettingsToggle
+                      checked={skipGitHooks}
                       disabled={!skipGitHooksLoaded}
-                      className={`relative inline-flex h-5 w-8 items-center rounded-full transition-colors ${skipGitHooks ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-text-muted)]'}`}
-                    >
-                      <span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${skipGitHooks ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
-                    </button>
+                      ariaLabel={t('settings.skipGitHooks', '跳过 Git Hooks')}
+                      onChange={(newVal) => {
+                        setSkipGitHooks(newVal);
+                        saveSkipGitHooks(newVal).catch(() => {});
+                      }}
+                    />
                   </div>
 
                   {/* 模板列表 */}
@@ -2398,35 +2566,35 @@ export const SettingsView: FC<SettingsViewProps> = ({
                 <h2 className="text-lg font-medium mb-4">{t('settings.cloudTitle', '云端连接')}</h2>
                 <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)]/50 rounded-lg p-4">
                   {cloudStatus?.connected ? (
-                    <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg space-y-2">
+                    <div className="p-3 bg-[var(--color-success)]/10 border border-[var(--color-success)]/30 rounded-lg space-y-2 text-[var(--color-text-primary)]">
                       <div className="flex items-center justify-between">
                         <div>
-                          <p className="text-sm font-medium text-green-700 dark:text-green-300">{t('settings.cloudConnected', '已连接')}</p>
-                          <p className="text-xs text-muted-foreground">{cloudStatus.server_url}</p>
+                          <p className="text-sm font-medium text-[var(--color-success)]">{t('settings.cloudConnected', '已连接')}</p>
+                          <p className="text-xs text-[var(--color-text-secondary)]">{cloudStatus.server_url}</p>
                         </div>
                         <Button variant="outline" size="sm" onClick={handleCloudDisconnect}>{t('settings.cloudDisconnect', '断开连接')}</Button>
                       </div>
                       {(cloudStatus.username || cloudStatus.user_email) && (
-                        <div className="text-xs text-muted-foreground space-y-0.5 pt-1 border-t border-green-200/30">
+                        <div className="text-xs text-[var(--color-text-secondary)] space-y-0.5 pt-1 border-t border-[var(--color-success)]/20">
                           {cloudStatus.username && (
-                            <p>{t('settings.cloudUsername', '用户名')}: <span className="text-[var(--color-text-secondary)]">{cloudStatus.username}</span></p>
+                            <p>{t('settings.cloudUsername', '用户名')}: <span className="text-[var(--color-text-primary)]">{cloudStatus.username}</span></p>
                           )}
                           {cloudStatus.user_email && (
-                            <p>{t('settings.cloudEmail', '邮箱')}: <span className="text-[var(--color-text-secondary)]">{cloudStatus.user_email}</span></p>
+                            <p>{t('settings.cloudEmail', '邮箱')}: <span className="text-[var(--color-text-primary)]">{cloudStatus.user_email}</span></p>
                           )}
                           {cloudStatus.token_expires_at && (
-                            <p>{t('settings.cloudTokenExpiry', 'Token 有效期至')}: <span className="text-[var(--color-text-secondary)]">{new Date(cloudStatus.token_expires_at).toLocaleString()}</span></p>
+                            <p>{t('settings.cloudTokenExpiry', 'Token 有效期至')}: <span className="text-[var(--color-text-primary)]">{formatCloudTokenExpiryUtc(cloudStatus.token_expires_at)}</span></p>
                           )}
                         </div>
                       )}
                     </div>
                   ) : pairingCode ? (
-                    <div className="space-y-3 p-4 border border-[var(--color-border)]/50 rounded-lg">
-                      <p className="text-sm text-muted-foreground">{t('settings.cloudPairingHint', '请在 WMS 管理后台输入以下配对码：')}</p>
-                      <p className="text-3xl font-mono font-bold text-center tracking-wider">{pairingCode}</p>
+                    <div className="space-y-3 p-4 bg-[var(--color-bg-base)]/35 border border-[var(--color-border)]/50 rounded-lg text-[var(--color-text-primary)]">
+                      <p className="text-sm text-[var(--color-text-secondary)]">{t('settings.cloudPairingHint', '请在 WMS 管理后台输入以下配对码：')}</p>
+                      <p className="text-3xl font-mono font-bold text-center tracking-wider text-[var(--color-text-primary)]">{pairingCode}</p>
                       {pairingStatus?.status === 'claimed' && (
-                        <div className="p-3 bg-yellow-50 dark:bg-[var(--color-warning)]/10 rounded">
-                          <p className="text-sm">{t('settings.cloudPairingRequest', '用户')} <strong>{pairingStatus.user_email || pairingStatus.username}</strong> {t('settings.cloudPairingRequestSuffix', '请求连接此设备')}</p>
+                        <div className="p-3 bg-[var(--color-warning)]/10 border border-[var(--color-warning)]/30 rounded text-[var(--color-text-primary)]">
+                          <p className="text-sm">{t('settings.cloudPairingRequest', '用户')} <strong className="text-[var(--color-warning)]">{pairingStatus.user_email || pairingStatus.username}</strong> {t('settings.cloudPairingRequestSuffix', '请求连接此设备')}</p>
                           <div className="flex gap-2 mt-2">
                             <Button size="sm" onClick={handleCloudApprove}>{t('settings.cloudApprove', '同意')}</Button>
                             <Button size="sm" variant="outline" onClick={handleCloudReject}>{t('settings.cloudReject', '拒绝')}</Button>
@@ -2437,8 +2605,8 @@ export const SettingsView: FC<SettingsViewProps> = ({
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      <p className="text-sm text-muted-foreground">服务端 <code className="bg-[var(--color-bg-elevated)]/50 px-1.5 py-0.5 rounded text-xs">https://wms.kirov-opensource.com/</code></p>
-                      <p className="text-sm text-muted-foreground">设备名称 <code className="bg-[var(--color-bg-elevated)]/50 px-1.5 py-0.5 rounded text-xs">自动获取 hostname</code></p>
+                      <p className="text-sm text-[var(--color-text-secondary)]">服务端 <code className="bg-[var(--color-bg-elevated)]/70 border border-[var(--color-border)]/40 text-[var(--color-text-primary)] px-1.5 py-0.5 rounded text-xs">https://wms.kirov-opensource.com/</code></p>
+                      <p className="text-sm text-[var(--color-text-secondary)]">设备名称 <code className="bg-[var(--color-bg-elevated)]/70 border border-[var(--color-border)]/40 text-[var(--color-text-primary)] px-1.5 py-0.5 rounded text-xs">自动获取 hostname</code></p>
                       <Button onClick={handleStartPairing}>{t('settings.cloudStartPairing', '开始配对')}</Button>
                     </div>
                   )}
@@ -2480,9 +2648,15 @@ export const SettingsView: FC<SettingsViewProps> = ({
                         <label className="text-sm text-[var(--color-text-secondary)]">DevTools (F12)</label>
                         <p className="text-xs text-[var(--color-text-muted)]">{t('settings.devToolsDesc', 'Press F12 to open developer tools')}</p>
                       </div>
-                      <button type="button" onClick={() => { const newVal = !devConsoleEnabled; setDevConsoleEnabled(newVal); localStorage.setItem('dev-console-enabled', String(newVal)); window.dispatchEvent(new Event('dev-console-enabled-changed')); }}
-                        className={`relative inline-flex h-5 w-8 items-center rounded-full transition-colors ${devConsoleEnabled ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-text-muted)]'}`}
-                      ><span className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${devConsoleEnabled ? 'translate-x-3.5' : 'translate-x-0.5'}`} /></button>
+                      <SettingsToggle
+                        checked={devConsoleEnabled}
+                        ariaLabel="DevTools (F12)"
+                        onChange={(newVal) => {
+                          setDevConsoleEnabled(newVal);
+                          localStorage.setItem('dev-console-enabled', String(newVal));
+                          window.dispatchEvent(new Event('dev-console-enabled-changed'));
+                        }}
+                      />
                     </div>
                   )}
                 </div>

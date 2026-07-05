@@ -75,6 +75,7 @@ pub struct CloudStatus {
 pub struct DeviceCodeResponse {
     pub code: String,
     pub device_secret: String,
+    pub expires_at: Option<String>,
     pub expires_in: Option<u64>,
     pub poll_interval: Option<u64>,
 }
@@ -85,6 +86,7 @@ pub struct DeviceCodeStatusResponse {
     pub access_token: Option<String>,
     pub refresh_token: Option<String>,
     pub user_email: Option<String>,
+    pub username: Option<String>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
@@ -92,6 +94,33 @@ pub struct ApproveResponse {
     pub access_token: Option<String>,
     pub refresh_token: Option<String>,
     pub user_email: Option<String>,
+}
+
+fn expired_device_code_status() -> DeviceCodeStatusResponse {
+    DeviceCodeStatusResponse {
+        status: "expired".to_string(),
+        access_token: None,
+        refresh_token: None,
+        user_email: None,
+        username: None,
+    }
+}
+
+fn device_code_status_from_error(
+    status: reqwest::StatusCode,
+    _body: &str,
+) -> Option<DeviceCodeStatusResponse> {
+    if status == reqwest::StatusCode::NOT_FOUND {
+        Some(expired_device_code_status())
+    } else {
+        None
+    }
+}
+
+fn clear_pairing_state() -> Result<(), String> {
+    let mut state = PAIRING_STATE.lock().map_err(|e| e.to_string())?;
+    *state = None;
+    Ok(())
 }
 
 // ==================== Commands ====================
@@ -199,6 +228,11 @@ pub(crate) async fn cloud_start_pairing() -> Result<DeviceCodeResponse, String> 
         // Clear any existing tokens on new pairing
         config.cloud.access_token = None;
         config.cloud.refresh_token = None;
+        // Clear tunnel credentials so a new account doesn't inherit the previous device's
+        // tunnel_token/subdomain.
+        config.cloud.tunnel_token = None;
+        config.cloud.subdomain = None;
+        config.cloud.tunnel_registered_as = None;
         save_global_config_internal(&config)?;
     }
 
@@ -248,6 +282,10 @@ pub(crate) async fn cloud_check_pairing_status() -> Result<DeviceCodeStatusRespo
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
+        if let Some(expired) = device_code_status_from_error(status, &text) {
+            clear_pairing_state()?;
+            return Ok(expired);
+        }
         return Err(format!("服务器返回错误 {}: {}", status, text));
     }
 
@@ -267,8 +305,7 @@ pub(crate) async fn cloud_check_pairing_status() -> Result<DeviceCodeStatusRespo
             save_global_config_internal(&config)?;
         }
         // Clear pairing state
-        let mut state = PAIRING_STATE.lock().map_err(|e| e.to_string())?;
-        *state = None;
+        clear_pairing_state()?;
     }
 
     Ok(data)
@@ -327,10 +364,7 @@ pub(crate) async fn cloud_approve_pairing() -> Result<ApproveResponse, String> {
     }
 
     // Clear pairing state
-    {
-        let mut state = PAIRING_STATE.lock().map_err(|e| e.to_string())?;
-        *state = None;
-    }
+    clear_pairing_state()?;
 
     Ok(data)
 }
@@ -366,14 +400,15 @@ pub(crate) async fn cloud_reject_pairing() -> Result<(), String> {
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
+        if device_code_status_from_error(status, &text).is_some() {
+            clear_pairing_state()?;
+            return Ok(());
+        }
         return Err(format!("服务器返回错误 {}: {}", status, text));
     }
 
     // Clear pairing state regardless
-    {
-        let mut state = PAIRING_STATE.lock().map_err(|e| e.to_string())?;
-        *state = None;
-    }
+    clear_pairing_state()?;
 
     Ok(())
 }
@@ -384,13 +419,15 @@ pub(crate) async fn cloud_disconnect() -> Result<(), String> {
     let mut config = load_global_config();
     config.cloud.access_token = None;
     config.cloud.refresh_token = None;
+    // Clear tunnel credentials too: a logged-out account must not keep a usable
+    // tunnel_token/subdomain that could bring up a public tunnel on the next start.
+    config.cloud.tunnel_token = None;
+    config.cloud.subdomain = None;
+    config.cloud.tunnel_registered_as = None;
     save_global_config_internal(&config)?;
 
     // Also clear any in-progress pairing
-    {
-        let mut state = PAIRING_STATE.lock().map_err(|e| e.to_string())?;
-        *state = None;
-    }
+    clear_pairing_state()?;
 
     Ok(())
 }
@@ -537,6 +574,7 @@ mod tests {
         let device_code = DeviceCodeResponse {
             code: "ABCD-EFGH".to_string(),
             device_secret: "secret".to_string(),
+            expires_at: Some("2026-07-03T00:17:06Z".to_string()),
             expires_in: Some(600),
             poll_interval: Some(3),
         };
@@ -544,6 +582,7 @@ mod tests {
         let decoded: DeviceCodeResponse = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded.code, "ABCD-EFGH");
         assert_eq!(decoded.device_secret, "secret");
+        assert_eq!(decoded.expires_at.as_deref(), Some("2026-07-03T00:17:06Z"));
         assert_eq!(decoded.expires_in, Some(600));
         assert_eq!(decoded.poll_interval, Some(3));
 
@@ -551,13 +590,36 @@ mod tests {
             "status": "approved",
             "access_token": "access",
             "refresh_token": "refresh",
-            "user_email": "user@example.com"
+            "user_email": "user@example.com",
+            "username": "alice"
         }))
         .unwrap();
         assert_eq!(status.status, "approved");
         assert_eq!(status.access_token.as_deref(), Some("access"));
         assert_eq!(status.refresh_token.as_deref(), Some("refresh"));
         assert_eq!(status.user_email.as_deref(), Some("user@example.com"));
+        assert_eq!(status.username.as_deref(), Some("alice"));
+    }
+
+    #[serial]
+    #[test]
+    fn device_code_not_found_errors_map_to_expired_status() {
+        let expired = device_code_status_from_error(
+            reqwest::StatusCode::NOT_FOUND,
+            r#"{"error":"Device code not found or expired"}"#,
+        )
+        .expect("not-found device code should map to expired");
+
+        assert_eq!(expired.status, "expired");
+        assert_eq!(expired.user_email, None);
+        assert_eq!(expired.username, None);
+
+        let other_error = device_code_status_from_error(
+            reqwest::StatusCode::BAD_REQUEST,
+            r#"{"error":"Invalid device secret"}"#,
+        );
+
+        assert!(other_error.is_none());
     }
 
     #[serial]

@@ -58,6 +58,8 @@ export function WorkspaceCell({ initialWorkspacePath, closable, onClose }: Works
     updater,
     voice,
     openSettings,
+    initialSettingsSection,
+    settingsNavNonce,
     handleSaveConfig,
     handleTerminalTabContextMenu,
   } = useAppShellState(t, initialWorkspacePath);
@@ -128,6 +130,8 @@ export function WorkspaceCell({ initialWorkspacePath, closable, onClose }: Works
               workspaces={workspace.workspaces}
               currentWorkspace={workspace.currentWorkspace}
               onRemoveWorkspace={workspace.removeWorkspace}
+              initialSection={initialSettingsSection}
+              settingsNavNonce={settingsNavNonce}
             />
           )}
         </div>
@@ -179,6 +183,14 @@ export function WorkspaceCell({ initialWorkspacePath, closable, onClose }: Works
               hasLastConfig={share.hasLastConfig}
               onQuickShare={share.handleQuickShare}
               hasNgrokToken={share.hasNgrokToken}
+              shareWmsUrl={share.shareWmsUrl}
+              wmsConnected={share.wmsConnected}
+              wmsReconnecting={share.wmsReconnecting}
+              wmsReconnectAttempt={share.wmsReconnectAttempt}
+              wmsNextRetrySecs={share.wmsNextRetrySecs}
+              wmsLoading={share.wmsLoading}
+              onToggleWms={share.handleToggleWms}
+              onWmsManualReconnect={share.handleWmsManualReconnect}
               occupation={mainOccupation.occupation}
               batchArchiveModalOpen={actions.batchArchiveModalOpen}
               onToggleBatchArchiveModal={() => actions.setBatchArchiveModalOpen(!actions.batchArchiveModalOpen)}
@@ -253,6 +265,7 @@ export function WorkspaceCell({ initialWorkspacePath, closable, onClose }: Works
               isKeyHeld={voice.isKeyHeld}
               analyserNode={voice.analyserNode}
               onToggleVoice={voice.toggleVoice}
+              onStartRecording={voice.startRecording}
               onStopRecording={voice.stopRecording}
               staging={voice.staging}
               clientId={terminalHook.clientId}

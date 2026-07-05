@@ -12,6 +12,9 @@ import { ChevronDownIcon, RefreshIcon } from './Icons';
 interface BranchComboboxProps {
   value: string;
   onChange: (value: string) => void;
+  /** Fires only on a committed value (selection or blur), not on every keystroke.
+   *  Use this for side effects like persistence to avoid writing partial input. */
+  onCommit?: (value: string) => void;
   onLoadBranches?: () => Promise<string[]>;
   placeholder?: string;
   disabled?: boolean;
@@ -20,6 +23,7 @@ interface BranchComboboxProps {
 export const BranchCombobox: FC<BranchComboboxProps> = ({
   value,
   onChange,
+  onCommit,
   onLoadBranches,
   placeholder,
   disabled = false,
@@ -60,6 +64,7 @@ export const BranchCombobox: FC<BranchComboboxProps> = ({
   const handleSelect = (branch: string) => {
     setInputValue(branch);
     onChange(branch);
+    onCommit?.(branch);
     setOpen(false);
     setSearchQuery('');
   };
@@ -74,6 +79,7 @@ export const BranchCombobox: FC<BranchComboboxProps> = ({
     if (inputValue !== value) {
       onChange(inputValue);
     }
+    onCommit?.(inputValue);
   };
 
   const filteredBranches = branches.filter(branch =>

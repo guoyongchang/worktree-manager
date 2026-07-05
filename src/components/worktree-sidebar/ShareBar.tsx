@@ -63,6 +63,15 @@ interface ShareBarProps {
   hasLastConfig?: boolean;
   onQuickShare?: () => void;
   hasNgrokToken?: boolean;
+  // WMS tunnel
+  wmsUrl?: string | null;
+  wmsConnected?: boolean;
+  wmsReconnecting?: boolean;
+  wmsReconnectAttempt?: number;
+  wmsNextRetrySecs?: number;
+  wmsLoading?: boolean;
+  onToggleWms?: () => void;
+  onWmsManualReconnect?: () => void;
 }
 
 export const ShareBar: FC<ShareBarProps> = ({
@@ -80,6 +89,14 @@ export const ShareBar: FC<ShareBarProps> = ({
   hasLastConfig = false,
   onQuickShare,
   hasNgrokToken = false,
+  wmsUrl = null,
+  wmsConnected = false,
+  wmsReconnecting = false,
+  wmsReconnectAttempt = 0,
+  wmsNextRetrySecs = 0,
+  wmsLoading = false,
+  onToggleWms,
+  onWmsManualReconnect,
 }) => {
   const { t } = useTranslation();
   const [showPassword, setShowPassword] = useState(false);
@@ -231,6 +248,17 @@ export const ShareBar: FC<ShareBarProps> = ({
             onCopyLabel={t('share.copyExternalLink')}
           />
         )}
+        <WmsTunnelRow
+          url={wmsUrl}
+          connected={wmsConnected}
+          reconnecting={wmsReconnecting}
+          reconnectAttempt={wmsReconnectAttempt}
+          nextRetrySecs={wmsNextRetrySecs}
+          loading={wmsLoading}
+          password={editingPassword}
+          onToggle={onToggleWms}
+          onManualReconnect={onWmsManualReconnect}
+        />
       </div>
 
       {urls.length > 0 ? (
@@ -325,6 +353,111 @@ export const ShareBar: FC<ShareBarProps> = ({
         onRandomPort={() => setSharePort(generateRandomPort())}
         onConfirm={handleStartShare}
       />
+    </div>
+  );
+};
+
+const WmsTunnelRow: FC<{
+  url: string | null;
+  connected: boolean;
+  reconnecting: boolean;
+  reconnectAttempt: number;
+  nextRetrySecs: number;
+  loading: boolean;
+  password: string;
+  onToggle?: () => void;
+  onManualReconnect?: () => void;
+}> = ({ url, connected, reconnecting, reconnectAttempt, nextRetrySecs, loading, password, onToggle, onManualReconnect }) => {
+  const { t } = useTranslation();
+
+  // Status text + tone when tunnel is running
+  let statusText: string | null = null;
+  let statusTone: 'connected' | 'reconnecting' | 'disconnected' | null = null;
+  if (url) {
+    if (reconnecting) {
+      statusText = nextRetrySecs > 0
+        ? t('share.wmsRetryIn', { seconds: nextRetrySecs })
+        : t('share.wmsReconnecting');
+      statusTone = 'reconnecting';
+    } else if (!connected) {
+      statusText = t('share.wmsDisconnected');
+      statusTone = 'disconnected';
+    } else {
+      statusText = t('share.wmsConnected');
+      statusTone = 'connected';
+    }
+  }
+  const statusColorClass =
+    statusTone === 'connected'
+      ? 'text-emerald-400'
+      : statusTone === 'reconnecting'
+        ? 'text-[var(--color-warning)]'
+        : 'text-[var(--color-error)]';
+
+  if (!url) {
+    return (
+      <div className="flex items-center gap-2 min-h-[24px]">
+        <span className="text-[11px] font-bold px-1.5 py-0.5 rounded shrink-0 bg-[var(--color-bg-elevated)] text-[var(--color-text-muted)] w-[52px] text-center">
+          {t('share.wan')}
+        </span>
+        <span className="text-[11px] font-medium text-[var(--color-text-muted)] shrink-0">{t('share.wmsLabel')}</span>
+        <span className="flex-1 text-xs text-[var(--color-text-muted)]">{t('share.wmsNotStarted')}</span>
+        <button
+          type="button"
+          onClick={onToggle}
+          disabled={loading}
+          className={`relative inline-flex h-4 w-7 items-center rounded-full shrink-0 transition-colors ${loading ? 'opacity-50 cursor-wait' : 'cursor-pointer'} bg-[var(--color-bg-elevated)]`}
+        >
+          <span className="inline-block h-3 w-3 rounded-full bg-white transition-transform translate-x-0.5" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-0.5">
+      <div className="flex items-center gap-2 min-h-[24px]">
+        <span className="text-[11px] font-bold px-1.5 py-0.5 rounded shrink-0 bg-[var(--color-bg-elevated)] text-[var(--color-text-muted)] w-[52px] text-center">
+          {t('share.wan')}
+        </span>
+        <span className="text-[11px] font-medium text-[var(--color-text-muted)] shrink-0">{t('share.wmsLabel')}</span>
+        <span className="flex-1 text-xs text-[var(--color-accent)] truncate min-w-0 select-all" title={url}>
+          {url.replace(/^https?:\/\//, '')}
+        </span>
+        <QrActions url={url} password={password} copyLabel={t('share.copyExternalLink')} />
+        <button
+          type="button"
+          onClick={onToggle}
+          disabled={loading}
+          className={`relative inline-flex h-4 w-7 items-center rounded-full shrink-0 transition-colors ${loading ? 'opacity-50 cursor-wait' : 'cursor-pointer'} bg-[var(--color-accent)]`}
+        >
+          <span className="inline-block h-3 w-3 rounded-full bg-white transition-transform translate-x-3.5" />
+        </button>
+      </div>
+      {statusText && (
+        <div className="flex items-center gap-2 pl-[60px]">
+          <span className={`text-[10px] ${statusColorClass}`}>
+            {reconnecting && reconnectAttempt > 0 ? `#${reconnectAttempt} ` : ''}{statusText}
+          </span>
+          {reconnecting && (
+            <TooltipProvider delayDuration={300}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={onManualReconnect}
+                    className="h-4 w-4 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+                  >
+                    <RefreshIcon className="w-3 h-3" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">{t('share.wmsManualReconnect')}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+        </div>
+      )}
     </div>
   );
 };

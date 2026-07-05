@@ -17,6 +17,15 @@ impl CloudError {
     pub fn is_auth_failed(&self) -> bool {
         matches!(self, Self::AuthExpired)
     }
+
+    pub fn is_provider_unconfigured(&self) -> bool {
+        matches!(
+            self,
+            Self::Http(500 | 503, msg)
+                if msg.contains("No AI provider configured")
+                    || msg.contains("AI provider not configured")
+        )
+    }
 }
 
 impl std::fmt::Display for CloudError {
@@ -142,7 +151,10 @@ pub async fn cloud_ai_chat(
     }
 }
 
-async fn refresh_access_token(server_url: &str, refresh_token: &str) -> Result<String, CloudError> {
+pub(crate) async fn refresh_access_token(
+    server_url: &str,
+    refresh_token: &str,
+) -> Result<String, CloudError> {
     let url = format!("{}/api/auth/refresh", server_url.trim_end_matches('/'));
     let client = reqwest::Client::new();
     let resp = client

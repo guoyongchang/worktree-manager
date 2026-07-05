@@ -1393,6 +1393,20 @@ async fn h_get_last_share_password() -> Response {
     result_json(crate::commands::sharing::get_last_share_password().await)
 }
 
+// -- WMS tunnel --
+
+async fn h_start_wms_tunnel() -> Response {
+    result_json(crate::commands::sharing::start_wms_tunnel_internal().await)
+}
+
+async fn h_stop_wms_tunnel() -> Response {
+    result_ok(crate::commands::sharing::stop_wms_tunnel_internal().await)
+}
+
+async fn h_wms_manual_reconnect() -> Response {
+    result_ok(crate::commands::sharing::wms_manual_reconnect_internal())
+}
+
 // -- Misc --
 
 async fn h_get_terminal_state(Json(args): Json<Value>) -> Response {
@@ -2186,8 +2200,24 @@ async fn h_set_voice_refine_model(Json(args): Json<Value>) -> Response {
     result_ok(crate::commands::voice::set_voice_refine_model_inner(model))
 }
 
-async fn h_list_dashscope_models() -> Response {
-    result_json(crate::commands::voice::list_dashscope_models_inner().await)
+async fn h_get_commit_ai_model() -> Response {
+    result_json(crate::commands::voice::get_commit_ai_model_inner())
+}
+
+async fn h_set_commit_ai_model(Json(args): Json<Value>) -> Response {
+    // Match the IPC command: a missing/non-string `model` is a client error, not a silent
+    // clear of the user's configured model. An explicit "" still clears (as via IPC).
+    let Some(model) = args.get("model").and_then(|v| v.as_str()) else {
+        return (StatusCode::BAD_REQUEST, "model must be a string").into_response();
+    };
+    result_ok(crate::commands::voice::set_commit_ai_model_inner(
+        model.to_string(),
+    ))
+}
+
+async fn h_list_dashscope_models(Json(args): Json<Value>) -> Response {
+    let purpose = args.get("purpose").and_then(|v| v.as_str());
+    result_json(crate::commands::voice::list_dashscope_models_inner(purpose).await)
 }
 
 // -- Cloud connection --
@@ -3150,12 +3180,16 @@ pub fn save_mcp_config(config: &McpConfig) -> Result<(), String> {
 pub async fn start_mcp_server(port: u16) -> Result<(), String> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
 
-    // Save MCP config
+    // Save MCP config（保留已有 capability_level，缺省 details；不覆盖用户设置）
+    let capability_level = load_mcp_config()
+        .map(|c| c.capability_level)
+        .filter(|l| matches!(l.as_str(), "core" | "details" | "advanced"))
+        .unwrap_or_else(|| "details".to_string());
     let config = McpConfig {
         version: env!("CARGO_PKG_VERSION").to_string(),
         http_port: port,
         installed_at: chrono::Utc::now().to_rfc3339(),
-        capability_level: "core".to_string(),
+        capability_level,
     };
     save_mcp_config(&config)?;
 
@@ -3911,6 +3945,7 @@ mod http_server_coverage_tests {
         config.voice_refine_base_url = Some("https://example.test/v1".to_string());
         config.voice_asr_model = Some("asr-model".to_string());
         config.voice_refine_model = Some("refine-model".to_string());
+        config.commit_ai_model = Some("commit-model".to_string());
         config.commit_prefix_templates = vec!["feat({{worktree-name}}):".to_string()];
         config.commit_prefix_enabled = false;
         config.default_prefix_index = 0;
@@ -3935,7 +3970,7 @@ mod http_server_coverage_tests {
             (h_get_dashscope_api_key().await, json!("dash...-key")),
             (h_get_commit_ai_api_key().await, json!("comm...-key")),
             (h_check_dashscope_api_key().await, json!(true)),
-            (h_check_commit_ai_api_key().await, json!(true)),
+            (h_check_commit_ai_api_key().await, json!(false)),
             (h_get_commit_ai_enabled().await, json!(false)),
             (
                 h_get_dashscope_base_url().await,
@@ -3948,6 +3983,7 @@ mod http_server_coverage_tests {
             ),
             (h_get_voice_asr_model().await, json!("asr-model")),
             (h_get_voice_refine_model().await, json!("refine-model")),
+            (h_get_commit_ai_model().await, json!("commit-model")),
             (h_get_skip_git_hooks().await, json!(true)),
             (h_get_shell_integration_enabled().await, json!(false)),
         ];
@@ -4066,9 +4102,9 @@ mod http_server_coverage_tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(refined, json!(""));
         assert_text_contains(
-            h_list_dashscope_models().await,
+            h_list_dashscope_models(Json(json!({}))).await,
             StatusCode::BAD_REQUEST,
-            "Dashscope API Key",
+            "未配置 AI 能力",
         )
         .await;
         let (status, cloud_status) = json_response(h_cloud_get_status().await).await;
@@ -5075,6 +5111,12 @@ mod http_server_coverage_tests {
             StatusCode::NO_CONTENT
         );
         assert_eq!(
+            h_set_commit_ai_model(Json(json!({"model": "commit-model-temp"})))
+                .await
+                .status(),
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
             json_response(h_get_dashscope_base_url().await).await.1,
             json!("wss://dash.example/ws")
         );
@@ -5093,6 +5135,10 @@ mod http_server_coverage_tests {
         assert_eq!(
             json_response(h_get_voice_refine_model().await).await.1,
             json!("refine-temp")
+        );
+        assert_eq!(
+            json_response(h_get_commit_ai_model().await).await.1,
+            json!("commit-model-temp")
         );
 
         let mcp = McpConfig {

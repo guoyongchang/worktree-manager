@@ -18,6 +18,7 @@ import {
   UpToDateToast,
 } from './UpdaterDialogs';
 import { UpdateCheckerDialog } from './UpdateCheckerDialog';
+import type { SettingsSection } from './SettingsView';
 import type { UseUpdaterReturn } from '../hooks/useUpdater';
 import type { UseShareFeatureReturn } from '../hooks/useShareFeature';
 import type { WorktreeListItem } from '../types';
@@ -28,7 +29,7 @@ interface GlobalDialogsProps {
   share: UseShareFeatureReturn;
   showShortcutHelp: boolean;
   onSetShowShortcutHelp: (v: boolean) => void;
-  onOpenSettings: () => void;
+  onOpenSettings: (section?: SettingsSection) => void;
   deleteConfirmWorktree: WorktreeListItem | null;
   onSetDeleteConfirmWorktree: (v: WorktreeListItem | null) => void;
   onDeleteArchivedWorktree: () => Promise<void>;
@@ -180,6 +181,31 @@ export const GlobalDialogs: FC<GlobalDialogsProps> = ({
                 {share.savingNgrokToken ? t('app.savingToken') : t('app.saveAndStart')}
               </Button>
             </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* WMS Login Required Dialog */}
+      <Dialog open={share.showWmsLoginDialog} onOpenChange={(open) => {
+        if (!open) share.setShowWmsLoginDialog(false);
+      }}>
+        <DialogContent className="max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>{t('app.wmsLoginTitle')}</DialogTitle>
+            <DialogDescription>
+              {t('app.wmsLoginDesc')}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex gap-2">
+            <Button variant="secondary" onClick={() => share.setShowWmsLoginDialog(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button onClick={() => {
+              share.setShowWmsLoginDialog(false);
+              onOpenSettings('cloud');
+            }}>
+              {t('app.wmsLoginButton')}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

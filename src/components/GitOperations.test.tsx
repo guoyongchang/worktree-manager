@@ -1,4 +1,4 @@
-import { act, render } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GitOperations } from './GitOperations';
@@ -6,6 +6,7 @@ import { GitOperations } from './GitOperations';
 const backend = vi.hoisted(() => ({
   syncWithBaseBranch: vi.fn(),
   pushToRemote: vi.fn(),
+  pullCurrentBranch: vi.fn(),
   mergeToTestBranch: vi.fn(),
   mergeToBaseBranch: vi.fn(),
   getBranchDiffStats: vi.fn(),
@@ -14,9 +15,11 @@ const backend = vi.hoisted(() => ({
   getGitDiff: vi.fn(),
   commitAll: vi.fn(),
   generateCommitMessage: vi.fn(),
-  checkDashscopeApiKey: vi.fn(),
+  checkCommitAiApiKey: vi.fn(),
+  getCommitAiEnabled: vi.fn(),
   getCommitPrefixConfig: vi.fn(),
   getGitUserGlobalConfig: vi.fn(),
+  getSkipGitHooks: vi.fn(),
   setGitUserConfig: vi.fn(),
 }));
 
@@ -43,6 +46,16 @@ describe('GitOperations', () => {
     });
     backend.checkRemoteBranchExists.mockResolvedValue(true);
     backend.fetchProjectRemote.mockResolvedValue(undefined);
+    backend.getCommitAiEnabled.mockResolvedValue(true);
+    backend.checkCommitAiApiKey.mockResolvedValue(false);
+    backend.getCommitPrefixConfig.mockResolvedValue({
+      templates: ['[{{worktree-name}}]'],
+      enabled: true,
+      default_index: 0,
+    });
+    backend.getGitDiff.mockResolvedValue('diff --git a/file b/file');
+    backend.generateCommitMessage.mockResolvedValue('fix(test): generated');
+    backend.getSkipGitHooks.mockResolvedValue(false);
   });
 
   afterEach(() => {
@@ -104,5 +117,45 @@ describe('GitOperations', () => {
       await Promise.resolve();
     });
     expect(onSilentRefresh).toHaveBeenCalled();
+  });
+
+  it('skips AI commit generation when commit AI is disabled', async () => {
+    backend.getBranchDiffStats.mockResolvedValue({
+      ahead: 0,
+      behind: 0,
+      ahead_of_test: 0,
+      changed_files: 1,
+      insertions: 2,
+      deletions: 1,
+      files: [],
+    });
+    backend.getCommitAiEnabled.mockResolvedValue(false);
+    backend.checkCommitAiApiKey.mockResolvedValue(true);
+
+    await act(async () => {
+      render(
+        <GitOperations
+          projectPath="/tmp/worktree/project-a"
+          projectName="project-a"
+          baseBranch="main"
+          testBranch="test"
+          currentBranch="feature/demo"
+        />
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const commitAndPush = screen.getByText('git.commitAndPush');
+    await act(async () => {
+      fireEvent.click(commitAndPush);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(backend.getCommitAiEnabled).toHaveBeenCalled();
+    expect(backend.checkCommitAiApiKey).not.toHaveBeenCalled();
+    expect(backend.getGitDiff).not.toHaveBeenCalled();
+    expect(backend.generateCommitMessage).not.toHaveBeenCalled();
   });
 });

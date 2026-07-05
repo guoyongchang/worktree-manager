@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { isTauri, callBackend, getSessionId, clearSessionId, authenticate } from '../lib/backend';
+import { ensureTunnelRoute } from '../lib/tunnelRoute';
 
 export interface UseBrowserAuthReturn {
   browserAuthenticated: boolean;
@@ -69,6 +70,11 @@ export function useBrowserAuth(): UseBrowserAuthReturn {
         }
       });
   }, []);
+
+  useEffect(() => {
+    if (isTauri() || !browserAuthenticated) return;
+    void ensureTunnelRoute();
+  }, [browserAuthenticated]);
 
   const handleBrowserLogin = useCallback(async () => {
     if (!browserLoginPassword.trim()) return;

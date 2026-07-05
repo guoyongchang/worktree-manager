@@ -1,103 +1,128 @@
-import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { Transport } from '../transport/http.js';
+import { type ToolHandler, textResult, errorResult } from './shared.js';
+import { evaluateMergeGate, evaluateDiffCertainty, gateOptsFromArgs } from './safety.js';
+import type { BranchDiffStats } from '../types.js';
 
-export function registerAdvancedTools(
-  server: Server,
-  transport: Transport
-): void {
-  server.setRequestHandler(
-    CallToolRequestSchema,
-    async (request) => {
-      const { name, arguments: args } = request.params;
+export function buildAdvancedHandlers(transport: Transport): Record<string, ToolHandler> {
+  return {
+    worktree_create: async (args) => {
+      const name = args?.name as string;
+      const projects = args?.projects as Array<{ name: string; base_branch?: string }>;
+      const folder_name = args?.folder_name as string | undefined;
+      if (!name || !projects) throw new Error('name and projects are required');
+      return textResult(await transport.createWorktree({ name, projects, folder_name }));
+    },
 
-      if (name === 'worktree_create') {
-        const name = args?.name as string;
-        const projects = args?.projects as Array<{ name: string; base_branch?: string }>;
-        const folder_name = args?.folder_name as string | undefined;
-        if (!name || !projects) {
-          throw new Error('name and projects are required');
-        }
-        const result = await transport.createWorktree({ name, projects, folder_name });
-        return {
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-        };
+    worktree_archive: async (args) => {
+      const name = args?.name as string;
+      if (!name) throw new Error('name is required');
+      return textResult(await transport.archiveWorktree(name));
+    },
+
+    worktree_delete_archived: async (args) => {
+      const name = args?.name as string;
+      if (!name) throw new Error('name is required');
+      return textResult(await transport.deleteArchivedWorktree(name));
+    },
+
+    git_commit: async (args) => {
+      const projectPath = args?.project_path as string;
+      const message = args?.message as string;
+      if (!projectPath || !message) throw new Error('project_path and message are required');
+      return textResult(await transport.commitAll(projectPath, message));
+    },
+
+    git_push: async (args) => {
+      const projectPath = args?.project_path as string;
+      if (!projectPath) throw new Error('project_path is required');
+      return textResult(await transport.pushToRemote(projectPath));
+    },
+
+    git_switch_branch: async (args) => {
+      const projectPath = args?.project_path as string;
+      const branchName = args?.branch_name as string;
+      if (!projectPath || !branchName) throw new Error('project_path and branch_name are required');
+      return textResult(await transport.switchBranch(projectPath, branchName));
+    },
+
+    git_fetch: async (args) => {
+      const projectPath = args?.project_path as string;
+      if (!projectPath) throw new Error('project_path is required');
+      return textResult(await transport.fetchProjectRemote(projectPath));
+    },
+
+    sync_base: async (args) => {
+      const projectPath = args?.project_path as string;
+      const baseBranch = args?.base_branch as string;
+      if (!projectPath || !baseBranch) throw new Error('project_path and base_branch are required');
+      return textResult(await transport.syncWithBase(projectPath, baseBranch));
+    },
+
+    pull: async (args) => {
+      const projectPath = args?.project_path as string;
+      if (!projectPath) throw new Error('project_path is required');
+      return textResult(await transport.pullCurrentBranch(projectPath));
+    },
+
+    commit_and_push: async (args) => {
+      const projectPath = args?.project_path as string;
+      const message = args?.message as string;
+      if (!projectPath || !message) throw new Error('project_path and message are required');
+      const authorName = args?.author_name as string | undefined;
+      const authorEmail = args?.author_email as string | undefined;
+      const skipHooks = typeof args?.skip_hooks === 'boolean' ? (args.skip_hooks as boolean) : undefined;
+      const committed = await transport.commitAll(projectPath, message, authorName, authorEmail, skipHooks);
+      try {
+        const pushed = await transport.pushToRemote(projectPath);
+        return textResult({ committed, pushed });
+      } catch (e) {
+        return errorResult(
+          `已提交但推送失败（需手动 push）。\ncommit: ${JSON.stringify(committed)}\npush error: ${e instanceof Error ? e.message : String(e)}`
+        );
       }
+    },
 
-      if (name === 'worktree_archive') {
-        const name = args?.name as string;
-        if (!name) {
-          throw new Error('name is required');
-        }
-        const result = await transport.archiveWorktree(name);
-        return {
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-        };
+    merge_to_test: async (args) => {
+      const projectPath = args?.project_path as string;
+      const baseBranch = args?.base_branch as string;
+      const testBranch = args?.test_branch as string;
+      if (!projectPath || !baseBranch || !testBranch) {
+        throw new Error('project_path, base_branch and test_branch are required');
       }
+      const fetchFirst = args?.fetch_first === true;
+      const force = args?.force === true;
+      if (fetchFirst) await transport.fetchProjectRemote(projectPath);
+      const stats = (await transport.getBranchDiffStats(projectPath, baseBranch, testBranch)) as BranchDiffStats;
+      // fail-closed：diff 全 0 且未 fetch 时视为「算不出」，拒绝而非放行
+      const certainty = evaluateDiffCertainty(stats, { fetched: fetchFirst, force });
+      if (!certainty.allow) return errorResult(`合并到 test 被拦截：${certainty.reason}`);
+      const gate = evaluateMergeGate(
+        { ahead: stats.ahead_of_test, changed_files: stats.changed_files },
+        gateOptsFromArgs(args)
+      );
+      if (!gate.allow) return errorResult(`合并到 test 被拦截：${gate.reason}`);
+      return textResult(await transport.mergeToTest(projectPath, testBranch));
+    },
 
-      if (name === 'worktree_delete_archived') {
-        const name = args?.name as string;
-        if (!name) {
-          throw new Error('name is required');
-        }
-        const result = await transport.deleteArchivedWorktree(name);
-        return {
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-        };
-      }
-
-      if (name === 'git_commit') {
-        const projectPath = args?.project_path as string;
-        const message = args?.message as string;
-        if (!projectPath || !message) {
-          throw new Error('project_path and message are required');
-        }
-        const result = await transport.commitAll(projectPath, message);
-        return {
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-        };
-      }
-
-      if (name === 'git_push') {
-        const projectPath = args?.project_path as string;
-        if (!projectPath) {
-          throw new Error('project_path is required');
-        }
-        const result = await transport.pushToRemote(projectPath);
-        return {
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-        };
-      }
-
-      if (name === 'git_switch_branch') {
-        const projectPath = args?.project_path as string;
-        const branchName = args?.branch_name as string;
-        if (!projectPath || !branchName) {
-          throw new Error('project_path and branch_name are required');
-        }
-        const result = await transport.switchBranch(projectPath, branchName);
-        return {
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-        };
-      }
-
-      if (name === 'git_fetch') {
-        const projectPath = args?.project_path as string;
-        if (!projectPath) {
-          throw new Error('project_path is required');
-        }
-        const result = await transport.fetchProjectRemote(projectPath);
-        return {
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-        };
-      }
-
-      return {
-        content: [{ type: 'text', text: `Unknown tool: ${name}` }],
-        isError: true,
-      };
-    }
-  );
+    merge_to_base: async (args) => {
+      const projectPath = args?.project_path as string;
+      const baseBranch = args?.base_branch as string;
+      if (!projectPath || !baseBranch) throw new Error('project_path and base_branch are required');
+      const fetchFirst = args?.fetch_first === true;
+      const force = args?.force === true;
+      if (fetchFirst) await transport.fetchProjectRemote(projectPath);
+      const stats = (await transport.getBranchDiffStats(projectPath, baseBranch)) as BranchDiffStats;
+      // fail-closed：diff 全 0 且未 fetch 时视为「算不出」，拒绝而非放行
+      const certainty = evaluateDiffCertainty(stats, { fetched: fetchFirst, force });
+      if (!certainty.allow) return errorResult(`合并到 base 被拦截：${certainty.reason}`);
+      const gate = evaluateMergeGate(
+        { ahead: stats.ahead, changed_files: stats.changed_files },
+        gateOptsFromArgs(args)
+      );
+      if (!gate.allow) return errorResult(`合并到 base 被拦截：${gate.reason}`);
+      return textResult(await transport.mergeToBase(projectPath, baseBranch));
+    },
+  };
 }
 
 export const ADVANCED_TOOLS = [
@@ -190,6 +215,75 @@ export const ADVANCED_TOOLS = [
         project_path: { type: 'string' },
       },
       required: ['project_path'],
+    },
+  },
+  {
+    name: 'sync_base',
+    description: 'Sync the latest base branch into the current branch (fetch origin/base + merge). Requires advanced capability.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_path: { type: 'string' },
+        base_branch: { type: 'string' },
+      },
+      required: ['project_path', 'base_branch'],
+    },
+  },
+  {
+    name: 'pull',
+    description: 'git pull the current branch from origin (fetch + merge into working branch). Unlike git_fetch (which only downloads refs without touching the working tree), this updates the checked-out branch. To push, use git_push. Requires advanced capability.',
+    inputSchema: {
+      type: 'object',
+      properties: { project_path: { type: 'string' } },
+      required: ['project_path'],
+    },
+  },
+  {
+    name: 'commit_and_push',
+    description: 'Stage all changes, commit with message, then push. Non-atomic: if commit succeeds but push fails, returns isError with a "committed but not pushed" message. Requires advanced capability.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_path: { type: 'string' },
+        message: { type: 'string' },
+        author_name: { type: 'string' },
+        author_email: { type: 'string' },
+        skip_hooks: { type: 'boolean' },
+      },
+      required: ['project_path', 'message'],
+    },
+  },
+  {
+    name: 'merge_to_test',
+    description: 'Merge the current branch into the test branch, guarded by a "not too many commits" threshold. Blocks if ahead_of_test > max_ahead (default 50) or worktree is dirty. Also blocks (fail-closed) when all diff stats are 0 and no fetch was done, since the backend cannot tell "no diff" from "could not compute" (e.g. test ref not fetched) — pass fetch_first:true. All guards bypassable with force:true. Requires advanced capability.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_path: { type: 'string' },
+        base_branch: { type: 'string', description: 'Needed to compute ahead/behind stats' },
+        test_branch: { type: 'string' },
+        max_ahead: { type: 'number', description: 'Max commits ahead of test allowed (default 50)' },
+        require_clean_worktree: { type: 'boolean', description: 'Block if uncommitted changes (default true)' },
+        fetch_first: { type: 'boolean', description: 'Fetch remote before computing diff. Recommended: without it, if the test ref is stale/unfetched all diff stats read 0 and the merge is blocked as "unverifiable"' },
+        force: { type: 'boolean', description: 'Bypass all guards (threshold + unverifiable-diff check)' },
+      },
+      required: ['project_path', 'base_branch', 'test_branch'],
+    },
+  },
+  {
+    name: 'merge_to_base',
+    description: 'Merge the current branch into the base branch, guarded by a "not too many commits" threshold. Blocks if ahead (of base) > max_ahead (default 50) or worktree is dirty. Also blocks (fail-closed) when all diff stats are 0 and no fetch was done, since the backend cannot tell "no diff" from "could not compute" (e.g. base ref not fetched) — pass fetch_first:true. All guards bypassable with force:true. Requires advanced capability.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_path: { type: 'string' },
+        base_branch: { type: 'string' },
+        max_ahead: { type: 'number', description: 'Max commits ahead of base allowed (default 50)' },
+        require_clean_worktree: { type: 'boolean', description: 'Block if uncommitted changes (default true)' },
+        fetch_first: { type: 'boolean', description: 'Fetch remote before computing diff. Recommended: without it, if the base ref is stale/unfetched all diff stats read 0 and the merge is blocked as "unverifiable"' },
+        force: { type: 'boolean', description: 'Bypass all guards (threshold + unverifiable-diff check)' },
+      },
+      required: ['project_path', 'base_branch'],
     },
   },
 ];
