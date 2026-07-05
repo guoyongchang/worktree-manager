@@ -114,7 +114,7 @@ function extractFrontendCommands() {
 function extractBackendHttpEndpoints() {
   const content = fs.readFileSync(backendPath, 'utf8');
   const functions = collectExportedFunctions(content);
-  const endpointRegex = /fetch\(\s*`\$\{getApiBase\(\)\}\/([^`]+)`/g;
+  const endpointRegex = /fetch\(\s*`\$\{(?:getApiBase|getCenterApiBase)\(\)\}\/([^`]+)`/g;
   const usages = new Map();
   const endpoints = [];
 
