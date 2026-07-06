@@ -1,0 +1,19 @@
+<!-- @dsCard group="Colors" viewport="700x140" name="Text hierarchy" subtitle="Three tiers: primary / secondary / muted" -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+body { margin: 0; background: var(--bg-base); padding: 16px 18px; font-family: var(--font-ui); }
+.line { display: flex; align-items: baseline; gap: 14px; padding: 6px 0; }
+.sample { font-size: 15px; font-weight: 500; width: 340px; }
+.tok { font-size: 11px; font-family: var(--font-mono); color: var(--text-muted); }
+</style>
+</head>
+<body>
+<div class="line"><span class="sample" style="color: var(--text-primary);">Work on multiple branches simultaneously</span><span class="tok">--text-primary · #E8E8ED · names, values, body</span></div>
+<div class="line"><span class="sample" style="color: var(--text-secondary);">Work on multiple branches simultaneously</span><span class="tok">--text-secondary · #8B8B9E · descriptions, stats</span></div>
+<div class="line"><span class="sample" style="color: var(--text-muted);">Work on multiple branches simultaneously</span><span class="tok">--text-muted · #55556A · hints, section labels</span></div>
+</body>
+</html>

@@ -13,7 +13,9 @@ dist-ssr
 *.local
 coverage/
 
-.claude/
+# Ignore local Claude settings, but track shared project skills (e.g. the design system skill)
+.claude/*
+!.claude/skills/
 .memory-staging/
 .superpowers/brainstorm/
 docs/superpowers/

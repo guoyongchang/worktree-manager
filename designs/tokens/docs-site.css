@@ -1,0 +1,40 @@
+/* ============================================================
+   Worktree Manager — Docs/marketing site tokens
+   Source: docs/en/index.html (Tailwind CDN, slate palette + blue
+   primary). The DOCS SITE deliberately uses a different palette
+   than the desktop app: slate + blue vs near-black + indigo.
+   ============================================================ */
+
+:root {
+  --docs-bg: #0f172a;            /* slate-900 — page bg */
+  --docs-bg-deep: #020617;       /* slate-950 — code blocks, tree views */
+  --docs-surface: #1e293b;       /* slate-800 — cards, nav chips */
+  --docs-border: #334155;        /* slate-700 — card borders */
+  --docs-border-soft: #475569;   /* slate-600 — scrollbar */
+
+  --docs-text: #f1f5f9;          /* slate-100 — headings, body */
+  --docs-text-secondary: #94a3b8;/* slate-400 — descriptions */
+  --docs-text-tertiary: #cbd5e1; /* slate-300 — prose */
+  --docs-text-muted: #64748b;    /* slate-500 — comments, labels */
+
+  --docs-primary: #3b82f6;       /* blue-500 — CTAs, links */
+  --docs-primary-hover: #2563eb; /* blue-600 */
+  --docs-primary-deep: #1d4ed8;  /* blue-700 — gradient ends */
+  --docs-link: #60a5fa;          /* blue-400 — inline links, tree dirs */
+
+  --docs-green: #4ade80;         /* green-400 — "new way" accents */
+  --docs-green-soft: #86efac;    /* green-300 — chip text */
+  --docs-red: #f87171;           /* red-400 — "old way" accents */
+  --docs-red-soft: #fca5a5;      /* red-300 — chip text */
+  --docs-purple: #8b5cf6;        /* violet-500 — NEW badge gradient end */
+
+  /* Signature gradients */
+  --docs-grad-cta: linear-gradient(135deg, #3b82f6, #1d4ed8); /* @kind color */
+  --docs-grad-step: linear-gradient(to bottom right, #3b82f6, #1d4ed8); /* @kind color */
+  --docs-grad-new: linear-gradient(135deg, #3b82f6, #8b5cf6); /* @kind color */
+  --docs-cta-glow: 0 4px 15px rgba(59, 130, 246, 0.3);
+  --docs-cta-glow-hover: 0 6px 20px rgba(59, 130, 246, 0.5);
+
+  --docs-radius-card: 12px;      /* rounded-xl feature cards */
+  --docs-radius: 8px;            /* rounded-lg buttons, chips */
+}

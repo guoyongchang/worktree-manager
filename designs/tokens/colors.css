@@ -1,0 +1,142 @@
+/* ============================================================
+   Worktree Manager — Color tokens
+   Source: src/index.css + src/themes/definitions.ts (verbatim)
+   Default theme is Default Dark. Alternate themes are activated
+   by setting data-theme="<id>" on <html> or any container.
+   ============================================================ */
+
+:root {
+  /* Backgrounds — three-layer elevation model */
+  --bg-base: #0A0A0F;      /* app canvas */
+  --bg-surface: #141419;   /* sidebar, cards, inputs, dialogs */
+  --bg-elevated: #1A1A22;  /* hover states, menus, third layer */
+
+  /* Border — single hairline color for everything */
+  --border: #1E1E26;
+
+  /* Text — three-step hierarchy */
+  --text-primary: #E8E8ED;
+  --text-secondary: #8B8B9E;
+  --text-muted: #55556A;
+
+  /* Accent (Indigo) */
+  --accent: #6366F1;
+  --accent-hover: #818CF8;
+  --accent-fg: #FFFFFF;
+
+  /* Semantic */
+  --success: #10B981;
+  --success-light: #34D399;
+  --warning: #F59E0B;
+  --warning-light: #FBBF24;
+  --warning-fg: #1E1E26;
+  --error: #EF4444;
+  --error-light: #F87171;
+  --error-fg: #FFFFFF;
+
+  /* Worktree label colors (sidebar branch icons, tags) */
+  --wt-red: #F87171;      /* red-400 */
+  --wt-orange: #FB923C;   /* orange-400 */
+  --wt-yellow: #FACC15;   /* yellow-400 */
+  --wt-green: #34D399;    /* emerald-400 */
+  --wt-purple: #C084FC;   /* purple-400 */
+
+  /* Merge-to-main danger-zone accents (orange family, used on merge buttons) */
+  --merge-main-border: rgba(154, 52, 18, 0.4);   /* orange-800/40 */
+  --merge-main-text: #FDBA74;                    /* orange-300 */
+  --merge-main-icon: #FB923C;                    /* orange-400 */
+}
+
+/* --color-* aliases — component code references these (Tailwind v4 @theme registration) */
+:root, [data-theme] {
+  --color-bg-base: var(--bg-base);
+  --color-bg-surface: var(--bg-surface);
+  --color-bg-elevated: var(--bg-elevated);
+  --color-border: var(--border);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-fg: var(--accent-fg);
+  --color-success: var(--success);
+  --color-success-light: var(--success-light);
+  --color-warning: var(--warning);
+  --color-warning-light: var(--warning-light);
+  --color-warning-fg: var(--warning-fg);
+  --color-error: var(--error);
+  --color-error-light: var(--error-light);
+  --color-error-fg: var(--error-fg);
+}
+
+/* ---------- Alternate themes (verbatim from src/index.css) ---------- */
+
+[data-theme="monokai"] {
+  --bg-base: #1E1F1C; --bg-surface: #272822; --bg-elevated: #3E3D32;
+  --border: #49483E;
+  --text-primary: #F8F8F2; --text-secondary: #A6A68A; --text-muted: #75715E;
+  --accent: #F92672; --accent-hover: #FF6188; --accent-fg: #FFFFFF;
+  --success: #A6E22E; --success-light: #C1E849;
+  --warning: #E6DB74; --warning-light: #F0E68C; --warning-fg: #272822;
+  --error: #F92672; --error-light: #FF6188; --error-fg: #FFFFFF;
+}
+
+[data-theme="dracula"] {
+  --bg-base: #1E1F29; --bg-surface: #282A36; --bg-elevated: #343746;
+  --border: #44475A;
+  --text-primary: #F8F8F2; --text-secondary: #BFBFBF; --text-muted: #6272A4;
+  --accent: #BD93F9; --accent-hover: #C9A8FC; --accent-fg: #282A36;
+  --success: #50FA7B; --success-light: #69FF94;
+  --warning: #F1FA8C; --warning-light: #FFFFA5; --warning-fg: #282A36;
+  --error: #FF5555; --error-light: #FF6E6E; --error-fg: #FFFFFF;
+}
+
+[data-theme="solarized-dark"] {
+  --bg-base: #001E27; --bg-surface: #002B36; --bg-elevated: #073642;
+  --border: #094553;
+  --text-primary: #EEE8D5; --text-secondary: #93A1A1; --text-muted: #586E75;
+  --accent: #268BD2; --accent-hover: #4BA3E0; --accent-fg: #FFFFFF;
+  --success: #859900; --success-light: #98A820;
+  --warning: #B58900; --warning-light: #C99A00; --warning-fg: #FFFFFF;
+  --error: #DC322F; --error-light: #E85050; --error-fg: #FFFFFF;
+}
+
+[data-theme="nord"] {
+  --bg-base: #1D2029; --bg-surface: #2E3440; --bg-elevated: #3B4252;
+  --border: #434C5E;
+  --text-primary: #ECEFF4; --text-secondary: #D8DEE9; --text-muted: #4C566A;
+  --accent: #88C0D0; --accent-hover: #8FBCBB; --accent-fg: #2E3440;
+  --success: #A3BE8C; --success-light: #B5C99D;
+  --warning: #EBCB8B; --warning-light: #EFD39E; --warning-fg: #2E3440;
+  --error: #BF616A; --error-light: #C9757D; --error-fg: #FFFFFF;
+}
+
+[data-theme="default-light"] {
+  --bg-base: #FFFFFF; --bg-surface: #F8F9FA; --bg-elevated: #F1F3F5;
+  --border: #E5E7EB;
+  --text-primary: #111827; --text-secondary: #4B5563; --text-muted: #9CA3AF;
+  --accent: #4F46E5; --accent-hover: #6366F1; --accent-fg: #FFFFFF;
+  --success: #059669; --success-light: #10B981;
+  --warning: #D97706; --warning-light: #F59E0B; --warning-fg: #FFFFFF;
+  --error: #DC2626; --error-light: #EF4444; --error-fg: #FFFFFF;
+}
+
+[data-theme="solarized-light"] {
+  --bg-base: #FDF6E3; --bg-surface: #F5EFD8; --bg-elevated: #EEE8D5;
+  --border: #D8D2BC;
+  --text-primary: #073642; --text-secondary: #586E75; --text-muted: #93A1A1;
+  --accent: #268BD2; --accent-hover: #2AA198; --accent-fg: #FFFFFF;
+  --success: #859900; --success-light: #98A820;
+  --warning: #B58900; --warning-light: #C99A00; --warning-fg: #FFFFFF;
+  --error: #DC322F; --error-light: #E85050; --error-fg: #FFFFFF;
+}
+
+[data-theme="github-light"] {
+  --bg-base: #FFFFFF; --bg-surface: #F6F8FA; --bg-elevated: #EAEEF2;
+  --border: #D0D7DE;
+  --text-primary: #1F2328; --text-secondary: #656D76; --text-muted: #8C959F;
+  --accent: #0969DA; --accent-hover: #218BFF; --accent-fg: #FFFFFF;
+  --success: #1F883D; --success-light: #2DA44E;
+  --warning: #9A6700; --warning-light: #BF8700; --warning-fg: #FFFFFF;
+  --error: #D1242F; --error-light: #E5534B; --error-fg: #FFFFFF;
+}

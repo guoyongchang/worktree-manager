@@ -1,0 +1,35 @@
+<!-- @dsCard group="Colors" viewport="700x170" name="Semantic colors" subtitle="Success / warning / error, each with a light hover step" -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+body { margin: 0; background: var(--bg-base); padding: 14px; font-family: var(--font-ui); color: var(--text-primary); }
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.pair { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.main { padding: 10px 12px; height: 62px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: flex-end; }
+.light { padding: 6px 12px; font-size: 11px; font-family: var(--font-mono); }
+.name { font-size: 12px; font-weight: 500; }
+.hex { font-size: 11px; font-family: var(--font-mono); opacity: 0.85; }
+.usage { margin-top: 10px; font-size: 11px; color: var(--text-muted); display: flex; gap: 16px; }
+</style>
+</head>
+<body>
+<div class="grid">
+  <div class="pair">
+    <div class="main" style="background: var(--success); color: #06281d;"><span class="name">--success</span><span class="hex">#10B981</span></div>
+    <div class="light" style="background: var(--success-light); color: #06281d;">--success-light #34D399</div>
+  </div>
+  <div class="pair">
+    <div class="main" style="background: var(--warning); color: var(--warning-fg);"><span class="name">--warning</span><span class="hex">#F59E0B</span></div>
+    <div class="light" style="background: var(--warning-light); color: #3d2b00;">--warning-light #FBBF24</div>
+  </div>
+  <div class="pair">
+    <div class="main" style="background: var(--error); color: var(--error-fg);"><span class="name">--error</span><span class="hex">#EF4444</span></div>
+    <div class="light" style="background: var(--error-light); color: #400;">--error-light #F87171</div>
+  </div>
+</div>
+<div class="usage"><span>clean state · merges</span><span>uncommitted changes · missing branches</span><span>conflicts · destructive actions</span></div>
+</body>
+</html>

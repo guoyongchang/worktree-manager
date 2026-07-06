@@ -1,0 +1,25 @@
+<!-- @dsCard group="Spacing" viewport="700x210" name="Spacing scale" subtitle="Tailwind 4px grid — only these steps appear in the app" -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+body { margin: 0; background: var(--bg-base); padding: 16px 18px; font-family: var(--font-ui); color: var(--text-primary); }
+.row { display: flex; align-items: center; gap: 12px; padding: 3px 0; }
+.tok { font-size: 10px; font-family: var(--font-mono); color: var(--text-muted); width: 170px; flex-shrink: 0; }
+.bar { height: 12px; background: var(--accent); border-radius: 2px; }
+</style>
+</head>
+<body>
+<div class="row"><span class="tok">2px · gap-0.5 · badge padding-y</span><span class="bar" style="width: 2px;"></span></div>
+<div class="row"><span class="tok">4px · gap-1 · icon gaps</span><span class="bar" style="width: 4px;"></span></div>
+<div class="row"><span class="tok">6px · gap-1.5 · label↔icon</span><span class="bar" style="width: 6px;"></span></div>
+<div class="row"><span class="tok">8px · gap-2 · button gap, chips</span><span class="bar" style="width: 8px;"></span></div>
+<div class="row"><span class="tok">10px · gap-2.5 · list icon↔name</span><span class="bar" style="width: 10px;"></span></div>
+<div class="row"><span class="tok">12px · p-3 · sidebar header pad</span><span class="bar" style="width: 12px;"></span></div>
+<div class="row"><span class="tok">16px · p-4 · list rows, cells</span><span class="bar" style="width: 16px;"></span></div>
+<div class="row"><span class="tok">24px · p-6 · cards, dialogs, view pad</span><span class="bar" style="width: 24px;"></span></div>
+<div class="row"><span class="tok">32px · p-8 · welcome padding</span><span class="bar" style="width: 32px;"></span></div>
+</body>
+</html>

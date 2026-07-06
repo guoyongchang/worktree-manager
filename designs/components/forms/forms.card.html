@@ -1,0 +1,57 @@
+<!-- @dsCard group="Components" viewport="700x330" name="Forms" subtitle="Button variants & sizes, Input, Select, Checkbox" -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/lucide@0.462.0/dist/umd/lucide.min.js"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>body { margin: 0; background: var(--bg-base); padding: 16px; }</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { Button, Input, Select, Checkbox, Icon } = window.WorktreeManagerDesignSystem_e60f48;
+
+function Demo() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <Button>Create Worktree</Button>
+        <Button variant="secondary">Sync main</Button>
+        <Button variant="outline">Outline</Button>
+        <Button variant="ghost">Ghost</Button>
+        <Button variant="destructive">Delete</Button>
+        <Button variant="warning">Force</Button>
+        <Button variant="link">Docs</Button>
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <Button size="lg"><Icon name="plus" /> Add Project</Button>
+        <Button size="sm" variant="secondary"><Icon name="refresh-cw" size={12} /> Pull</Button>
+        <Button size="icon" variant="ghost"><Icon name="settings" /></Button>
+        <Button size="icon" variant="secondary"><Icon name="folder" /></Button>
+        <Button disabled>Disabled</Button>
+        <Button size="sm" variant="secondary" style={{ borderColor: 'var(--merge-main-border)', color: 'var(--merge-main-text)' }}>
+          <Icon name="git-merge" size={12} color="var(--merge-main-icon)" /> Merge to main
+        </Button>
+      </div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <Input placeholder="feature-branch-name" style={{ width: 220 }} />
+        <Select options={['main', 'develop', 'release/2.4']} defaultValue="main" style={{ width: 160 }} />
+        <Checkbox label="Sync before create" defaultChecked />
+        <Checkbox label="Use folder alias" />
+      </div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <Input placeholder="Search worktrees" style={{ height: 28, width: 160, fontSize: 12 }} />
+        <Input placeholder="Disabled" disabled style={{ width: 160 }} />
+      </div>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Demo />);
+</script>
+</body>
+</html>

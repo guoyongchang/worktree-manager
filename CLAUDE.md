@@ -23,6 +23,10 @@ src/: App.tsx(~1230行), types.ts, constants.ts, index.css
   lib/: backend(~350行), websocket(~218行)
 ```
 
+## 设计规范
+
+所有 UI 工作先读 `designs/readme.md`（tokens、组件、UI kit、字体、参考截图都在 `designs/` 下），严格按其中的颜色/字体/间距执行。做 UI/设计相关任务时也可触发 `worktree-manager-design` skill（`.claude/skills/`）。设计系统的唯一来源是 `designs/`，同步更新只改这里。
+
 ## 核心约束（必须遵守）
 
 ### 终端状态分离

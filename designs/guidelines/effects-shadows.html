@@ -1,0 +1,23 @@
+<!-- @dsCard group="Effects" viewport="700x190" name="Shadows & overlay" subtitle="Deep black shadows; dialogs sit on a blurred black/60 veil" -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+body { margin: 0; background: var(--bg-base); padding: 20px 16px; font-family: var(--font-ui); color: var(--text-primary); display: flex; gap: 14px; align-items: flex-start; }
+.chip { width: 128px; height: 84px; border-radius: 8px; background: var(--bg-surface); border: 1px solid var(--border); padding: 10px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: flex-end; }
+.tok { font-size: 10px; font-family: var(--font-mono); color: var(--text-muted); line-height: 1.5; }
+.overlay-demo { width: 128px; height: 84px; border-radius: 8px; position: relative; overflow: hidden; border: 1px solid var(--border); background: repeating-linear-gradient(45deg, var(--bg-surface), var(--bg-surface) 8px, var(--bg-elevated) 8px, var(--bg-elevated) 16px); }
+.overlay-demo::after { content: ''; position: absolute; inset: 0; background: var(--overlay); backdrop-filter: blur(6px); }
+.overlay-demo .tok { position: absolute; bottom: 10px; left: 10px; z-index: 1; color: var(--text-secondary); }
+</style>
+</head>
+<body>
+<div class="chip" style="box-shadow: var(--shadow-subtle);"><span class="tok">--shadow-subtle<br>buttons, inputs, cards</span></div>
+<div class="chip" style="box-shadow: var(--shadow-card-hover);"><span class="tok">--shadow-card-hover<br>hovered cards</span></div>
+<div class="chip" style="box-shadow: var(--shadow-lg);"><span class="tok">--shadow-lg<br>menus, toasts, tooltips</span></div>
+<div class="chip" style="box-shadow: var(--shadow-modal);"><span class="tok">--shadow-modal<br>dialogs</span></div>
+<div class="overlay-demo"><span class="tok" style="z-index: 2; position: absolute;">--overlay<br>black/60 + blur 24</span></div>
+</body>
+</html>

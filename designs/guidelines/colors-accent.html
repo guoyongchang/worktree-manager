@@ -1,0 +1,24 @@
+<!-- @dsCard group="Colors" viewport="700x150" name="Accent — Indigo" subtitle="One accent; tints at 10/15/20% alpha do the theming" -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+body { margin: 0; background: var(--bg-base); padding: 14px; font-family: var(--font-ui); color: var(--text-primary); }
+.row { display: grid; grid-template-columns: 1.2fr 1.2fr 1fr 1fr 1fr; gap: 10px; }
+.sw { border-radius: 8px; border: 1px solid var(--border); padding: 10px 12px; height: 96px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: flex-end; gap: 2px; }
+.name { font-size: 12px; font-weight: 500; }
+.hex { font-size: 11px; font-family: var(--font-mono); opacity: 0.75; }
+</style>
+</head>
+<body>
+<div class="row">
+  <div class="sw" style="background: var(--accent); color: var(--accent-fg);"><span class="name">--accent</span><span class="hex">#6366F1 · primary buttons, selection</span></div>
+  <div class="sw" style="background: var(--accent-hover); color: var(--accent-fg);"><span class="name">--accent-hover</span><span class="hex">#818CF8 · hover, badge text</span></div>
+  <div class="sw" style="background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent-hover);"><span class="name">accent/10</span><span class="hex">tinted panels</span></div>
+  <div class="sw" style="background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent-hover);"><span class="name">accent/15</span><span class="hex">badge bg</span></div>
+  <div class="sw" style="background: transparent; border-color: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent-hover);"><span class="name">accent/20</span><span class="hex">tinted borders</span></div>
+</div>
+</body>
+</html>

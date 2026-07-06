@@ -1,0 +1,23 @@
+<!-- @dsCard group="Colors" viewport="700x150" name="Backgrounds & border" subtitle="Three-layer elevation: base → surface → elevated" -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+body { margin: 0; background: var(--bg-base); padding: 14px; font-family: var(--font-ui); color: var(--text-primary); }
+.row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.sw { border-radius: 8px; border: 1px solid var(--border); padding: 10px 12px; height: 92px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: flex-end; gap: 2px; }
+.name { font-size: 12px; font-weight: 500; }
+.hex { font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); }
+</style>
+</head>
+<body>
+<div class="row">
+  <div class="sw" style="background: var(--bg-base);"><span class="name">--bg-base</span><span class="hex">#0A0A0F · app canvas</span></div>
+  <div class="sw" style="background: var(--bg-surface);"><span class="name">--bg-surface</span><span class="hex">#141419 · cards, sidebar</span></div>
+  <div class="sw" style="background: var(--bg-elevated);"><span class="name">--bg-elevated</span><span class="hex">#1A1A22 · hover, menus</span></div>
+  <div class="sw" style="background: var(--border);"><span class="name">--border</span><span class="hex">#1E1E26 · all hairlines</span></div>
+</div>
+</body>
+</html>
