@@ -548,12 +548,31 @@ struct PtyReader {
     desktop_buffer: Arc<Mutex<DesktopPendingBuffer>>,
 }
 
+/// Normalize a filesystem path for prefix comparison: unify separators to '/', strip any
+/// trailing separators, and drop a trailing `#<suffix>` duplicated-tab marker.
+fn normalize_path_for_match(p: &str) -> String {
+    let p = p.split('#').next().unwrap_or(p);
+    p.replace('\\', "/").trim_end_matches('/').to_string()
+}
+
+/// True if `cwd` is exactly `normalized_prefix` or a real descendant path of it. Compared on
+/// true path boundaries so a hyphen/name sibling like `<prefix>-extra` never matches.
+/// `normalized_prefix` must already be normalized via [`normalize_path_for_match`].
+fn path_is_within_prefix(cwd: &str, normalized_prefix: &str) -> bool {
+    let cwd = normalize_path_for_match(cwd);
+    cwd == normalized_prefix || cwd.starts_with(&format!("{}/", normalized_prefix))
+}
+
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     reader: PtyReader,
     child: Box<dyn Child + Send + Sync>,
     shell_path: String,
+    /// Working directory this session was created in. Used for correct path-prefix matching
+    /// when closing a worktree's sessions (the session id alone is lossy: '/', '\\' and '#'
+    /// all collapse to '-', so a sibling `<path>-extra` is indistinguishable from a child).
+    cwd: String,
     broadcast_tx: broadcast::Sender<Vec<u8>>,
     /// Ring buffer of recent PTY output for replaying to new subscribers.
     replay_buffer: Arc<Mutex<VecDeque<u8>>>,
@@ -797,6 +816,7 @@ impl PtyManager {
             },
             child,
             shell_path,
+            cwd: cwd.to_string(),
             broadcast_tx,
             replay_buffer,
         };
@@ -993,9 +1013,11 @@ impl PtyManager {
         path_prefix: &str,
         reason: &str,
     ) -> Vec<String> {
-        let normalized_prefix = path_prefix.replace(['/', '\\', '#'], "-");
-        // NOTE: session IDs are created by frontend as `pty-{normalized-path}` (no trailing -#)
-        let session_prefix = format!("pty-{}", normalized_prefix);
+        // Match on each session's real working directory rather than the lossy dash-normalized
+        // session id (where '/', '\\' and '#' all collapse to '-'). Id-prefix matching could not
+        // tell a child path `<prefix>/sub` or duplicated tab `<prefix>#2` from a hyphen sibling
+        // `<prefix>-extra`, so archiving one worktree could kill a sibling worktree's live PTYs.
+        let normalized_prefix = normalize_path_for_match(path_prefix);
 
         // Collect IDs under read lock, then drop guard before write lock
         let sessions_to_close: Vec<String> = {
@@ -1004,13 +1026,15 @@ impl PtyManager {
                 .read()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             sessions
-                .keys()
-                .filter(|id| {
-                    // Exact match or followed by '-' to avoid matching /path/project-extra
-                    // when closing /path/project
-                    **id == session_prefix || id.starts_with(&format!("{}-", session_prefix))
+                .iter()
+                .filter(|(_, session)| {
+                    session
+                        .lock()
+                        .ok()
+                        .map(|s| path_is_within_prefix(&s.cwd, &normalized_prefix))
+                        .unwrap_or(false)
                 })
-                .cloned()
+                .map(|(id, _)| id.clone())
                 .collect()
         }; // read guard dropped here
 
@@ -1057,10 +1081,10 @@ mod tests {
     use super::powershell_integration_args;
     use super::{
         append_bash_integration_args, bash_integration_init_path, bytes_to_utf8_with_pending,
-        get_default_shell, requested_shell_path, resolve_shell_from_id,
-        resolve_shell_from_path_lookup, shell_escape_single_quote, shell_program_name,
-        shell_startup_args, windows_path_to_git_bash, DesktopPendingBuffer, PtyManager,
-        DESKTOP_PENDING_BUFFER_CAP, DESKTOP_READER_TTL,
+        get_default_shell, normalize_path_for_match, path_is_within_prefix, requested_shell_path,
+        resolve_shell_from_id, resolve_shell_from_path_lookup, shell_escape_single_quote,
+        shell_program_name, shell_startup_args, windows_path_to_git_bash, DesktopPendingBuffer,
+        PtyManager, DESKTOP_PENDING_BUFFER_CAP, DESKTOP_READER_TTL,
     };
     use serial_test::serial;
     #[cfg(target_os = "windows")]
@@ -1555,56 +1579,80 @@ mod tests {
     #[cfg(not(target_os = "windows"))]
     #[serial]
     #[test]
-    fn close_sessions_by_path_prefix_closes_exact_and_child_session_ids() {
+    fn close_sessions_by_path_prefix_matches_real_paths_not_hyphen_siblings() {
         if !std::path::Path::new("/bin/sh").exists() {
             // Unix CI images should have /bin/sh; skip only on unusual local systems.
             return;
         }
         let mut manager = PtyManager::new();
-        let cwd = tempfile::tempdir().expect("pty cwd");
-        let prefix = cwd.path().to_string_lossy().replace(['/', '\\', '#'], "-");
-        let exact_id = format!("pty-{}", prefix);
-        let child_id = format!("pty-{}-extra", prefix);
-        let unrelated_id = unique_session_id("unrelated");
+        let root = tempfile::tempdir().expect("pty root");
+        let feature = root.path().join("wt").join("feature");
+        let feature_sub = feature.join("sub");
+        let sibling = root.path().join("wt").join("feature-extra");
+        let unrelated = root.path().join("other");
+        for dir in [&feature, &feature_sub, &sibling, &unrelated] {
+            std::fs::create_dir_all(dir).expect("create test dir");
+        }
 
-        manager
-            .create_session(
-                &exact_id,
-                cwd.path().to_str().unwrap(),
-                80,
-                24,
-                Some("/bin/sh"),
-            )
-            .expect("create exact session");
-        manager
-            .create_session(
-                &child_id,
-                cwd.path().to_str().unwrap(),
-                80,
-                24,
-                Some("/bin/sh"),
-            )
-            .expect("create child session");
-        manager
-            .create_session(
-                &unrelated_id,
-                cwd.path().to_str().unwrap(),
-                80,
-                24,
-                Some("/bin/sh"),
-            )
-            .expect("create unrelated session");
+        let id_for = |p: &std::path::Path| {
+            format!("pty-{}", p.to_string_lossy().replace(['/', '\\', '#'], "-"))
+        };
+        // Two tabs of the SAME worktree: a plain tab and a duplicated tab (the frontend appends
+        // "#<ts>", normalized to "-<ts>"); both share the same real cwd.
+        let exact_id = id_for(&feature);
+        let dup_tab_id = format!("{}-2", exact_id);
+        let child_id = id_for(&feature_sub);
+        let sibling_id = id_for(&sibling);
+        let unrelated_id = id_for(&unrelated);
 
-        let mut closed =
-            manager.close_sessions_by_path_prefix(cwd.path().to_str().unwrap(), "unit test");
+        let feature_s = feature.to_string_lossy().to_string();
+        let feature_sub_s = feature_sub.to_string_lossy().to_string();
+        let sibling_s = sibling.to_string_lossy().to_string();
+        let unrelated_s = unrelated.to_string_lossy().to_string();
+        for (id, cwd) in [
+            (&exact_id, &feature_s),
+            (&dup_tab_id, &feature_s),
+            (&child_id, &feature_sub_s),
+            (&sibling_id, &sibling_s),
+            (&unrelated_id, &unrelated_s),
+        ] {
+            manager
+                .create_session(id, cwd, 80, 24, Some("/bin/sh"))
+                .expect("create session");
+        }
+
+        let mut closed = manager.close_sessions_by_path_prefix(&feature_s, "unit test");
         closed.sort();
+        let mut expected = vec![exact_id.clone(), dup_tab_id.clone(), child_id.clone()];
+        expected.sort();
 
-        assert_eq!(closed, vec![exact_id.clone(), child_id.clone()]);
+        // The worktree itself, its duplicated tab, and a true child path are closed…
+        assert_eq!(closed, expected);
         assert!(!manager.has_session(&exact_id));
+        assert!(!manager.has_session(&dup_tab_id));
         assert!(!manager.has_session(&child_id));
+        // …but a hyphen-sibling worktree and an unrelated session must survive.
+        assert!(manager.has_session(&sibling_id));
         assert!(manager.has_session(&unrelated_id));
-        manager
-            .close_session(&unrelated_id, "unit test cleanup")
-            .unwrap();
+
+        manager.close_session(&sibling_id, "cleanup").unwrap();
+        manager.close_session(&unrelated_id, "cleanup").unwrap();
+    }
+
+    #[test]
+    fn path_is_within_prefix_rejects_hyphen_siblings() {
+        let prefix = normalize_path_for_match("/root/wt/feature");
+        // Exact, duplicated-tab (#ts stripped), and child paths match.
+        assert!(path_is_within_prefix("/root/wt/feature", &prefix));
+        assert!(path_is_within_prefix(
+            "/root/wt/feature#1720000000",
+            &prefix
+        ));
+        assert!(path_is_within_prefix("/root/wt/feature/sub", &prefix));
+        assert!(path_is_within_prefix("/root/wt/feature/", &prefix));
+        // Hyphen/name siblings and unrelated paths do not.
+        assert!(!path_is_within_prefix("/root/wt/feature-extra", &prefix));
+        assert!(!path_is_within_prefix("/root/wt/feature2", &prefix));
+        assert!(!path_is_within_prefix("/root/other", &prefix));
     }
 }

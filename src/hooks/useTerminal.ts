@@ -539,9 +539,16 @@ export function useTerminal(
 
   // Remove all terminals matching a path prefix (e.g. worktree archive)
   const cleanupTerminalsForPath = useCallback(async (pathPrefix: string) => {
-    // Normalize pathPrefix to handle Windows backslashes for consistent matching
-    const normalizedPrefix = pathPrefix.replace(/\\/g, '/');
-    const matches = (p: string) => p.startsWith(pathPrefix) || p.replace(/\\/g, '/').startsWith(normalizedPrefix) || p.split('#')[0].startsWith(pathPrefix) || p.split('#')[0].replace(/\\/g, '/').startsWith(normalizedPrefix);
+    // Match the exact worktree path or a true child path (prefix + '/'), never a hyphen/name
+    // sibling like `<prefix>-extra`. A bare startsWith over-matched siblings, so archiving one
+    // worktree wiped a sibling worktree's terminals. Strip any '#<timestamp>' duplicated-tab
+    // suffix and normalize Windows backslashes.
+    const norm = (s: string) => s.replace(/\\/g, '/').replace(/\/+$/, '');
+    const normalizedPrefix = norm(pathPrefix);
+    const matches = (p: string) => {
+      const base = norm(p.split('#')[0]);
+      return base === normalizedPrefix || base.startsWith(`${normalizedPrefix}/`);
+    };
 
     try {
       await closePtySessionsByPath(pathPrefix);
@@ -594,8 +601,14 @@ export function useTerminal(
   // UI-only cleanup: clear local terminal state without closing backend PTY sessions.
   // Used when a grid cell is unmounted — other cells may still share the same PTY sessions.
   const cleanupTerminalUIForPath = useCallback((pathPrefix: string) => {
-    const normalizedPrefix = pathPrefix.replace(/\\/g, '/');
-    const matches = (p: string) => p.startsWith(pathPrefix) || p.replace(/\\/g, '/').startsWith(normalizedPrefix) || p.split('#')[0].startsWith(pathPrefix) || p.split('#')[0].replace(/\\/g, '/').startsWith(normalizedPrefix);
+    // Path-boundary match (exact or `<prefix>/child`), not a bare startsWith that also caught
+    // hyphen/name siblings like `<prefix>-extra`. Strip '#<timestamp>' tab suffixes.
+    const norm = (s: string) => s.replace(/\\/g, '/').replace(/\/+$/, '');
+    const normalizedPrefix = norm(pathPrefix);
+    const matches = (p: string) => {
+      const base = norm(p.split('#')[0]);
+      return base === normalizedPrefix || base.startsWith(`${normalizedPrefix}/`);
+    };
 
     setMountedTerminals(prev => {
       const next = new Set(prev);
