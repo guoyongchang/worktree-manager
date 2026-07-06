@@ -14,6 +14,11 @@ const REPLAY_BUFFER_CAP: usize = 64 * 1024;
 const DESKTOP_PENDING_BUFFER_CAP: usize = 8 * 1024 * 1024;
 /// Drop desktop reader cursors that have stopped polling so they no longer pin backlog in memory.
 const DESKTOP_READER_TTL: Duration = Duration::from_secs(10);
+/// Upper bound on concurrent PTY sessions. Each session spawns a shell child process, a
+/// dedicated reader thread and multi-MB buffers, so an (authenticated) remote share client
+/// looping `pty_create` with fresh ids could otherwise exhaust host processes/threads/FDs/RAM.
+/// The desktop + browser UIs never approach this, so it only bites abuse.
+const MAX_PTY_SESSIONS: usize = 64;
 
 /// Shell integration script directory (set once during app setup)
 static SHELL_INTEGRATION_DIR: OnceLock<PathBuf> = OnceLock::new();
@@ -606,6 +611,23 @@ impl PtyManager {
                 id
             );
             self.close_session(id, "create_session: replacing existing")?;
+        }
+
+        // Bound the number of concurrent sessions so a remote client cannot exhaust host
+        // resources by spawning unlimited shells. The existing session (if any) was just
+        // closed above, so the count here reflects the sessions that will remain.
+        let active = self.session_count();
+        if active >= MAX_PTY_SESSIONS {
+            log::warn!(
+                "[pty] create_session: refusing session '{}' — at capacity ({}/{})",
+                id,
+                active,
+                MAX_PTY_SESSIONS
+            );
+            return Err(format!(
+                "Too many terminal sessions ({} of {} in use). Close some terminals and try again.",
+                active, MAX_PTY_SESSIONS
+            ));
         }
 
         let pty_system = native_pty_system();

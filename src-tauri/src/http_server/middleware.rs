@@ -55,6 +55,15 @@ fn is_localhost_only_path(path: &str) -> bool {
             | "/api/open_devtools"
             | "/api/terminate_worktree_locking_process"
             | "/api/frontend_log"
+            // Cloud account / device-pairing management is owner-only, just like the ngrok
+            // token and WMS tunnel controls above. A remote share client must never be able
+            // to read the owner's cloud status or wipe/rebind their cloud + tunnel credentials.
+            | "/api/cloud_get_status"
+            | "/api/cloud_start_pairing"
+            | "/api/cloud_check_pairing_status"
+            | "/api/cloud_approve_pairing"
+            | "/api/cloud_reject_pairing"
+            | "/api/cloud_disconnect"
     )
 }
 
@@ -142,10 +151,13 @@ pub(super) async fn auth_middleware(
         return next.run(request).await;
     }
 
-    let needs_auth = SHARE_STATE
-        .lock()
-        .map(|state| state.active && state.auth_key.is_some())
-        .unwrap_or(false);
+    // Recover from a poisoned lock instead of `.unwrap_or(false)`: the previous form would
+    // silently drop authentication (fail OPEN) on the RCE-gating endpoints if the mutex were
+    // ever poisoned. Reading the real state under poison keeps the gate fail-closed.
+    let needs_auth = {
+        let state = SHARE_STATE.lock().unwrap_or_else(|p| p.into_inner());
+        state.active && state.auth_key.is_some()
+    };
     if !needs_auth {
         return next.run(request).await;
     }
@@ -193,4 +205,34 @@ pub(super) async fn no_cache_html_middleware(
         headers.insert("Pragma", "no-cache".parse().unwrap());
     }
     resp
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_localhost_only_path;
+
+    #[test]
+    fn cloud_management_commands_are_localhost_only() {
+        for path in [
+            "/api/cloud_get_status",
+            "/api/cloud_start_pairing",
+            "/api/cloud_check_pairing_status",
+            "/api/cloud_approve_pairing",
+            "/api/cloud_reject_pairing",
+            "/api/cloud_disconnect",
+        ] {
+            assert!(
+                is_localhost_only_path(path),
+                "{path} must be restricted to localhost"
+            );
+        }
+    }
+
+    #[test]
+    fn shared_endpoints_stay_remote_reachable() {
+        // These are used by remote share clients and must NOT become localhost-only.
+        assert!(!is_localhost_only_path("/api/pty_create"));
+        assert!(!is_localhost_only_path("/api/list_worktrees"));
+        assert!(!is_localhost_only_path("/api/get_file_diff"));
+    }
 }

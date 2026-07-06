@@ -1564,10 +1564,13 @@ async fn h_ws_upgrade(
         None => return (StatusCode::UNAUTHORIZED, "Missing session_id").into_response(),
     };
 
-    let needs_auth = SHARE_STATE
-        .lock()
-        .map(|state| state.active && state.auth_key.is_some())
-        .unwrap_or(false);
+    // Recover from a poisoned lock rather than failing OPEN: on a lock error the old
+    // `.unwrap_or(false)` would treat the share as password-free and skip the auth check,
+    // exposing the WebSocket (and thus pty_write) without credentials.
+    let needs_auth = {
+        let state = SHARE_STATE.lock().unwrap_or_else(|p| p.into_inner());
+        state.active && state.auth_key.is_some()
+    };
 
     if needs_auth {
         let is_authenticated = AUTHENTICATED_SESSIONS
