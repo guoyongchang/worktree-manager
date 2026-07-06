@@ -1691,7 +1691,7 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                     manager.subscribe_session(&pty_session_id)
                 };
 
-                if let Some((replay, mut rx)) = subscription {
+                if let Some((replay, mut rx, replay_arc)) = subscription {
                     log::info!(
                         "PTY subscribe '{}': replay buffer {} bytes",
                         pty_session_id,
@@ -1756,6 +1756,30 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                                     // Clear pending buffer on lag — skipped messages may have
                                     // contained the continuation bytes we were waiting for.
                                     utf8_pending.clear();
+                                    // Resync: re-send the current replay snapshot so the client
+                                    // recovers the latest retained output instead of silently
+                                    // losing the skipped chunks (it may visually repeat a little
+                                    // recent output, but the terminal state converges).
+                                    let snapshot = replay_arc
+                                        .lock()
+                                        .map(|rb| rb.iter().copied().collect::<Vec<u8>>())
+                                        .unwrap_or_default();
+                                    if !snapshot.is_empty() {
+                                        let (text, pending) = bytes_to_utf8_with_pending(&snapshot);
+                                        utf8_pending = pending;
+                                        if !text.is_empty() {
+                                            let msg = json!({
+                                                "type": "pty_output",
+                                                "sessionId": sid,
+                                                "data": text,
+                                            });
+                                            let mut s = sender.lock().await;
+                                            if s.send(Message::text(msg.to_string())).await.is_err()
+                                            {
+                                                break;
+                                            }
+                                        }
+                                    }
                                     continue;
                                 }
                                 Err(tokio::sync::broadcast::error::RecvError::Closed) => {

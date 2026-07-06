@@ -632,6 +632,10 @@ impl PtyManager {
             self.close_session(id, "create_session: replacing existing")?;
         }
 
+        // Reap any sessions whose shell already exited so they don't leak or count against the
+        // cap below.
+        self.reap_dead_sessions();
+
         // Bound the number of concurrent sessions so a remote client cannot exhaust host
         // resources by spawning unlimited shells. The existing session (if any) was just
         // closed above, so the count here reflects the sessions that will remain.
@@ -762,16 +766,21 @@ impl PtyManager {
                     Ok(0) => break, // EOF
                     Ok(n) => {
                         let data = buf[..n].to_vec();
-                        // Send to broadcast (for WS subscribers); ignore errors (no receivers)
-                        let _ = broadcast_tx_clone.send(data.clone());
-                        // Append to replay buffer
-                        if let Ok(mut rb) = replay_buf_clone.lock() {
+                        // Append to the replay buffer and broadcast under the SAME lock. A newly
+                        // subscribing client snapshots the replay buffer and subscribes to the
+                        // broadcast while holding this lock (see subscribe_session), so making the
+                        // two operations atomic here means it can neither miss a chunk nor receive
+                        // it twice at the snapshot/subscribe seam.
+                        {
+                            let mut rb = replay_buf_clone.lock().unwrap_or_else(|p| p.into_inner());
                             rb.extend(&data);
                             // Trim from front if over capacity
                             if rb.len() > REPLAY_BUFFER_CAP {
                                 let excess = rb.len() - REPLAY_BUFFER_CAP;
                                 rb.drain(..excess);
                             }
+                            // Send to broadcast (for WS subscribers); ignore errors (no receivers)
+                            let _ = broadcast_tx_clone.send(data.clone());
                         }
                         // Desktop readers consume per-client cursors from a shared backlog
                         // so multiple windows do not steal output from each other.
@@ -989,23 +998,68 @@ impl PtyManager {
             .len()
     }
 
+    /// Remove sessions whose shell process has already exited, freeing their slot and resources.
+    /// Called before creating a session so exited (zombie) sessions neither accumulate nor count
+    /// against MAX_PTY_SESSIONS. Live sessions whose client merely disconnected are left intact
+    /// (kept available for reconnect, tmux-style).
+    fn reap_dead_sessions(&self) {
+        let dead: Vec<String> = {
+            let sessions = self
+                .sessions
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            sessions
+                .iter()
+                .filter_map(|(id, session)| {
+                    let mut guard = session.lock().ok()?;
+                    match guard.child.try_wait() {
+                        Ok(Some(_)) => Some(id.clone()),
+                        _ => None,
+                    }
+                })
+                .collect()
+        };
+        if dead.is_empty() {
+            return;
+        }
+        let mut sessions = self
+            .sessions
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        for id in &dead {
+            sessions.remove(id);
+            log::info!("[pty] Reaped exited shell session '{}'", id);
+        }
+    }
+
     /// Get a broadcast receiver and replay buffer snapshot for a PTY session (used by WebSocket subscribers).
     /// Returns (replay_data, broadcast_receiver).
-    pub fn subscribe_session(&self, id: &str) -> Option<(Vec<u8>, broadcast::Receiver<Vec<u8>>)> {
+    /// Returns `(replay_snapshot, broadcast_receiver, replay_buffer)`. The replay buffer handle
+    /// lets the caller re-snapshot to resync a client that lags off the broadcast channel.
+    #[allow(clippy::type_complexity)]
+    pub fn subscribe_session(
+        &self,
+        id: &str,
+    ) -> Option<(
+        Vec<u8>,
+        broadcast::Receiver<Vec<u8>>,
+        Arc<Mutex<VecDeque<u8>>>,
+    )> {
         let sessions = self
             .sessions
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let session_arc = sessions.get(id)?;
         let session = session_arc.lock().ok()?;
-        let replay = session
-            .replay_buffer
-            .lock()
-            .ok()
-            .map(|rb| rb.iter().copied().collect::<Vec<u8>>())
-            .unwrap_or_default();
+        let replay_arc = session.replay_buffer.clone();
+        // Snapshot the replay buffer and subscribe to the broadcast while holding the replay
+        // lock, so the reader thread (which appends+broadcasts under the same lock) cannot
+        // interleave between the two — the client receives every chunk exactly once.
+        let rb = replay_arc.lock().unwrap_or_else(|p| p.into_inner());
+        let replay = rb.iter().copied().collect::<Vec<u8>>();
         let rx = session.broadcast_tx.subscribe();
-        Some((replay, rx))
+        drop(rb);
+        Some((replay, rx, replay_arc))
     }
 
     pub fn close_sessions_by_path_prefix(
@@ -1539,7 +1593,7 @@ mod tests {
             .resize_session(&id, 100, 30)
             .expect("resize session");
 
-        let (replay, _) = manager.subscribe_session(&id).expect("subscribe session");
+        let (replay, _, _) = manager.subscribe_session(&id).expect("subscribe session");
         assert!(
             String::from_utf8_lossy(&replay).contains("WM_PTY_OK"),
             "replay was {:?}",
