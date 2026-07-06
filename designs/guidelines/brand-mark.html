@@ -1,0 +1,32 @@
+<!-- @dsCard group="Brand" viewport="700x170" name="App icon & wordmark" subtitle="The only brand mark; name set in plain Inter semibold" -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+body { margin: 0; background: var(--bg-base); padding: 20px; font-family: var(--font-ui); color: var(--text-primary); display: flex; align-items: center; gap: 28px; }
+img { display: block; }
+.word { display: flex; flex-direction: column; gap: 4px; }
+.word .name { font-size: 22px; font-weight: 600; }
+.word .tag { font-size: 13px; color: var(--text-secondary); }
+.tok { font-size: 10px; font-family: var(--font-mono); color: var(--text-muted); }
+.tile { width: 72px; height: 72px; border-radius: 16px; background: var(--accent); display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-card-hover); }
+</style>
+</head>
+<body>
+<div style="display: flex; flex-direction: column; gap: 6px; align-items: center;">
+  <img src="../assets/app-icon.svg" width="72" height="72" alt="Worktree Manager app icon">
+  <span class="tok">assets/app-icon.svg</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px; align-items: center;">
+  <div class="tile"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 36px; height: 36px;"><rect width="20" height="14" x="2" y="6" rx="2"/><path d="M12 12h.01"/><path d="M16 6V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg></div>
+  <span class="tok">welcome tile: accent + briefcase</span>
+</div>
+<div class="word">
+  <span class="name">Worktree Manager</span>
+  <span class="tag">The missing GUI for Git Worktrees.</span>
+  <span class="tok">no logotype — plain Inter 600</span>
+</div>
+</body>
+</html>

@@ -1,0 +1,25 @@
+<!-- @dsCard group="Effects" viewport="700x160" name="Motion" subtitle="150–200ms zoom/fade enters; indeterminate accent progress" -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+body { margin: 0; background: var(--bg-base); padding: 16px; font-family: var(--font-ui); color: var(--text-primary); display: flex; gap: 20px; align-items: center; }
+.c { display: flex; flex-direction: column; gap: 8px; align-items: center; }
+.tok { font-size: 10px; font-family: var(--font-mono); color: var(--text-muted); text-align: center; line-height: 1.5; }
+.panel { width: 130px; height: 60px; border-radius: 8px; background: var(--bg-surface); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--text-secondary); }
+@keyframes loop-in { 0% { opacity: 0; transform: scale(0.95); } 20%, 80% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(0.95); } }
+.demo-in { animation: loop-in 2s ease-out infinite; }
+.track { width: 130px; height: 4px; background: var(--bg-elevated); border-radius: 9999px; overflow: hidden; }
+.track > div { height: 100%; border-radius: 9999px; }
+.tile { width: 44px; height: 44px; border-radius: 12px; background: var(--accent); display: flex; align-items: center; justify-content: center; }
+</style>
+</head>
+<body>
+<div class="c"><div class="panel demo-in">animate-in</div><span class="tok">zoom 0.95→1 + fade<br>150–200ms ease-out</span></div>
+<div class="c"><div class="track"><div class="animate-progress-indeterminate animate-gradient"></div></div><span class="tok">indeterminate progress<br>accent gradient shift</span></div>
+<div class="c"><div class="tile animate-subtle-pulse"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px"><rect width="20" height="14" x="2" y="6" rx="2"/><path d="M12 12h.01"/><path d="M16 6V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg></div><span class="tok">subtle-pulse 3s<br>hero icons only</span></div>
+<div class="c"><div class="panel" style="border-style: dashed; border-color: color-mix(in srgb, var(--accent) 40%, transparent); color: color-mix(in srgb, var(--accent) 70%, transparent); font-weight: 500;">+ New Worktree</div><span class="tok">dashed accent affordance<br>hover fills accent/10</span></div>
+</body>
+</html>

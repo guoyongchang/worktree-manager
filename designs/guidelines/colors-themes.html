@@ -1,0 +1,30 @@
+<!-- @dsCard group="Colors" viewport="700x240" name="Themes" subtitle="8 user-selectable themes via data-theme attribute" -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+body { margin: 0; background: var(--bg-base); padding: 14px; font-family: var(--font-ui); }
+.grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.theme { border-radius: 8px; border: 1px solid var(--border); background: var(--bg-surface); padding: 10px; }
+.theme .name { font-size: 11px; font-weight: 500; color: var(--text-primary); margin-bottom: 2px; }
+.theme .id { font-size: 9px; font-family: var(--font-mono); color: var(--text-muted); margin-bottom: 8px; }
+.theme .chips { display: flex; gap: 4px; }
+.theme .chips span { width: 16px; height: 16px; border-radius: 4px; border: 1px solid var(--border); }
+.theme .btn { margin-top: 8px; display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 4px; background: var(--accent); color: var(--accent-fg); font-size: 9px; font-weight: 500; }
+</style>
+</head>
+<body>
+<div class="grid">
+  <div class="theme"><div class="name">Default Dark</div><div class="id">(default)</div><div class="chips"><span style="background:var(--bg-base)"></span><span style="background:var(--bg-elevated)"></span><span style="background:var(--accent)"></span><span style="background:var(--success)"></span></div><span class="btn">Accent</span></div>
+  <div class="theme" data-theme="monokai"><div class="name">Monokai</div><div class="id">data-theme="monokai"</div><div class="chips"><span style="background:var(--bg-base)"></span><span style="background:var(--bg-elevated)"></span><span style="background:var(--accent)"></span><span style="background:var(--success)"></span></div><span class="btn">Accent</span></div>
+  <div class="theme" data-theme="dracula"><div class="name">Dracula</div><div class="id">data-theme="dracula"</div><div class="chips"><span style="background:var(--bg-base)"></span><span style="background:var(--bg-elevated)"></span><span style="background:var(--accent)"></span><span style="background:var(--success)"></span></div><span class="btn">Accent</span></div>
+  <div class="theme" data-theme="solarized-dark"><div class="name">Solarized Dark</div><div class="id">data-theme="solarized-dark"</div><div class="chips"><span style="background:var(--bg-base)"></span><span style="background:var(--bg-elevated)"></span><span style="background:var(--accent)"></span><span style="background:var(--success)"></span></div><span class="btn">Accent</span></div>
+  <div class="theme" data-theme="nord"><div class="name">Nord</div><div class="id">data-theme="nord"</div><div class="chips"><span style="background:var(--bg-base)"></span><span style="background:var(--bg-elevated)"></span><span style="background:var(--accent)"></span><span style="background:var(--success)"></span></div><span class="btn">Accent</span></div>
+  <div class="theme" data-theme="default-light"><div class="name">Default Light</div><div class="id">data-theme="default-light"</div><div class="chips"><span style="background:var(--bg-base)"></span><span style="background:var(--bg-elevated)"></span><span style="background:var(--accent)"></span><span style="background:var(--success)"></span></div><span class="btn">Accent</span></div>
+  <div class="theme" data-theme="solarized-light"><div class="name">Solarized Light</div><div class="id">data-theme="solarized-light"</div><div class="chips"><span style="background:var(--bg-base)"></span><span style="background:var(--bg-elevated)"></span><span style="background:var(--accent)"></span><span style="background:var(--success)"></span></div><span class="btn">Accent</span></div>
+  <div class="theme" data-theme="github-light"><div class="name">GitHub Light</div><div class="id">data-theme="github-light"</div><div class="chips"><span style="background:var(--bg-base)"></span><span style="background:var(--bg-elevated)"></span><span style="background:var(--accent)"></span><span style="background:var(--success)"></span></div><span class="btn">Accent</span></div>
+</div>
+</body>
+</html>

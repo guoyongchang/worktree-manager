@@ -1,0 +1,111 @@
+<!-- @dsCard group="App — Desktop" viewport="1024x640" name="Welcome (first run)" subtitle="Empty state before any workspace exists" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Worktree Manager — Welcome</title>
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/lucide@0.462.0/dist/umd/lucide.min.js"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>body { margin: 0; background: var(--bg-base); color: var(--text-primary); font-family: var(--font-ui); }</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+/* Port of src/components/WelcomeView.tsx */
+const { Button, Icon } = window.WorktreeManagerDesignSystem_e60f48;
+
+function WelcomeView() {
+  const [showDetails, setShowDetails] = React.useState(true);
+  return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+      <button style={{
+        position: 'absolute', top: 16, right: 16, display: 'flex', alignItems: 'center', gap: 6,
+        height: 32, padding: '0 10px', fontSize: 12, color: 'var(--text-secondary)',
+        border: '1px solid var(--border)', background: 'var(--bg-surface)', borderRadius: 6,
+        cursor: 'pointer', fontFamily: 'var(--font-ui)',
+      }}>
+        <Icon name="globe" size={14} />
+        <span>English</span>
+      </button>
+
+      <div style={{ maxWidth: 512, width: '100%', margin: '0 auto', textAlign: 'center', padding: 32 }}>
+        <div style={{ marginBottom: 32 }}>
+          <div className="animate-subtle-pulse" style={{
+            width: 80, height: 80, margin: '0 auto 24px', borderRadius: 16, background: 'var(--accent)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'var(--shadow-card-hover)',
+          }}>
+            <Icon name="briefcase" size={40} color="#fff" />
+          </div>
+          <h1 style={{ fontSize: 24, fontWeight: 600, margin: '0 0 12px' }}>Welcome to Worktree Manager</h1>
+          <div style={{
+            marginBottom: 24, padding: 16, borderRadius: 8, textAlign: 'left',
+            background: 'color-mix(in srgb, var(--accent) 10%, transparent)',
+            border: '1px solid color-mix(in srgb, var(--accent) 20%, transparent)',
+          }}>
+            <h2 style={{ fontSize: 14, fontWeight: 500, margin: '0 0 6px' }}>Manage Git workspaces without the clutter</h2>
+            <p style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+              Switch between features, branches, and worktrees without losing your place. Group related projects together.
+            </p>
+          </div>
+          <p style={{ color: 'var(--text-secondary)', fontSize: 14, lineHeight: 1.6, margin: 0 }}>
+            Import an existing workspace directory, or create a new one to get started.
+          </p>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{
+            padding: 16, borderRadius: 8, background: 'var(--bg-surface)',
+            border: '1px solid var(--border)', textAlign: 'left', transition: 'all 150ms',
+          }}>
+            <button
+              onClick={() => setShowDetails(d => !d)}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'none', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'var(--font-ui)', padding: 0 }}
+            >
+              <h3 style={{ fontSize: 14, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
+                <Icon name="folder" size={16} style={{ color: 'var(--accent)' }} />
+                What is a workspace?
+              </h3>
+              <Icon name="chevron-down" size={16} style={{ transform: showDetails ? 'rotate(180deg)' : 'none', transition: 'transform 150ms' }} />
+            </button>
+            {showDetails && (
+              <div style={{ marginTop: 8 }}>
+                <p style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+                  A workspace is a directory holding your main repos plus the worktrees created from them. Related projects switch branches together.
+                </p>
+                <pre style={{
+                  marginTop: 8, fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg-base)',
+                  fontFamily: 'var(--font-mono)', borderRadius: 4, padding: 8, overflowX: 'auto', textAlign: 'left',
+                }}>{`workspace/
+├── projects/      # main repos
+│   ├── backend/
+│   └── frontend/
+└── worktrees/     # your worktrees`}</pre>
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <Button variant="secondary" style={{ height: 48 }}>
+              <Icon name="folder" size={16} /> Import existing
+            </Button>
+            <Button style={{ height: 48 }}>
+              <Icon name="plus" size={16} /> Create new
+            </Button>
+          </div>
+
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
+            Only requirement: Git 2.0+. No Node.js or Rust needed at runtime.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<WelcomeView />);
+</script>
+</body>
+</html>

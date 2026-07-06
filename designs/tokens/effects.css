@@ -1,0 +1,25 @@
+/* ============================================================
+   Worktree Manager — Shadow, focus & transparency tokens
+   Source: src/design-tokens.ts (shadows) + component class usage
+   ============================================================ */
+
+:root {
+  /* Shadows (dark-theme tuned, from design-tokens.ts) */
+  --shadow-subtle: 0 1px 3px rgba(0, 0, 0, 0.3);      /* buttons, inputs (shadow-sm) */
+  --shadow-card-hover: 0 4px 24px rgba(0, 0, 0, 0.4); /* hovered cards */
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -4px rgba(0, 0, 0, 0.4); /* menus, toasts, tooltips */
+  --shadow-modal: 0 8px 32px rgba(0, 0, 0, 0.6);      /* dialogs (shadow-2xl) */
+
+  /* Focus ring — accent at 40% opacity, 2px, no offset */
+  --focus-ring: 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent);
+
+  /* Standard alpha steps for accent/semantic tints (bg / border pairs) */
+  --alpha-tint: 10%;      /* e.g. accent/10 backgrounds */
+  --alpha-tint-strong: 15%; /* badge backgrounds */
+  --alpha-border: 20%;    /* tinted borders (accent/20, warning/20) */
+  --alpha-border-strong: 30%;
+
+  /* Dialog overlay */
+  --overlay: rgba(0, 0, 0, 0.6);  /* bg-black/60 + backdrop-blur-xl */
+  --overlay-blur: 24px;
+}

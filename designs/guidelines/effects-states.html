@@ -1,0 +1,23 @@
+<!-- @dsCard group="Effects" viewport="700x170" name="Interactive states" subtitle="Hover = elevate bg · press = 0.98 scale · focus = accent/40 ring" -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+body { margin: 0; background: var(--bg-base); padding: 16px; font-family: var(--font-ui); color: var(--text-primary); display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; }
+.c { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+.btn { display: inline-flex; align-items: center; height: 36px; padding: 0 16px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-primary); font-size: 14px; font-weight: 500; font-family: var(--font-ui); }
+.tok { font-size: 10px; font-family: var(--font-mono); color: var(--text-muted); text-align: center; line-height: 1.5; }
+.row-demo { width: 148px; border-left: 2px solid transparent; padding: 8px 10px; font-size: 13px; font-weight: 500; border-radius: 0; background: transparent; }
+</style>
+</head>
+<body>
+<div class="c"><span class="btn">Rest</span><span class="tok">surface + border</span></div>
+<div class="c"><span class="btn" style="background: var(--bg-elevated);">Hover</span><span class="tok">bg → elevated<br>(no color shifts)</span></div>
+<div class="c"><span class="btn" style="transform: scale(0.98); background: var(--bg-elevated);">Press</span><span class="tok">scale 0.98</span></div>
+<div class="c"><span class="btn" style="box-shadow: var(--focus-ring);">Focus</span><span class="tok">2px accent/40 ring<br>no offset</span></div>
+<div class="c"><span class="btn" style="opacity: 0.5;">Disabled</span><span class="tok">50% opacity</span></div>
+<div class="c"><span class="row-demo" style="background: var(--bg-elevated); border-left-color: var(--accent);">Selected row</span><span class="tok">elevated bg +<br>2px accent left edge</span></div>
+</body>
+</html>

@@ -1,0 +1,27 @@
+<!-- @dsCard group="Colors" viewport="700x130" name="Worktree label colors" subtitle="User-assignable branch-icon colors + merge-to-main orange" -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+body { margin: 0; background: var(--bg-base); padding: 16px; font-family: var(--font-ui); color: var(--text-primary); display: flex; align-items: center; gap: 24px; }
+.chips { display: flex; gap: 14px; }
+.chip { display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); }
+.dot { width: 26px; height: 26px; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: var(--bg-surface); border: 1px solid var(--border); }
+svg { width: 15px; height: 15px; }
+.merge { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--merge-main-border); background: var(--bg-surface); color: var(--merge-main-text); font-size: 12px; font-weight: 500; }
+</style>
+</head>
+<body>
+<div class="chips">
+  <span class="chip"><span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></span>default</span>
+  <span class="chip"><span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="var(--wt-red)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></span>red</span>
+  <span class="chip"><span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="var(--wt-orange)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></span>orange</span>
+  <span class="chip"><span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="var(--wt-yellow)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></span>yellow</span>
+  <span class="chip"><span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="var(--wt-green)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></span>green</span>
+  <span class="chip"><span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="var(--wt-purple)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg></span>purple</span>
+</div>
+<span class="merge"><svg viewBox="0 0 24 24" fill="none" stroke="var(--merge-main-icon)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></svg> Merge to main — danger orange</span>
+</body>
+</html>

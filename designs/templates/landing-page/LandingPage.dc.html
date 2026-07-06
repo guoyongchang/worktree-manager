@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<!-- @template name="Docs landing page" description="Marketing site — slate/blue palette, gradient CTAs, emoji feature icons, workflow comparison" -->
+<helmet><script src="./ds-base.js"></script></helmet>
+<div data-screen-label="Landing page" style="background: var(--docs-bg); color: var(--docs-text); font-family: var(--font-ui); min-height: 100vh;">
+
+  <nav data-screen-label="Nav" style="position: sticky; top: 0; width: 100%; background: color-mix(in srgb, var(--docs-bg) 95%, transparent); backdrop-filter: blur(4px); border-bottom: 1px solid var(--docs-border); z-index: 50;">
+    <div style="max-width: 72rem; margin: 0 auto; padding: 0 24px; height: 64px; display: flex; align-items: center; justify-content: space-between;">
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <img src="../../assets/app-icon.svg" alt="Worktree Manager" style="width: 32px; height: 32px;">
+        <span style="font-size: 20px; font-weight: 700;">Worktree Manager</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 24px; font-size: 15px;">
+        <a href="#" style="color: var(--docs-link); text-decoration: none;">Home</a>
+        <a href="#" style="color: var(--docs-text-tertiary); text-decoration: none;" style-hover="color: #93c5fd;">Guide</a>
+        <a href="#" style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; background: var(--docs-surface); border-radius: 8px; color: var(--docs-text); text-decoration: none; transition: background 200ms;" style-hover="background: var(--docs-border);">
+          <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"></path></svg>
+          <span>GitHub</span>
+        </a>
+        <span style="font-size: 14px; color: var(--docs-text-secondary);"><a href="#" style="color: var(--docs-text-secondary); text-decoration: none;">中文</a> | <b style="color: var(--docs-text); font-weight: 600;">English</b></span>
+      </div>
+    </div>
+  </nav>
+
+  <header data-screen-label="Hero" style="padding: 80px 16px; text-align: center; background: linear-gradient(to bottom, var(--docs-surface), var(--docs-bg));">
+    <img src="../../assets/app-icon.svg" alt="Worktree Manager" style="width: 96px; height: 96px; margin: 0 auto 24px; display: block;">
+    <h1 style="font-size: 48px; font-weight: 700; margin: 0 0 16px;">Git Worktree Manager</h1>
+    <p style="font-size: 20px; color: var(--docs-text-secondary); max-width: 42rem; margin: 0 auto 32px; line-height: 1.6;">An elegant Git Worktree visual management tool for efficient multi-branch parallel development. Supports secure browser sharing over LAN or ngrok.</p>
+    <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+      <a href="#" style="display: inline-flex; align-items: center; gap: 8px; padding: 12px 24px; background: var(--docs-primary); color: #fff; border-radius: 8px; font-weight: 500; font-size: 15px; text-decoration: none; transition: background 200ms;" style-hover="background: var(--docs-primary-hover);">
+        <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4-4 4m0 0-4-4m4 4V4"></path></svg>
+        <span>Download Latest</span>
+      </a>
+      <a href="#" style="display: inline-flex; align-items: center; gap: 8px; padding: 12px 24px; background: var(--docs-surface); border: 1px solid var(--docs-border); color: #fff; border-radius: 8px; font-weight: 500; font-size: 15px; text-decoration: none; transition: background 200ms;" style-hover="background: var(--docs-border);">GitHub</a>
+      <a href="#" style="display: inline-flex; align-items: center; gap: 8px; padding: 12px 24px; background: var(--docs-surface); border: 1px solid var(--docs-border); color: #fff; border-radius: 8px; font-weight: 500; font-size: 15px; text-decoration: none; transition: background 200ms;" style-hover="background: var(--docs-border);">Get Started</a>
+    </div>
+  </header>
+
+  <section data-screen-label="Download" style="padding: 64px 16px; background: linear-gradient(to bottom, var(--docs-bg), color-mix(in srgb, var(--docs-surface) 50%, var(--docs-bg)), var(--docs-bg)); text-align: center;">
+    <h2 style="font-size: 36px; font-weight: 700; margin: 0 0 12px;">Download &amp; Install</h2>
+    <p style="color: var(--docs-text-secondary); font-size: 18px; margin: 0 0 32px;">Ready to use, with auto-updates</p>
+    <a href="#" style="display: inline-flex; align-items: center; gap: 12px; padding: 16px 32px; background: var(--docs-grad-cta); color: #fff; border-radius: 12px; font-size: 18px; font-weight: 600; text-decoration: none; transition: all 300ms; box-shadow: var(--docs-cta-glow);" style-hover="box-shadow: var(--docs-cta-glow-hover); transform: translateY(-1px);">
+      <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4-4 4m0 0-4-4m4 4V4"></path></svg>
+      <span>Download Latest Version</span>
+    </a>
+    <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin: 32px 0;">
+      <span style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; background: var(--docs-surface); border: 1px solid var(--docs-border); border-radius: 8px; color: var(--docs-text-secondary); font-size: 14px;" style-hover="border-color: rgba(59,130,246,0.5);">macOS (Intel + ARM)</span>
+      <span style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; background: var(--docs-surface); border: 1px solid var(--docs-border); border-radius: 8px; color: var(--docs-text-secondary); font-size: 14px;" style-hover="border-color: rgba(59,130,246,0.5);">Windows</span>
+      <span style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; background: var(--docs-surface); border: 1px solid var(--docs-border); border-radius: 8px; color: var(--docs-text-secondary); font-size: 14px;" style-hover="border-color: rgba(59,130,246,0.5);">Linux</span>
+    </div>
+    <span style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; background: rgba(20,83,45,0.2); border: 1px solid rgba(21,128,61,0.5); border-radius: 8px; color: var(--docs-green-soft); font-size: 14px;">Built-in auto-update — new versions are pushed automatically, no manual downloads needed</span>
+  </section>
+
+  <sc-if value="{{ showPainPoint }}" hint-placeholder-val="{{ true }}">
+  <section data-screen-label="Pain point" style="padding: 64px 16px;">
+    <div style="max-width: 72rem; margin: 0 auto;">
+      <h2 style="font-size: 30px; font-weight: 700; margin: 0 0 12px;">Sound familiar?</h2>
+      <p style="color: var(--docs-text-secondary); font-size: 18px; margin: 0 0 40px;">Productivity black holes every developer has experienced</p>
+      <div style="background: var(--docs-surface); border: 1px solid var(--docs-border); border-radius: 12px; padding: 24px;">
+        <div style="font-weight: 600; font-size: 18px; display: flex; align-items: center; gap: 8px; margin-bottom: 12px; color: var(--docs-red);">🔥 Production is on fire, but your work isn't committed yet</div>
+        <p style="color: var(--docs-text-tertiary); font-size: 14px; line-height: 1.7; margin: 0 0 8px;">You're on <code style="background: var(--docs-bg-deep); padding: 2px 8px; border-radius: 4px; font-size: 12px; font-family: var(--font-mono);">feature/checkout-v2</code> refactoring the checkout flow, with a dozen files changed and <code style="background: var(--docs-bg-deep); padding: 2px 8px; border-radius: 4px; font-size: 12px; font-family: var(--font-mono);">npm run dev</code> hot-reloading. Slack fires off an alert: <strong>payment callback is returning 500 in production.</strong></p>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0;">
+          <div style="padding: 16px; border-radius: 8px; background: rgba(239,68,68,0.04); border: 1px solid rgba(239,68,68,0.15);">
+            <h4 style="font-weight: 600; margin: 0 0 12px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--docs-red);">Traditional Approach</h4>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
+              <span style="display: inline-flex; padding: 4px 10px; border-radius: 6px; font-family: var(--font-mono); font-size: 11px; white-space: nowrap; background: rgba(239,68,68,0.1); color: var(--docs-red-soft); border: 1px solid rgba(239,68,68,0.12);">git stash</span><span style="color: var(--docs-border-soft); font-size: 11px;">→</span>
+              <span style="display: inline-flex; padding: 4px 10px; border-radius: 6px; font-family: var(--font-mono); font-size: 11px; white-space: nowrap; background: rgba(239,68,68,0.1); color: var(--docs-red-soft); border: 1px solid rgba(239,68,68,0.12);">checkout hotfix</span><span style="color: var(--docs-border-soft); font-size: 11px;">→</span>
+              <span style="display: inline-flex; padding: 4px 10px; border-radius: 6px; font-family: var(--font-mono); font-size: 11px; white-space: nowrap; background: rgba(239,68,68,0.1); color: var(--docs-red-soft); border: 1px solid rgba(239,68,68,0.12);">npm install</span><span style="color: var(--docs-border-soft); font-size: 11px;">→</span>
+              <span style="display: inline-flex; padding: 4px 10px; border-radius: 6px; font-family: var(--font-mono); font-size: 11px; white-space: nowrap; background: rgba(239,68,68,0.1); color: var(--docs-red-soft); border: 1px solid rgba(239,68,68,0.12);">fix bug</span><span style="color: var(--docs-border-soft); font-size: 11px;">→</span>
+              <span style="display: inline-flex; padding: 4px 10px; border-radius: 6px; font-family: var(--font-mono); font-size: 11px; white-space: nowrap; background: rgba(239,68,68,0.1); color: var(--docs-red-soft); border: 1px solid rgba(239,68,68,0.12);">push</span><span style="color: var(--docs-border-soft); font-size: 11px;">→</span>
+              <span style="display: inline-flex; padding: 4px 10px; border-radius: 6px; font-family: var(--font-mono); font-size: 11px; white-space: nowrap; background: rgba(239,68,68,0.1); color: var(--docs-red-soft); border: 1px solid rgba(239,68,68,0.12);">checkout back</span><span style="color: var(--docs-border-soft); font-size: 11px;">→</span>
+              <span style="display: inline-flex; padding: 4px 10px; border-radius: 6px; font-family: var(--font-mono); font-size: 11px; white-space: nowrap; background: rgba(239,68,68,0.1); color: var(--docs-red-soft); border: 1px solid rgba(239,68,68,0.12);">stash pop</span>
+            </div>
+            <div style="margin-top: 12px; font-size: 12px; font-weight: 600; color: var(--docs-red);">8 steps · 15+ minutes · possible conflicts</div>
+          </div>
+          <div style="padding: 16px; border-radius: 8px; background: rgba(34,197,94,0.04); border: 1px solid rgba(34,197,94,0.15);">
+            <h4 style="font-weight: 600; margin: 0 0 12px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--docs-green);">Worktree Manager</h4>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
+              <span style="display: inline-flex; padding: 4px 10px; border-radius: 6px; font-family: var(--font-mono); font-size: 11px; white-space: nowrap; background: rgba(34,197,94,0.1); color: var(--docs-green-soft); border: 1px solid rgba(34,197,94,0.12);">Click "+" to create hotfix</span><span style="color: var(--docs-border-soft); font-size: 11px;">→</span>
+              <span style="display: inline-flex; padding: 4px 10px; border-radius: 6px; font-family: var(--font-mono); font-size: 11px; white-space: nowrap; background: rgba(34,197,94,0.1); color: var(--docs-green-soft); border: 1px solid rgba(34,197,94,0.12);">fix bug</span><span style="color: var(--docs-border-soft); font-size: 11px;">→</span>
+              <span style="display: inline-flex; padding: 4px 10px; border-radius: 6px; font-family: var(--font-mono); font-size: 11px; white-space: nowrap; background: rgba(34,197,94,0.1); color: var(--docs-green-soft); border: 1px solid rgba(34,197,94,0.12);">push</span><span style="color: var(--docs-border-soft); font-size: 11px;">→</span>
+              <span style="display: inline-flex; padding: 4px 10px; border-radius: 6px; font-family: var(--font-mono); font-size: 11px; white-space: nowrap; background: rgba(34,197,94,0.1); color: var(--docs-green-soft); border: 1px solid rgba(34,197,94,0.12);">archive</span>
+            </div>
+            <div style="margin-top: 12px; font-size: 12px; font-weight: 600; color: var(--docs-green);">4 steps · 30-second switch · zero impact on original branch</div>
+          </div>
+        </div>
+        <div style="padding: 12px; background: rgba(20,83,45,0.2); border: 1px solid rgba(21,128,61,0.5); border-radius: 8px;">
+          <p style="color: var(--docs-green-soft); font-size: 14px; margin: 0;"><strong>node_modules automatically shared via symlink</strong>, ready in seconds. Your feature branch dev server keeps running, and your in-progress code stays untouched.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+  </sc-if>
+
+  <section data-screen-label="Features" style="padding: 80px 16px;">
+    <div style="max-width: 72rem; margin: 0 auto;">
+      <h2 style="font-size: 36px; font-weight: 700; margin: 0 0 12px; text-align: center;">Core Features</h2>
+      <p style="color: var(--docs-text-secondary); font-size: 18px; margin: 0 0 48px; text-align: center;">Built for multi-branch development</p>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px;">
+        <div style="background: var(--docs-surface); border: 1px solid var(--docs-border); border-radius: 12px; padding: 24px; transition: all 300ms;" style-hover="border-color: rgba(59,130,246,0.5); box-shadow: 0 10px 15px -3px rgba(59,130,246,0.1);">
+          <div style="font-size: 36px; margin-bottom: 16px;">🔀</div>
+          <h3 style="font-size: 20px; font-weight: 600; margin: 0 0 8px; color: var(--docs-text);">Multi-Branch Parallel Work</h3>
+          <p style="color: var(--docs-text-secondary); font-size: 14px; line-height: 1.6; margin: 0;">Work on multiple branches simultaneously in one project, without interference. No stashing, no cloning multiple copies.</p>
+        </div>
+        <div style="background: var(--docs-surface); border: 1px solid var(--docs-border); border-radius: 12px; padding: 24px; transition: all 300ms;" style-hover="border-color: rgba(59,130,246,0.5); box-shadow: 0 10px 15px -3px rgba(59,130,246,0.1);">
+          <div style="font-size: 36px; margin-bottom: 16px;">🔗</div>
+          <h3 style="font-size: 20px; font-weight: 600; margin: 0 0 8px; color: var(--docs-text);">Smart Folder Linking</h3>
+          <p style="color: var(--docs-text-secondary); font-size: 14px; line-height: 1.6; margin: 0;">Automatically links node_modules, .next, vendor and other build artifacts to avoid redundant dependency installations.</p>
+        </div>
+        <div style="background: var(--docs-surface); border: 1px solid var(--docs-border); border-radius: 12px; padding: 24px; transition: all 300ms;" style-hover="border-color: rgba(59,130,246,0.5); box-shadow: 0 10px 15px -3px rgba(59,130,246,0.1);">
+          <div style="font-size: 36px; margin-bottom: 16px;">📊</div>
+          <h3 style="font-size: 20px; font-weight: 600; margin: 0 0 8px; color: var(--docs-text);">Branch Status Monitoring</h3>
+          <p style="color: var(--docs-text-secondary); font-size: 14px; line-height: 1.6; margin: 0;">Real-time display of commit counts, uncommitted changes, test branch merge status, and more at a glance.</p>
+        </div>
+        <div style="background: var(--docs-surface); border: 1px solid var(--docs-border); border-radius: 12px; padding: 24px; transition: all 300ms;" style-hover="border-color: rgba(59,130,246,0.5); box-shadow: 0 10px 15px -3px rgba(59,130,246,0.1);">
+          <div style="font-size: 36px; margin-bottom: 16px;">💻</div>
+          <h3 style="font-size: 20px; font-weight: 600; margin: 0 0 8px; color: var(--docs-text);">Built-in Terminal</h3>
+          <p style="color: var(--docs-text-secondary); font-size: 14px; line-height: 1.6; margin: 0;">Each worktree has independent terminal sessions with multi-tab, tab duplication, and fullscreen support.</p>
+        </div>
+        <div style="background: var(--docs-surface); border: 1px solid var(--docs-border); border-radius: 12px; padding: 24px; transition: all 300ms;" style-hover="border-color: rgba(59,130,246,0.5); box-shadow: 0 10px 15px -3px rgba(59,130,246,0.1);">
+          <div style="font-size: 36px; margin-bottom: 16px;">🧠</div>
+          <h3 style="font-size: 20px; font-weight: 600; margin: 0 0 8px; color: var(--docs-text);">AI Voice Refinement <span style="font-size: 0.6em; vertical-align: middle; background: var(--docs-grad-new); padding: 2px 8px; border-radius: 4px; font-weight: 600; color: #fff; letter-spacing: 0.05em;">NEW</span></h3>
+          <p style="color: var(--docs-text-secondary); font-size: 14px; line-height: 1.6; margin: 0;">AI-powered post-processing for voice input. Automatically corrects recognition errors and normalizes command syntax.</p>
+        </div>
+        <div style="background: linear-gradient(135deg, #1e293b 0%, #172554 100%); border: 1px solid rgba(59,130,246,0.3); border-radius: 12px; padding: 24px; transition: all 300ms;" style-hover="border-color: rgba(59,130,246,0.5); box-shadow: 0 10px 15px -3px rgba(59,130,246,0.1);">
+          <div style="font-size: 36px; margin-bottom: 16px;">🌐</div>
+          <h3 style="font-size: 20px; font-weight: 600; margin: 0 0 8px; color: var(--docs-text);">Browser Sharing</h3>
+          <p style="color: var(--docs-text-secondary); font-size: 14px; line-height: 1.6; margin: 0;">Share your workspace with one click. Colleagues access it through a browser. Supports LAN direct and ngrok tunneling.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <sc-if value="{{ showSteps }}" hint-placeholder-val="{{ true }}">
+  <section data-screen-label="Steps" style="padding: 80px 16px; background: linear-gradient(to bottom, var(--docs-bg), var(--docs-surface), var(--docs-bg));">
+    <div style="max-width: 72rem; margin: 0 auto;">
+      <h2 style="font-size: 36px; font-weight: 700; margin: 0 0 12px; text-align: center;">Three Steps to Start</h2>
+      <p style="color: var(--docs-text-secondary); font-size: 18px; margin: 0 0 48px; text-align: center;">Get started with multi-branch parallel development in minutes</p>
+      <div style="max-width: 48rem; margin: 0 auto; display: flex; flex-direction: column; gap: 24px;">
+        <div style="display: flex; gap: 16px; align-items: flex-start;">
+          <div style="flex-shrink: 0; width: 40px; height: 40px; border-radius: 9999px; background: var(--docs-grad-step); display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 18px;">1</div>
+          <div>
+            <h3 style="font-size: 18px; font-weight: 600; margin: 0 0 8px; color: var(--docs-text);">Create a Workspace</h3>
+            <p style="color: var(--docs-text-secondary); line-height: 1.6; margin: 0;">Click "New Workspace" and select a directory as the workspace root. The app initializes the structure and detects Git projects within it.</p>
+          </div>
+        </div>
+        <div style="display: flex; gap: 16px; align-items: flex-start;">
+          <div style="flex-shrink: 0; width: 40px; height: 40px; border-radius: 9999px; background: var(--docs-grad-step); display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 18px;">2</div>
+          <div>
+            <h3 style="font-size: 18px; font-weight: 600; margin: 0 0 8px; color: var(--docs-text);">Create a Worktree (Working Branch)</h3>
+            <p style="color: var(--docs-text-secondary); line-height: 1.6; margin: 0;">Click the "+" button in the sidebar, enter a branch name like <code style="background: var(--docs-bg-deep); padding: 2px 8px; border-radius: 4px; font-size: 12px; font-family: var(--font-mono);">feature/login</code>, and select which projects join the worktree.</p>
+          </div>
+        </div>
+        <div style="display: flex; gap: 16px; align-items: flex-start;">
+          <div style="flex-shrink: 0; width: 40px; height: 40px; border-radius: 9999px; background: var(--docs-grad-step); display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 18px;">3</div>
+          <div>
+            <h3 style="font-size: 18px; font-weight: 600; margin: 0 0 8px; color: var(--docs-text);">Develop in Parallel</h3>
+            <p style="color: var(--docs-text-secondary); line-height: 1.6; margin: 0;">Each worktree is an isolated directory with shared dependencies. Open it in your IDE, run its own terminal, and merge from the project card when done.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+  </sc-if>
+
+  <footer style="border-top: 1px solid var(--docs-border); padding: 32px 16px; text-align: center; color: var(--docs-text-muted); font-size: 14px;">
+    <p style="margin: 0;">Worktree Manager · MIT License · <a href="https://github.com/guoyongchang/worktree-manager" style="color: var(--docs-link); text-decoration: none;">GitHub</a></p>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;showPainPoint&quot;: {&quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: true, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;Sections&quot;},
+  &quot;showSteps&quot;: {&quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: true, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;Sections&quot;}
+}">
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      showPainPoint: this.props.showPainPoint ?? true,
+      showSteps: this.props.showSteps ?? true,
+    };
+  }
+}
+</script>
+</body>
+</html>
