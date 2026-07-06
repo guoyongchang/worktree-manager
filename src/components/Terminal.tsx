@@ -204,6 +204,10 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
   const desktopTransportRef = useRef<'event' | 'polling' | null>(null);
   const initializedRef = useRef(false);
   const initInProgressRef = useRef(false);
+  const lastSentSizeRef = useRef<{ cols: number; rows: number } | null>(null);
+  const resizeDebounceRef = useRef<number | null>(null);
+  const handleResizeRef = useRef<(force?: boolean) => void>(() => {});
+  const focusHandlerRef = useRef<{ el: HTMLElement; handler: () => void } | null>(null);
   const cwdRef = useRef(actualCwd);
   const mouseSelectionRef = useRef({
     pressed: false,
@@ -526,6 +530,17 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
         pasteHandlerRef.current = null;
       }
 
+      const focusH = focusHandlerRef.current;
+      if (focusH) {
+        focusH.el.removeEventListener('focusin', focusH.handler);
+        focusHandlerRef.current = null;
+      }
+
+      if (resizeDebounceRef.current !== null) {
+        clearTimeout(resizeDebounceRef.current);
+        resizeDebounceRef.current = null;
+      }
+
       if (pendingPasteFallbackRef.current !== null) {
         clearTimeout(pendingPasteFallbackRef.current);
         pendingPasteFallbackRef.current = null;
@@ -740,6 +755,12 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
           handlePaste: handleTerminalPaste,
         };
 
+        // Assert this client's size when the terminal gains focus, so the most-recently-focused
+        // client's dimensions win when several clients (e.g. mobile + desktop) view the same PTY.
+        const handleFocusIn = () => handleResizeRef.current(true);
+        terminalRef.current.addEventListener('focusin', handleFocusIn);
+        focusHandlerRef.current = { el: terminalRef.current, handler: handleFocusIn };
+
         // Mouse selection handling
         const resetStuckSelection = (forceClear = false) => {
           const selectionState = mouseSelectionRef.current;
@@ -927,21 +948,22 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
       initializedRef.current = true;
       startReading();
 
-      // Deferred resize
+      // Deferred resize: assert this client's initial size once and record it, so subsequent
+      // ResizeObserver ticks dedupe against it instead of storming the shared PTY. (Previously
+      // this fired on every reattach via `|| exists`, clobbering another client's size.)
       requestAnimationFrame(() => {
         setTimeout(() => {
           if (adapterRef.current && mountedRef.current) {
             try { adapterRef.current.fit(); } catch (_e) { /* ignore */ }
             const newCols = Math.max(adapterRef.current.cols || 80, 2);
             const newRows = Math.max(adapterRef.current.rows || 24, 2);
-            if (newCols !== cols || newRows !== rows || exists) {
-              callBackend('pty_resize', {
-                sessionId: sessionIdRef.current,
-                cols: newCols,
-                rows: newRows,
-                ...(clientId ? { clientId } : {}),
-              }).catch(() => { });
-            }
+            lastSentSizeRef.current = { cols: newCols, rows: newRows };
+            callBackend('pty_resize', {
+              sessionId: sessionIdRef.current,
+              cols: newCols,
+              rows: newRows,
+              ...(clientId ? { clientId } : {}),
+            }).catch(() => { });
           }
         }, 100);
       });
@@ -998,12 +1020,20 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
   }, []);
 
 
-  const handleResize = useCallback(() => {
+  // Resize the (shared) PTY to this client's fitted size. Several clients can view the same PTY
+  // at once but it has a single size, so we only send on an actual change to avoid a SIGWINCH
+  // storm; `force` re-asserts even when unchanged, used when this client becomes the active /
+  // focused view so the most-recently-focused client's size wins.
+  const handleResize = useCallback((force = false) => {
     if (!adapterRef.current || !mountedRef.current || !visible || !initializedRef.current) return;
 
     try { adapterRef.current.fit(); } catch (_e) { /* ignore */ }
     const cols = Math.max(adapterRef.current.cols || 80, 2);
     const rows = Math.max(adapterRef.current.rows || 24, 2);
+
+    const last = lastSentSizeRef.current;
+    if (!force && last && last.cols === cols && last.rows === rows) return;
+    lastSentSizeRef.current = { cols, rows };
 
     callBackend('pty_resize', {
       sessionId: sessionIdRef.current,
@@ -1012,9 +1042,19 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
       ...(clientId ? { clientId } : {}),
     }).catch(() => { /* noop */ });
   }, [visible, clientId]);
+  handleResizeRef.current = handleResize;
+
+  // Debounced resize for high-frequency triggers (ResizeObserver during a window drag).
+  const scheduleResize = useCallback(() => {
+    if (resizeDebounceRef.current !== null) clearTimeout(resizeDebounceRef.current);
+    resizeDebounceRef.current = window.setTimeout(() => {
+      resizeDebounceRef.current = null;
+      handleResize(false);
+    }, 120);
+  }, [handleResize]);
 
   const handleResizeToFit = useCallback(() => {
-    handleResize();
+    handleResize(true);
     handleCloseContextMenu();
   }, [handleResize, handleCloseContextMenu]);
 
@@ -1024,9 +1064,10 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
 
     if (visible) {
       if (isTauri()) startReading();
-      // Small delay ensures DOM is fully rendered before resize
+      // Small delay ensures DOM is fully rendered before resize. Becoming visible means this
+      // client is now the active view, so force-assert its size (last-focused client wins).
       const resizeTimer = setTimeout(() => {
-        handleResize();
+        handleResize(true);
       }, 50);
       return () => clearTimeout(resizeTimer);
     }
@@ -1041,7 +1082,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
 
     const resizeObserver = new ResizeObserver(() => {
       if (visible) {
-        handleResize();
+        scheduleResize();
       }
     });
 
@@ -1050,7 +1091,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
     return () => {
       resizeObserver.disconnect();
     };
-  }, [visible, handleResize]);
+  }, [visible, scheduleResize]);
 
   // Cleanup on unmount — stop reading only (PTY sessions persist like tmux)
   useEffect(() => {
@@ -1225,7 +1266,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
           </>
         )}
       </div>
-      {isMobile && <MobileTerminalToolbar sessionId={sessionIdRef.current} onResize={handleResize} onDebug={handleShowDebugInfo} />}
+      {isMobile && <MobileTerminalToolbar sessionId={sessionIdRef.current} onResize={() => handleResize(true)} onDebug={handleShowDebugInfo} />}
     </div>
   );
 });

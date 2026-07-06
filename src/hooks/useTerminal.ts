@@ -299,6 +299,29 @@ export function useTerminal(
     if (activatedChanged ||
       msg.activeTerminalTab !== activeTerminalTabRef.current ||
       msg.terminalVisible !== terminalVisibleRef.current) {
+      // Prune terminals the peer closed (present locally, absent in the new set) from the mount
+      // set and per-terminal UI state, so a peer's tab-close no longer leaves a zombie Terminal
+      // mounted here. UI-only: unmounting a Terminal stops reading but does not pty_close (the
+      // peer that closed the tab already closed the backend PTY).
+      const removed = [...currentActivated].filter(p => !newActivatedTerminals.has(p));
+      if (removed.length > 0) {
+        setMountedTerminals(prev => {
+          const next = new Set(prev);
+          for (const p of removed) next.delete(p);
+          return next.size === prev.size ? prev : next;
+        });
+        setCwdOverrides(prev => {
+          const next = new Map(prev);
+          for (const p of removed) next.delete(p);
+          return next.size === prev.size ? prev : next;
+        });
+        setShellIntegrationMap(prev => {
+          const next = new Map(prev);
+          for (const p of removed) next.delete(p);
+          return next.size === prev.size ? prev : next;
+        });
+      }
+
       setActivatedTerminals(newActivatedTerminals);
       setActiveTerminalTab(msg.activeTerminalTab);
       setTerminalVisible(msg.terminalVisible);
