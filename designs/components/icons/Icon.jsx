@@ -62,6 +62,8 @@ export function Icon({ name, size = 16, strokeWidth = 2, color = 'currentColor',
   if (ready && window.lucide.icons) {
     node = window.lucide.icons[toPascal(name)] || window.lucide.icons[name] || null;
   }
+  // lucide UMD (0.462.0) icons are a full ['svg', attrs, children] triple — render only the children
+  const entries = Array.isArray(node) && node[0] === 'svg' ? node[2] : node;
 
   return (
     <svg
@@ -78,7 +80,7 @@ export function Icon({ name, size = 16, strokeWidth = 2, color = 'currentColor',
       style={{ flexShrink: 0, ...style }}
       {...props}
     >
-      {Array.isArray(node) ? node.map((n, i) => renderNode(n, i)) : null}
+      {Array.isArray(entries) ? entries.map((n, i) => renderNode(n, i)) : null}
     </svg>
   );
 }

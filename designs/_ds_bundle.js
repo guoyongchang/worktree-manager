@@ -590,6 +590,8 @@ function Icon({
   if (ready && window.lucide.icons) {
     node = window.lucide.icons[toPascal(name)] || window.lucide.icons[name] || null;
   }
+  // lucide UMD (0.462.0) icons are a full ['svg', attrs, children] triple — render only the children
+  const entries = Array.isArray(node) && node[0] === 'svg' ? node[2] : node;
   return /*#__PURE__*/React.createElement("svg", _extends({
     xmlns: "http://www.w3.org/2000/svg",
     width: size,
@@ -605,7 +607,7 @@ function Icon({
       flexShrink: 0,
       ...style
     }
-  }, props), Array.isArray(node) ? node.map((n, i) => renderNode(n, i)) : null);
+  }, props), Array.isArray(entries) ? entries.map((n, i) => renderNode(n, i)) : null);
 }
 Object.assign(__ds_scope, { Icon });
 })(); } catch (e) { __ds_ns.__errors.push({ path: "components/icons/Icon.jsx", error: String((e && e.message) || e) }); }
