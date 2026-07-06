@@ -98,6 +98,25 @@ describe('GitOperations', () => {
     expect(backend.fetchProjectRemote).not.toHaveBeenCalled();
   });
 
+  it('skips remote branch checks for non-git project status', async () => {
+    await act(async () => {
+      render(
+        <GitOperations
+          projectPath="/tmp/worktree"
+          projectName="workspace-root"
+          baseBranch="main"
+          testBranch="test"
+          currentBranch="unknown"
+        />
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(backend.getBranchDiffStats).toHaveBeenCalledTimes(1);
+    expect(backend.checkRemoteBranchExists).not.toHaveBeenCalled();
+  });
+
   it('auto-refresh does not call setLoading when onSilentRefresh is provided', async () => {
     const onSilentRefresh = vi.fn().mockResolvedValue(undefined);
     render(

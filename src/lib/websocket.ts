@@ -49,7 +49,17 @@ class WebSocketManager {
   private static readonly MAX_PENDING_WRITE_BYTES = 256 * 1024;
 
   connect(sessionId: string) {
-    if (this.ws && this.connected) return;
+    if (!sessionId) {
+      this.sessionId = null;
+      return;
+    }
+    if (this.ws && this.sessionId === sessionId) return;
+    if (this.ws && this.sessionId !== sessionId) {
+      this.ws.close();
+      this.ws = null;
+      this.connected = false;
+      this.notifyConnectionState(false);
+    }
     this.sessionId = sessionId;
     this.doConnect();
   }
@@ -344,7 +354,7 @@ let instance: WebSocketManager | null = null;
 export function getWebSocketManager(): WebSocketManager {
   if (!instance) {
     instance = new WebSocketManager();
-    instance.connect(getSessionId());
   }
+  instance.connect(getSessionId());
   return instance;
 }

@@ -223,6 +223,11 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
   }, [projectPath, baseBranch, testBranch]);
 
   const checkBranches = useCallback(async () => {
+    if (!currentBranch || currentBranch === 'unknown') {
+      setTestBranchExists(null);
+      setBaseBranchExists(null);
+      return;
+    }
     try {
       const [testExists, baseExists] = await Promise.all([
         checkRemoteBranchExists(projectPath, testBranch),
@@ -233,7 +238,7 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
     } catch (err) {
       console.error('Failed to check branches:', err);
     }
-  }, [projectPath, testBranch, baseBranch]);
+  }, [projectPath, testBranch, baseBranch, currentBranch]);
 
   const loadLocalState = useCallback(async () => {
     await Promise.all([loadStats(), checkBranches()]);

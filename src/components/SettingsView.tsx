@@ -1076,6 +1076,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
 
   // Load cloud status on mount
   useEffect(() => {
+    if (!isTauri()) return;
     cloudGetStatus().then(setCloudStatus).catch(() => {})
   }, [])
 
