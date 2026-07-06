@@ -143,7 +143,8 @@ function getSubdomain(): string | null {
 }
 
 function getCenterApiBase(): string {
-  return '/api';
+  const subdomain = getSubdomain();
+  return subdomain ? `/t/${subdomain}/api` : '/api';
 }
 
 async function probePeerLatency(

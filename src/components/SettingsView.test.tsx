@@ -13,6 +13,8 @@ vi.mock('../lib/backend', async () => {
   const actual = await vi.importActual<typeof import('../lib/backend')>('../lib/backend');
   return {
     ...actual,
+    isTauri: vi.fn(() => false),
+    cloudGetStatus: vi.fn().mockResolvedValue({ connected: false }),
     getVaultStatus: vi.fn().mockResolvedValue({
       connected: false,
       vault_path: null,
@@ -21,6 +23,33 @@ vi.mock('../lib/backend', async () => {
     vaultLink: vi.fn(),
     listVaultItemChildren: vi.fn(),
   };
+});
+
+import { cloudGetStatus } from '../lib/backend';
+import { SettingsView } from './SettingsView';
+
+const baseWorkspaceConfig = {
+  name: 'Test Workspace',
+  worktrees_dir: 'worktrees',
+  projects: [],
+  linked_workspace_items: [],
+};
+
+const defaultSettingsProps = {
+  workspaceConfig: baseWorkspaceConfig,
+  configPath: '/tmp/.worktree-manager.json',
+  error: null,
+  onBack: vi.fn(),
+  onSaveConfig: vi.fn().mockResolvedValue(undefined),
+  onClearError: vi.fn(),
+};
+
+describe('SettingsView browser mode', () => {
+  it('does not load cloud status from a browser sharing session', () => {
+    render(<SettingsView {...defaultSettingsProps} />);
+
+    expect(cloudGetStatus).not.toHaveBeenCalled();
+  });
 });
 
 describe('WorkspaceVaultSection', () => {

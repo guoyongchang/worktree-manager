@@ -69,7 +69,7 @@ describe('tunnelRoute', () => {
     expect(getRoutedWebSocketUrl('sid')).toBe('wss://167.235.103.66:8443/t/bliss-kind-drift/ws?session_id=sid&route_token=route-token');
   });
 
-  it('discovers route candidates from the center API root while on a share path', async () => {
+  it('discovers route candidates through the current share path while on a tunneled URL', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -85,7 +85,7 @@ describe('tunnelRoute', () => {
 
     expect(discovery?.subdomain).toBe('bliss-kind-drift');
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/tunnel/route/bliss-kind-drift',
+      '/t/bliss-kind-drift/api/tunnel/route/bliss-kind-drift',
       { headers: { 'X-Session-Id': '' } },
     );
   });
@@ -192,6 +192,7 @@ describe('tunnelRoute', () => {
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
 
     expect(route?.selected_peer_id).toBe('center');
+    expect(fetchMock.mock.calls[0][0]).toBe('/t/bliss-kind-drift/api/tunnel/route/bliss-kind-drift/select');
     expect(body).toEqual({
       route_session_id: 'rts_manual',
       measurements: [
