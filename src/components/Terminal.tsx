@@ -203,6 +203,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
   const desktopListenerTokenRef = useRef(0);
   const desktopTransportRef = useRef<'event' | 'polling' | null>(null);
   const initializedRef = useRef(false);
+  const initInProgressRef = useRef(false);
   const cwdRef = useRef(actualCwd);
   const mouseSelectionRef = useRef({
     pressed: false,
@@ -654,6 +655,10 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
   const initPty = useCallback(async () => {
     const adapter = adapterRef.current;
     if (!adapter || !terminalRef.current) return;
+    // Guard against overlapping initPty runs (rapid visibility/reinit toggles during
+    // async init) — a concurrent run could double pty_create or leak a reader/subscription.
+    if (initInProgressRef.current) return;
+    initInProgressRef.current = true;
 
     setInitStatus('Preparing terminal...');
     setInitError(null);
@@ -914,7 +919,11 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
         }
       }
 
-      setInitStatus('Subscribing output...');
+      // Bail if the component was torn down during the awaits above — otherwise we
+      // would re-arm a reader/subscription after the unmount cleanup already ran.
+      if (!adapterRef.current || !mountedRef.current) return;
+
+      if (!gotFirstDataRef.current) setInitStatus('Subscribing output...');
       initializedRef.current = true;
       startReading();
 
@@ -937,9 +946,17 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
         }, 100);
       });
 
-      setInitStatus('Waiting for output...');
-
-      if (exists) {
+      // Clear the init overlay. If the restore read already delivered buffered output
+      // (reattaching to a session already open on another client), the terminal is
+      // usable now — do NOT re-show a spinner, because no *new* output is coming for an
+      // idle shell and the overlay (which also blocks input and disables the tab-close
+      // button) would hang forever. Otherwise wait briefly for the first output, then
+      // clear unconditionally so a silent session (fresh, or an empty restore) can't
+      // get stuck either.
+      if (gotFirstDataRef.current) {
+        setInitStatus(null);
+      } else {
+        setInitStatus('Waiting for output...');
         setTimeout(() => {
           if (!gotFirstDataRef.current) setInitStatus(null);
         }, 2000);
@@ -949,6 +966,8 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
       setInitStatus(null);
       setInitError(String(e));
       console.error('[terminal] Failed to initialize PTY:', e);
+    } finally {
+      initInProgressRef.current = false;
     }
   }, [clientId, handleIncomingData, sendPastedText, startReading]);
 
@@ -1040,22 +1059,19 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
     };
   }, [stopReading]);
 
-  // Browser mode: track WS connection state and re-subscribe on reconnect
+  // Browser mode: track WS connection state only. Re-subscription on reconnect is handled
+  // centrally by the WS manager's onopen handler, which re-sends pty_subscribe for every
+  // tracked session (and the pty callback persists across reconnects). Re-subscribing here
+  // as well issued a duplicate pty_subscribe, so the server replayed its buffer twice and
+  // terminal output was duplicated on every reconnect.
   useEffect(() => {
     if (isTauri()) return;
     const wsMgr = getWebSocketManager();
     const unsub = wsMgr.onConnectionStateChange((connected) => {
       setWsConnected(connected);
-      // On reconnect, re-subscribe if we had an active session
-      if (connected && initializedRef.current && wsSubscribedRef.current) {
-        console.log('[terminal] WS reconnected, re-subscribing PTY:', sessionIdRef.current);
-        wsMgr.subscribePty(sessionIdRef.current, (data) => {
-          handleIncomingData(data);
-        });
-      }
     });
     return unsub;
-  }, [handleIncomingData]);
+  }, []);
 
   return (
     <div className="h-full w-full flex flex-col overflow-hidden">
