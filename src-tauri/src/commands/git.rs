@@ -485,16 +485,82 @@ pub fn import_external_project_impl(
 
 fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dst)?;
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
+    let entries = match std::fs::read_dir(src) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(e),
+        };
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
-        if src_path.is_dir() {
+        let metadata = match std::fs::symlink_metadata(&src_path) {
+            Ok(metadata) => metadata,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(e),
+        };
+        let file_type = metadata.file_type();
+
+        if file_type.is_dir() {
             copy_dir_recursive(&src_path, &dst_path)?;
+        } else if file_type.is_symlink() {
+            match copy_symlink(&src_path, &dst_path) {
+                Ok(()) => {}
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::NotFound && path_was_removed(&src_path) =>
+                {
+                    continue;
+                }
+                Err(e) => return Err(e),
+            }
+        } else if file_type.is_file() {
+            match std::fs::copy(&src_path, &dst_path) {
+                Ok(_) => {}
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::NotFound && path_was_removed(&src_path) =>
+                {
+                    continue;
+                }
+                Err(e) => return Err(e),
+            }
         } else {
-            std::fs::copy(&src_path, &dst_path)?;
+            continue;
         }
     }
+    Ok(())
+}
+
+fn path_was_removed(path: &Path) -> bool {
+    matches!(
+        std::fs::symlink_metadata(path),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound
+    )
+}
+
+#[cfg(unix)]
+fn copy_symlink(src: &Path, dst: &Path) -> std::io::Result<()> {
+    let target = std::fs::read_link(src)?;
+    std::os::unix::fs::symlink(target, dst)
+}
+
+#[cfg(windows)]
+fn copy_symlink(src: &Path, dst: &Path) -> std::io::Result<()> {
+    let target = std::fs::read_link(src)?;
+    if src.is_dir() {
+        std::os::windows::fs::symlink_dir(target, dst)
+    } else {
+        std::os::windows::fs::symlink_file(target, dst)
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn copy_symlink(src: &Path, dst: &Path) -> std::io::Result<()> {
+    let _ = (src, dst);
     Ok(())
 }
 
@@ -1246,6 +1312,29 @@ mod tests {
         run_git(&repo, &["add", "README.md"]);
         run_git(&repo, &["commit", "-m", "initial commit"]);
         repo
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_dir_recursive_preserves_broken_symlink_without_not_found() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let src = temp.path().join("src");
+        let dst = temp.path().join("dst");
+        std::fs::create_dir_all(&src).expect("create src");
+        std::fs::write(src.join("README.md"), "ok\n").expect("write readme");
+        std::os::unix::fs::symlink("missing-target", src.join("broken-link"))
+            .expect("create broken symlink");
+
+        copy_dir_recursive(&src, &dst).expect("copy source with broken symlink");
+
+        assert_eq!(
+            std::fs::read_to_string(dst.join("README.md")).expect("read copied readme"),
+            "ok\n"
+        );
+        assert_eq!(
+            std::fs::read_link(dst.join("broken-link")).expect("read copied symlink"),
+            PathBuf::from("missing-target")
+        );
     }
 
     fn init_bare_repo(origin_path: &Path) {
