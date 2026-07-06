@@ -1,0 +1,37 @@
+/* ============================================================
+   Worktree Manager — Spacing, radius & size tokens
+   Source: Tailwind class usage across src/components (4px grid)
+   ============================================================ */
+
+:root {
+  /* Spacing — Tailwind 4px scale; only steps the app uses */
+  --space-0-5: 2px;
+  --space-1: 4px;
+  --space-1-5: 6px;
+  --space-2: 8px;
+  --space-2-5: 10px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;   /* card/dialog padding, main view padding */
+  --space-8: 32px;
+
+  /* Corner radii */
+  --radius-sm: 2px;    /* menu items, tiny close buttons */
+  --radius: 4px;       /* inline alerts, prefix pills, scrollbar thumb */
+  --radius-md: 6px;    /* buttons, inputs, selects, menus, tooltips */
+  --radius-lg: 8px;    /* cards, dialogs, toasts, welcome panels */
+  --radius-xl: 12px;   /* docs-site cards */
+  --radius-2xl: 16px;  /* welcome app-icon tile */
+  --radius-full: 9999px; /* badges, status dots */
+
+  /* Control heights */
+  --h-control-sm: 32px;  /* h-8 — small buttons, icon buttons in headers */
+  --h-control: 36px;     /* h-9 — default buttons, inputs, selects */
+  --h-control-lg: 40px;  /* h-10 — large buttons */
+  --h-control-xl: 48px;  /* h-12 — welcome CTA buttons */
+
+  /* Layout */
+  --sidebar-width: 288px;        /* default; user-resizable 200–500px */
+  --terminal-bar-height: 32px;   /* bottom terminal tab strip */
+  --status-dot: 10px;            /* w-2.5 h-2.5 */
+}

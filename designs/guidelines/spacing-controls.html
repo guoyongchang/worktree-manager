@@ -1,0 +1,21 @@
+<!-- @dsCard group="Spacing" viewport="700x170" name="Control heights" subtitle="28 / 32 / 36 / 40 / 48px" -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+body { margin: 0; background: var(--bg-base); padding: 16px; font-family: var(--font-ui); color: var(--text-primary); display: flex; gap: 10px; align-items: flex-end; }
+.c { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+.ctrl { display: inline-flex; align-items: center; justify-content: center; padding: 0 14px; border-radius: 6px; background: var(--bg-surface); border: 1px solid var(--border); font-size: 13px; font-weight: 500; }
+.tok { font-size: 10px; font-family: var(--font-mono); color: var(--text-muted); text-align: center; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div class="c"><span class="ctrl" style="height: 28px; font-size: 12px;">h-7</span><span class="tok">28px<br>sidebar search</span></div>
+<div class="c"><span class="ctrl" style="height: 32px; font-size: 12px;">h-8</span><span class="tok">32px sm<br>dense actions</span></div>
+<div class="c"><span class="ctrl" style="height: 36px; background: var(--accent); color: var(--accent-fg); border-color: transparent;">h-9</span><span class="tok">36px default<br>buttons, inputs</span></div>
+<div class="c"><span class="ctrl" style="height: 40px;">h-10</span><span class="tok">40px lg</span></div>
+<div class="c"><span class="ctrl" style="height: 48px;">h-12</span><span class="tok">48px xl<br>welcome CTAs</span></div>
+</body>
+</html>

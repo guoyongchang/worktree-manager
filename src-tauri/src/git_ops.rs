@@ -1824,7 +1824,33 @@ pub struct FileDiff {
 
 /// Get old (HEAD) and new (working tree) content for a single file for side-by-side diff.
 pub fn get_file_diff(path: &Path, file_path: &str) -> Result<FileDiff, String> {
+    // Security: `file_path` is client-controlled and this is reachable over the shared HTTP
+    // surface. Constrain the read to within the repository so a remote client cannot exfiltrate
+    // arbitrary host files (e.g. /etc/passwd, ~/.ssh/id_rsa, .env) via an absolute path or `..`
+    // traversal. Note `Path::join` silently discards the base when the arg is absolute.
+    let rel = Path::new(file_path);
+    if rel.components().any(|c| {
+        matches!(
+            c,
+            std::path::Component::ParentDir
+                | std::path::Component::RootDir
+                | std::path::Component::Prefix(_)
+        )
+    }) {
+        return Err("Invalid file path".to_string());
+    }
+
     let full_path = path.join(file_path);
+
+    // Defense-in-depth: if the resolved file exists, ensure it did not escape the repo root
+    // through a symlink. Non-existent (deleted) files cannot be canonicalized, so they skip
+    // this check but are already covered by the lexical guard above.
+    if full_path.exists() {
+        match (path.canonicalize(), full_path.canonicalize()) {
+            (Ok(root), Ok(resolved)) if resolved.starts_with(&root) => {}
+            _ => return Err("Invalid file path".to_string()),
+        }
+    }
 
     // Try to get old content from HEAD
     let old_output = git_command()
@@ -1966,6 +1992,26 @@ mod tests {
         run_git(repo, &["commit", "-m", "feature commit"]);
 
         temp
+    }
+
+    #[serial]
+    #[test]
+    fn get_file_diff_rejects_traversal_and_absolute_paths() {
+        let temp = make_test_repo();
+        let repo = temp.path();
+
+        // A legitimate repo-relative path still works.
+        assert!(
+            get_file_diff(repo, "feature.txt").is_ok(),
+            "in-repo file should be readable"
+        );
+
+        // Absolute paths must be rejected so /etc/passwd etc. cannot be exfiltrated.
+        assert!(get_file_diff(repo, "/etc/passwd").is_err());
+
+        // Parent-dir traversal must be rejected, whether or not the target exists.
+        assert!(get_file_diff(repo, "../../../../etc/passwd").is_err());
+        assert!(get_file_diff(repo, "../feature.txt").is_err());
     }
 
     fn clone_repo(origin_path: &Path, clone_path: &Path) {

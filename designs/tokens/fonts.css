@@ -1,0 +1,17 @@
+/* ============================================================
+   Worktree Manager — Webfonts
+   Inter Variable is bundled in the app repo and copied here.
+   Maple Mono NF CN (terminal font) binaries are NOT in the repo;
+   JetBrains Mono is the app's own declared fallback and is loaded
+   from Google Fonts as the substitute. FLAGGED in readme.md.
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap');
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('../assets/fonts/Inter-Variable.woff2') format('woff2');
+}

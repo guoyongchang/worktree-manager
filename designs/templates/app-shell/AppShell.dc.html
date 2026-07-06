@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<!-- @template name="App shell (main view)" description="Interactive desktop-app shell: sidebar, workspace overview, worktree detail, create/archive modals, terminal, toasts" -->
+<helmet><script src="./ds-base.js"></script></helmet>
+<div data-theme="{{ themeAttr }}" style="height: 100vh; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-base); color: var(--text-primary); font-family: var(--font-ui);">
+  <div style="flex: 1; display: flex; min-height: 0;">
+
+    <!-- ============ Sidebar ============ -->
+    <div data-screen-label="Sidebar" style="width: 288px; flex-shrink: 0; background: var(--bg-surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0;">
+      <div style="padding: 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; position: relative;">
+        <button onClick="{{ toggleWsMenu }}" style="flex: 1; min-width: 0; height: 36px; display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-primary); font-size: 14px; font-weight: 500; font-family: var(--font-ui); cursor: pointer; box-shadow: var(--shadow-subtle); transition: all 150ms;" style-hover="background: var(--bg-elevated);">
+          <span style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;"><rect width="20" height="14" x="2" y="6" rx="2"></rect><path d="M12 12h.01"></path><path d="M16 6V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"></path></svg>
+            <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">worktree-manager-space</span>
+          </span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;"><path d="m6 9 6 6 6-6"></path></svg>
+        </button>
+        <button onClick="{{ settingsToast }}" title="Settings" style="height: 36px; width: 36px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; border: none; background: transparent; color: var(--text-primary); cursor: pointer; transition: all 150ms;" style-hover="background: var(--bg-elevated);">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+        </button>
+        <sc-if value="{{ wsMenu }}" hint-placeholder-val="{{ false }}">
+          <div style="position: absolute; top: 52px; left: 12px; right: 12px; z-index: 55; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-surface); padding: 4px; box-shadow: var(--shadow-lg); animation: animate-in 0.15s ease-out;">
+            <button onClick="{{ wsCurrentClick }}" style="width: 100%; display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-radius: 2px; border: none; background: var(--bg-elevated); color: var(--text-primary); font-size: 14px; font-weight: 500; font-family: var(--font-ui); cursor: default; text-align: left;">
+              <span>worktree-manager-space</span>
+              <span style="font-size: 10px; color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); padding: 1px 4px; border-radius: 4px;">current</span>
+            </button>
+            <button onClick="{{ wsOtherClick }}" style="width: 100%; display: flex; align-items: center; padding: 8px 10px; border-radius: 2px; border: none; background: transparent; color: var(--text-primary); font-size: 14px; font-weight: 500; font-family: var(--font-ui); cursor: pointer; text-align: left; transition: background 150ms;" style-hover="background: var(--bg-elevated);">client-work</button>
+            <div style="margin: 4px -4px; height: 1px; background: var(--border);"></div>
+            <button onClick="{{ wsAddClick }}" style="width: 100%; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 2px; border: none; background: transparent; color: var(--text-secondary); font-size: 14px; font-family: var(--font-ui); cursor: pointer; text-align: left; transition: background 150ms;" style-hover="background: var(--bg-elevated);">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>
+              <span>Add workspace</span>
+            </button>
+          </div>
+        </sc-if>
+      </div>
+
+      <div style="padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between;">
+        <h1 style="font-size: 16px; font-weight: 600; margin: 0;">Worktrees</h1>
+        <div style="display: flex; gap: 4px;">
+          <button onClick="{{ refreshToast }}" title="Refresh" style="height: 32px; width: 32px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; border: none; background: transparent; color: var(--text-primary); cursor: pointer; transition: all 150ms;" style-hover="background: var(--bg-elevated);">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
+          </button>
+          <button onClick="{{ collapseToast }}" title="Collapse sidebar" style="height: 32px; width: 32px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; border: none; background: transparent; color: var(--text-primary); cursor: pointer; transition: all 150ms;" style-hover="background: var(--bg-elevated);">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m11 17-5-5 5-5"></path><path d="m18 17-5-5 5-5"></path></svg>
+          </button>
+        </div>
+      </div>
+
+      <div onClick="{{ selectMain }}" style="position: relative; padding: 12px 16px; border-bottom: 1px solid var(--border); cursor: pointer; display: flex; align-items: center; gap: 10px; transition: all 150ms;" style-hover="background: var(--bg-elevated);">
+        <sc-if value="{{ mainSelected }}" hint-placeholder-val="{{ true }}">
+          <div style="position: absolute; inset: 0; background: var(--bg-elevated); border-left: 2px solid var(--accent); pointer-events: none;"></div>
+        </sc-if>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position: relative; flex-shrink: 0;"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg>
+        <span style="position: relative; font-size: 14px; font-weight: 500;">Main workspace</span>
+      </div>
+
+      <div style="flex: 1; overflow-y: auto; min-height: 0;">
+        <div style="padding: 8px 16px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+          <span style="font-size: 11px; font-weight: 500; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap;">Active ({{ activeCount }})</span>
+          <input value="{{ search }}" onChange="{{ onSearch }}" placeholder="Search worktrees" style="height: 28px; width: 150px; font-size: 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-surface); padding: 0 10px; color: var(--text-primary); font-family: var(--font-ui); box-shadow: var(--shadow-subtle);">
+        </div>
+
+        <sc-for list="{{ sidebarRows }}" as="wt" hint-placeholder-count="5">
+          <div onClick="{{ wt.select }}" style="position: relative; padding: 10px 12px; display: flex; align-items: center; gap: 8px; cursor: pointer; transition: all 150ms;" style-hover="background: var(--bg-elevated);">
+            <sc-if value="{{ wt.isSelected }}" hint-placeholder-val="{{ false }}">
+              <div style="position: absolute; inset: 0; background: var(--bg-elevated); border-left: 2px solid var(--accent); pointer-events: none;"></div>
+            </sc-if>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position: relative; flex-shrink: 0;"><line x1="6" x2="6" y1="3" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>
+            <span style="position: relative; font-size: 14px; font-weight: 500; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ wt.name }}</span>
+            <sc-if value="{{ wt.warning }}" hint-placeholder-val="{{ false }}">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position: relative; flex-shrink: 0;"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 20h16a2 2 0 0 0 1.73-2Z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>
+            </sc-if>
+          </div>
+        </sc-for>
+
+        <div onClick="{{ openCreate }}" style="margin: 8px 12px; padding: 6px 0; border-radius: 6px; border: 1px dashed color-mix(in srgb, var(--accent) 40%, transparent); display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; color: color-mix(in srgb, var(--accent) 70%, transparent); font-size: 12px; font-weight: 500; transition: all 150ms;" style-hover="background: color-mix(in srgb, var(--accent) 10%, transparent); border-color: var(--accent); color: var(--accent);">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>
+          <span>New Worktree</span>
+        </div>
+
+        <div onClick="{{ toggleArchivedList }}" style="padding: 8px 16px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; transition: background 150ms;" style-hover="background: var(--bg-elevated);">
+          <span style="font-size: 11px; font-weight: 500; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">Archive ({{ archivedCount }})</span>
+          <span style="display: inline-flex;">
+            <sc-if value="{{ showArchived }}" hint-placeholder-val="{{ false }}">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(90deg);"><path d="m9 18 6-6-6-6"></path></svg>
+            </sc-if>
+            <sc-if value="{{ archClosed }}" hint-placeholder-val="{{ true }}">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg>
+            </sc-if>
+          </span>
+        </div>
+        <sc-if value="{{ showArchived }}" hint-placeholder-val="{{ false }}">
+          <sc-for list="{{ archivedRows }}" as="wt" hint-placeholder-count="1">
+            <div onClick="{{ wt.select }}" style="position: relative; padding: 10px 12px; display: flex; align-items: center; gap: 8px; cursor: pointer; transition: all 150ms; opacity: 0.6;" style-hover="background: var(--bg-elevated);">
+              <sc-if value="{{ wt.isSelected }}" hint-placeholder-val="{{ false }}">
+                <div style="position: absolute; inset: 0; background: var(--bg-elevated); pointer-events: none;"></div>
+              </sc-if>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position: relative; flex-shrink: 0;"><rect width="20" height="5" x="2" y="3" rx="1"></rect><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path><path d="M10 12h4"></path></svg>
+              <span style="position: relative; font-size: 14px; font-weight: 500; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ wt.name }}</span>
+            </div>
+          </sc-for>
+        </sc-if>
+      </div>
+
+      <div onClick="{{ shareToast }}" style="border-top: 1px solid var(--border); padding: 12px; display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 13px; color: var(--text-secondary); cursor: pointer; transition: all 150ms;" style-hover="background: var(--bg-elevated); color: var(--text-primary);">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"></line><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"></line></svg>
+        <span>Share</span>
+      </div>
+      <div style="height: 32px; border-top: 1px solid var(--border); padding: 0 12px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;">
+        <span style="font-size: 12px; font-family: var(--font-mono); color: color-mix(in srgb, var(--warning) 70%, transparent);">DEV</span>
+        <span style="font-size: 11px; color: var(--text-muted);">v1.0</span>
+      </div>
+    </div>
+
+    <!-- ============ Main ============ -->
+    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg-base);">
+      <div style="flex: 1; overflow-y: auto; padding: 24px; min-height: 0;">
+
+        <!-- Workspace overview -->
+        <sc-if value="{{ isOverview }}" hint-placeholder-val="{{ true }}">
+          <div data-screen-label="Workspace overview" style="display: flex; flex-direction: column; gap: 16px;">
+            <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap;">
+              <div style="min-width: 0;">
+                <h2 style="font-size: 20px; font-weight: 600; margin: 0;">Main workspace — some-projects</h2>
+                <p style="font-size: 13px; color: var(--text-muted); margin: 4px 0 0;">/Users/guo/Work/some-projects/worktree-manager-space</p>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <div style="display: flex; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-surface); padding: 2px; gap: 2px;">
+                  <button style="height: 26px; padding: 0 10px; border-radius: 4px; border: none; background: color-mix(in srgb, var(--accent) 55%, var(--bg-elevated)); color: #fff; font-size: 11px; font-weight: 600; cursor: pointer; font-family: var(--font-ui);">BASE (5)</button>
+                  <button style="height: 26px; padding: 0 10px; border-radius: 4px; border: none; background: transparent; color: var(--text-secondary); font-size: 11px; font-weight: 600; cursor: pointer; font-family: var(--font-ui);" style-hover="color: var(--text-primary);">TEST</button>
+                  <button style="height: 26px; padding: 0 10px; border-radius: 4px; border: none; background: transparent; color: var(--text-secondary); font-size: 11px; font-weight: 600; cursor: pointer; font-family: var(--font-ui);" style-hover="color: var(--text-primary);">HEAD</button>
+                </div>
+                <button onClick="{{ addProjectToast }}" style="height: 36px; padding: 0 16px; display: inline-flex; align-items: center; gap: 8px; border-radius: 6px; border: 1px solid transparent; background: var(--accent); color: var(--accent-fg); font-size: 14px; font-weight: 500; font-family: var(--font-ui); cursor: pointer; box-shadow: var(--shadow-subtle); transition: all 150ms;" style-hover="background: var(--accent-hover);">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>
+                  <span>Add Project</span>
+                </button>
+              </div>
+            </div>
+
+            <div style="border: 1px solid var(--border); border-radius: 8px; background: var(--bg-surface); padding: 14px 16px;">
+              <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); margin-bottom: 10px;">
+                <span style="display: inline-block; width: 10px; height: 10px; border-radius: 9999px; background: #10B981; flex-shrink: 0;"></span>
+                <span>Vault mounted</span>
+                <span style="color: var(--text-muted); font-size: 12px;">(17)</span>
+              </div>
+              <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                <sc-for list="{{ vaultItems }}" as="it" hint-placeholder-count="8">
+                  <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 5px; background: var(--bg-elevated); font-size: 12px; color: var(--text-secondary);">
+                    <sc-if value="{{ it.isFolder }}" hint-placeholder-val="{{ false }}">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--success-light)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg>
+                    </sc-if>
+                    <sc-if value="{{ it.isFile }}" hint-placeholder-val="{{ true }}">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path></svg>
+                    </sc-if>
+                    <span>{{ it.name }}</span>
+                  </span>
+                </sc-for>
+              </div>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg>
+              <span style="display: inline-block; width: 8px; height: 8px; border-radius: 9999px; background: #A855F7;"></span>
+              <span>Repos</span>
+              <span style="color: var(--text-muted); font-size: 12px;">(3)</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(90deg);"><path d="m9 18 6-6-6-6"></path></svg>
+              <span style="display: inline-block; width: 8px; height: 8px; border-radius: 9999px; background: #10B981;"></span>
+              <span>Worktree</span>
+              <span style="color: var(--text-muted); font-size: 12px;">(3)</span>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- Worktree detail header -->
+        <sc-if value="{{ isWorktree }}" hint-placeholder-val="{{ false }}">
+          <div data-screen-label="Worktree detail" style="display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 16px;">
+            <div style="min-width: 0;">
+              <h2 style="font-size: 20px; font-weight: 600; margin: 0; display: flex; align-items: center; gap: 10px;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5c0-1.1.9-2 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2"></path></svg>
+                <span>{{ detailTitle }}</span>
+              </h2>
+              <p style="font-size: 13px; color: var(--text-muted); margin: 4px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ detailPath }}</p>
+            </div>
+            <sc-if value="{{ notArchivedDetail }}" hint-placeholder-val="{{ true }}">
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <button onClick="{{ deployToast }}" style="height: 36px; padding: 0 16px; display: inline-flex; align-items: center; gap: 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-primary); font-size: 14px; font-weight: 500; font-family: var(--font-ui); cursor: pointer; box-shadow: var(--shadow-subtle); transition: all 150ms;" style-hover="background: var(--bg-elevated);">Deploy to main</button>
+                <button onClick="{{ askArchiveSelected }}" style="height: 36px; padding: 0 16px; display: inline-flex; align-items: center; gap: 8px; border-radius: 6px; border: 1px solid transparent; background: var(--warning); color: var(--warning-fg); font-size: 14px; font-weight: 500; font-family: var(--font-ui); cursor: pointer; box-shadow: var(--shadow-subtle); transition: all 150ms;" style-hover="background: var(--warning-light);">Archive</button>
+              </div>
+            </sc-if>
+            <sc-if value="{{ archivedDetail }}" hint-placeholder-val="{{ false }}">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <button onClick="{{ restoreSelected }}" style="height: 36px; padding: 0 16px; border-radius: 6px; border: 1px solid transparent; background: var(--accent); color: var(--accent-fg); font-size: 14px; font-weight: 500; font-family: var(--font-ui); cursor: pointer; box-shadow: var(--shadow-subtle); transition: all 150ms;" style-hover="background: var(--accent-hover);">Restore</button>
+              </div>
+            </sc-if>
+          </div>
+          <sc-if value="{{ archivedDetail }}" hint-placeholder-val="{{ false }}">
+            <div style="display: flex; align-items: center; gap: 10px; padding: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-surface); color: var(--text-secondary); font-size: 14px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="5" x="2" y="3" rx="1"></rect><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path><path d="M10 12h4"></path></svg>
+              <span>This worktree is archived. Restore it to work on its branches again.</span>
+            </div>
+          </sc-if>
+        </sc-if>
+
+        <!-- Project cards (shared by both views) -->
+        <sc-if value="{{ showCards }}" hint-placeholder-val="{{ true }}">
+          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 16px; margin-top: 8px;">
+            <sc-for list="{{ cards }}" as="card" hint-placeholder-count="2">
+              <div style="border: 1px solid var(--border); border-radius: 8px; background: var(--bg-surface); padding: 16px; display: flex; flex-direction: column; gap: 10px; position: relative; overflow: hidden;">
+                <sc-if value="{{ card.dirty }}" hint-placeholder-val="{{ false }}">
+                  <div style="position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--warning);"></div>
+                </sc-if>
+                <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;">
+                  <div style="min-width: 0;">
+                    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                      <span style="font-size: 16px; font-weight: 600; word-break: break-word;">{{ card.name }}</span>
+                      <span style="display: inline-flex; align-items: center; border-radius: 9999px; border: 1px solid transparent; padding: 2px 8px; font-size: 10px; font-weight: 500; line-height: 1.5; background: color-mix(in srgb, var(--success) 15%, transparent); color: var(--success-light);">Worktree</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); margin-top: 8px;">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>
+                      <span>{{ card.branch }}</span>
+                    </div>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 2px;">
+                    <button onClick="{{ card.openEditor }}" title="Open in VS Code" style="height: 26px; width: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 5px; border: none; background: transparent; color: var(--accent); cursor: pointer; transition: all 150ms;" style-hover="background: var(--bg-elevated);">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 18 6-6-6-6"></path><path d="m8 6-6 6 6 6"></path></svg>
+                    </button>
+                    <button onClick="{{ card.openTerminal }}" title="Open in terminal" style="height: 26px; width: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 5px; border: none; background: transparent; color: var(--text-secondary); cursor: pointer; transition: all 150ms;" style-hover="background: var(--bg-elevated); color: var(--text-primary);">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" x2="20" y1="19" y2="19"></line></svg>
+                    </button>
+                  </div>
+                </div>
+
+                <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                  <sc-for list="{{ card.badges }}" as="b" hint-placeholder-count="1">
+                    <sc-if value="{{ b.isWarning }}" hint-placeholder-val="{{ true }}">
+                      <span style="display: inline-flex; align-items: center; border-radius: 9999px; border: 1px solid transparent; padding: 2px 8px; font-size: 10px; font-weight: 500; line-height: 1.5; white-space: nowrap; background: color-mix(in srgb, var(--warning) 15%, transparent); color: var(--warning-light);">{{ b.label }}</span>
+                    </sc-if>
+                    <sc-if value="{{ b.isSuccess }}" hint-placeholder-val="{{ false }}">
+                      <span style="display: inline-flex; align-items: center; border-radius: 9999px; border: 1px solid transparent; padding: 2px 8px; font-size: 10px; font-weight: 500; line-height: 1.5; white-space: nowrap; background: color-mix(in srgb, var(--success) 15%, transparent); color: var(--success-light);">{{ b.label }}</span>
+                    </sc-if>
+                    <sc-if value="{{ b.isSecondary }}" hint-placeholder-val="{{ false }}">
+                      <span style="display: inline-flex; align-items: center; border-radius: 9999px; border: 1px solid transparent; padding: 2px 8px; font-size: 10px; font-weight: 500; line-height: 1.5; white-space: nowrap; background: var(--bg-elevated); color: var(--text-secondary);">{{ b.label }}</span>
+                    </sc-if>
+                  </sc-for>
+                </div>
+
+                <div style="height: 1px; background: var(--border); margin: 2px 0;"></div>
+
+                <div style="display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--text-secondary);">
+                  <div style="display: flex; gap: 12px;">
+                    <span>{{ card.ahead }} ahead</span>
+                    <span>{{ card.behind }} behind</span>
+                    <span>{{ card.changed }} {{ card.changedLabel }}</span>
+                  </div>
+                  <button onClick="{{ card.refresh }}" title="Refresh remote state" style="height: 26px; width: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 5px; border: none; background: transparent; color: var(--text-secondary); cursor: pointer; transition: all 150ms;" style-hover="background: var(--bg-elevated); color: var(--text-primary);">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
+                  </button>
+                </div>
+
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
+                  <button onClick="{{ card.sync }}" style="height: 32px; padding: 0 8px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-primary); font-size: 12px; font-weight: 500; font-family: var(--font-ui); cursor: pointer; box-shadow: var(--shadow-subtle); transition: all 150ms; min-width: 0;" style-hover="background: var(--bg-elevated);">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg>
+                    <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Sync main</span>
+                  </button>
+                  <button onClick="{{ card.pull }}" style="height: 32px; padding: 0 8px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-primary); font-size: 12px; font-weight: 500; font-family: var(--font-ui); cursor: pointer; box-shadow: var(--shadow-subtle); transition: all 150ms; min-width: 0;" style-hover="background: var(--bg-elevated);">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" x2="12" y1="15" y2="3"></line></svg>
+                    <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Pull</span>
+                  </button>
+                  <button onClick="{{ card.push }}" style="height: 32px; padding: 0 8px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-primary); font-size: 12px; font-weight: 500; font-family: var(--font-ui); cursor: pointer; box-shadow: var(--shadow-subtle); transition: all 150ms; min-width: 0;" style-hover="background: var(--bg-elevated);">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" x2="12" y1="3" y2="15"></line></svg>
+                    <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ card.pushLabel }}</span>
+                  </button>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
+                  <button onClick="{{ card.mergeTest }}" style="height: 32px; padding: 0 8px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-primary); font-size: 12px; font-weight: 500; font-family: var(--font-ui); cursor: pointer; box-shadow: var(--shadow-subtle); transition: all 150ms; min-width: 0;" style-hover="background: var(--bg-elevated);">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;"><circle cx="18" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><path d="M6 21V9a9 9 0 0 0 9 9"></path></svg>
+                    <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Merge to test</span>
+                  </button>
+                  <button onClick="{{ card.mergeMain }}" style="height: 32px; padding: 0 8px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: 6px; border: 1px solid var(--merge-main-border); background: var(--bg-surface); color: var(--merge-main-text); font-size: 12px; font-weight: 500; font-family: var(--font-ui); cursor: pointer; box-shadow: var(--shadow-subtle); transition: all 150ms; min-width: 0;" style-hover="background: rgba(124, 45, 18, 0.2);">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--merge-main-icon)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;"><circle cx="18" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><path d="M6 21V9a9 9 0 0 0 9 9"></path></svg>
+                    <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Merge to main</span>
+                  </button>
+                </div>
+
+                <sc-if value="{{ card.warning }}" hint-placeholder-val="{{ false }}">
+                  <div style="display: flex; align-items: flex-start; gap: 6px; font-size: 12px; color: color-mix(in srgb, var(--warning) 80%, transparent);">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 20h16a2 2 0 0 0 1.73-2Z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>
+                    <span>{{ card.warning }}</span>
+                  </div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+      </div>
+
+      <!-- ============ Terminal ============ -->
+      <div data-screen-label="Terminal" style="flex-shrink: 0; border-top: 1px solid var(--border); background: var(--bg-surface); display: flex; flex-direction: column; position: relative;">
+        <div style="height: 32px; display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
+          <button onClick="{{ toggleTerm }}" style="height: 26px; width: 26px; margin-left: 8px; display: inline-flex; align-items: center; justify-content: center; border-radius: 5px; border: none; background: transparent; color: var(--text-secondary); cursor: pointer; transition: all 150ms;" style-hover="background: var(--bg-elevated); color: var(--text-primary);">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" x2="20" y1="19" y2="19"></line></svg>
+          </button>
+          <div style="display: flex; align-items: stretch; height: 100%; overflow-x: auto;">
+            <sc-for list="{{ termTabs }}" as="tab" hint-placeholder-count="3">
+              <sc-if value="{{ tab.active }}" hint-placeholder-val="{{ true }}">
+                <div onClick="{{ tab.click }}" style="display: flex; align-items: center; gap: 6px; padding: 0 12px; font-size: 12px; cursor: pointer; white-space: nowrap; height: 32px; box-sizing: border-box; color: var(--text-primary); background: var(--bg-base); border-left: 1px solid var(--border); border-right: 1px solid var(--border);">{{ tab.name }}</div>
+              </sc-if>
+              <sc-if value="{{ tab.inactive }}" hint-placeholder-val="{{ false }}">
+                <div onClick="{{ tab.click }}" style="display: flex; align-items: center; gap: 6px; padding: 0 12px; font-size: 12px; cursor: pointer; white-space: nowrap; height: 32px; box-sizing: border-box; color: var(--text-muted); transition: color 150ms;" style-hover="color: var(--text-secondary);">{{ tab.name }}</div>
+              </sc-if>
+            </sc-for>
+          </div>
+          <button onClick="{{ newTermToast }}" style="height: 22px; width: 22px; margin-left: auto; margin-right: 8px; border-radius: 9999px; border: none; background: color-mix(in srgb, var(--accent) 80%, transparent); color: #fff; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: background 150ms; flex-shrink: 0;" style-hover="background: var(--accent);">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>
+          </button>
+        </div>
+        <sc-if value="{{ termOpen }}" hint-placeholder-val="{{ false }}">
+          <div style="height: 208px; overflow-y: auto; background: var(--bg-base); padding: 10px 14px; font-family: var(--font-mono); font-size: 12px; line-height: 1.7; box-sizing: border-box;">
+            <div style="color: var(--text-muted);">{{ termLine1 }}</div>
+            <div style="color: var(--success-light);">{{ termLine2 }}</div>
+            <div style="color: var(--text-secondary);">  VITE v7.3.1  ready in 428 ms</div>
+            <div style="color: var(--text-secondary);">  ➜  Local:   http://localhost:1420/</div>
+            <div style="color: var(--accent-hover);">  [tauri] watching for file changes…</div>
+          </div>
+        </sc-if>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ Create Worktree modal ============ -->
+  <sc-if value="{{ createOpen }}" hint-placeholder-val="{{ false }}">
+    <div data-screen-label="Create worktree modal">
+      <div onClick="{{ closeCreate }}" style="position: fixed; inset: 0; z-index: 50; background: var(--overlay); -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px); animation: fade-in 0.15s ease-out;"></div>
+      <div style="position: fixed; left: 50%; top: 50%; z-index: 50; transform: translate(-50%, -50%); display: grid; gap: 16px; width: calc(100% - 32px); max-width: 560px; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-primary); padding: 24px; box-shadow: var(--shadow-modal); border-radius: 8px; animation: animate-in 0.15s ease-out;">
+        <div style="font-size: 16px; font-weight: 500; line-height: 1; letter-spacing: -0.025em;">New Worktree</div>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <label style="font-size: 14px;">Worktree name</label>
+          <input value="{{ draftName }}" onChange="{{ onDraftName }}" placeholder="feature-login" style="height: 36px; width: 100%; box-sizing: border-box; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-base); padding: 0 12px; font-size: 14px; color: var(--text-primary); font-family: var(--font-ui); box-shadow: var(--shadow-subtle);">
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <span style="font-size: 14px;">Select projects</span>
+          <sc-for list="{{ draftProjects }}" as="p" hint-placeholder-count="3">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-base);">
+              <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
+                <input type="checkbox" checked="{{ p.checked }}" onChange="{{ p.toggle }}" style="width: 16px; height: 16px; accent-color: var(--accent); margin: 0; cursor: pointer;">
+                <div style="min-width: 0;">
+                  <div style="font-size: 14px; font-weight: 500;">{{ p.name }}</div>
+                  <div style="font-size: 11px; color: var(--text-muted);">default: main · test: test</div>
+                </div>
+              </div>
+              <span style="font-size: 12px; color: var(--text-secondary); flex-shrink: 0;">Base: main</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+          <label style="display: inline-flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer;">
+            <input type="checkbox" checked="{{ syncBase }}" onChange="{{ toggleSyncBase }}" style="width: 16px; height: 16px; accent-color: var(--accent); margin: 0; cursor: pointer;">
+            <span>Sync Base before create</span>
+          </label>
+          <div style="display: flex; gap: 8px;">
+            <button onClick="{{ closeCreate }}" style="height: 36px; padding: 0 16px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-primary); font-size: 14px; font-weight: 500; font-family: var(--font-ui); cursor: pointer; box-shadow: var(--shadow-subtle); transition: all 150ms;" style-hover="background: var(--bg-elevated);">Cancel</button>
+            <button onClick="{{ submitCreate }}" disabled="{{ createDisabled }}" style="height: 36px; padding: 0 16px; border-radius: 6px; border: 1px solid transparent; background: var(--accent); color: var(--accent-fg); font-size: 14px; font-weight: 500; font-family: var(--font-ui); cursor: pointer; box-shadow: var(--shadow-subtle); transition: all 150ms;" style-hover="background: var(--accent-hover);">Create ({{ draftCount }})</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ============ Archive confirm ============ -->
+  <sc-if value="{{ archiveOpen }}" hint-placeholder-val="{{ false }}">
+    <div data-screen-label="Archive confirm">
+      <div onClick="{{ cancelArchive }}" style="position: fixed; inset: 0; z-index: 50; background: var(--overlay); -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px); animation: fade-in 0.15s ease-out;"></div>
+      <div style="position: fixed; left: 50%; top: 50%; z-index: 50; transform: translate(-50%, -50%); display: grid; gap: 16px; width: calc(100% - 32px); max-width: 420px; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-primary); padding: 24px; box-shadow: var(--shadow-modal); border-radius: 8px; animation: animate-in 0.15s ease-out;">
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <div style="font-size: 16px; font-weight: 500; line-height: 1; letter-spacing: -0.025em;">Archive worktree</div>
+          <div style="font-size: 14px; color: var(--text-secondary);">Archive "{{ archiveName }}"? Branches are kept; the working directory is moved to the archive. You can restore it anytime.</div>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 8px;">
+          <button onClick="{{ cancelArchive }}" style="height: 36px; padding: 0 16px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-primary); font-size: 14px; font-weight: 500; font-family: var(--font-ui); cursor: pointer; box-shadow: var(--shadow-subtle); transition: all 150ms;" style-hover="background: var(--bg-elevated);">Cancel</button>
+          <button onClick="{{ confirmArchive }}" style="height: 36px; padding: 0 16px; border-radius: 6px; border: 1px solid transparent; background: var(--warning); color: var(--warning-fg); font-size: 14px; font-weight: 500; font-family: var(--font-ui); cursor: pointer; box-shadow: var(--shadow-subtle); transition: all 150ms;" style-hover="background: var(--warning-light);">Archive</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ============ Toasts ============ -->
+  <div style="position: fixed; bottom: 24px; right: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 8px;">
+    <sc-for list="{{ toasts }}" as="t" hint-placeholder-count="0">
+      <x-import component-from-global-scope="WorktreeManagerDesignSystem_e60f48.Toast" type="{{ t.type }}" message="{{ t.message }}" on-close="{{ t.close }}" duration="{{ t.duration }}" hint-size="320px,52px"></x-import>
+    </sc-for>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;theme&quot;: {&quot;editor&quot;: &quot;enum&quot;, &quot;default&quot;: &quot;default-dark&quot;, &quot;tsType&quot;: &quot;string&quot;, &quot;options&quot;: [&quot;default-dark&quot;, &quot;monokai&quot;, &quot;dracula&quot;, &quot;solarized-dark&quot;, &quot;nord&quot;, &quot;default-light&quot;, &quot;solarized-light&quot;, &quot;github-light&quot;], &quot;section&quot;: &quot;Theme&quot;},
+  &quot;terminalOpen&quot;: {&quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: false, &quot;tsType&quot;: &quot;boolean&quot;, &quot;section&quot;: &quot;Layout&quot;}
+}">
+class Component extends DCLogic {
+  state = {
+    worktrees: [
+      { name: 'feature-ui-optimize' },
+      { name: 'Ui-bug-fix' },
+      { name: 'ui-optimize-3', warning: '2 uncommitted changes in worktree-manager' },
+      { name: 'windows-archive-usage-check' },
+      {
+        name: 'windows-bug-fix', warning: '1 uncommitted change in worktree-manager',
+        projects: [
+          { name: 'worktree-manager', branch: 'windows-bug-fix', ahead: 0, behind: 136, changed: 1, uncommitted: true,
+            badges: [['warning', '1 changed file'], ['warning', '269 commits not merged to test'], ['secondary', '136 behind']] },
+          { name: 'worktree-manager-server', branch: 'windows-bug-fix', ahead: 0, behind: 0, changed: 0,
+            badges: [['success', 'Clean']] },
+        ],
+      },
+    ],
+    archived: [],
+    selected: null,
+    showArchived: false,
+    search: '',
+    wsMenu: false,
+    createOpen: false,
+    draftName: '',
+    draftSel: {},
+    syncBase: true,
+    archiveConfirm: null,
+    termOpenState: null,
+    activeTerm: 'Workspace',
+    toasts: [],
+  };
+
+  DEFAULT_PROJECTS = ['worktree-manager', 'worktree-manager-server', 'worktree-manager-obsidian-bridge'];
+
+  OVERVIEW = [
+    { name: 'worktree-manager', branch: 'main', ahead: 0, behind: 0, changed: 0,
+      badges: [['warning', '391 commits not merged to test']] },
+    { name: 'worktree-manager-server', branch: 'main', ahead: 0, behind: 0, changed: 1, uncommitted: true,
+      badges: [['warning', '1 changed file']] },
+    { name: 'worktree-manager-obsidian-bridge', branch: 'main', ahead: 0, behind: 0, changed: 0,
+      badges: [['success', 'Clean']], warning: "Branch 'test' does not exist on remote — push it first." },
+  ];
+
+  VAULT = ['.memory-organizer.config.json', 'AGENTS.md', 'CLAUDE.md', 'WORKSPACE.md', 'api/', 'architecture/',
+    'bootstrap-prompt.md', 'claude-reference/', 'development/', 'features/', 'index.md', 'ingest.md',
+    'log.md', 'mcp.servers.json', 'memory/', 'reference/', 'repos.md'];
+
+  toast(type, message) {
+    const id = (this._tid = (this._tid || 0) + 1);
+    this.setState(s => ({ toasts: [...s.toasts, { id, type, message }] }));
+  }
+
+  dismissToast(id) {
+    this.setState(s => ({ toasts: s.toasts.filter(t => t.id !== id) }));
+  }
+
+  cardVM(p) {
+    const t = (type, msg) => this.toast(type, msg);
+    return {
+      key: p.name, name: p.name, branch: p.branch,
+      ahead: p.ahead, behind: p.behind, changed: p.changed,
+      changedLabel: p.changed === 1 ? 'changed file' : 'changed files',
+      pushLabel: p.changed > 0 ? 'Commit & Push' : 'Push',
+      warning: p.warning || null,
+      dirty: !!p.uncommitted,
+      badges: (p.badges || []).map(pair => ({
+        label: pair[1],
+        isWarning: pair[0] === 'warning',
+        isSuccess: pair[0] === 'success',
+        isSecondary: pair[0] === 'secondary',
+      })),
+      sync: () => t('success', 'Synced ' + p.name + ' with main'),
+      pull: () => t('success', 'Pulled ' + p.branch),
+      push: () => t('success', p.changed > 0 ? 'Committed and pushed' : 'Pushed to remote'),
+      mergeTest: () => t('success', 'Merged ' + p.branch + ' to test'),
+      mergeMain: () => t('warning', 'Merge ' + p.branch + ' to main requires confirmation'),
+      refresh: () => t('info', 'Remote state synced for ' + p.name),
+      openEditor: () => t('success', 'Opened in VS Code'),
+      openTerminal: () => t('info', 'Terminal opened'),
+    };
+  }
+
+  renderVals() {
+    const s = this.state;
+    const t = (type, msg) => this.toast(type, msg);
+    const active = s.worktrees.filter(w => !s.archived.includes(w.name));
+    const archivedList = s.worktrees.filter(w => s.archived.includes(w.name));
+    const shown = active.filter(w => !s.search || w.name.toLowerCase().includes(s.search.toLowerCase()));
+    const selectedWt = s.worktrees.find(w => w.name === s.selected) || null;
+    const isWorktree = !!selectedWt;
+    const isArchivedSel = isWorktree && s.archived.includes(selectedWt.name);
+    const termOpen = s.termOpenState === null ? (this.props.terminalOpen ?? false) : s.termOpenState;
+
+    const cards = isWorktree
+      ? (isArchivedSel ? [] : (selectedWt.projects
+          || this.DEFAULT_PROJECTS.map(name => ({ name, branch: selectedWt.name, ahead: 0, behind: 0, changed: 0, badges: [['success', 'Clean']] })))
+          .map(p => this.cardVM(p)))
+      : this.OVERVIEW.map(p => this.cardVM(p));
+
+    const termNames = ['Workspace'].concat(
+      (isWorktree && selectedWt.projects ? selectedWt.projects.map(p => p.name) : this.DEFAULT_PROJECTS).slice(0, 3));
+    const activeTerm = termNames.includes(s.activeTerm) ? s.activeTerm : 'Workspace';
+
+    return {
+      themeAttr: this.props.theme ?? 'default-dark',
+      wsMenu: s.wsMenu,
+      toggleWsMenu: () => this.setState(x => ({ wsMenu: !x.wsMenu })),
+      wsCurrentClick: () => this.setState({ wsMenu: false }),
+      wsOtherClick: () => { this.setState({ wsMenu: false }); t('info', 'Switching workspace requires confirmation'); },
+      wsAddClick: () => { this.setState({ wsMenu: false }); t('info', 'Add workspace — not in this template'); },
+      settingsToast: () => t('info', 'Settings view — not in this template'),
+      refreshToast: () => t('info', 'Remote state synced'),
+      collapseToast: () => t('info', 'Collapsed sidebar — not in this template'),
+      shareToast: () => t('info', 'Share over network — not in this template'),
+      addProjectToast: () => t('info', 'Add project — not in this template'),
+      deployToast: () => t('info', 'Deploy to main workspace — not in this template'),
+      newTermToast: () => t('info', 'New terminal session'),
+
+      activeCount: active.length,
+      archivedCount: archivedList.length,
+      search: s.search,
+      onSearch: (e) => this.setState({ search: e.target.value }),
+      mainSelected: s.selected === null,
+      selectMain: () => this.setState({ selected: null }),
+      sidebarRows: shown.map(w => ({
+        name: w.name, warning: !!w.warning,
+        isSelected: s.selected === w.name,
+        select: () => this.setState({ selected: w.name }),
+      })),
+      archivedRows: archivedList.map(w => ({
+        name: w.name,
+        isSelected: s.selected === w.name,
+        select: () => this.setState({ selected: w.name }),
+      })),
+      showArchived: s.showArchived,
+      archClosed: !s.showArchived,
+      toggleArchivedList: () => this.setState(x => ({ showArchived: !x.showArchived })),
+
+      isOverview: !isWorktree,
+      isWorktree,
+      notArchivedDetail: isWorktree && !isArchivedSel,
+      archivedDetail: isArchivedSel,
+      detailTitle: isWorktree ? selectedWt.name : '',
+      detailPath: isWorktree ? '/Users/guo/Work/some-projects/worktree-manager-space/worktrees/' + selectedWt.name : '',
+      askArchiveSelected: () => this.setState({ archiveConfirm: s.selected }),
+      restoreSelected: () => {
+        this.setState(x => ({ archived: x.archived.filter(n => n !== x.selected) }));
+        t('success', 'Restored ' + s.selected);
+      },
+      showCards: !isArchivedSel,
+      cards,
+      vaultItems: this.VAULT.map(n => ({
+        name: n.replace('/', ''), isFolder: n.endsWith('/'), isFile: !n.endsWith('/'),
+      })),
+
+      openCreate: () => {
+        const sel = {};
+        this.DEFAULT_PROJECTS.forEach(n => { sel[n] = true; });
+        this.setState({ createOpen: true, draftName: '', draftSel: sel });
+      },
+      closeCreate: () => this.setState({ createOpen: false }),
+      createOpen: s.createOpen,
+      draftName: s.draftName,
+      onDraftName: (e) => this.setState({ draftName: e.target.value }),
+      draftProjects: this.DEFAULT_PROJECTS.map(name => ({
+        name, checked: !!s.draftSel[name],
+        toggle: () => this.setState(x => ({ draftSel: { ...x.draftSel, [name]: !x.draftSel[name] } })),
+      })),
+      draftCount: this.DEFAULT_PROJECTS.filter(n => s.draftSel[n]).length,
+      createDisabled: !s.draftName.trim() || this.DEFAULT_PROJECTS.filter(n => s.draftSel[n]).length === 0,
+      syncBase: s.syncBase,
+      toggleSyncBase: () => this.setState(x => ({ syncBase: !x.syncBase })),
+      submitCreate: () => {
+        const name = s.draftName.trim();
+        if (!name) return;
+        this.setState(x => ({
+          worktrees: [...x.worktrees, { name }],
+          createOpen: false,
+          selected: name,
+        }));
+        t('success', 'Worktree "' + name + '" created — dependencies symlinked');
+      },
+
+      archiveOpen: !!s.archiveConfirm,
+      archiveName: s.archiveConfirm || '',
+      cancelArchive: () => this.setState({ archiveConfirm: null }),
+      confirmArchive: () => {
+        const name = s.archiveConfirm;
+        this.setState(x => ({
+          archived: [...x.archived, name],
+          selected: x.selected === name ? null : x.selected,
+          archiveConfirm: null,
+        }));
+        t('success', 'Archived ' + name);
+      },
+
+      termOpen,
+      toggleTerm: () => this.setState({ termOpenState: !termOpen }),
+      termTabs: termNames.map(name => ({
+        name,
+        active: name === activeTerm,
+        inactive: name !== activeTerm,
+        click: () => this.setState({ activeTerm: name, termOpenState: true }),
+      })),
+      termLine1: '# worktree: ' + (isWorktree ? selectedWt.name : 'main') + ' · shell integration active',
+      termLine2: '➜ ' + activeTerm + ' git:(' + (isWorktree ? selectedWt.name : 'main') + ') ✗ npm run tauri dev',
+
+      toasts: s.toasts.map(x => ({
+        type: x.type, message: x.message,
+        duration: x.type === 'warning' ? 5000 : 3000,
+        close: () => this.dismissToast(x.id),
+      })),
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,69 @@
+/* ============================================================
+   Worktree Manager — Motion tokens, keyframes & utilities
+   Source: src/index.css (verbatim keyframes) + design-tokens.ts
+   ============================================================ */
+
+:root {
+  --duration-fast: 150ms; /* @kind other */   /* default for all transitions */
+  --duration: 200ms; /* @kind other */        /* enters */
+  --duration-slow: 300ms; /* @kind other */   /* toast slide-in */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1); /* @kind other */ /* design-tokens.ts easing */
+}
+
+/* shadcn/ui-style animations (verbatim from src/index.css) */
+@keyframes animate-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes animate-out {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.95); }
+}
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes slide-in-from-top { from { transform: translateY(-0.5rem); } to { transform: translateY(0); } }
+@keyframes slide-in-from-bottom { from { transform: translateY(0.5rem); } to { transform: translateY(0); } }
+@keyframes slide-in-from-bottom-4 {
+  from { transform: translateY(1rem); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@keyframes slide-out-to-right {
+  from { transform: translateX(0); opacity: 1; }
+  to { transform: translateX(100%); opacity: 0; }
+}
+@keyframes toast-countdown { from { width: 100%; } to { width: 0%; } }
+@keyframes progress-indeterminate {
+  0% { width: 0%; margin-left: 0%; }
+  50% { width: 60%; margin-left: 20%; }
+  100% { width: 0%; margin-left: 100%; }
+}
+@keyframes subtle-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.03); }
+}
+@keyframes gradient-shift {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+@keyframes ptr-spin { to { transform: rotate(360deg); } }
+
+.animate-in { animation: animate-in 0.2s ease-out; }
+.animate-out { animation: animate-out 0.15s ease-in; }
+.fade-in-0 { animation: fade-in 0.15s ease-out; }
+.fade-out-0 { animation: fade-out 0.15s ease-in; }
+.zoom-in-95 { animation: animate-in 0.15s ease-out; }
+.zoom-out-95 { animation: animate-out 0.15s ease-in; }
+.slide-in-from-top-2 { animation: slide-in-from-top 0.15s ease-out; }
+.slide-in-from-bottom-2 { animation: slide-in-from-bottom 0.15s ease-out; }
+.slide-in-from-bottom-4 { animation: slide-in-from-bottom-4 0.3s ease-out; }
+.slide-out-to-right { animation: slide-out-to-right 0.2s ease-in forwards; }
+.animate-subtle-pulse { animation: subtle-pulse 3s ease-in-out infinite; }
+.animate-progress-indeterminate { animation: progress-indeterminate 1.5s ease-in-out infinite; }
+.animate-spin { animation: ptr-spin 0.8s linear infinite; }
+
+/* Animated accent gradient (progress bars) */
+.animate-gradient {
+  background: linear-gradient(90deg, var(--accent), var(--accent-hover), var(--accent));
+  background-size: 200% 100%;
+  animation: gradient-shift 2s linear infinite;
+}

@@ -1,0 +1,22 @@
+<!-- @dsCard group="Spacing" viewport="700x160" name="Corner radii" subtitle="2px menus → 6px controls → 8px cards → full badges" -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+body { margin: 0; background: var(--bg-base); padding: 16px; font-family: var(--font-ui); color: var(--text-primary); display: flex; gap: 12px; align-items: flex-start; }
+.chip { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+.box { width: 84px; height: 64px; background: var(--bg-elevated); border: 1px solid var(--border); }
+.tok { font-size: 10px; font-family: var(--font-mono); color: var(--text-muted); text-align: center; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div class="chip"><div class="box" style="border-radius: 2px;"></div><span class="tok">2px sm<br>menu items</span></div>
+<div class="chip"><div class="box" style="border-radius: 4px;"></div><span class="tok">4px<br>inline alerts</span></div>
+<div class="chip"><div class="box" style="border-radius: 6px;"></div><span class="tok">6px md<br>buttons, inputs, menus</span></div>
+<div class="chip"><div class="box" style="border-radius: 8px;"></div><span class="tok">8px lg<br>cards, dialogs, toasts</span></div>
+<div class="chip"><div class="box" style="border-radius: 16px;"></div><span class="tok">16px 2xl<br>welcome icon tile</span></div>
+<div class="chip"><div class="box" style="border-radius: 9999px; height: 28px; width: 110px;"></div><span class="tok">full<br>badges, dots</span></div>
+</body>
+</html>

@@ -1,0 +1,178 @@
+<!-- @dsCard group="Docs Site" viewport="1280x800" name="Landing page" subtitle="Marketing site — slate/blue palette, emoji feature icons" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Git Worktree Manager — Multi-Branch Parallel Development Tool</title>
+<link rel="icon" href="../../assets/app-icon.svg">
+<link rel="stylesheet" href="../../styles.css">
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <div class="nav-brand">
+      <img src="../../assets/app-icon.svg" alt="Worktree Manager">
+      <span>Worktree Manager</span>
+    </div>
+    <div class="nav-links">
+      <a href="#" class="active">Home</a>
+      <a href="#">Guide</a>
+      <a href="#" class="nav-gh">
+        <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
+        GitHub
+      </a>
+      <span class="lang"><a href="#">中文</a> | <b>English</b></span>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <img src="../../assets/app-icon.svg" alt="Worktree Manager">
+  <h1>Git Worktree Manager</h1>
+  <p>An elegant Git Worktree visual management tool for efficient multi-branch parallel development. Supports secure browser sharing over LAN or ngrok.</p>
+  <div class="hero-ctas">
+    <a href="#" class="btn-primary">
+      <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+      Download Latest
+    </a>
+    <a href="#" class="btn-ghost">GitHub</a>
+    <a href="#" class="btn-ghost">Get Started</a>
+  </div>
+</header>
+
+<section class="download">
+  <div class="container">
+    <h2 class="sec">Download &amp; Install</h2>
+    <p class="sub">Ready to use, with auto-updates</p>
+    <a href="#" class="download-btn">
+      <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+      Download Latest Version
+    </a>
+    <div class="platforms">
+      <span class="platform-badge">macOS (Intel + ARM)</span>
+      <span class="platform-badge">Windows</span>
+      <span class="platform-badge">Linux</span>
+    </div>
+    <span class="autoupdate">Built-in auto-update — new versions are pushed automatically, no manual downloads needed</span>
+  </div>
+</section>
+
+<section class="pain">
+  <div class="container">
+    <h2>Sound familiar?</h2>
+    <p>Productivity black holes every developer has experienced</p>
+    <div class="pain-card">
+      <div class="pain-title">🔥 Production is on fire, but your work isn't committed yet</div>
+      <p class="desc">You're on <code class="inline">feature/checkout-v2</code> refactoring the checkout flow, with a dozen files changed and <code class="inline">npm run dev</code> hot-reloading. Slack fires off an alert: <strong>payment callback is returning 500 in production.</strong></p>
+      <div class="workflow-compare">
+        <div class="workflow-col workflow-old">
+          <h4>Traditional Approach</h4>
+          <div class="workflow-steps">
+            <span class="wf-step">git stash</span><span class="wf-arrow">→</span>
+            <span class="wf-step">checkout hotfix</span><span class="wf-arrow">→</span>
+            <span class="wf-step">npm install</span><span class="wf-arrow">→</span>
+            <span class="wf-step">fix bug</span><span class="wf-arrow">→</span>
+            <span class="wf-step">push</span><span class="wf-arrow">→</span>
+            <span class="wf-step">checkout back</span><span class="wf-arrow">→</span>
+            <span class="wf-step">stash pop</span>
+          </div>
+          <div class="wf-result">8 steps · 15+ minutes · possible conflicts</div>
+        </div>
+        <div class="workflow-col workflow-new">
+          <h4>Worktree Manager</h4>
+          <div class="workflow-steps">
+            <span class="wf-step">Click "+" to create hotfix</span><span class="wf-arrow">→</span>
+            <span class="wf-step">fix bug</span><span class="wf-arrow">→</span>
+            <span class="wf-step">push</span><span class="wf-arrow">→</span>
+            <span class="wf-step">archive</span>
+          </div>
+          <div class="wf-result">4 steps · 30-second switch · zero impact on original branch</div>
+        </div>
+      </div>
+      <div class="pain-note">
+        <p><strong>node_modules automatically shared via symlink</strong>, ready in seconds. Your feature branch dev server keeps running, and your in-progress code stays untouched.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="features">
+  <div class="container">
+    <h2 class="sec">Core Features</h2>
+    <p class="sub">Built for multi-branch development</p>
+    <div class="feature-grid">
+      <div class="feature-card">
+        <div class="feature-icon">🔀</div>
+        <h3>Multi-Branch Parallel Work</h3>
+        <p>Work on multiple branches simultaneously in one project, without interference. No stashing, no cloning multiple copies.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔗</div>
+        <h3>Smart Folder Linking</h3>
+        <p>Automatically links node_modules, .next, vendor and other build artifacts to avoid redundant dependency installations.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📊</div>
+        <h3>Branch Status Monitoring</h3>
+        <p>Real-time display of commit counts, uncommitted changes, test branch merge status, and more at a glance.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">💻</div>
+        <h3>Built-in Terminal</h3>
+        <p>Each worktree has independent terminal sessions with multi-tab, tab duplication, and fullscreen support.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🧠</div>
+        <h3>AI Voice Refinement <span class="badge-new">NEW</span></h3>
+        <p>AI-powered post-processing for voice input. Automatically corrects recognition errors and normalizes command syntax.</p>
+      </div>
+      <div class="feature-card" style="border-color: rgba(59, 130, 246, 0.3); background: linear-gradient(135deg, #1e293b 0%, #172554 100%);">
+        <div class="feature-icon">🌐</div>
+        <h3>Browser Sharing</h3>
+        <p>Share your workspace with one click. Colleagues access it through a browser. Supports LAN direct and ngrok tunneling.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="how">
+  <div class="container">
+    <h2 class="sec" style="text-align: center;">Three Steps to Start</h2>
+    <p class="sub" style="text-align: center;">Get started with multi-branch parallel development in minutes</p>
+    <div class="steps">
+      <div class="step">
+        <div class="step-number">1</div>
+        <div>
+          <h3>Create a Workspace</h3>
+          <p>Click "New Workspace" and select a directory as the workspace root. The app initializes the structure and detects Git projects within it.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-number">2</div>
+        <div>
+          <h3>Create a Worktree (Working Branch)</h3>
+          <p>Click the "+" button in the sidebar, enter a branch name like <code class="inline">feature/login</code>, and select which projects join the worktree.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-number">3</div>
+        <div>
+          <h3>Develop in Parallel</h3>
+          <p>Each worktree is an isolated directory with shared dependencies. Open it in your IDE, run its own terminal, and merge from the project card when done.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="container">
+    <p>Worktree Manager · MIT License · <a href="https://github.com/guoyongchang/worktree-manager">GitHub</a></p>
+  </div>
+</footer>
+
+</body>
+</html>

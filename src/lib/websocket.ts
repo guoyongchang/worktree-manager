@@ -43,6 +43,11 @@ class WebSocketManager {
   private pendingLockSubscription: string | null = null;
   private pendingVoiceSubscription = false;
 
+  // Keystrokes typed while disconnected, flushed in order on reconnect (bounded, drop-oldest).
+  private pendingWrites: Array<{ sessionId: string; data: string }> = [];
+  private pendingWriteBytes = 0;
+  private static readonly MAX_PENDING_WRITE_BYTES = 256 * 1024;
+
   connect(sessionId: string) {
     if (!sessionId) {
       this.sessionId = null;
@@ -95,6 +100,16 @@ class WebSocketManager {
       }
       if (this.pendingVoiceSubscription) {
         this.sendJson({ type: 'subscribe_voice_events' });
+      }
+
+      // Flush keystrokes buffered while disconnected, in order, after re-subscribing.
+      if (this.pendingWrites.length > 0) {
+        const queued = this.pendingWrites;
+        this.pendingWrites = [];
+        this.pendingWriteBytes = 0;
+        for (const w of queued) {
+          this.sendJson({ type: 'pty_write', sessionId: w.sessionId, data: w.data });
+        }
       }
     };
 
@@ -215,7 +230,22 @@ class WebSocketManager {
   }
 
   writePty(sessionId: string, data: string) {
-    this.sendJson({ type: 'pty_write', sessionId, data });
+    if (this.ws && this.connected) {
+      this.ws.send(JSON.stringify({ type: 'pty_write', sessionId, data }));
+      return;
+    }
+    // Buffer keystrokes typed while (re)connecting so they aren't silently dropped; flush in
+    // order once the socket reopens. Bounded (drop-oldest) to avoid unbounded growth on a
+    // long outage.
+    this.pendingWrites.push({ sessionId, data });
+    this.pendingWriteBytes += data.length;
+    while (
+      this.pendingWriteBytes > WebSocketManager.MAX_PENDING_WRITE_BYTES &&
+      this.pendingWrites.length > 0
+    ) {
+      const dropped = this.pendingWrites.shift();
+      if (dropped) this.pendingWriteBytes -= dropped.data.length;
+    }
   }
 
   subscribeTerminalState(workspacePath: string, worktreeName: string, callback: TerminalStateCallback) {
@@ -308,6 +338,8 @@ class WebSocketManager {
     this.terminalStateCallbacks = [];
     this.voiceEventCallbacks = [];
     this.pendingVoiceSubscription = false;
+    this.pendingWrites = [];
+    this.pendingWriteBytes = 0;
     if (this.ws) {
       this.ws.close();
       this.ws = null;

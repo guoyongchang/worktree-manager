@@ -1,0 +1,110 @@
+/* Kit-level layout styles — Tailwind-class translations from the app source */
+.wmk-app { height: 100vh; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-base); color: var(--text-primary); font-family: var(--font-ui); }
+.wmk-body { flex: 1; display: flex; min-height: 0; }
+
+/* ---------- Sidebar ---------- */
+.wmk-sidebar { width: 288px; flex-shrink: 0; background: var(--bg-surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+.wmk-sidebar-top { padding: 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; }
+.wmk-sidebar-heading { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.wmk-sidebar-heading h1 { font-size: 16px; font-weight: 600; margin: 0; }
+.wmk-main-card { padding: 12px 16px; border-bottom: 1px solid var(--border); cursor: pointer; display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 500; border-left: 2px solid transparent; transition: all 150ms; }
+.wmk-main-card:hover { background: var(--bg-elevated); }
+.wmk-main-card--selected { background: var(--bg-elevated); border-left-color: var(--accent); }
+.wmk-list { flex: 1; overflow-y: auto; min-height: 0; }
+.wmk-section-row { padding: 8px 16px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.wmk-section-label { font-size: 11px; font-weight: 500; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
+.wmk-archive-toggle { cursor: pointer; transition: background 150ms; }
+.wmk-archive-toggle:hover { background: var(--bg-elevated); }
+.wmk-wt-row { padding: 10px 12px 10px 4px; display: flex; align-items: center; gap: 8px; cursor: pointer; border-left: 2px solid transparent; transition: all 150ms; position: relative; }
+.wmk-wt-row:hover { background: var(--bg-elevated); }
+.wmk-wt-row--selected { background: var(--bg-elevated); border-left-color: var(--accent); }
+.wmk-grip { color: var(--text-muted); opacity: 0; display: inline-flex; cursor: grab; }
+.wmk-wt-row:hover .wmk-grip { opacity: 0.7; }
+.wmk-wt-name { font-size: 14px; font-weight: 500; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wmk-new-wt { margin: 8px 12px; padding: 6px 0; border-radius: 6px; border: 1px dashed color-mix(in srgb, var(--accent) 40%, transparent); display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; color: color-mix(in srgb, var(--accent) 70%, transparent); font-size: 12px; font-weight: 500; transition: all 150ms; }
+.wmk-new-wt:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); border-color: var(--accent); color: var(--accent); }
+.wmk-sharebar { border-top: 1px solid var(--border); padding: 12px; display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 13px; color: var(--text-secondary); cursor: pointer; transition: all 150ms; }
+.wmk-sharebar:hover { background: var(--bg-elevated); color: var(--text-primary); }
+.wmk-bottombar { height: 32px; border-top: 1px solid var(--border); padding: 0 12px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+.wmk-dev { font-size: 12px; font-family: var(--font-mono); color: color-mix(in srgb, var(--warning) 70%, transparent); cursor: pointer; }
+.wmk-dev:hover { color: var(--warning); }
+.wmk-ctx { position: fixed; z-index: 60; min-width: 8rem; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-surface); padding: 4px; box-shadow: var(--shadow-lg); animation: animate-in 0.15s ease-out; }
+
+/* ---------- Main / detail ---------- */
+.wmk-main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg-base); }
+.wmk-scroll { flex: 1; overflow-y: auto; padding: 24px; min-height: 0; }
+.wmk-detail { display: flex; flex-direction: column; gap: 16px; }
+.wmk-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.wmk-title { font-size: 20px; font-weight: 600; margin: 0; }
+.wmk-path { font-size: 13px; color: var(--text-muted); margin: 4px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wmk-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.wmk-icon-group { display: flex; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-surface); overflow: hidden; }
+.wmk-group-btn { height: 34px; width: 34px; display: flex; align-items: center; justify-content: center; background: transparent; border: none; color: var(--text-secondary); cursor: pointer; transition: all 150ms; }
+.wmk-group-btn:hover { background: var(--bg-elevated); color: var(--text-primary); }
+.wmk-group-btn + .wmk-group-btn { border-left: 1px solid var(--border); }
+.wmk-split { display: flex; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-surface); overflow: hidden; }
+.wmk-split--accent .wmk-split-main { background: var(--accent); color: var(--accent-fg); }
+.wmk-split--accent .wmk-split-main:hover { background: var(--accent-hover); }
+.wmk-split-main { height: 34px; width: 34px; display: flex; align-items: center; justify-content: center; background: transparent; border: none; color: var(--text-secondary); cursor: pointer; transition: all 150ms; }
+.wmk-split-main:hover { background: var(--bg-elevated); color: var(--text-primary); }
+.wmk-split-arrow { height: 34px; width: 22px; display: flex; align-items: center; justify-content: center; background: transparent; border: none; border-left: 1px solid var(--border); color: var(--text-secondary); cursor: pointer; transition: all 150ms; }
+.wmk-split-arrow:hover { background: var(--bg-elevated); color: var(--text-primary); }
+
+.wmk-segmented { display: flex; background: var(--bg-surface); border: 1px solid var(--border); border-radius: 6px; padding: 2px; gap: 2px; }
+.wmk-segment { height: 26px; padding: 0 10px; border-radius: 4px; border: none; background: transparent; color: var(--text-secondary); font-size: 11px; font-weight: 600; letter-spacing: 0.02em; cursor: pointer; transition: all 150ms; font-family: var(--font-ui); }
+.wmk-segment:hover { color: var(--text-primary); }
+.wmk-segment--active { background: color-mix(in srgb, var(--accent) 55%, var(--bg-elevated)); color: #fff; }
+
+.wmk-vault { border: 1px solid var(--border); border-radius: 8px; background: var(--bg-surface); padding: 14px 16px; }
+.wmk-vault-head { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); margin-bottom: 10px; }
+.wmk-vault-count { color: var(--text-muted); font-size: 12px; }
+.wmk-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.wmk-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 5px; background: var(--bg-elevated); font-size: 12px; color: var(--text-secondary); }
+
+.wmk-group-head { display: flex; align-items: center; gap: 8px; padding: 6px 0; background: none; border: none; color: var(--text-primary); font-size: 14px; font-weight: 500; cursor: pointer; font-family: var(--font-ui); }
+.wmk-group-head:hover { color: var(--accent-hover); }
+
+.wmk-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 16px; margin-top: 8px; }
+.wmk-card { border: 1px solid var(--border); border-radius: 8px; background: var(--bg-surface); padding: 16px; display: flex; flex-direction: column; gap: 10px; transition: box-shadow 150ms, border-color 150ms; }
+.wmk-card:hover { box-shadow: var(--shadow-card-hover); }
+.wmk-card--dirty { border-left: 3px solid var(--warning); }
+.wmk-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.wmk-card-title { font-size: 16px; font-weight: 600; word-break: break-word; }
+.wmk-card-branch { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); margin-top: 8px; }
+.wmk-card-icons { display: flex; align-items: center; gap: 2px; }
+.wmk-mini-icon { height: 26px; width: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 5px; border: none; background: transparent; color: var(--text-secondary); cursor: pointer; transition: all 150ms; }
+.wmk-mini-icon:hover { background: var(--bg-elevated); color: var(--text-primary); }
+.wmk-mini-icon--accent { color: var(--accent); }
+.wmk-card-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.wmk-card-divider { height: 1px; background: var(--border); margin: 2px 0; }
+.wmk-card-stats { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--text-secondary); }
+.wmk-card-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.wmk-card-actions--2 { grid-template-columns: repeat(2, 1fr); }
+.wmk-card-warning { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; color: color-mix(in srgb, var(--warning) 80%, transparent); }
+.wmk-add-project { margin-top: 4px; padding: 12px 0; border-radius: 8px; border: 1px dashed var(--border); display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; color: var(--text-muted); font-size: 13px; transition: all 150ms; }
+.wmk-add-project:hover { border-color: color-mix(in srgb, var(--accent) 40%, transparent); color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.wmk-archived-note { display: flex; align-items: center; gap: 10px; padding: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-surface); color: var(--text-secondary); font-size: 14px; }
+
+/* ---------- Create modal ---------- */
+.wmk-cm-tabs { display: flex; gap: 16px; border-bottom: 1px solid var(--border); }
+.wmk-cm-tab { padding: 6px 2px 8px; background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-muted); font-size: 13px; font-weight: 500; cursor: pointer; font-family: var(--font-ui); margin-bottom: -1px; transition: color 150ms; }
+.wmk-cm-tab:hover { color: var(--text-secondary); }
+.wmk-cm-tab--active { color: var(--accent); border-bottom-color: var(--accent); }
+.wmk-cm-group { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 6px; background: var(--bg-elevated); }
+.wmk-cm-project { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-base); }
+
+/* ---------- Terminal ---------- */
+.wmk-terminal { flex-shrink: 0; border-top: 1px solid var(--border); background: var(--bg-surface); display: flex; flex-direction: column; transition: height 200ms ease-out; position: relative; }
+.wmk-term-resize { position: absolute; top: -3px; left: 0; right: 0; height: 6px; cursor: row-resize; }
+.wmk-term-resize::after { content: ''; position: absolute; top: 2px; left: 50%; transform: translateX(-50%); width: 40px; height: 3px; border-radius: 2px; background: var(--border); }
+.wmk-term-bar { height: 32px; display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.wmk-term-tabs { display: flex; align-items: stretch; height: 100%; overflow-x: auto; }
+.wmk-term-tab { display: flex; align-items: center; gap: 6px; padding: 0 12px; font-size: 12px; color: var(--text-muted); cursor: pointer; border-right: 1px solid transparent; border-left: 1px solid transparent; white-space: nowrap; transition: color 150ms; }
+.wmk-term-tab:hover { color: var(--text-secondary); }
+.wmk-term-tab--active { color: var(--text-primary); background: var(--bg-base); border-color: var(--border); }
+.wmk-term-tab-x { display: inline-flex; padding: 2px; border-radius: 3px; border: none; background: transparent; color: var(--text-muted); cursor: pointer; }
+.wmk-term-tab-x:hover { background: var(--bg-elevated); color: var(--text-primary); }
+.wmk-term-plus { height: 22px; width: 22px; border-radius: 9999px; border: none; background: color-mix(in srgb, var(--accent) 80%, transparent); color: #fff; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: background 150ms; }
+.wmk-term-plus:hover { background: var(--accent); }
+.wmk-term-body { flex: 1; min-height: 0; overflow-y: auto; background: var(--bg-base); padding: 10px 14px; font-family: var(--font-mono); font-size: 12px; line-height: 1.7; }
+.wmk-caret { display: inline-block; width: 7px; height: 13px; background: var(--text-secondary); vertical-align: -2px; margin-left: 1px; animation: fade-in 1s steps(2) infinite alternate; }

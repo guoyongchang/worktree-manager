@@ -1,0 +1,44 @@
+/* ============================================================
+   Worktree Manager — Typography tokens
+   Source: src/design-tokens.ts + class usage across src/components
+   UI font: Inter (variable, bundled). Mono: Maple Mono NF CN in the
+   real app (not in repo) → JetBrains Mono is the app's declared
+   fallback and is used here. See fonts.css.
+   ============================================================ */
+
+:root {
+  --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'Maple Mono NF CN', 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* Size scale (Tailwind steps actually used in the app) */
+  --fs-2xs: 10px;    /* badges, status pills, shortcut hints */
+  --fs-xs: 12px;     /* metadata, stats, buttons (sm), section labels (11px also used) */
+  --fs-label: 11px;  /* uppercase sidebar section labels */
+  --fs-sm: 14px;     /* body / default UI text, buttons, inputs */
+  --fs-base: 16px;   /* sidebar h1 "Worktrees", dialog titles */
+  --fs-lg: 18px;     /* card titles in detail view */
+  --fs-xl: 20px;     /* view titles */
+  --fs-2xl: 24px;    /* welcome title, workspace title */
+
+  /* Weights — Inter variable 100–900; app uses only these */
+  --fw-regular: 400; /* @kind font */
+  --fw-medium: 500; /* @kind font */   /* default for labels, buttons, item names */
+  --fw-semibold: 600; /* @kind font */ /* headings, titles */
+
+  /* Line heights */
+  --lh-none: 1; /* @kind font */          /* leading-none — card/dialog titles */
+  --lh-tight: 1.25; /* @kind font */
+  --lh-normal: 1.5; /* @kind font */
+  --lh-relaxed: 1.625; /* @kind font */   /* leading-relaxed — descriptions */
+
+  /* Tracking */
+  --tracking-tight: -0.025em; /* @kind font */  /* tracking-tight — titles */
+  --tracking-wider: 0.05em; /* @kind font */    /* uppercase section labels */
+}
+
+html {
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}

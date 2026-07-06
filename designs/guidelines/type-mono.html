@@ -1,0 +1,23 @@
+<!-- @dsCard group="Type" viewport="700x180" name="Mono type — terminal & paths" subtitle="Maple Mono NF CN in-app; JetBrains Mono fallback here" -->
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="../styles.css">
+<style>
+body { margin: 0; background: var(--bg-base); padding: 16px 18px; font-family: var(--font-ui); color: var(--text-primary); }
+.term { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; font-family: var(--font-mono); font-size: 12px; line-height: 1.7; }
+.dim { color: var(--text-muted); }
+.g { color: var(--success-light); }
+.path { margin-top: 10px; font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary); }
+</style>
+</head>
+<body>
+<div class="term">
+<span class="dim"># each worktree gets its own terminal</span><br>
+<span class="g">git worktree add</span> ../worktrees/hotfix-payment -b hotfix-payment<br>
+<span class="g">npm run</span> tauri dev
+</div>
+<div class="path">/Users/guo/Work/some-projects/worktree-manager-space · worktrees/feature-checkout-v2</div>
+</body>
+</html>

@@ -1,0 +1,28 @@
+/* ============================================================
+   Worktree Manager — Base element styles
+   Source: src/index.css (scrollbars, press effect, focus reset)
+   ============================================================ */
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* Native-app feel: no focus outlines (focus shown via ring on controls) */
+:focus { outline: none; }
+
+* { -webkit-tap-highlight-color: transparent; }
+
+/* Button press effect — global, on all buttons */
+button:active:not(:disabled) { scale: 0.98; }
+button { touch-action: manipulation; }
+
+/* Custom scrollbar (dark-theme tuned) */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-muted) 50%, transparent);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text-muted) 80%, transparent);
+}
