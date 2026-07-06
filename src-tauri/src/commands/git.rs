@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use crate::config::{get_window_workspace_config, save_workspace_config_internal};
@@ -140,6 +140,18 @@ pub(crate) async fn switch_branch(request: SwitchBranchRequest) -> Result<(), St
 pub fn clone_project_impl(window_label: &str, request: CloneProjectRequest) -> Result<(), String> {
     validate_git_ref_name(&request.base_branch)?;
     validate_git_ref_name(&request.test_branch)?;
+
+    // Security: the name becomes a directory under projects/ and is used as the git-clone
+    // destination. Reject anything that is not a single normal path component so a remote
+    // client cannot escape the workspace (via `..`, absolute paths or drive prefixes) and
+    // write files to arbitrary host locations.
+    let trimmed_name = request.name.trim();
+    let mut components = Path::new(trimmed_name).components();
+    let is_single_component =
+        matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none();
+    if trimmed_name.is_empty() || !is_single_component {
+        return Err(format!("Invalid project name: '{}'", request.name));
+    }
 
     let (workspace_path, mut config) =
         get_window_workspace_config(window_label).ok_or("No workspace selected")?;

@@ -203,6 +203,11 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
   const desktopListenerTokenRef = useRef(0);
   const desktopTransportRef = useRef<'event' | 'polling' | null>(null);
   const initializedRef = useRef(false);
+  const initInProgressRef = useRef(false);
+  const lastSentSizeRef = useRef<{ cols: number; rows: number } | null>(null);
+  const resizeDebounceRef = useRef<number | null>(null);
+  const handleResizeRef = useRef<(force?: boolean) => void>(() => {});
+  const focusHandlerRef = useRef<{ el: HTMLElement; handler: () => void } | null>(null);
   const cwdRef = useRef(actualCwd);
   const mouseSelectionRef = useRef({
     pressed: false,
@@ -525,6 +530,17 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
         pasteHandlerRef.current = null;
       }
 
+      const focusH = focusHandlerRef.current;
+      if (focusH) {
+        focusH.el.removeEventListener('focusin', focusH.handler);
+        focusHandlerRef.current = null;
+      }
+
+      if (resizeDebounceRef.current !== null) {
+        clearTimeout(resizeDebounceRef.current);
+        resizeDebounceRef.current = null;
+      }
+
       if (pendingPasteFallbackRef.current !== null) {
         clearTimeout(pendingPasteFallbackRef.current);
         pendingPasteFallbackRef.current = null;
@@ -654,6 +670,10 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
   const initPty = useCallback(async () => {
     const adapter = adapterRef.current;
     if (!adapter || !terminalRef.current) return;
+    // Guard against overlapping initPty runs (rapid visibility/reinit toggles during
+    // async init) — a concurrent run could double pty_create or leak a reader/subscription.
+    if (initInProgressRef.current) return;
+    initInProgressRef.current = true;
 
     setInitStatus('Preparing terminal...');
     setInitError(null);
@@ -734,6 +754,12 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
           el: terminalRef.current,
           handlePaste: handleTerminalPaste,
         };
+
+        // Assert this client's size when the terminal gains focus, so the most-recently-focused
+        // client's dimensions win when several clients (e.g. mobile + desktop) view the same PTY.
+        const handleFocusIn = () => handleResizeRef.current(true);
+        terminalRef.current.addEventListener('focusin', handleFocusIn);
+        focusHandlerRef.current = { el: terminalRef.current, handler: handleFocusIn };
 
         // Mouse selection handling
         const resetStuckSelection = (forceClear = false) => {
@@ -914,32 +940,45 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
         }
       }
 
-      setInitStatus('Subscribing output...');
+      // Bail if the component was torn down during the awaits above — otherwise we
+      // would re-arm a reader/subscription after the unmount cleanup already ran.
+      if (!adapterRef.current || !mountedRef.current) return;
+
+      if (!gotFirstDataRef.current) setInitStatus('Subscribing output...');
       initializedRef.current = true;
       startReading();
 
-      // Deferred resize
+      // Deferred resize: assert this client's initial size once and record it, so subsequent
+      // ResizeObserver ticks dedupe against it instead of storming the shared PTY. (Previously
+      // this fired on every reattach via `|| exists`, clobbering another client's size.)
       requestAnimationFrame(() => {
         setTimeout(() => {
           if (adapterRef.current && mountedRef.current) {
             try { adapterRef.current.fit(); } catch (_e) { /* ignore */ }
             const newCols = Math.max(adapterRef.current.cols || 80, 2);
             const newRows = Math.max(adapterRef.current.rows || 24, 2);
-            if (newCols !== cols || newRows !== rows || exists) {
-              callBackend('pty_resize', {
-                sessionId: sessionIdRef.current,
-                cols: newCols,
-                rows: newRows,
-                ...(clientId ? { clientId } : {}),
-              }).catch(() => { });
-            }
+            lastSentSizeRef.current = { cols: newCols, rows: newRows };
+            callBackend('pty_resize', {
+              sessionId: sessionIdRef.current,
+              cols: newCols,
+              rows: newRows,
+              ...(clientId ? { clientId } : {}),
+            }).catch(() => { });
           }
         }, 100);
       });
 
-      setInitStatus('Waiting for output...');
-
-      if (exists) {
+      // Clear the init overlay. If the restore read already delivered buffered output
+      // (reattaching to a session already open on another client), the terminal is
+      // usable now — do NOT re-show a spinner, because no *new* output is coming for an
+      // idle shell and the overlay (which also blocks input and disables the tab-close
+      // button) would hang forever. Otherwise wait briefly for the first output, then
+      // clear unconditionally so a silent session (fresh, or an empty restore) can't
+      // get stuck either.
+      if (gotFirstDataRef.current) {
+        setInitStatus(null);
+      } else {
+        setInitStatus('Waiting for output...');
         setTimeout(() => {
           if (!gotFirstDataRef.current) setInitStatus(null);
         }, 2000);
@@ -949,6 +988,8 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
       setInitStatus(null);
       setInitError(String(e));
       console.error('[terminal] Failed to initialize PTY:', e);
+    } finally {
+      initInProgressRef.current = false;
     }
   }, [clientId, handleIncomingData, sendPastedText, startReading]);
 
@@ -979,12 +1020,20 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
   }, []);
 
 
-  const handleResize = useCallback(() => {
+  // Resize the (shared) PTY to this client's fitted size. Several clients can view the same PTY
+  // at once but it has a single size, so we only send on an actual change to avoid a SIGWINCH
+  // storm; `force` re-asserts even when unchanged, used when this client becomes the active /
+  // focused view so the most-recently-focused client's size wins.
+  const handleResize = useCallback((force = false) => {
     if (!adapterRef.current || !mountedRef.current || !visible || !initializedRef.current) return;
 
     try { adapterRef.current.fit(); } catch (_e) { /* ignore */ }
     const cols = Math.max(adapterRef.current.cols || 80, 2);
     const rows = Math.max(adapterRef.current.rows || 24, 2);
+
+    const last = lastSentSizeRef.current;
+    if (!force && last && last.cols === cols && last.rows === rows) return;
+    lastSentSizeRef.current = { cols, rows };
 
     callBackend('pty_resize', {
       sessionId: sessionIdRef.current,
@@ -993,9 +1042,19 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
       ...(clientId ? { clientId } : {}),
     }).catch(() => { /* noop */ });
   }, [visible, clientId]);
+  handleResizeRef.current = handleResize;
+
+  // Debounced resize for high-frequency triggers (ResizeObserver during a window drag).
+  const scheduleResize = useCallback(() => {
+    if (resizeDebounceRef.current !== null) clearTimeout(resizeDebounceRef.current);
+    resizeDebounceRef.current = window.setTimeout(() => {
+      resizeDebounceRef.current = null;
+      handleResize(false);
+    }, 120);
+  }, [handleResize]);
 
   const handleResizeToFit = useCallback(() => {
-    handleResize();
+    handleResize(true);
     handleCloseContextMenu();
   }, [handleResize, handleCloseContextMenu]);
 
@@ -1005,9 +1064,10 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
 
     if (visible) {
       if (isTauri()) startReading();
-      // Small delay ensures DOM is fully rendered before resize
+      // Small delay ensures DOM is fully rendered before resize. Becoming visible means this
+      // client is now the active view, so force-assert its size (last-focused client wins).
       const resizeTimer = setTimeout(() => {
-        handleResize();
+        handleResize(true);
       }, 50);
       return () => clearTimeout(resizeTimer);
     }
@@ -1022,7 +1082,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
 
     const resizeObserver = new ResizeObserver(() => {
       if (visible) {
-        handleResize();
+        scheduleResize();
       }
     });
 
@@ -1031,7 +1091,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
     return () => {
       resizeObserver.disconnect();
     };
-  }, [visible, handleResize]);
+  }, [visible, scheduleResize]);
 
   // Cleanup on unmount — stop reading only (PTY sessions persist like tmux)
   useEffect(() => {
@@ -1040,22 +1100,19 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
     };
   }, [stopReading]);
 
-  // Browser mode: track WS connection state and re-subscribe on reconnect
+  // Browser mode: track WS connection state only. Re-subscription on reconnect is handled
+  // centrally by the WS manager's onopen handler, which re-sends pty_subscribe for every
+  // tracked session (and the pty callback persists across reconnects). Re-subscribing here
+  // as well issued a duplicate pty_subscribe, so the server replayed its buffer twice and
+  // terminal output was duplicated on every reconnect.
   useEffect(() => {
     if (isTauri()) return;
     const wsMgr = getWebSocketManager();
     const unsub = wsMgr.onConnectionStateChange((connected) => {
       setWsConnected(connected);
-      // On reconnect, re-subscribe if we had an active session
-      if (connected && initializedRef.current && wsSubscribedRef.current) {
-        console.log('[terminal] WS reconnected, re-subscribing PTY:', sessionIdRef.current);
-        wsMgr.subscribePty(sessionIdRef.current, (data) => {
-          handleIncomingData(data);
-        });
-      }
     });
     return unsub;
-  }, [handleIncomingData]);
+  }, []);
 
   return (
     <div className="h-full w-full flex flex-col overflow-hidden">
@@ -1209,7 +1266,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
           </>
         )}
       </div>
-      {isMobile && <MobileTerminalToolbar sessionId={sessionIdRef.current} onResize={handleResize} onDebug={handleShowDebugInfo} />}
+      {isMobile && <MobileTerminalToolbar sessionId={sessionIdRef.current} onResize={() => handleResize(true)} onDebug={handleShowDebugInfo} />}
     </div>
   );
 });

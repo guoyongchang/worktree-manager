@@ -14,6 +14,11 @@ const REPLAY_BUFFER_CAP: usize = 64 * 1024;
 const DESKTOP_PENDING_BUFFER_CAP: usize = 8 * 1024 * 1024;
 /// Drop desktop reader cursors that have stopped polling so they no longer pin backlog in memory.
 const DESKTOP_READER_TTL: Duration = Duration::from_secs(10);
+/// Upper bound on concurrent PTY sessions. Each session spawns a shell child process, a
+/// dedicated reader thread and multi-MB buffers, so an (authenticated) remote share client
+/// looping `pty_create` with fresh ids could otherwise exhaust host processes/threads/FDs/RAM.
+/// The desktop + browser UIs never approach this, so it only bites abuse.
+const MAX_PTY_SESSIONS: usize = 64;
 
 /// Shell integration script directory (set once during app setup)
 static SHELL_INTEGRATION_DIR: OnceLock<PathBuf> = OnceLock::new();
@@ -543,12 +548,31 @@ struct PtyReader {
     desktop_buffer: Arc<Mutex<DesktopPendingBuffer>>,
 }
 
+/// Normalize a filesystem path for prefix comparison: unify separators to '/', strip any
+/// trailing separators, and drop a trailing `#<suffix>` duplicated-tab marker.
+fn normalize_path_for_match(p: &str) -> String {
+    let p = p.split('#').next().unwrap_or(p);
+    p.replace('\\', "/").trim_end_matches('/').to_string()
+}
+
+/// True if `cwd` is exactly `normalized_prefix` or a real descendant path of it. Compared on
+/// true path boundaries so a hyphen/name sibling like `<prefix>-extra` never matches.
+/// `normalized_prefix` must already be normalized via [`normalize_path_for_match`].
+fn path_is_within_prefix(cwd: &str, normalized_prefix: &str) -> bool {
+    let cwd = normalize_path_for_match(cwd);
+    cwd == normalized_prefix || cwd.starts_with(&format!("{}/", normalized_prefix))
+}
+
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     reader: PtyReader,
     child: Box<dyn Child + Send + Sync>,
     shell_path: String,
+    /// Working directory this session was created in. Used for correct path-prefix matching
+    /// when closing a worktree's sessions (the session id alone is lossy: '/', '\\' and '#'
+    /// all collapse to '-', so a sibling `<path>-extra` is indistinguishable from a child).
+    cwd: String,
     broadcast_tx: broadcast::Sender<Vec<u8>>,
     /// Ring buffer of recent PTY output for replaying to new subscribers.
     replay_buffer: Arc<Mutex<VecDeque<u8>>>,
@@ -606,6 +630,27 @@ impl PtyManager {
                 id
             );
             self.close_session(id, "create_session: replacing existing")?;
+        }
+
+        // Reap any sessions whose shell already exited so they don't leak or count against the
+        // cap below.
+        self.reap_dead_sessions();
+
+        // Bound the number of concurrent sessions so a remote client cannot exhaust host
+        // resources by spawning unlimited shells. The existing session (if any) was just
+        // closed above, so the count here reflects the sessions that will remain.
+        let active = self.session_count();
+        if active >= MAX_PTY_SESSIONS {
+            log::warn!(
+                "[pty] create_session: refusing session '{}' — at capacity ({}/{})",
+                id,
+                active,
+                MAX_PTY_SESSIONS
+            );
+            return Err(format!(
+                "Too many terminal sessions ({} of {} in use). Close some terminals and try again.",
+                active, MAX_PTY_SESSIONS
+            ));
         }
 
         let pty_system = native_pty_system();
@@ -721,16 +766,21 @@ impl PtyManager {
                     Ok(0) => break, // EOF
                     Ok(n) => {
                         let data = buf[..n].to_vec();
-                        // Send to broadcast (for WS subscribers); ignore errors (no receivers)
-                        let _ = broadcast_tx_clone.send(data.clone());
-                        // Append to replay buffer
-                        if let Ok(mut rb) = replay_buf_clone.lock() {
+                        // Append to the replay buffer and broadcast under the SAME lock. A newly
+                        // subscribing client snapshots the replay buffer and subscribes to the
+                        // broadcast while holding this lock (see subscribe_session), so making the
+                        // two operations atomic here means it can neither miss a chunk nor receive
+                        // it twice at the snapshot/subscribe seam.
+                        {
+                            let mut rb = replay_buf_clone.lock().unwrap_or_else(|p| p.into_inner());
                             rb.extend(&data);
                             // Trim from front if over capacity
                             if rb.len() > REPLAY_BUFFER_CAP {
                                 let excess = rb.len() - REPLAY_BUFFER_CAP;
                                 rb.drain(..excess);
                             }
+                            // Send to broadcast (for WS subscribers); ignore errors (no receivers)
+                            let _ = broadcast_tx_clone.send(data.clone());
                         }
                         // Desktop readers consume per-client cursors from a shared backlog
                         // so multiple windows do not steal output from each other.
@@ -775,6 +825,7 @@ impl PtyManager {
             },
             child,
             shell_path,
+            cwd: cwd.to_string(),
             broadcast_tx,
             replay_buffer,
         };
@@ -947,23 +998,68 @@ impl PtyManager {
             .len()
     }
 
+    /// Remove sessions whose shell process has already exited, freeing their slot and resources.
+    /// Called before creating a session so exited (zombie) sessions neither accumulate nor count
+    /// against MAX_PTY_SESSIONS. Live sessions whose client merely disconnected are left intact
+    /// (kept available for reconnect, tmux-style).
+    fn reap_dead_sessions(&self) {
+        let dead: Vec<String> = {
+            let sessions = self
+                .sessions
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            sessions
+                .iter()
+                .filter_map(|(id, session)| {
+                    let mut guard = session.lock().ok()?;
+                    match guard.child.try_wait() {
+                        Ok(Some(_)) => Some(id.clone()),
+                        _ => None,
+                    }
+                })
+                .collect()
+        };
+        if dead.is_empty() {
+            return;
+        }
+        let mut sessions = self
+            .sessions
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        for id in &dead {
+            sessions.remove(id);
+            log::info!("[pty] Reaped exited shell session '{}'", id);
+        }
+    }
+
     /// Get a broadcast receiver and replay buffer snapshot for a PTY session (used by WebSocket subscribers).
     /// Returns (replay_data, broadcast_receiver).
-    pub fn subscribe_session(&self, id: &str) -> Option<(Vec<u8>, broadcast::Receiver<Vec<u8>>)> {
+    /// Returns `(replay_snapshot, broadcast_receiver, replay_buffer)`. The replay buffer handle
+    /// lets the caller re-snapshot to resync a client that lags off the broadcast channel.
+    #[allow(clippy::type_complexity)]
+    pub fn subscribe_session(
+        &self,
+        id: &str,
+    ) -> Option<(
+        Vec<u8>,
+        broadcast::Receiver<Vec<u8>>,
+        Arc<Mutex<VecDeque<u8>>>,
+    )> {
         let sessions = self
             .sessions
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let session_arc = sessions.get(id)?;
         let session = session_arc.lock().ok()?;
-        let replay = session
-            .replay_buffer
-            .lock()
-            .ok()
-            .map(|rb| rb.iter().copied().collect::<Vec<u8>>())
-            .unwrap_or_default();
+        let replay_arc = session.replay_buffer.clone();
+        // Snapshot the replay buffer and subscribe to the broadcast while holding the replay
+        // lock, so the reader thread (which appends+broadcasts under the same lock) cannot
+        // interleave between the two — the client receives every chunk exactly once.
+        let rb = replay_arc.lock().unwrap_or_else(|p| p.into_inner());
+        let replay = rb.iter().copied().collect::<Vec<u8>>();
         let rx = session.broadcast_tx.subscribe();
-        Some((replay, rx))
+        drop(rb);
+        Some((replay, rx, replay_arc))
     }
 
     pub fn close_sessions_by_path_prefix(
@@ -971,9 +1067,11 @@ impl PtyManager {
         path_prefix: &str,
         reason: &str,
     ) -> Vec<String> {
-        let normalized_prefix = path_prefix.replace(['/', '\\', '#'], "-");
-        // NOTE: session IDs are created by frontend as `pty-{normalized-path}` (no trailing -#)
-        let session_prefix = format!("pty-{}", normalized_prefix);
+        // Match on each session's real working directory rather than the lossy dash-normalized
+        // session id (where '/', '\\' and '#' all collapse to '-'). Id-prefix matching could not
+        // tell a child path `<prefix>/sub` or duplicated tab `<prefix>#2` from a hyphen sibling
+        // `<prefix>-extra`, so archiving one worktree could kill a sibling worktree's live PTYs.
+        let normalized_prefix = normalize_path_for_match(path_prefix);
 
         // Collect IDs under read lock, then drop guard before write lock
         let sessions_to_close: Vec<String> = {
@@ -982,13 +1080,15 @@ impl PtyManager {
                 .read()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             sessions
-                .keys()
-                .filter(|id| {
-                    // Exact match or followed by '-' to avoid matching /path/project-extra
-                    // when closing /path/project
-                    **id == session_prefix || id.starts_with(&format!("{}-", session_prefix))
+                .iter()
+                .filter(|(_, session)| {
+                    session
+                        .lock()
+                        .ok()
+                        .map(|s| path_is_within_prefix(&s.cwd, &normalized_prefix))
+                        .unwrap_or(false)
                 })
-                .cloned()
+                .map(|(id, _)| id.clone())
                 .collect()
         }; // read guard dropped here
 
@@ -1035,10 +1135,10 @@ mod tests {
     use super::powershell_integration_args;
     use super::{
         append_bash_integration_args, bash_integration_init_path, bytes_to_utf8_with_pending,
-        get_default_shell, requested_shell_path, resolve_shell_from_id,
-        resolve_shell_from_path_lookup, shell_escape_single_quote, shell_program_name,
-        shell_startup_args, windows_path_to_git_bash, DesktopPendingBuffer, PtyManager,
-        DESKTOP_PENDING_BUFFER_CAP, DESKTOP_READER_TTL,
+        get_default_shell, normalize_path_for_match, path_is_within_prefix, requested_shell_path,
+        resolve_shell_from_id, resolve_shell_from_path_lookup, shell_escape_single_quote,
+        shell_program_name, shell_startup_args, windows_path_to_git_bash, DesktopPendingBuffer,
+        PtyManager, DESKTOP_PENDING_BUFFER_CAP, DESKTOP_READER_TTL,
     };
     use serial_test::serial;
     #[cfg(target_os = "windows")]
@@ -1493,7 +1593,7 @@ mod tests {
             .resize_session(&id, 100, 30)
             .expect("resize session");
 
-        let (replay, _) = manager.subscribe_session(&id).expect("subscribe session");
+        let (replay, _, _) = manager.subscribe_session(&id).expect("subscribe session");
         assert!(
             String::from_utf8_lossy(&replay).contains("WM_PTY_OK"),
             "replay was {:?}",
@@ -1533,56 +1633,80 @@ mod tests {
     #[cfg(not(target_os = "windows"))]
     #[serial]
     #[test]
-    fn close_sessions_by_path_prefix_closes_exact_and_child_session_ids() {
+    fn close_sessions_by_path_prefix_matches_real_paths_not_hyphen_siblings() {
         if !std::path::Path::new("/bin/sh").exists() {
             // Unix CI images should have /bin/sh; skip only on unusual local systems.
             return;
         }
         let mut manager = PtyManager::new();
-        let cwd = tempfile::tempdir().expect("pty cwd");
-        let prefix = cwd.path().to_string_lossy().replace(['/', '\\', '#'], "-");
-        let exact_id = format!("pty-{}", prefix);
-        let child_id = format!("pty-{}-extra", prefix);
-        let unrelated_id = unique_session_id("unrelated");
+        let root = tempfile::tempdir().expect("pty root");
+        let feature = root.path().join("wt").join("feature");
+        let feature_sub = feature.join("sub");
+        let sibling = root.path().join("wt").join("feature-extra");
+        let unrelated = root.path().join("other");
+        for dir in [&feature, &feature_sub, &sibling, &unrelated] {
+            std::fs::create_dir_all(dir).expect("create test dir");
+        }
 
-        manager
-            .create_session(
-                &exact_id,
-                cwd.path().to_str().unwrap(),
-                80,
-                24,
-                Some("/bin/sh"),
-            )
-            .expect("create exact session");
-        manager
-            .create_session(
-                &child_id,
-                cwd.path().to_str().unwrap(),
-                80,
-                24,
-                Some("/bin/sh"),
-            )
-            .expect("create child session");
-        manager
-            .create_session(
-                &unrelated_id,
-                cwd.path().to_str().unwrap(),
-                80,
-                24,
-                Some("/bin/sh"),
-            )
-            .expect("create unrelated session");
+        let id_for = |p: &std::path::Path| {
+            format!("pty-{}", p.to_string_lossy().replace(['/', '\\', '#'], "-"))
+        };
+        // Two tabs of the SAME worktree: a plain tab and a duplicated tab (the frontend appends
+        // "#<ts>", normalized to "-<ts>"); both share the same real cwd.
+        let exact_id = id_for(&feature);
+        let dup_tab_id = format!("{}-2", exact_id);
+        let child_id = id_for(&feature_sub);
+        let sibling_id = id_for(&sibling);
+        let unrelated_id = id_for(&unrelated);
 
-        let mut closed =
-            manager.close_sessions_by_path_prefix(cwd.path().to_str().unwrap(), "unit test");
+        let feature_s = feature.to_string_lossy().to_string();
+        let feature_sub_s = feature_sub.to_string_lossy().to_string();
+        let sibling_s = sibling.to_string_lossy().to_string();
+        let unrelated_s = unrelated.to_string_lossy().to_string();
+        for (id, cwd) in [
+            (&exact_id, &feature_s),
+            (&dup_tab_id, &feature_s),
+            (&child_id, &feature_sub_s),
+            (&sibling_id, &sibling_s),
+            (&unrelated_id, &unrelated_s),
+        ] {
+            manager
+                .create_session(id, cwd, 80, 24, Some("/bin/sh"))
+                .expect("create session");
+        }
+
+        let mut closed = manager.close_sessions_by_path_prefix(&feature_s, "unit test");
         closed.sort();
+        let mut expected = vec![exact_id.clone(), dup_tab_id.clone(), child_id.clone()];
+        expected.sort();
 
-        assert_eq!(closed, vec![exact_id.clone(), child_id.clone()]);
+        // The worktree itself, its duplicated tab, and a true child path are closed…
+        assert_eq!(closed, expected);
         assert!(!manager.has_session(&exact_id));
+        assert!(!manager.has_session(&dup_tab_id));
         assert!(!manager.has_session(&child_id));
+        // …but a hyphen-sibling worktree and an unrelated session must survive.
+        assert!(manager.has_session(&sibling_id));
         assert!(manager.has_session(&unrelated_id));
-        manager
-            .close_session(&unrelated_id, "unit test cleanup")
-            .unwrap();
+
+        manager.close_session(&sibling_id, "cleanup").unwrap();
+        manager.close_session(&unrelated_id, "cleanup").unwrap();
+    }
+
+    #[test]
+    fn path_is_within_prefix_rejects_hyphen_siblings() {
+        let prefix = normalize_path_for_match("/root/wt/feature");
+        // Exact, duplicated-tab (#ts stripped), and child paths match.
+        assert!(path_is_within_prefix("/root/wt/feature", &prefix));
+        assert!(path_is_within_prefix(
+            "/root/wt/feature#1720000000",
+            &prefix
+        ));
+        assert!(path_is_within_prefix("/root/wt/feature/sub", &prefix));
+        assert!(path_is_within_prefix("/root/wt/feature/", &prefix));
+        // Hyphen/name siblings and unrelated paths do not.
+        assert!(!path_is_within_prefix("/root/wt/feature-extra", &prefix));
+        assert!(!path_is_within_prefix("/root/wt/feature2", &prefix));
+        assert!(!path_is_within_prefix("/root/other", &prefix));
     }
 }
