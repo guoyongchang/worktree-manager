@@ -147,8 +147,8 @@ pub fn clone_project_impl(window_label: &str, request: CloneProjectRequest) -> R
     // write files to arbitrary host locations.
     let trimmed_name = request.name.trim();
     let mut components = Path::new(trimmed_name).components();
-    let is_single_component = matches!(components.next(), Some(Component::Normal(_)))
-        && components.next().is_none();
+    let is_single_component =
+        matches!(components.next(), Some(Component::Normal(_))) && components.next().is_none();
     if trimmed_name.is_empty() || !is_single_component {
         return Err(format!("Invalid project name: '{}'", request.name));
     }
