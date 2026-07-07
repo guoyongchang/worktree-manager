@@ -5,9 +5,12 @@ import {
   getRoutedWebSocketUrl,
   getTunnelRoute,
   discoverTunnelRoutes,
+  ensureTunnelRoute,
+  hasSelectableRoutePeers,
   measurePeerMedianLatency,
   selectTunnelRoute,
   selectBestMeasuredPeer,
+  shouldUseTunnelRouteSelection,
   setTunnelRouteForTests,
   type TunnelRouteDiscovery,
   type PeerCandidate,
@@ -87,6 +90,57 @@ describe('tunnelRoute', () => {
     expect(fetchMock).toHaveBeenCalledWith(
       '/t/bliss-kind-drift/api/tunnel/route/bliss-kind-drift',
       { headers: { 'X-Session-Id': '' } },
+    );
+  });
+
+  it('skips route discovery outside the public tunnel domain', async () => {
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: new URL('https://lan.example.test/t/bliss-kind-drift/'),
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    expect(shouldUseTunnelRouteSelection()).toBe(false);
+    await expect(discoverTunnelRoutes(5)).resolves.toBeNull();
+    await expect(ensureTunnelRoute()).resolves.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('treats the current domain as the only node when no peer nodes are available', async () => {
+    const candidatesResponse = () => ({
+      ok: true,
+      json: async () => ({
+        route_session_id: 'rts_center',
+        subdomain: 'bliss-kind-drift',
+        route_token: 'route-token',
+        peers: [
+          {
+            id: 'center',
+            public_base_url: 'https://tunnel.kirov-opensource.com',
+            public_ws_url: 'wss://tunnel.kirov-opensource.com',
+            probe_url: 'https://tunnel.kirov-opensource.com/_wms/probe',
+            desktop_rtt_ms: 42,
+            load_score: 0,
+            weight: 100,
+          },
+        ],
+      }),
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(candidatesResponse())
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce(candidatesResponse())
+      .mockResolvedValueOnce({ ok: true });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const discovery = await discoverTunnelRoutes(1);
+
+    expect(hasSelectableRoutePeers(discovery)).toBe(false);
+    await expect(ensureTunnelRoute()).resolves.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      '/t/bliss-kind-drift/api/tunnel/route/bliss-kind-drift/select',
+      expect.anything(),
     );
   });
 

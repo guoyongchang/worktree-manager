@@ -52,6 +52,28 @@ let currentRoute: SelectedTunnelRoute | null = null;
 const ROUTE_STORAGE_KEY = 'wm_tunnel_route';
 const ROUTE_PREFERENCE_KEY = 'wm_tunnel_peer_preference';
 const AUTO_ROUTE_PREFERENCE = 'auto';
+const ROUTE_SELECTION_ORIGIN = 'https://tunnel.kirov-opensource.com';
+
+export function shouldUseTunnelRouteSelection(): boolean {
+  return window.location.origin === ROUTE_SELECTION_ORIGIN;
+}
+
+function peerOrigin(publicBaseUrl: string): string | null {
+  try {
+    return new URL(publicBaseUrl).origin;
+  } catch {
+    return null;
+  }
+}
+
+export function isCurrentDomainPeer(peer: Pick<PeerCandidate, 'id' | 'public_base_url'>): boolean {
+  return peer.id === 'center'
+    || peerOrigin(peer.public_base_url) === window.location.origin;
+}
+
+export function hasSelectableRoutePeers(discovery: TunnelRouteDiscovery | null): boolean {
+  return !!discovery?.options.some((option) => !isCurrentDomainPeer(option.peer));
+}
 
 export function selectBestMeasuredPeer(
   peers: PeerCandidate[],
@@ -197,6 +219,7 @@ export async function measurePeerMedianLatency(
 }
 
 export async function discoverTunnelRoutes(sampleCount = 5): Promise<TunnelRouteDiscovery | null> {
+  if (!shouldUseTunnelRouteSelection()) return null;
   const subdomain = getSubdomain();
   if (!subdomain) return null;
   const centerBase = getCenterApiBase();
@@ -226,6 +249,12 @@ export async function discoverTunnelRoutes(sampleCount = 5): Promise<TunnelRoute
   } catch {
     return null;
   }
+}
+
+export async function shouldPromptTunnelRouteSelection(): Promise<boolean> {
+  if (!shouldUseTunnelRouteSelection()) return false;
+  const discovery = await discoverTunnelRoutes(1);
+  return hasSelectableRoutePeers(discovery);
 }
 
 function measurementForOption(option: TunnelRouteOption): PeerMeasurement {
@@ -285,11 +314,19 @@ export async function selectTunnelRoute(
 }
 
 export async function ensureTunnelRoute(): Promise<SelectedTunnelRoute | null> {
+  if (!shouldUseTunnelRouteSelection()) {
+    clearTunnelRoute();
+    return null;
+  }
+
   const existing = getTunnelRoute();
   if (existing) return existing;
 
   const discovery = await discoverTunnelRoutes(1);
-  if (!discovery) return null;
+  if (!discovery || !hasSelectableRoutePeers(discovery)) {
+    clearTunnelRoute();
+    return null;
+  }
   const preferredPeerId = getRoutePreference();
   const preferredRoute = await selectTunnelRoute(discovery, preferredPeerId);
   if (preferredRoute || preferredPeerId === AUTO_ROUTE_PREFERENCE) return preferredRoute;

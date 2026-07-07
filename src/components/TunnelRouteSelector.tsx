@@ -6,6 +6,8 @@ import {
   discoverTunnelRoutes,
   getRoutePreference,
   getTunnelRoute,
+  hasSelectableRoutePeers,
+  isCurrentDomainPeer,
   selectTunnelRoute,
   type TunnelRouteDiscovery,
   type TunnelRouteOption,
@@ -30,6 +32,20 @@ function latencyLabel(option: TunnelRouteOption): string {
 
 function routeLabel(option: TunnelRouteOption): string {
   return option.peer.public_base_url;
+}
+
+function routeDisplayName(option: TunnelRouteOption): string {
+  return isCurrentDomainPeer(option.peer) ? '当前域名' : option.peer.id;
+}
+
+function routeCompactLabel(option: TunnelRouteOption): string {
+  return isCurrentDomainPeer(option.peer) ? `当前域名 (${option.peer.id})` : option.peer.id;
+}
+
+function routeDetailLabel(option: TunnelRouteOption): string {
+  return isCurrentDomainPeer(option.peer)
+    ? `${option.peer.id} · ${routeLabel(option)}`
+    : routeLabel(option);
 }
 
 function bestReachablePeerId(discovery: TunnelRouteDiscovery | null): string {
@@ -70,6 +86,10 @@ export function TunnelRouteSelector({
           setError('没有可用的路由节点');
           return;
         }
+        if (!hasSelectableRoutePeers(next)) {
+          setDiscovery(null);
+          return;
+        }
         setDiscovery(next);
         const current = getTunnelRoute()?.selected_peer_id;
         const preferred = current || getRoutePreference();
@@ -95,6 +115,10 @@ export function TunnelRouteSelector({
   );
   const canConfirm = !!discovery && !loading && !selecting
     && (selectedPeerId === AUTO_ROUTE || !!selectedOption?.reachable);
+
+  if (variant === 'compact' && !loading && !discovery) {
+    return null;
+  }
 
   const confirm = async () => {
     if (!discovery || !canConfirm) return;
@@ -126,7 +150,7 @@ export function TunnelRouteSelector({
           <option value={AUTO_ROUTE}>自动选择</option>
           {routeOptions.map((option) => (
             <option key={option.peer.id} value={option.peer.id} disabled={!option.reachable}>
-              {option.peer.id} · {latencyLabel(option)}
+              {routeCompactLabel(option)} · {latencyLabel(option)}
             </option>
           ))}
         </select>
@@ -188,7 +212,7 @@ export function TunnelRouteSelector({
             type="button"
             role="radio"
             aria-checked={selectedPeerId === option.peer.id}
-            aria-label={`${option.peer.id} ${latencyLabel(option)}`}
+            aria-label={`${routeCompactLabel(option)} ${latencyLabel(option)}`}
             disabled={!option.reachable}
             className={cn(
               'w-full rounded-md border px-3 py-2 text-left transition-colors disabled:opacity-50',
@@ -200,9 +224,9 @@ export function TunnelRouteSelector({
           >
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <div className="font-medium truncate">{option.peer.id}</div>
+                <div className="font-medium truncate">{routeDisplayName(option)}</div>
                 <div className="text-xs text-[var(--color-text-secondary)] truncate">
-                  {routeLabel(option)}
+                  {routeDetailLabel(option)}
                 </div>
               </div>
               <div className="text-sm tabular-nums text-[var(--color-text-primary)]">

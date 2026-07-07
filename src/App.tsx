@@ -22,6 +22,7 @@ import {
 import { useAppShellState } from "./hooks/useAppShellState";
 import { Input } from "@/components/ui/input";
 import { isTauri, callBackend } from "./lib/backend";
+import { shouldUseTunnelRouteSelection } from "./lib/tunnelRoute";
 import type { CrashReport } from "./types";
 import "./index.css";
 
@@ -226,7 +227,7 @@ function App() {
           </div>
         )}
 
-        {!isTauri() && browserAuth.browserAuthenticated && (
+        {!isTauri() && browserAuth.browserAuthenticated && shouldUseTunnelRouteSelection() && (
           <div className="fixed top-3 right-3 z-50">
             <TunnelRouteSelector
               variant="compact"

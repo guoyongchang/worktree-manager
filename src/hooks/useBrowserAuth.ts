@@ -1,6 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { isTauri, callBackend, getSessionId, clearSessionId, authenticate } from '../lib/backend';
-import { ensureTunnelRoute } from '../lib/tunnelRoute';
+import {
+  ensureTunnelRoute,
+  shouldPromptTunnelRouteSelection,
+  shouldUseTunnelRouteSelection,
+} from '../lib/tunnelRoute';
 
 export interface UseBrowserAuthReturn {
   browserAuthenticated: boolean;
@@ -16,6 +20,7 @@ export interface UseBrowserAuthReturn {
 
 async function prepareTunnelRoute(): Promise<void> {
   if (isTauri()) return;
+  if (!shouldUseTunnelRouteSelection()) return;
   await ensureTunnelRoute().catch(() => null);
 }
 
@@ -98,7 +103,11 @@ export function useBrowserAuth(): UseBrowserAuthReturn {
     setBrowserLoginError(null);
     try {
       await authenticate(browserLoginPassword.trim());
-      setBrowserRouteSelectionPending(true);
+      if (await shouldPromptTunnelRouteSelection()) {
+        setBrowserRouteSelectionPending(true);
+      } else {
+        setBrowserAuthenticated(true);
+      }
       setBrowserLoggingIn(false);
       return;
     } catch (e) {

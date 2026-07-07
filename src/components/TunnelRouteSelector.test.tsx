@@ -3,6 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const routeMocks = vi.hoisted(() => ({
   discoverTunnelRoutes: vi.fn(),
+  hasSelectableRoutePeers: vi.fn((next) => (
+    !!next?.options.some((option: { peer: { id: string } }) => option.peer.id !== 'center')
+  )),
+  isCurrentDomainPeer: vi.fn((peer: { id: string; public_base_url: string }) => (
+    peer.id === 'center' || peer.public_base_url === 'https://tunnel.kirov-opensource.com'
+  )),
   selectTunnelRoute: vi.fn(),
   getRoutePreference: vi.fn(),
   getTunnelRoute: vi.fn(),
@@ -49,6 +55,11 @@ const discovery: TunnelRouteDiscovery = {
   ],
 };
 
+const centerOnlyDiscovery: TunnelRouteDiscovery = {
+  ...discovery,
+  options: [discovery.options[1]],
+};
+
 describe('TunnelRouteSelector', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -72,7 +83,8 @@ describe('TunnelRouteSelector', () => {
 
     expect(routeMocks.discoverTunnelRoutes).toHaveBeenCalledWith(5);
     expect(await screen.findByText('aliyun-cn-1')).toBeInTheDocument();
-    expect(screen.getByText('center')).toBeInTheDocument();
+    expect(screen.getByText('当前域名')).toBeInTheDocument();
+    expect(screen.getByText('center · https://tunnel.kirov-opensource.com')).toBeInTheDocument();
     expect(screen.getByText('10 ms')).toBeInTheDocument();
     expect(screen.getByText('80 ms')).toBeInTheDocument();
 
@@ -83,5 +95,16 @@ describe('TunnelRouteSelector', () => {
       expect(routeMocks.selectTunnelRoute).toHaveBeenCalledWith(discovery, 'center');
     });
     expect(onSelected).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides the compact selector when the current domain is the only node', async () => {
+    routeMocks.discoverTunnelRoutes.mockResolvedValue(centerOnlyDiscovery);
+
+    render(<TunnelRouteSelector variant="compact" onSelected={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(routeMocks.discoverTunnelRoutes).toHaveBeenCalledWith(5);
+    });
+    expect(screen.queryByLabelText('路由节点')).not.toBeInTheDocument();
   });
 });

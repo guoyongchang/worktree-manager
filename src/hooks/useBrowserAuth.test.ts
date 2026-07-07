@@ -11,6 +11,8 @@ const backendMocks = vi.hoisted(() => ({
 
 const tunnelRouteMocks = vi.hoisted(() => ({
   ensureTunnelRoute: vi.fn(),
+  shouldPromptTunnelRouteSelection: vi.fn(),
+  shouldUseTunnelRouteSelection: vi.fn(),
 }));
 
 vi.mock('../lib/backend', () => backendMocks);
@@ -33,6 +35,8 @@ describe('useBrowserAuth tunnel routing', () => {
     backendMocks.getSessionId.mockReturnValue('sid-1');
     backendMocks.callBackend.mockResolvedValue([]);
     tunnelRouteMocks.ensureTunnelRoute.mockResolvedValue(null);
+    tunnelRouteMocks.shouldPromptTunnelRouteSelection.mockResolvedValue(true);
+    tunnelRouteMocks.shouldUseTunnelRouteSelection.mockReturnValue(true);
     window.history.replaceState({}, '', '/t/bliss-kind-drift/');
   });
 
@@ -86,6 +90,45 @@ describe('useBrowserAuth tunnel routing', () => {
       result.current.completeBrowserRouteSelection();
     });
 
+    expect(result.current.browserRouteSelectionPending).toBe(false);
+    expect(result.current.browserAuthenticated).toBe(true);
+  });
+
+  it('enters directly after password authentication when the public tunnel has no peer nodes', async () => {
+    backendMocks.getSessionId.mockReturnValue('');
+    backendMocks.authenticate.mockResolvedValue(undefined);
+    tunnelRouteMocks.shouldPromptTunnelRouteSelection.mockResolvedValue(false);
+    const { result } = renderHook(() => useBrowserAuth());
+
+    await act(async () => {
+      result.current.setBrowserLoginPassword('share-password');
+    });
+    await act(async () => {
+      await result.current.handleBrowserLogin();
+    });
+
+    expect(backendMocks.authenticate).toHaveBeenCalledWith('share-password');
+    expect(tunnelRouteMocks.shouldPromptTunnelRouteSelection).toHaveBeenCalledTimes(1);
+    expect(result.current.browserRouteSelectionPending).toBe(false);
+    expect(result.current.browserAuthenticated).toBe(true);
+  });
+
+  it('enters directly after password authentication outside the public tunnel domain', async () => {
+    backendMocks.getSessionId.mockReturnValue('');
+    backendMocks.authenticate.mockResolvedValue(undefined);
+    tunnelRouteMocks.shouldPromptTunnelRouteSelection.mockResolvedValue(false);
+    tunnelRouteMocks.shouldUseTunnelRouteSelection.mockReturnValue(false);
+    const { result } = renderHook(() => useBrowserAuth());
+
+    await act(async () => {
+      result.current.setBrowserLoginPassword('share-password');
+    });
+    await act(async () => {
+      await result.current.handleBrowserLogin();
+    });
+
+    expect(backendMocks.authenticate).toHaveBeenCalledWith('share-password');
+    expect(tunnelRouteMocks.ensureTunnelRoute).not.toHaveBeenCalled();
     expect(result.current.browserRouteSelectionPending).toBe(false);
     expect(result.current.browserAuthenticated).toBe(true);
   });
