@@ -1,4 +1,7 @@
 #!/usr/bin/env sh
+git_env_vars="$(git rev-parse --local-env-vars)"
+unset $git_env_vars
+
 cd src-tauri || exit 1
 
 cargo test
