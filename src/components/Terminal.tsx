@@ -186,7 +186,8 @@ export interface TerminalHandle {
 }
 
 const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible, clientId, voiceStatus = 'idle', onShellIntegrationDetected, onCwdChanged, onSearchRequested, onRendererFallback }, ref) => {
-  // Keep desktop PTY on polling until the event-stream path can preserve replay semantics.
+  // Keep desktop PTY on polling. The backend intentionally avoids emitting Tauri events
+  // from PTY reader threads because that exercises a Windows Tao refcount race.
   const enableDesktopEventStreaming = false;
   useTranslation();
   const terminalRef = useRef<HTMLDivElement>(null);

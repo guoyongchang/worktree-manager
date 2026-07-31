@@ -4,7 +4,6 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
-use tauri::Emitter;
 use tokio::sync::broadcast;
 
 /// Max replay buffer size per session (64 KB)
@@ -755,12 +754,10 @@ impl PtyManager {
         let replay_buffer: Arc<Mutex<VecDeque<u8>>> =
             Arc::new(Mutex::new(VecDeque::with_capacity(REPLAY_BUFFER_CAP)));
         let replay_buf_clone = replay_buffer.clone();
-        let session_id = id.to_string();
 
         // Spawn a thread to read from PTY
         std::thread::spawn(move || {
             let mut buf = [0u8; 4096];
-            let mut event_utf8_pending: Vec<u8> = Vec::new();
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => break, // EOF
@@ -787,30 +784,9 @@ impl PtyManager {
                         if let Ok(mut pending) = desktop_pending_clone.lock() {
                             pending.append(&data);
                         }
-
-                        // Desktop event push path: emit UTF-8 text chunks to all windows.
-                        let combined = if event_utf8_pending.is_empty() {
-                            data
-                        } else {
-                            let mut combined = std::mem::take(&mut event_utf8_pending);
-                            combined.extend(data);
-                            combined
-                        };
-                        let (text, pending) = bytes_to_utf8_with_pending(&combined);
-                        event_utf8_pending = pending;
-                        if !text.is_empty() {
-                            if let Some(handle) =
-                                crate::state::APP_HANDLE.lock().ok().and_then(|h| h.clone())
-                            {
-                                let _ = handle.emit(
-                                    "pty-output",
-                                    serde_json::json!({
-                                        "sessionId": session_id,
-                                        "data": text,
-                                    }),
-                                );
-                            }
-                        }
+                        // Do not emit Tauri events from this reader thread. Desktop clients poll
+                        // the buffer above and remote clients use the broadcast channel. Cloning
+                        // AppHandle here also exercises a known Windows Tao refcount race.
                     }
                     Err(_) => break,
                 }
