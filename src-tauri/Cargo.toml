@@ -82,3 +82,8 @@ windows-icons = "=0.3.0"
 [dev-dependencies]
 tempfile = "=3.24.0"
 serial_test = "=3.2.0"
+
+# Windows crash workaround for tauri-apps/tao#1290.
+# Keep the vendored crate at 0.34.5 so it satisfies tauri-runtime-wry 2.10.x.
+[patch.crates-io]
+tao = { path = "vendor/tao-0.34.5" }
