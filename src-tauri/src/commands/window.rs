@@ -274,6 +274,10 @@ pub(crate) fn broadcast_terminal_state(
     });
 }
 
+// NOTE(tauri#15408): this async command builds a window from a tokio thread, which clones the
+// runtime context off the main thread. It is a rare, user-initiated operation and building the
+// window from a *sync* command would deadlock on Windows (see tauri's WebviewWindowBuilder docs),
+// so it is exempt from the "borrow via state::with_app_handle" rule.
 #[tauri::command]
 pub(crate) async fn open_workspace_window(
     app: tauri::AppHandle,

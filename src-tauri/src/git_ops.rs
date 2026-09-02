@@ -2,7 +2,7 @@ use git2::{Repository, StatusOptions};
 use serde::Serialize;
 use std::path::Path;
 
-use crate::utils::{git_command, run_git_logged};
+use crate::utils::{git_command, run_command_with_timeout, run_git_logged};
 
 fn command_without_window(program: &str) -> std::process::Command {
     #[cfg(target_os = "windows")]
@@ -485,6 +485,28 @@ fn run_git_in(path: &Path, args: &[&str], label: &str) -> Result<std::process::O
     run_git_logged(&mut cmd, label).map_err(|e| format!("执行 git {} 失败: {}", args.join(" "), e))
 }
 
+/// Timeout for `git fetch` inside the merge flow (network).
+const MERGE_FETCH_TIMEOUT_SECS: u64 = 180;
+/// Timeout for `git push` inside the merge flow (network; large pushes take a while).
+const MERGE_PUSH_TIMEOUT_SECS: u64 = 300;
+
+/// Like `run_git_in` but bounded: network steps must never leave the merge button spinning.
+/// A timeout is reported as `Err`, which the caller treats like any other failed step.
+fn run_git_in_with_timeout(
+    path: &Path,
+    args: &[&str],
+    label: &str,
+    timeout_secs: u64,
+) -> Result<std::process::Output, String> {
+    let mut cmd = git_command();
+    cmd.arg("-C").arg(path).args(args);
+    run_command_with_timeout(
+        &mut cmd,
+        label,
+        std::time::Duration::from_secs(timeout_secs),
+    )
+}
+
 fn output_stderr(output: &std::process::Output) -> String {
     String::from_utf8_lossy(&output.stderr).trim().to_string()
 }
@@ -581,6 +603,9 @@ fn fetch_merge_push_remote_target(
     let fetch_refspec = format!("+refs/heads/{}:{}", target, remote_ref);
     let push_refspec = format!("HEAD:refs/heads/{}", target);
     let merge_message = format!("Merge branch '{}' into {}", current_branch, target);
+    // Fully qualified: a plain `git merge <name>` resolves a same-named TAG before the branch
+    // (refs/tags/ wins over refs/heads/ in rev DWIM) and would silently merge the wrong thing.
+    let feature_ref = format!("refs/heads/{}", current_branch);
 
     for attempt in 1..=2 {
         // Step 2: bring origin/<target> up to date (explicit refspec: works even for
@@ -591,10 +616,11 @@ fn fetch_merge_push_remote_target(
             target,
             attempt
         );
-        let fetch = run_git_in(
+        let fetch = run_git_in_with_timeout(
             path,
             &["fetch", "origin", &fetch_refspec],
             &format!("{} fetch target", label),
+            MERGE_FETCH_TIMEOUT_SECS,
         )?;
         if !fetch.status.success() {
             let stderr = output_stderr(&fetch);
@@ -634,7 +660,15 @@ fn fetch_merge_push_remote_target(
         log::info!("[{}] Step 4: git merge {}", label, current_branch);
         let merge = run_git_in(
             path,
-            &["merge", "--no-edit", "-m", &merge_message, current_branch],
+            // --ff: keep "fast-forward when possible" even if the user set merge.ff=only.
+            &[
+                "merge",
+                "--ff",
+                "--no-edit",
+                "-m",
+                &merge_message,
+                &feature_ref,
+            ],
             &format!("{} merge current", label),
         )?;
         if !merge.status.success() {
@@ -672,10 +706,11 @@ fn fetch_merge_push_remote_target(
 
         // Step 5: push the detached HEAD straight to the remote branch.
         log::info!("[{}] Step 5: git push origin {}", label, push_refspec);
-        let push = run_git_in(
+        let push = run_git_in_with_timeout(
             path,
             &["push", "origin", &push_refspec, "--no-verify"],
             &format!("{} push target", label),
+            MERGE_PUSH_TIMEOUT_SECS,
         )?;
         if push.status.success() {
             log::info!("[{}] Step 5 OK: pushed {}", label, target);
@@ -796,15 +831,17 @@ fn sync_local_target_branch(path: &Path, target: &str, label: &str) -> Vec<Strin
                     output_stderr(&output)
                 );
                 notes.push(format!(
-                    "⚠ 本地 {} 分支未能同步到 origin/{}，请手动处理",
-                    target, target
+                    "⚠ 本地 {} 分支未能同步到 origin/{}（{}），请手动处理",
+                    target,
+                    target,
+                    output_stderr(&output)
                 ));
             }
             Err(e) => {
                 log::warn!("[{}] Step 6: git branch -f {} failed: {}", label, target, e);
                 notes.push(format!(
-                    "⚠ 本地 {} 分支未能同步到 origin/{}，请手动处理",
-                    target, target
+                    "⚠ 本地 {} 分支未能同步到 origin/{}（{}），请手动处理",
+                    target, target, e
                 ));
             }
         }
@@ -906,7 +943,7 @@ fn merge_current_branch_into_remote_target(
             current_branch
         );
         return Err(format!(
-            "当前分支有未提交的更改，请先提交或暂存后再合并到 {}",
+            "当前分支有未提交的更改，请先提交或 git stash 贮藏后再合并到 {}",
             target
         ));
     }

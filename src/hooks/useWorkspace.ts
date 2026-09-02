@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { callBackend, fetchProjectRemote, isTauri, updateWorktreeColor as updateWorktreeColorBackend } from '../lib/backend';
 import { useCellContext } from '../contexts/CellContext';
 import { getPreferredExternalTerminal, getShellForTerminalLaunch, logTerminalPreferenceDebugInfo } from '../lib/terminalPreferences';
-import { GIT_BATCH_CONCURRENCY, mapWithConcurrency } from '../lib/utils';
+import { GIT_FETCH_CONCURRENCY, mapWithConcurrency } from '../lib/utils';
 import type {
   WorkspaceRef,
   WorkspaceConfig,
@@ -165,7 +165,7 @@ export function useWorkspace(ready = true, initialWorkspacePath?: string, shellM
         }
       }
       // Fetch with bounded fan-out (ignore individual failures)
-      await mapWithConcurrency(projectPaths, GIT_BATCH_CONCURRENCY, p => fetchProjectRemote(p));
+      await mapWithConcurrency(projectPaths, GIT_FETCH_CONCURRENCY, p => fetchProjectRemote(p));
     } catch {
       // fetch failures are non-fatal
     }

@@ -31,6 +31,13 @@ export function basename(path: string): string {
 export const GIT_BATCH_CONCURRENCY = 4;
 
 /**
+ * Fan-out for the read-only remote fetch sweep (sidebar refresh). Fetches do not write to the
+ * working tree, so a larger bound keeps the "fetching" phase short for big workspaces while
+ * still avoiding dozens of simultaneous git processes.
+ */
+export const GIT_FETCH_CONCURRENCY = 8;
+
+/**
  * Run `fn` over `items` with at most `limit` promises in flight at once.
  * Like Promise.allSettled: never throws, results are returned in input order.
  */

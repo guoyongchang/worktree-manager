@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { GIT_BATCH_CONCURRENCY, basename, mapWithConcurrency, normalizePath } from './utils';
+import { GIT_BATCH_CONCURRENCY, GIT_FETCH_CONCURRENCY, basename, mapWithConcurrency, normalizePath } from './utils';
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -44,6 +44,7 @@ describe('mapWithConcurrency', () => {
   it('exposes a small default fan-out for git batches', () => {
     expect(GIT_BATCH_CONCURRENCY).toBeGreaterThanOrEqual(2);
     expect(GIT_BATCH_CONCURRENCY).toBeLessThanOrEqual(8);
+    expect(GIT_FETCH_CONCURRENCY).toBeGreaterThanOrEqual(GIT_BATCH_CONCURRENCY);
   });
 });
 

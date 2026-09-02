@@ -556,7 +556,7 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
           className={`p-2 bg-green-900/40 border border-green-800/50 rounded text-green-300 text-xs transition-opacity duration-200 cursor-pointer flex items-center justify-between gap-2 ${dismissing === 'success' ? 'opacity-0' : 'opacity-100'}`}
           onClick={() => { clearTimeout(successTimerRef.current); setSuccess(null); setDismissing(null); }}
         >
-          <span>{success}</span>
+          <span className="whitespace-pre-wrap">{success}</span>
           <CloseIcon className="w-3 h-3 shrink-0 text-[var(--color-success)]" />
         </div>
       )}

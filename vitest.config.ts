@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import path from "path";
 
@@ -12,7 +12,7 @@ export default defineConfig({
     // packages/* are standalone packages with their own test runners
     // (e.g. packages/mcp uses node:test); keep them out of the root vitest run.
     // .claude/** hosts local agent git worktrees (gitignored) that would otherwise be crawled.
-    exclude: ["**/node_modules/**", "**/dist/**", "**/packages/**", "**/.claude/**"],
+    exclude: [...configDefaults.exclude, "**/packages/**", "**/.claude/**"],
   },
   resolve: {
     alias: { "@": path.resolve(__dirname, "./src") },

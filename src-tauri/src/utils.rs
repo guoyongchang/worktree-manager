@@ -181,6 +181,12 @@ pub(crate) fn git_command() -> Command {
     };
     cmd.stdin(Stdio::null());
     cmd.env("GIT_TERMINAL_PROMPT", "0");
+    // Deterministic (English) git messages: several callers match on git's stderr text
+    // ("couldn't find remote ref", "CONFLICT", ...) and Git for Windows otherwise follows the
+    // Windows UI language. Only the message catalogue is pinned (not LC_ALL/LC_CTYPE), so
+    // paths and hook scripts keep the user's locale.
+    cmd.env("LC_MESSAGES", "C");
+    cmd.env("LANGUAGE", "C");
     cmd
 }
 

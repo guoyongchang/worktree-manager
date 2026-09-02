@@ -161,7 +161,10 @@ fn rm_error_name(code: u32) -> &'static str {
 struct LockCheckScan {
     paths: Vec<Vec<u16>>,
     skipped_long: usize,
-    truncated: bool,
+    /// Stopped at `LOCK_CHECK_MAX_RESOURCES` (expected for any real repository).
+    capped: bool,
+    /// Stopped by `LOCK_CHECK_SCAN_BUDGET` (worth telling the user about).
+    timed_out: bool,
 }
 
 /// Breadth-first scan of the worktree collecting REGULAR FILES only.
@@ -182,7 +185,8 @@ fn collect_lock_check_resources(root: &Path) -> LockCheckScan {
     let mut scan = LockCheckScan {
         paths: Vec::new(),
         skipped_long: 0,
-        truncated: false,
+        capped: false,
+        timed_out: false,
     };
     let mut queue = VecDeque::new();
     queue.push_back(root.to_path_buf());
@@ -193,10 +197,14 @@ fn collect_lock_check_resources(root: &Path) -> LockCheckScan {
         };
 
         for entry in entries.flatten() {
-            if scan.paths.len() >= LOCK_CHECK_MAX_RESOURCES
-                || start.elapsed() >= LOCK_CHECK_SCAN_BUDGET
-            {
-                scan.truncated = true;
+            if scan.paths.len() >= LOCK_CHECK_MAX_RESOURCES {
+                // Expected for any real repository: the shallow files that matter are already
+                // registered, so this is logged but not surfaced as a warning.
+                scan.capped = true;
+                break 'bfs;
+            }
+            if start.elapsed() >= LOCK_CHECK_SCAN_BUDGET {
+                scan.timed_out = true;
                 break 'bfs;
             }
 
@@ -414,12 +422,13 @@ pub fn find_worktree_locking_processes(path: &Path) -> LockCheckReport {
     let mut failed_batches = 0usize;
     let mut skipped_batches = 0usize;
     let mut first_error: Option<String> = None;
-    let mut truncated = scan.truncated;
+    // Only time-budget cut-offs count as "incomplete" for the user; the file-count cap is normal.
+    let mut budget_truncated = scan.timed_out;
 
     for (batch_index, batch) in batches.iter().enumerate() {
         if start.elapsed() >= LOCK_CHECK_TOTAL_BUDGET {
             skipped_batches = total_batches - batch_index;
-            truncated = true;
+            budget_truncated = true;
             break;
         }
 
@@ -453,7 +462,7 @@ pub fn find_worktree_locking_processes(path: &Path) -> LockCheckReport {
     processes.sort_by(|a, b| a.name.cmp(&b.name).then(a.pid.cmp(&b.pid)));
 
     let scanned_files = scan.paths.len();
-    let warning = if failed_batches > 0 || truncated {
+    let warning = if failed_batches > 0 || budget_truncated {
         let mut details = Vec::new();
         if failed_batches > 0 {
             details.push(format!(
@@ -462,8 +471,8 @@ pub fn find_worktree_locking_processes(path: &Path) -> LockCheckReport {
                 first_error.as_deref().unwrap_or("unknown")
             ));
         }
-        if truncated {
-            details.push("扫描因文件数/耗时上限被截断".to_string());
+        if budget_truncated {
+            details.push("扫描因耗时上限被截断".to_string());
         }
         Some(format!(
             "文件占用检查未完整执行（{}；已扫描 {} 个文件），归档时将以目录重命名探测为准",
@@ -476,24 +485,26 @@ pub fn find_worktree_locking_processes(path: &Path) -> LockCheckReport {
 
     if warning.is_some() {
         log::warn!(
-            "[lock-check] incomplete: path='{}', scanned_files={}, skipped_long={}, batches={}, failed_batches={}, skipped_batches={}, truncated={}, first_error={:?}, scan_ms={}, total_ms={}",
+            "[lock-check] incomplete: path='{}', scanned_files={}, skipped_long={}, capped={}, batches={}, failed_batches={}, skipped_batches={}, budget_truncated={}, first_error={:?}, scan_ms={}, total_ms={}",
             path.display(),
             scanned_files,
             scan.skipped_long,
+            scan.capped,
             total_batches,
             failed_batches,
             skipped_batches,
-            truncated,
+            budget_truncated,
             first_error,
             scan_ms,
             start.elapsed().as_millis()
         );
     } else {
         log::info!(
-            "[lock-check] complete: path='{}', scanned_files={}, skipped_long={}, batches={}, processes={}, scan_ms={}, total_ms={}",
+            "[lock-check] complete: path='{}', scanned_files={}, skipped_long={}, capped={}, batches={}, processes={}, scan_ms={}, total_ms={}",
             path.display(),
             scanned_files,
             scan.skipped_long,
+            scan.capped,
             total_batches,
             processes.len(),
             scan_ms,
@@ -505,7 +516,7 @@ pub fn find_worktree_locking_processes(path: &Path) -> LockCheckReport {
         processes,
         warning,
         scanned_files,
-        truncated,
+        truncated: scan.capped || budget_truncated,
     }
 }
 
@@ -1667,8 +1678,10 @@ fn restore_project_worktree(
     // Step A: idempotency. A previous (partially failed) restore, or an archive whose
     // `git worktree remove` failed, may have left the project registered already.
     if wt_proj_path.join(".git").is_file() {
+        // `branch --show-current` prints the bare branch name (empty when detached); unlike
+        // `rev-parse --abbrev-ref HEAD` it is not disturbed by a tag of the same name.
         match run_git_command_with_timeout_secs(
-            &["rev-parse", "--abbrev-ref", "HEAD"],
+            &["branch", "--show-current"],
             &wt_dir,
             RESTORE_GIT_QUERY_TIMEOUT_SECS,
         ) {
@@ -1694,11 +1707,17 @@ fn restore_project_worktree(
                 );
             }
             Err(e) => {
-                log::warn!(
-                    "[worktree] Project '{}': could not inspect existing registration ({}); re-adding",
+                // Never fall through to the destructive re-add when the directory could not even
+                // be inspected (spawn failure / timeout): it may still hold uncommitted work.
+                log::error!(
+                    "[worktree] Project '{}': could not inspect existing registration: {}",
                     proj_name,
                     e
                 );
+                return Err(format!(
+                    "{}: 无法检查已存在的项目目录（{}），已跳过以免误删",
+                    proj_name, e
+                ));
             }
         }
     }
@@ -1806,8 +1825,19 @@ fn restore_project_worktree(
             base_branch
         );
         let base_ref = format!("origin/{}", base_branch);
+        // --no-track: `-b <branch> origin/<base>` would otherwise record origin/<base> as the
+        // upstream, so a later `git pull` merges the base branch and `git push` is refused.
+        // The first `git push -u` sets the real upstream (create_worktree does the same push).
         run_git_command_with_timeout_secs(
-            &["worktree", "add", &wt_dir, "-b", branch_name, &base_ref],
+            &[
+                "worktree",
+                "add",
+                &wt_dir,
+                "-b",
+                branch_name,
+                "--no-track",
+                &base_ref,
+            ],
             &main_dir,
             RESTORE_WORKTREE_ADD_TIMEOUT_SECS,
         )

@@ -365,6 +365,36 @@ fn install_panic_hook() {
     }));
 }
 
+/// Destroy a window by label from a non-main thread without cloning any window handle off the
+/// main thread (tauri-apps/tauri#15408): the lookup, the clone and the drop all happen inside the
+/// closure that the event loop executes on the main thread.
+///
+/// Must be called from a worker/tokio thread: on the main thread `run_on_main_thread` would run
+/// the closure inline while `APP_HANDLE` is still locked and the nested lock would deadlock.
+fn destroy_window_on_main_thread(label: String) {
+    use tauri::Manager;
+
+    let label_for_log = label.clone();
+    let posted = crate::state::with_app_handle(|handle| {
+        handle.run_on_main_thread(move || {
+            crate::state::with_app_handle(|handle| match handle.get_webview_window(&label) {
+                Some(window) => {
+                    if let Err(e) = window.destroy() {
+                        log::error!("[window] failed to destroy '{}': {}", label, e);
+                    }
+                }
+                None => log::warn!("[window] close: window '{}' no longer exists", label),
+            });
+        })
+    });
+    if !matches!(posted, Some(Ok(()))) {
+        log::error!(
+            "[window] could not post destroy for '{}' to the main thread",
+            label_for_log
+        );
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     install_panic_hook();
@@ -438,38 +468,45 @@ pub fn run() {
 
                     if terminal_count > 0 || share_active {
                         api.prevent_close();
-                        let window = window.clone();
+                        // NOTE(tauri#15408): never move the `Window` into the async task —
+                        // cloning/dropping it on a tokio thread races tao's Rc refcount on
+                        // Windows. Only the label crosses the thread boundary: the dialog is
+                        // shown from this (main) thread and the destroy is posted back to it.
+                        let label = window.label().to_string();
+                        let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
+
+                        if terminal_count > 0 {
+                            use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+                            window
+                                .dialog()
+                                .message(format!(
+                                    "有 {} 个活跃终端会话，关闭将终止所有会话。\n\n确定关闭？",
+                                    terminal_count
+                                ))
+                                .title("Worktree Manager")
+                                .buttons(MessageDialogButtons::OkCancelCustom(
+                                    "关闭".to_string(),
+                                    "取消".to_string(),
+                                ))
+                                .show(move |confirmed| {
+                                    let _ = tx.send(confirmed);
+                                });
+                        } else {
+                            let _ = tx.send(true);
+                        }
 
                         tauri::async_runtime::spawn(async move {
                             use tokio::time::{timeout, Duration};
 
-                            if terminal_count > 0 {
-                                use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
-                                let (tx, rx) = tokio::sync::oneshot::channel();
-                                window
-                                    .dialog()
-                                    .message(format!(
-                                        "有 {} 个活跃终端会话，关闭将终止所有会话。\n\n确定关闭？",
-                                        terminal_count
-                                    ))
-                                    .title("Worktree Manager")
-                                    .buttons(MessageDialogButtons::OkCancelCustom(
-                                        "关闭".to_string(),
-                                        "取消".to_string(),
-                                    ))
-                                    .show(move |confirmed| {
-                                        let _ = tx.send(confirmed);
-                                    });
-                                // Timeout: force close if dialog doesn't respond within 30s
-                                match timeout(Duration::from_secs(30), rx).await {
-                                    Ok(Ok(false)) => return,
-                                    Ok(Ok(true)) => {} // user confirmed
-                                    Ok(Err(_)) => {}   // channel dropped, proceed with close
-                                    Err(_) => {
-                                        log::warn!(
-                                            "Close confirmation dialog timed out, forcing close"
-                                        );
-                                    }
+                            // Timeout: force close if dialog doesn't respond within 30s
+                            match timeout(Duration::from_secs(30), rx).await {
+                                Ok(Ok(false)) => return,
+                                Ok(Ok(true)) => {} // user confirmed (or no dialog was needed)
+                                Ok(Err(_)) => {}   // channel dropped, proceed with close
+                                Err(_) => {
+                                    log::warn!(
+                                        "Close confirmation dialog timed out, forcing close"
+                                    );
                                 }
                             }
 
@@ -496,7 +533,7 @@ pub fn run() {
                                 }
                             }
 
-                            let _ = window.destroy();
+                            destroy_window_on_main_thread(label);
                         });
                     }
                 }
