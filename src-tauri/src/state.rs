@@ -41,6 +41,33 @@ pub(crate) fn workspace_lifecycle_lock(workspace_path: &str) -> std::sync::Arc<M
         .clone()
 }
 
+/// 生命周期锁的最长等待时间。超过后放弃并向用户报错，而不是无限期阻塞
+/// （例如某个卡住的 git 子进程仍持有兄弟操作的锁时，restore 不应永远显示“恢复中”）。
+pub(crate) const LIFECYCLE_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// 带超时地获取 workspace 生命周期锁：每 50ms 轮询一次 `try_lock`，超时返回用户可读的中文错误。
+/// 中毒的锁视为可用（上一个持有者 panic 不应永久锁死该 workspace）。
+pub(crate) fn lock_lifecycle_with_timeout(
+    lock: &std::sync::Arc<Mutex<()>>,
+    timeout: std::time::Duration,
+) -> Result<std::sync::MutexGuard<'_, ()>, String> {
+    const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        match lock.try_lock() {
+            Ok(guard) => return Ok(guard),
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => return Ok(poisoned.into_inner()),
+            Err(std::sync::TryLockError::WouldBlock) => {}
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(
+                "另一个 Worktree 操作正在进行中（创建/归档/恢复/删除），请稍后重试".to_string(),
+            );
+        }
+        std::thread::sleep(POLL_INTERVAL);
+    }
+}
+
 // ==================== 分享状态 ====================
 
 pub(crate) static SHARE_STATE: Lazy<Mutex<ShareState>> =
@@ -80,6 +107,27 @@ pub(crate) static TERMINAL_STATES: Lazy<Mutex<HashMap<(String, String), Terminal
 // Global AppHandle for emitting events from anywhere
 pub(crate) static APP_HANDLE: Lazy<Mutex<Option<tauri::AppHandle>>> =
     Lazy::new(|| Mutex::new(None));
+
+/// Borrow the global `AppHandle` without cloning it.
+///
+/// Windows stability rule (tauri-apps/tauri#15408): on Windows tao keeps the event-loop
+/// runner in a non-atomic `Rc` that lives inside every `AppHandle` / `Window` / `Webview`.
+/// Cloning or dropping such a handle on a non-main thread races the main thread's refcount
+/// updates and has produced ILLEGAL_INSTRUCTION / ACCESS_VIOLATION crashes in production.
+/// Worker threads, tokio tasks and HTTP handlers must therefore never do
+/// `APP_HANDLE.lock()...clone()`; they borrow through this helper instead. Emitting through
+/// `&AppHandle` is safe: the emit path only posts messages through the thread-safe
+/// `EventLoopProxy`. Never hold the returned borrow across an `.await` or a blocking
+/// main-thread round-trip (window creation etc.).
+///
+/// TODO(tauri>=2.12): re-evaluate once tauri-apps/tauri#15411 ships upstream.
+pub(crate) fn with_app_handle<R>(f: impl FnOnce(&tauri::AppHandle) -> R) -> Option<R> {
+    APP_HANDLE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .as_ref()
+        .map(f)
+}
 
 // Auth rate limiter
 pub(crate) static AUTH_RATE_LIMITER: Lazy<Mutex<AuthRateLimiter>> =
@@ -471,6 +519,53 @@ mod tests {
             b.try_lock().is_ok(),
             "holding workspace A lock must not block workspace B"
         );
+    }
+
+    #[serial]
+    #[test]
+    fn lifecycle_lock_with_timeout_fails_fast_while_held_and_succeeds_after_release() {
+        use std::sync::Arc;
+
+        let lock = workspace_lifecycle_lock("/workspace/lock-timeout-test");
+        let (held_tx, held_rx) = std::sync::mpsc::channel::<()>();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let holder = {
+            let lock = Arc::clone(&lock);
+            std::thread::spawn(move || {
+                let _guard = lock.lock().unwrap_or_else(|p| p.into_inner());
+                held_tx.send(()).expect("signal held");
+                release_rx.recv().expect("wait for release");
+            })
+        };
+        held_rx.recv().expect("holder acquired the lock");
+
+        // 锁被占用：300ms 后必须超时并返回用户可读的错误，而不是一直阻塞。
+        let started = std::time::Instant::now();
+        let err = match lock_lifecycle_with_timeout(&lock, Duration::from_millis(300)) {
+            Ok(_) => panic!("must not acquire a held lock"),
+            Err(err) => err,
+        };
+        assert_eq!(
+            err,
+            "另一个 Worktree 操作正在进行中（创建/归档/恢复/删除），请稍后重试"
+        );
+        assert!(
+            started.elapsed() >= Duration::from_millis(300),
+            "returned too early: {:?}",
+            started.elapsed()
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "returned too late: {:?}",
+            started.elapsed()
+        );
+
+        // 释放后必须能立即拿到锁。
+        release_tx.send(()).expect("release holder");
+        holder.join().expect("holder thread");
+        let guard = lock_lifecycle_with_timeout(&lock, Duration::from_millis(300))
+            .expect("lock acquired after release");
+        drop(guard);
     }
 
     #[serial]

@@ -100,9 +100,20 @@ fn switch_branch_sync(request: SwitchBranchRequest) -> Result<(), String> {
     log::info!("[git] Step 2/3: git checkout {} succeeded", request.branch);
 
     // Step 3: Pull latest changes
-    log::info!("[git] Step 3/3: git pull origin {}", request.branch);
+    // Explicit merge strategy: Git >= 2.33.1 aborts a plain `git pull` on a diverged branch
+    // ("Need to specify how to reconcile divergent branches") when pull.rebase is unset.
+    log::info!(
+        "[git] Step 3/3: git pull --no-rebase --no-edit origin {}",
+        request.branch
+    );
     let pull_output = git_command()
-        .args(["pull", "origin", &request.branch])
+        .args([
+            "pull",
+            "--no-rebase",
+            "--no-edit",
+            "origin",
+            &request.branch,
+        ])
         .current_dir(&path)
         .output()
         .map_err(|e| format!("Failed to pull: {}", e))?;
@@ -914,9 +925,18 @@ pub fn switch_branch_internal(request: &SwitchBranchRequest) -> Result<(), Strin
         );
         return Err(format!("Failed to checkout {}: {}", request.branch, stderr));
     }
-    log::info!("[git] Step 3/3: git pull origin {}", request.branch);
+    log::info!(
+        "[git] Step 3/3: git pull --no-rebase --no-edit origin {}",
+        request.branch
+    );
     let _ = git_command()
-        .args(["pull", "origin", &request.branch])
+        .args([
+            "pull",
+            "--no-rebase",
+            "--no-edit",
+            "origin",
+            &request.branch,
+        ])
         .current_dir(&path)
         .output();
     log::info!("[git] Successfully switched to branch '{}'", request.branch);
@@ -924,6 +944,11 @@ pub fn switch_branch_internal(request: &SwitchBranchRequest) -> Result<(), Strin
 }
 
 // ==================== Sync All Projects to BASE ====================
+
+/// Upper bound on projects synced concurrently by "sync all to base".
+/// Kept deliberately low: Windows credential helpers (and some corporate proxies)
+/// misbehave when many `git fetch`/`git push` processes authenticate at once.
+const SYNC_ALL_MAX_CONCURRENT: usize = 4;
 
 #[derive(Debug, serde::Serialize, Clone)]
 pub struct SyncBaseResult {
@@ -975,7 +1000,7 @@ pub(crate) fn sync_all_projects_to_base_impl(
         .map(|p| (p.name.clone(), p.base_branch.clone()))
         .collect();
 
-    let max_concurrent = project_paths.len().clamp(1, 8);
+    let max_concurrent = project_paths.len().clamp(1, SYNC_ALL_MAX_CONCURRENT);
 
     log::info!(
         "[sync-base] Syncing {} projects to their base branches (max concurrent: {})",
@@ -1022,12 +1047,16 @@ pub(crate) fn sync_all_projects_to_base_impl(
 
             let tx = sem_tx.clone();
             let handle = s.spawn(move || {
+                // The permit lives for the whole closure and is returned from `Drop`,
+                // so it is released on the success path and during unwinding alike.
                 let _permit = SyncPermitRelease(tx);
                 sync_single_project_to_base(&path, &project_name, &base_branch)
             });
             handles.push((result_path, result_project_name, handle));
         }
 
+        // Every handle is joined explicitly: a panicking worker becomes a "failed" result
+        // for that project only and never propagates out of the scope.
         let mut results = Vec::new();
         for (path, project_name, handle) in handles {
             results.push(sync_worker_join_result(handle.join(), path, project_name));

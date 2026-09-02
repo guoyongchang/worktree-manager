@@ -251,7 +251,7 @@ Shared items (`.claude`, `CLAUDE.md`, config files) are automatically symlinked 
 <details>
 <summary>For contributors and developers</summary>
 
-**Prerequisites:** Node.js 20+, Rust 1.70+ ([install](https://rustup.rs)), Git 2.0+
+**Prerequisites:** Node.js 22+, Rust 1.98 ([install rustup](https://rustup.rs); the toolchain is installed automatically via rust-toolchain.toml), Git 2.0+
 
 ```bash
 git clone https://github.com/guoyongchang/worktree-manager.git

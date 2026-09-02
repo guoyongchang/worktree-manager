@@ -247,7 +247,7 @@ workspace/
 <details>
 <summary>面向贡献者和开发者</summary>
 
-**环境要求：** Node.js 20+、Rust 1.70+（[安装](https://rustup.rs)）、Git 2.0+
+**环境要求：** Node.js 22+、Rust 1.98（[安装 rustup](https://rustup.rs)，工具链会通过 rust-toolchain.toml 自动安装）、Git 2.0+
 
 ```bash
 git clone https://github.com/guoyongchang/worktree-manager.git

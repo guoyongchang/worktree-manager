@@ -13,19 +13,19 @@ concurrency:
 jobs:
   test:
     name: Tests (Node + Rust)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Cache npm downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.npm
           key: npm-${{ runner.os }}-${{ hashFiles('package.json') }}
@@ -49,10 +49,13 @@ jobs:
       - name: Build frontend assets
         run: npm run build
 
+      # 工具链版本必须与仓库根目录 rust-toolchain.toml 一致
+      # （dtolnay/rust-toolchain 不读取该文件，需在此显式指定）。
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
-          components: clippy
+          toolchain: 1.98.0
+          components: clippy, rustfmt
 
       - name: Cache Rust dependencies
         uses: swatinem/rust-cache@v2
@@ -69,6 +72,10 @@ jobs:
             libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev \
             libwebkit2gtk-4.1-dev \
             libsoup-3.0-dev || sudo apt-get install -y --no-install-recommends libsoup2.4-dev
+
+      # 格式护栏：rustfmt 零差异（与本地 pre-commit 钩子的检查一致）。
+      - name: Rustfmt check
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 
       # 静态护栏：clippy 对 lib 代码零警告（可抓 unwrap/panic/切片等隐患）。
       # 测试代码暂不纳入门禁（存量警告待清理后再收紧为 --all-targets）。
@@ -92,12 +99,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install frontend dependencies
         run: npm install
@@ -105,8 +112,11 @@ jobs:
       - name: Build frontend assets
         run: npm run build
 
+      # 与 rust-toolchain.toml 保持一致（见 test job 说明）。
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.0
 
       - name: Cache Rust dependencies
         uses: swatinem/rust-cache@v2

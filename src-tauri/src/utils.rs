@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::fs;
+use std::io::Read;
 use std::path::Path;
-use std::process::{Command, Output};
-use std::sync::{Mutex, OnceLock};
+use std::process::{Command, Output, Stdio};
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use wait_timeout::ChildExt;
 
@@ -151,18 +153,21 @@ pub(crate) fn get_user_env() -> &'static HashMap<String, String> {
 /// - Uses custom path if set, otherwise auto-detects
 /// - On Unix: merges user's login shell PATH so hooks can find tools like cargo
 /// - Hides the console window on Windows (CREATE_NO_WINDOW)
+/// - Never waits on a terminal: stdin is closed and `GIT_TERMINAL_PROMPT=0` makes terminal
+///   credential/passphrase prompts fail fast instead of hanging a GUI app (GUI credential
+///   helpers such as Git Credential Manager / osxkeychain keep working).
 pub(crate) fn git_command() -> Command {
     let git = resolve_git_path();
     #[cfg(target_os = "windows")]
-    {
+    let mut cmd = {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         let mut cmd = Command::new(&git);
         cmd.creation_flags(CREATE_NO_WINDOW);
         cmd
-    }
+    };
     #[cfg(not(target_os = "windows"))]
-    {
+    let mut cmd = {
         let mut cmd = Command::new(&git);
         // Merge user's shell PATH so git hooks can find tools (cargo, node, etc.)
         let user_env = get_user_env();
@@ -173,7 +178,10 @@ pub(crate) fn git_command() -> Command {
             }
         }
         cmd
-    }
+    };
+    cmd.stdin(Stdio::null());
+    cmd.env("GIT_TERMINAL_PROMPT", "0");
+    cmd
 }
 
 pub(crate) fn truncate_log_text(text: &str, max_chars: usize) -> String {
@@ -251,10 +259,6 @@ fn command_for_log(cmd: &Command) -> String {
     mask_url_credentials(&parts.join(" "))
 }
 
-fn git_args_for_log(args: &[&str]) -> Vec<String> {
-    args.iter().map(|arg| mask_url_credentials(arg)).collect()
-}
-
 fn exit_code_for_log(status: &std::process::ExitStatus) -> String {
     status
         .code()
@@ -313,27 +317,103 @@ pub(crate) fn run_git_logged(cmd: &mut Command, label: &str) -> std::io::Result<
     }
 }
 
-pub(crate) fn run_git_command_with_timeout(
-    args: &[&str],
-    cwd: &str,
-) -> Result<std::process::Output, String> {
+/// Grace period for the stdout/stderr reader threads to observe EOF after the child has been
+/// reaped. Orphaned grandchildren (git-remote-https, credential helpers) may keep the inherited
+/// pipe open indefinitely; after this period whatever was collected so far is used.
+const PIPE_DRAIN_GRACE: Duration = Duration::from_secs(2);
+
+/// Background reader draining one child pipe to EOF into a shared buffer.
+struct PipeReader {
+    buffer: Arc<Mutex<Vec<u8>>>,
+    done: mpsc::Receiver<()>,
+}
+
+impl PipeReader {
+    fn spawn<R: Read + Send + 'static>(name: &str, source: Option<R>) -> Self {
+        let buffer = Arc::new(Mutex::new(Vec::new()));
+        let (done_tx, done_rx) = mpsc::channel();
+        if let Some(mut source) = source {
+            let sink = Arc::clone(&buffer);
+            let spawned = std::thread::Builder::new()
+                .name(format!("git-pipe-{}", name))
+                .spawn(move || {
+                    let mut chunk = [0u8; 8192];
+                    loop {
+                        match source.read(&mut chunk) {
+                            Ok(0) => break,
+                            Ok(n) => sink
+                                .lock()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                                .extend_from_slice(&chunk[..n]),
+                            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                            Err(_) => break,
+                        }
+                    }
+                    let _ = done_tx.send(());
+                });
+            if let Err(e) = spawned {
+                // The closure (pipe handle and done_tx included) was dropped: the child gets
+                // EPIPE instead of blocking, and `collect` sees a disconnected channel.
+                log::warn!("[git:pipe] failed to spawn {} reader thread: {}", name, e);
+            }
+        }
+        Self {
+            buffer,
+            done: done_rx,
+        }
+    }
+
+    /// Wait (bounded by `deadline`) for EOF, then return everything collected so far.
+    fn collect(self, deadline: Instant) -> Vec<u8> {
+        let wait = deadline.saturating_duration_since(Instant::now());
+        if let Err(RecvTimeoutError::Timeout) = self.done.recv_timeout(wait) {
+            log::warn!(
+                "[git:pipe] reader did not reach EOF within {:?}; using partial output (an orphaned child process may still hold the pipe)",
+                PIPE_DRAIN_GRACE
+            );
+        }
+        let mut guard = self
+            .buffer
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        std::mem::take(&mut *guard)
+    }
+}
+
+/// Run `cmd` with a wall-clock timeout, draining stdout/stderr concurrently.
+///
+/// * stdin is closed; stdout/stderr are read to EOF by background threads so a chatty child can
+///   never fill the pipe buffer and deadlock against `wait()`.
+/// * On timeout the child is killed and reaped. Reader threads are joined with a bounded wait, so
+///   an orphaned grandchild that still holds the pipe cannot block the caller; partial output is
+///   used in that case.
+pub(crate) fn run_command_with_timeout(
+    cmd: &mut Command,
+    label: &str,
+    timeout: Duration,
+) -> Result<Output, String> {
     let start = Instant::now();
-    let args_for_log = git_args_for_log(args);
+    let args_for_log: Vec<String> = cmd
+        .get_args()
+        .map(|arg| mask_url_credentials(&arg.to_string_lossy()))
+        .collect();
+    let cwd = command_cwd_for_log(cmd);
     log::info!(
-        "[git:timeout] starting: args={:?}, cwd='{}'",
+        "[git:{}] starting: args={:?}, cwd='{}'",
+        label,
         args_for_log,
         cwd
     );
 
-    let mut child = git_command()
-        .args(args)
-        .current_dir(cwd)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| {
             log::error!(
-                "[git:timeout] spawn failed: args={:?}, cwd='{}', elapsed_ms={}, stderr='<not available: {}>'",
+                "[git:{}] spawn failed: args={:?}, cwd='{}', elapsed_ms={}, stderr='<not available: {}>'",
+                label,
                 args_for_log,
                 cwd,
                 start.elapsed().as_millis(),
@@ -342,67 +422,49 @@ pub(crate) fn run_git_command_with_timeout(
             format!("Failed to spawn git command: {}", e)
         })?;
 
-    let timeout = Duration::from_secs(GIT_COMMAND_TIMEOUT_SECS);
+    let stdout_reader = PipeReader::spawn("stdout", child.stdout.take());
+    let stderr_reader = PipeReader::spawn("stderr", child.stderr.take());
+
     match child.wait_timeout(timeout) {
         Ok(Some(status)) => {
+            let deadline = Instant::now() + PIPE_DRAIN_GRACE;
+            let stdout = stdout_reader.collect(deadline);
+            let stderr = stderr_reader.collect(deadline);
             let exit_code = exit_code_for_log(&status);
-            let stdout = child
-                .stdout
-                .take()
-                .map(|mut s| {
-                    let mut buf = Vec::new();
-                    std::io::Read::read_to_end(&mut s, &mut buf).ok();
-                    buf
-                })
-                .unwrap_or_default();
-            let stderr = child
-                .stderr
-                .take()
-                .map(|mut s| {
-                    let mut buf = Vec::new();
-                    std::io::Read::read_to_end(&mut s, &mut buf).ok();
-                    buf
-                })
-                .unwrap_or_default();
-            let output = std::process::Output {
-                status,
-                stdout,
-                stderr,
-            };
             let elapsed_ms = start.elapsed().as_millis();
             log::info!(
-                "[git:timeout] finished: args={:?}, cwd='{}', elapsed_ms={}, exit_code={}",
+                "[git:{}] finished: args={:?}, cwd='{}', elapsed_ms={}, exit_code={}",
+                label,
                 args_for_log,
                 cwd,
                 elapsed_ms,
                 exit_code
             );
-            if !output.status.success() {
+            if !status.success() {
                 log::error!(
-                    "[git:timeout] failed: args={:?}, cwd='{}', elapsed_ms={}, exit_code={}, stderr='{}'",
+                    "[git:{}] failed: args={:?}, cwd='{}', elapsed_ms={}, exit_code={}, stderr='{}'",
+                    label,
                     args_for_log,
                     cwd,
                     elapsed_ms,
                     exit_code,
-                    stderr_for_log(&output.stderr)
+                    stderr_for_log(&stderr)
                 );
             }
-            Ok(output)
+            Ok(Output {
+                status,
+                stdout,
+                stderr,
+            })
         }
         Ok(None) => {
             let _ = child.kill();
             let _ = child.wait();
-            let stderr = child
-                .stderr
-                .take()
-                .map(|mut s| {
-                    let mut buf = Vec::new();
-                    std::io::Read::read_to_end(&mut s, &mut buf).ok();
-                    buf
-                })
-                .unwrap_or_default();
+            drop(stdout_reader);
+            let stderr = stderr_reader.collect(Instant::now() + PIPE_DRAIN_GRACE);
             log::error!(
-                "[git:timeout] timed out: args={:?}, cwd='{}', elapsed_ms={}, stderr='{}'",
+                "[git:{}] timed out: args={:?}, cwd='{}', elapsed_ms={}, stderr='{}'",
+                label,
                 args_for_log,
                 cwd,
                 start.elapsed().as_millis(),
@@ -410,23 +472,17 @@ pub(crate) fn run_git_command_with_timeout(
             );
             Err(format!(
                 "Git command timed out after {} seconds",
-                GIT_COMMAND_TIMEOUT_SECS
+                timeout.as_secs()
             ))
         }
         Err(e) => {
             let _ = child.kill();
             let _ = child.wait();
-            let stderr = child
-                .stderr
-                .take()
-                .map(|mut s| {
-                    let mut buf = Vec::new();
-                    std::io::Read::read_to_end(&mut s, &mut buf).ok();
-                    buf
-                })
-                .unwrap_or_default();
+            drop(stdout_reader);
+            let stderr = stderr_reader.collect(Instant::now() + PIPE_DRAIN_GRACE);
             log::error!(
-                "[git:timeout] wait failed: args={:?}, cwd='{}', elapsed_ms={}, stderr='{}', error={}",
+                "[git:{}] wait failed: args={:?}, cwd='{}', elapsed_ms={}, stderr='{}', error={}",
+                label,
                 args_for_log,
                 cwd,
                 start.elapsed().as_millis(),
@@ -436,6 +492,22 @@ pub(crate) fn run_git_command_with_timeout(
             Err(format!("Failed to wait for git command: {}", e))
         }
     }
+}
+
+/// Run a git command in `cwd` with an explicit timeout in seconds.
+pub(crate) fn run_git_command_with_timeout_secs(
+    args: &[&str],
+    cwd: &str,
+    timeout_secs: u64,
+) -> Result<Output, String> {
+    let mut cmd = git_command();
+    cmd.args(args).current_dir(cwd);
+    run_command_with_timeout(&mut cmd, "timeout", Duration::from_secs(timeout_secs))
+}
+
+/// Run a git command in `cwd` with the default `GIT_COMMAND_TIMEOUT_SECS` timeout.
+pub(crate) fn run_git_command_with_timeout(args: &[&str], cwd: &str) -> Result<Output, String> {
+    run_git_command_with_timeout_secs(args, cwd, GIT_COMMAND_TIMEOUT_SECS)
 }
 
 /// Normalize path separators for the current platform.
@@ -1085,5 +1157,78 @@ mod tests {
         assert_eq!(results[1].size_bytes, 1024);
         assert_eq!(results[1].size_display, "1.0 KB");
         assert!(results[1].is_recommended);
+    }
+    #[serial]
+    #[test]
+    fn git_command_disables_terminal_prompts() {
+        let cmd = git_command();
+
+        let prompt = cmd
+            .get_envs()
+            .find(|(key, _)| *key == std::ffi::OsStr::new("GIT_TERMINAL_PROMPT"))
+            .map(|(_, value)| value);
+
+        assert_eq!(prompt, Some(Some(std::ffi::OsStr::new("0"))));
+    }
+
+    #[cfg(unix)]
+    #[serial]
+    #[test]
+    fn run_command_with_timeout_drains_large_stderr_without_deadlock() {
+        // > 256 KiB on stderr: a wait-then-read implementation deadlocks on the full pipe buffer.
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "head -c 300000 /dev/zero | tr '\\0' x >&2"]);
+        let started = Instant::now();
+
+        let output = run_command_with_timeout(&mut cmd, "test", Duration::from_secs(20))
+            .expect("command completes");
+
+        assert!(output.status.success(), "{:?}", output.status);
+        assert_eq!(output.stderr.len(), 300_000);
+        assert!(output.stderr.iter().all(|byte| *byte == b'x'));
+        assert!(output.stdout.is_empty());
+        assert!(
+            started.elapsed() < Duration::from_secs(15),
+            "took {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[cfg(unix)]
+    #[serial]
+    #[test]
+    fn run_command_with_timeout_returns_promptly_when_orphan_keeps_pipe_open() {
+        // The backgrounded `sleep` inherits our stderr pipe and outlives the killed child, so a
+        // read-to-EOF after the kill would block for the full 30 s.
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "sleep 30 >&2 & exec sleep 30"]);
+        let started = Instant::now();
+
+        let err = run_command_with_timeout(&mut cmd, "test", Duration::from_secs(1)).unwrap_err();
+
+        assert_eq!(err, "Git command timed out after 1 seconds");
+        assert!(err.contains("timed out"), "{err}");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "took {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[cfg(unix)]
+    #[serial]
+    #[test]
+    fn run_git_command_with_timeout_secs_reports_spawn_failure_and_success() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let cwd = temp.path().to_string_lossy().to_string();
+
+        let output = run_git_command_with_timeout_secs(&["--version"], &cwd, 30)
+            .expect("git --version runs");
+        assert!(output.status.success());
+        assert!(String::from_utf8_lossy(&output.stdout).starts_with("git version"));
+
+        let missing_cwd = temp.path().join("missing").to_string_lossy().to_string();
+        let err = run_git_command_with_timeout(&["--version"], &missing_cwd).unwrap_err();
+        assert!(err.starts_with("Failed to spawn git command"), "{err}");
     }
 }

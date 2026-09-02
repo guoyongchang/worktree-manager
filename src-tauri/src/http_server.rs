@@ -198,6 +198,12 @@ fn to_snake(s: &str) -> String {
     result
 }
 
+/// Clone the global `AppHandle` for the few handlers that must hand an owned handle to
+/// Tauri APIs (updater download, window/devtools access).
+///
+/// NOTE(tauri#15408): cloning/dropping an AppHandle on a tokio worker races tao's non-atomic
+/// Rc refcount on Windows. Only use this for rare, user-initiated operations that need an
+/// owned handle; everything else (emit, reads) must borrow via `state::with_app_handle`.
 fn current_app_handle() -> Result<tauri::AppHandle, String> {
     crate::APP_HANDLE
         .lock()
@@ -953,11 +959,6 @@ async fn h_get_locked_worktrees(Json(args): Json<Value>) -> Response {
 }
 
 async fn h_broadcast_terminal_state(Json(args): Json<Value>) -> Response {
-    let app = match current_app_handle() {
-        Ok(app) => app,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
-    };
-
     let workspace_path = get_param(&args, "workspace_path");
     let worktree_name = get_param(&args, "worktree_name");
     let activated_terminals = args
@@ -991,7 +992,6 @@ async fn h_broadcast_terminal_state(Json(args): Json<Value>) -> Response {
         .map(|s| s.to_string());
 
     crate::commands::window::broadcast_terminal_state(
-        app,
         workspace_path,
         worktree_name,
         activated_terminals,
@@ -2049,12 +2049,9 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                 .to_string();
                 let _ = TERMINAL_STATE_BROADCAST.send(broadcast_msg);
 
-                // Also emit Tauri event for PC端 to receive Web端 changes
-                if let Some(app_handle) = crate::APP_HANDLE
-                    .lock()
-                    .ok()
-                    .and_then(|h| h.as_ref().cloned())
-                {
+                // Also emit Tauri event for PC端 to receive Web端 changes.
+                // Borrow, never clone (tauri-apps/tauri#15408): see state::with_app_handle.
+                crate::state::with_app_handle(|app_handle| {
                     let _ = app_handle.emit(
                         "terminal-state-update",
                         json!({
@@ -2067,7 +2064,7 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                             "sessionId": session_id,
                         }),
                     );
-                }
+                });
             }
 
             "subscribe_voice_events" => {
@@ -4182,21 +4179,26 @@ mod http_server_coverage_tests {
             "App handle unavailable",
         )
         .await;
-        assert_text_contains(
-            h_broadcast_terminal_state(Json(json!({
-                "workspacePath": "/tmp/ws-a",
-                "worktreeName": "feature-a",
-                "activatedTerminals": ["main"],
-                "activeTerminalTab": "main",
-                "terminalVisible": true,
-                "clientId": "client-a",
-                "sessionId": "pty-a"
-            })))
-            .await,
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "App handle unavailable",
-        )
+        // broadcast_terminal_state no longer needs an owned AppHandle: without one the state
+        // cache and the WebSocket broadcast still work and only the desktop Tauri event is
+        // skipped (state::with_app_handle borrows instead of cloning, tauri-apps/tauri#15408).
+        let response = h_broadcast_terminal_state(Json(json!({
+            "workspacePath": "/tmp/ws-a",
+            "worktreeName": "feature-a",
+            "activatedTerminals": ["main"],
+            "activeTerminalTab": "main",
+            "terminalVisible": true,
+            "clientId": "client-a",
+            "sessionId": "pty-a"
+        })))
         .await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let cached = crate::commands::window::get_terminal_state_inner(
+            "/tmp/ws-a".to_string(),
+            "feature-a".to_string(),
+        )
+        .expect("broadcast_terminal_state should update the cache even without an AppHandle");
+        assert_eq!(cached.activated_terminals, vec!["main".to_string()]);
 
         assert_eq!(
             h_frontend_log(Json(json!({"level": "info", "message": "coverage"})))

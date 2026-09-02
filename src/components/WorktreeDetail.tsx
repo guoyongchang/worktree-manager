@@ -63,6 +63,7 @@ import type {
   TagDefinition,
 } from '../types';
 import { ProjectEditModal } from './ProjectEditModal';
+import { GIT_BATCH_CONCURRENCY, mapWithConcurrency } from '../lib/utils';
 
 const StatusBadges: FC<{ project: ProjectStatus }> = ({ project }) => {
   const { t } = useTranslation();
@@ -878,15 +879,13 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
 
     setSwitchingBranch(targets.map(t => t.proj.name));
 
-    await Promise.all(
-      targets.map(async ({ proj, targetBranch }) => {
-        try {
-          await onSwitchBranch(proj.path, targetBranch);
-        } catch (e: any) {
-          toast('error', t('detail.switchBranchFailed', { name: proj.name, branch: targetBranch, error: String(e?.message || e) }));
-        }
-      })
-    );
+    await mapWithConcurrency(targets, GIT_BATCH_CONCURRENCY, async ({ proj, targetBranch }) => {
+      try {
+        await onSwitchBranch(proj.path, targetBranch);
+      } catch (e: any) {
+        toast('error', t('detail.switchBranchFailed', { name: proj.name, branch: targetBranch, error: String(e?.message || e) }));
+      }
+    });
 
     setSwitchingBranch([]);
     onRefresh?.();
@@ -907,7 +906,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
     if (ops.length === 0) return;
     setMainAction('sync');
     try {
-      await Promise.allSettled(ops.map(op => op.triggerSync()));
+      await mapWithConcurrency(ops, GIT_BATCH_CONCURRENCY, op => op.triggerSync());
     } finally {
       setMainAction(null);
     }
@@ -918,7 +917,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
     if (ops.length === 0) return;
     setMainAction('pull');
     try {
-      await Promise.allSettled(ops.map(op => op.triggerPull()));
+      await mapWithConcurrency(ops, GIT_BATCH_CONCURRENCY, op => op.triggerPull());
     } finally {
       setMainAction(null);
     }
@@ -929,7 +928,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
     if (ops.length === 0) return;
     setMainAction('refresh');
     try {
-      await Promise.allSettled(ops.map(op => op.triggerRefresh()));
+      await mapWithConcurrency(ops, GIT_BATCH_CONCURRENCY, op => op.triggerRefresh());
     } finally {
       setMainAction(null);
     }
@@ -942,7 +941,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
       const ops = selectedWorktree.projects
         .map(p => gitOpsRefs.current.get(p.path))
         .filter(Boolean) as GitOperationsHandle[];
-      await Promise.allSettled(ops.map(op => op.triggerSync()));
+      await mapWithConcurrency(ops, GIT_BATCH_CONCURRENCY, op => op.triggerSync());
     } finally {
       setWorktreeAction(null);
     }
@@ -955,7 +954,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
       const ops = selectedWorktree.projects
         .map(p => gitOpsRefs.current.get(p.path))
         .filter(Boolean) as GitOperationsHandle[];
-      await Promise.allSettled(ops.map(op => op.triggerPull()));
+      await mapWithConcurrency(ops, GIT_BATCH_CONCURRENCY, op => op.triggerPull());
     } finally {
       setWorktreeAction(null);
     }
@@ -968,7 +967,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
       const ops = selectedWorktree.projects
         .map(p => gitOpsRefs.current.get(p.path))
         .filter(Boolean) as GitOperationsHandle[];
-      await Promise.allSettled(ops.map(op => op.triggerRefresh()));
+      await mapWithConcurrency(ops, GIT_BATCH_CONCURRENCY, op => op.triggerRefresh());
     } finally {
       setWorktreeAction(null);
     }

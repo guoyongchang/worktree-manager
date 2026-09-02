@@ -518,7 +518,10 @@ export function useWorkspaceActions(
 
   const allArchiveIssuesConfirmed = (() => {
     if (!archiveModal?.status) return false;
-    if (archiveModal.status.locked_processes.length > 0 || archiveModal.status.lock_check_error) {
+    // Only real lock holders block archiving. A failed or partial lock check
+    // (lock_check_error) is diagnostic: the backend still runs the authoritative
+    // rename probe when archiving, so it must not disable the confirm button.
+    if (archiveModal.status.locked_processes.length > 0) {
       return false;
     }
     const { projects } = archiveModal.status;

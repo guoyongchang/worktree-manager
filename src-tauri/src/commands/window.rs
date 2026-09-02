@@ -3,8 +3,7 @@ use tauri::Emitter;
 
 use crate::config::{load_global_config, load_occupation_state};
 use crate::state::{
-    APP_HANDLE, LOCK_BROADCAST, TERMINAL_STATES, TERMINAL_STATE_BROADCAST, WINDOW_WORKSPACES,
-    WORKTREE_LOCKS,
+    LOCK_BROADCAST, TERMINAL_STATES, TERMINAL_STATE_BROADCAST, WINDOW_WORKSPACES, WORKTREE_LOCKS,
 };
 use crate::types::TerminalState;
 
@@ -215,7 +214,6 @@ pub(crate) fn get_terminal_state(
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn broadcast_terminal_state(
-    app: tauri::AppHandle,
     workspace_path: String,
     worktree_name: String,
     activated_terminals: Vec<String>,
@@ -258,19 +256,22 @@ pub(crate) fn broadcast_terminal_state(
         let _ = TERMINAL_STATE_BROADCAST.send(json_str);
     }
 
-    // 同时通过 Tauri 事件发送给所有桌面端窗口
-    let _ = app.emit(
-        "terminal-state-update",
-        serde_json::json!({
-            "workspacePath": workspace_path,
-            "worktreeName": worktree_name,
-            "activatedTerminals": activated_terminals,
-            "activeTerminalTab": active_terminal_tab,
-            "terminalVisible": terminal_visible,
-            "clientId": client_id,
-            "sessionId": session_id,
-        }),
-    );
+    // 同时通过 Tauri 事件发送给所有桌面端窗口。
+    // 借用而非 clone AppHandle：HTTP handler 会在 tokio 线程调用本函数（tauri-apps/tauri#15408）。
+    crate::state::with_app_handle(|app| {
+        let _ = app.emit(
+            "terminal-state-update",
+            serde_json::json!({
+                "workspacePath": workspace_path,
+                "worktreeName": worktree_name,
+                "activatedTerminals": activated_terminals,
+                "activeTerminalTab": active_terminal_tab,
+                "terminalVisible": terminal_visible,
+                "clientId": client_id,
+                "sessionId": session_id,
+            }),
+        );
+    });
 }
 
 #[tauri::command]
@@ -367,9 +368,10 @@ pub(crate) fn broadcast_lock_state(workspace_path: &str) {
         let _ = LOCK_BROADCAST.send(json_str);
     }
 
-    if let Some(app_handle) = APP_HANDLE.lock().ok().and_then(|handle| handle.clone()) {
+    // Borrow, never clone: see state::with_app_handle (tauri-apps/tauri#15408).
+    crate::state::with_app_handle(|app_handle| {
         let _ = app_handle.emit("lock-state-update", payload);
-    }
+    });
 }
 
 // ==================== DevTools ====================

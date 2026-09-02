@@ -78,9 +78,11 @@ export const ArchiveConfirmationModal: FC<ArchiveConfirmationModalProps> = ({
               )}
 
               {archiveModal.status.lock_check_error && archiveModal.status.locked_processes.length === 0 && (
-                <div className="bg-[var(--color-error)]/10 border border-[var(--color-error)]/20 rounded-lg p-3 text-sm text-[var(--color-error)]">
+                // Diagnostic only: the lock check could not complete. Archiving still runs the
+                // authoritative rename probe, so this is a warning, not a blocker.
+                <div className="bg-[var(--color-warning)]/10 border border-[var(--color-warning)]/20 rounded-lg p-3 text-sm text-[var(--color-warning)]">
                   <div className="flex items-start gap-2">
-                    <WarningIcon className="w-4 h-4 text-[var(--color-error)] shrink-0 mt-0.5" />
+                    <WarningIcon className="w-4 h-4 text-[var(--color-warning)] shrink-0 mt-0.5" />
                     <span>{archiveModal.status.lock_check_error}</span>
                   </div>
                 </div>

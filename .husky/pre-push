@@ -4,4 +4,5 @@ unset $git_env_vars
 
 cd src-tauri || exit 1
 
-cargo test
+# 与 CI 一致：部分测试会修改全局进程状态，必须单线程运行。
+cargo test -- --test-threads=1
