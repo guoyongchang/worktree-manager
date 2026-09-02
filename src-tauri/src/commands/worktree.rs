@@ -67,9 +67,10 @@ pub(crate) fn create_symlink(src: &std::path::Path, dst: &std::path::Path) -> st
 
 /// Result of the (Windows-only) Restart Manager file-usage diagnostic.
 ///
-/// The Restart Manager query is strictly best-effort: the authoritative "is anything holding
-/// this worktree" check before archiving is `probe_windows_rename`, so a failed or truncated
-/// query is surfaced as a `warning` and must never block archiving on its own.
+/// The Restart Manager query is strictly best-effort. Archiving never touches files, so the
+/// diagnostic is only consulted when deleting an archived worktree fails (to name the processes
+/// holding its files) and by the "terminate locking process" command. A failed or truncated
+/// query is surfaced as a `warning` and never blocks anything on its own.
 /// On non-Windows platforms the report is always empty.
 #[derive(Debug, Default)]
 pub struct LockCheckReport {
@@ -475,7 +476,7 @@ pub fn find_worktree_locking_processes(path: &Path) -> LockCheckReport {
             details.push("扫描因耗时上限被截断".to_string());
         }
         Some(format!(
-            "文件占用检查未完整执行（{}；已扫描 {} 个文件），归档时将以目录重命名探测为准",
+            "文件占用检查未完整执行（{}；已扫描 {} 个文件）",
             details.join("；"),
             scanned_files
         ))
@@ -523,76 +524,6 @@ pub fn find_worktree_locking_processes(path: &Path) -> LockCheckReport {
 #[cfg(not(target_os = "windows"))]
 pub fn find_worktree_locking_processes(_path: &Path) -> LockCheckReport {
     LockCheckReport::default()
-}
-
-#[cfg(target_os = "windows")]
-fn probe_windows_rename(path: &Path) -> Result<(), String> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| "Worktree path has no parent".to_string())?;
-    let name = path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .ok_or_else(|| "Invalid worktree path".to_string())?;
-    let probe_path = parent.join(format!(
-        ".{}.archive-lock-check-{}",
-        name,
-        std::process::id()
-    ));
-
-    match fs::remove_dir_all(&probe_path) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => {
-            return Err(friendly_fs_error("无法清理归档检查的临时目录", &e));
-        }
-    }
-
-    fs::rename(path, &probe_path).map_err(|e| {
-        friendly_fs_error("Worktree 正在被占用，无法归档。请关闭相关程序后重试", &e)
-    })?;
-    if let Err(e) = fs::rename(&probe_path, path) {
-        return Err(format!(
-            "归档检查后恢复目录失败：{}。\n请手动将 '{}' 重命名为 '{}'",
-            crate::utils::friendly_io_error(&e),
-            probe_path.display(),
-            path.display()
-        ));
-    }
-    Ok(())
-}
-
-/// Windows pre-archive gate: known locking processes block archiving; an incomplete Restart
-/// Manager diagnostic only logs a warning, and the authoritative rename probe decides.
-#[cfg(target_os = "windows")]
-fn ensure_windows_archive_file_usage_clear(path: &Path) -> Result<(), String> {
-    let report = find_worktree_locking_processes(path);
-    if !report.processes.is_empty() {
-        let names = report
-            .processes
-            .iter()
-            .map(|process| format!("{} (PID {})", process.name, process.pid))
-            .collect::<Vec<_>>()
-            .join(", ");
-        return Err(format!(
-            "Worktree files are currently in use. End these processes before archiving: {}",
-            names
-        ));
-    }
-    if let Some(warning) = &report.warning {
-        log::warn!(
-            "[worktree] {} (path='{}'); continuing with the rename probe",
-            warning,
-            path.display()
-        );
-    }
-
-    probe_windows_rename(path)
-}
-
-#[cfg(not(target_os = "windows"))]
-fn ensure_windows_archive_file_usage_clear(_path: &Path) -> Result<(), String> {
-    Ok(())
 }
 
 pub fn terminate_worktree_locking_process_impl(
@@ -1323,11 +1254,16 @@ pub(crate) async fn create_worktree(
     }
 }
 
+/// Archive a worktree = move it from the active list to the archived list. Nothing else
+/// happens: project directories, git worktree registrations and branches stay exactly as they
+/// are, so archiving is instant and can never be blocked by locked files. Everything
+/// destructive (`git worktree remove`, directory deletion, `git branch -D`) lives in
+/// `delete_archived_worktree_impl`.
 pub fn archive_worktree_impl(window_label: &str, name: String) -> Result<(), String> {
     let workspace_path =
         crate::config::get_window_workspace_path(window_label).ok_or("No workspace selected")?;
 
-    // 串行化同一 workspace 的生命周期操作，防止并发竞态破坏配置/git 状态。
+    // 串行化同一 workspace 的生命周期操作，防止并发竞态破坏配置。
     let lifecycle_lock = crate::state::workspace_lifecycle_lock(&workspace_path);
     let _lifecycle_guard = crate::state::lock_lifecycle_with_timeout(
         &lifecycle_lock,
@@ -1344,16 +1280,13 @@ pub fn archive_worktree_impl(window_label: &str, name: String) -> Result<(), Str
     }
 
     log::info!(
-        "[worktree] Archiving worktree '{}' in workspace '{}'",
+        "[worktree] Archiving worktree '{}' in workspace '{}' (config-only: files, git worktrees and branches are left untouched)",
         name,
         workspace_path
     );
 
-    // Step 1: Close all PTY sessions associated with this worktree
-    log::info!(
-        "[worktree] Step 1/4: Closing PTY sessions for worktree '{}'",
-        name
-    );
+    // Step 1/2: close the worktree's PTY sessions. The worktree leaves the active list and the
+    // frontend unmounts its terminals (cleanupTerminalsForPath); this is the backend safety net.
     {
         let worktree_path_str = worktree_path.to_string_lossy().to_string();
         if let Ok(mut manager) = PTY_MANAGER.lock() {
@@ -1365,84 +1298,16 @@ pub fn archive_worktree_impl(window_label: &str, name: String) -> Result<(), Str
                     closed.len(),
                     closed
                 );
-            } else {
-                log::info!("[worktree] No PTY sessions to close");
             }
         }
     }
 
-    // Step 2: On Windows, fail before mutating git worktree registrations if files are in use.
-    log::info!("[worktree] Step 2/4: Checking file usage for '{}'", name);
-    ensure_windows_archive_file_usage_clear(&worktree_path)?;
-
-    // Step 3: Remove git worktrees first
-    log::info!(
-        "[worktree] Step 3/4: Removing git worktree registrations for '{}'",
-        name
-    );
-    let projects_path = worktree_path.join("projects");
-    if projects_path.exists() {
-        if let Ok(entries) = std::fs::read_dir(&projects_path) {
-            for entry in entries.flatten() {
-                let proj_path = entry.path();
-                let proj_name = proj_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-
-                let main_proj_path = root.join("projects").join(proj_name);
-
-                log::info!(
-                    "[worktree] Removing git worktree for project '{}'",
-                    proj_name
-                );
-                let output = git_command()
-                    .args([
-                        "-C",
-                        main_proj_path.to_string_lossy().as_ref(),
-                        "worktree",
-                        "remove",
-                        proj_path.to_string_lossy().as_ref(),
-                        "--force",
-                    ])
-                    .output();
-
-                match &output {
-                    Ok(o) if o.status.success() => {
-                        log::info!(
-                            "[worktree] Successfully removed git worktree for '{}'",
-                            proj_name
-                        );
-                    }
-                    Ok(o) => {
-                        let stderr_for_log =
-                            mask_url_credentials(&String::from_utf8_lossy(&o.stderr));
-                        log::warn!(
-                            "[worktree] git worktree remove for '{}' returned non-zero: {}",
-                            proj_name,
-                            stderr_for_log
-                        );
-                    }
-                    Err(e) => {
-                        log::warn!(
-                            "[worktree] Failed to execute git worktree remove for '{}': {}",
-                            proj_name,
-                            e
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    // Step 4: Mark as archived in config (no folder rename)
-    log::info!("[worktree] Step 4/4: Marking worktree as archived in config");
+    // Step 2/2: mark as archived in config.
     let mut config = config;
     if !config.archived_worktrees.contains(&name) {
         config.archived_worktrees.push(name.clone());
     }
     save_workspace_config_internal(&workspace_path, &config)?;
-    log::info!(
-        "[worktree] Marked worktree '{}' as archived in config",
-        name
-    );
 
     log::info!("[worktree] Successfully archived worktree '{}'", name);
     Ok(())
@@ -1477,33 +1342,13 @@ pub fn check_worktree_status_impl(
         errors: vec![],
         projects: vec![],
         locked_processes: vec![],
-        lock_check_supported: cfg!(target_os = "windows"),
+        lock_check_supported: false,
         lock_check_error: None,
     };
 
-    // Restart Manager diagnostic (Windows only; empty elsewhere). Known locking processes block
-    // archiving; an incomplete check is only a warning – the rename probe at archive time is
-    // authoritative, so `can_archive` is left untouched in that case.
-    let lock_report = find_worktree_locking_processes(&worktree_path);
-    log::debug!(
-        "[worktree] lock check for '{}': scanned_files={}, truncated={}, processes={}",
-        name,
-        lock_report.scanned_files,
-        lock_report.truncated,
-        lock_report.processes.len()
-    );
-    if let Some(warning) = lock_report.warning {
-        status.warnings.push(warning.clone());
-        status.lock_check_error = Some(warning);
-    }
-    if !lock_report.processes.is_empty() {
-        status.can_archive = false;
-        status.errors.push(format!(
-            "Worktree files are currently in use by {} process(es)",
-            lock_report.processes.len()
-        ));
-        status.locked_processes = lock_report.processes;
-    }
+    // Archiving is a pure config change (see archive_worktree_impl): no file-lock check is
+    // needed here. Locked files only matter when an archived worktree is deleted, and that
+    // failure reports the holding processes itself.
 
     let projects_path = worktree_path.join("projects");
     if !projects_path.exists() {
@@ -1658,12 +1503,13 @@ fn set_local_upstream(wt_dir: &str, proj_name: &str, branch_name: &str) {
     }
 }
 
-/// Restore one project of an archived worktree.
+/// Check (and only if necessary repair) one project of a worktree being restored.
 ///
-/// Returns `Err(message)` (already prefixed with the project name) when the project could not be
-/// re-registered; the caller aggregates these and keeps the archived flag so a retry can pick up
-/// where this attempt stopped. Projects that cannot be restored automatically for configuration
-/// reasons (invalid base branch) are skipped with a log line, as before.
+/// Healthy worktrees are left untouched. Directories git cannot open are re-added from the
+/// branch. Returns `Err(message)` (already prefixed with the project name) when a repair was
+/// needed but failed; the caller aggregates these and keeps the archived flag so a retry can pick
+/// up where this attempt stopped. Projects that cannot be repaired automatically for
+/// configuration reasons (invalid base branch) are skipped with a log line, as before.
 fn restore_project_worktree(
     config: &crate::types::WorkspaceConfig,
     main_proj_path: &Path,
@@ -1675,42 +1521,42 @@ fn restore_project_worktree(
     let wt_dir = wt_proj_path.to_string_lossy().to_string();
     let step = Instant::now();
 
-    // Step A: idempotency. A previous (partially failed) restore, or an archive whose
-    // `git worktree remove` failed, may have left the project registered already.
-    if wt_proj_path.join(".git").is_file() {
-        // `branch --show-current` prints the bare branch name (empty when detached); unlike
-        // `rev-parse --abbrev-ref HEAD` it is not disturbed by a tag of the same name.
+    // Step A: a healthy registered worktree needs nothing. Archiving is a pure list move, so in
+    // the normal case every project is still a valid git worktree — on whatever branch the user
+    // left it (a different branch, detached HEAD or uncommitted work is NOT a reason to touch
+    // it). Only directories git cannot open (legacy archives that ran `git worktree remove`,
+    // partially deleted trees on Windows) go through the repair path below.
+    if wt_proj_path.join(".git").exists() {
         match run_git_command_with_timeout_secs(
-            &["branch", "--show-current"],
+            &["rev-parse", "--is-inside-work-tree"],
             &wt_dir,
             RESTORE_GIT_QUERY_TIMEOUT_SECS,
         ) {
             Ok(output)
                 if output.status.success()
-                    && String::from_utf8_lossy(&output.stdout).trim() == branch_name =>
+                    && String::from_utf8_lossy(&output.stdout).trim() == "true" =>
             {
                 log::info!(
-                    "[worktree] Project '{}': already registered on branch '{}', skipping re-add ({} ms)",
+                    "[worktree] Project '{}': valid git worktree, left untouched ({} ms)",
                     proj_name,
-                    branch_name,
                     step.elapsed().as_millis()
                 );
                 restore_project_links(config, main_proj_path, wt_proj_path, proj_name);
                 return Ok(());
             }
             Ok(output) => {
-                log::info!(
-                    "[worktree] Project '{}': .git file present but HEAD is '{}' (exit code {:?}); re-adding",
+                log::warn!(
+                    "[worktree] Project '{}': .git present but git cannot open the worktree (exit code {:?}: {}); repairing",
                     proj_name,
-                    String::from_utf8_lossy(&output.stdout).trim(),
-                    output.status.code()
+                    output.status.code(),
+                    mask_url_credentials(String::from_utf8_lossy(&output.stderr).trim())
                 );
             }
             Err(e) => {
-                // Never fall through to the destructive re-add when the directory could not even
-                // be inspected (spawn failure / timeout): it may still hold uncommitted work.
+                // Never fall through to the destructive repair when the directory could not even
+                // be inspected (spawn failure / timeout): it may hold uncommitted work.
                 log::error!(
-                    "[worktree] Project '{}': could not inspect existing registration: {}",
+                    "[worktree] Project '{}': could not inspect existing worktree: {}",
                     proj_name,
                     e
                 );
@@ -1917,15 +1763,17 @@ pub fn restore_worktree_impl(window_label: &str, name: String) -> Result<(), Str
 
     let restore_start = Instant::now();
     log::info!(
-        "[worktree] Restoring worktree '{}' (branch: '{}') from archive in workspace '{}'",
+        "[worktree] Restoring worktree '{}' (branch: '{}') from archive in workspace '{}' (config-only unless a project directory needs repair)",
         name,
         branch_name,
         workspace_path
     );
 
-    // Step 1: Re-register git worktrees for each project
+    // Step 1: make sure every project directory is a usable git worktree. Restoring is a pure
+    // list move for healthy worktrees; repairs only happen for directories that older versions
+    // (which ran `git worktree remove` on archive) or a failed deletion left behind.
     log::info!(
-        "[worktree] Step 1/3: Re-registering git worktrees for '{}'",
+        "[worktree] Step 1/3: Checking project worktrees for '{}'",
         name
     );
     let mut failures: Vec<String> = Vec::new();
@@ -2055,6 +1903,11 @@ pub(crate) async fn restore_worktree(window: tauri::Window, name: String) -> Res
         .map_err(|e| format!("Task join error: {}", e))?
 }
 
+/// Timeout for the git calls made while deleting an archived worktree.
+const DELETE_GIT_TIMEOUT_SECS: u64 = 120;
+
+/// Delete an archived worktree. This is the only place where git worktree registrations, the
+/// directory and the local branches are removed (archiving itself is a pure config change).
 pub fn delete_archived_worktree_impl(window_label: &str, name: String) -> Result<(), String> {
     let workspace_path =
         crate::config::get_window_workspace_path(window_label).ok_or("No workspace selected")?;
@@ -2089,6 +1942,7 @@ pub fn delete_archived_worktree_impl(window_label: &str, name: String) -> Result
         .map(|s| s.as_str())
         .unwrap_or(folder_key);
     validate_git_ref_name(branch_name)?;
+    let delete_start = Instant::now();
     log::info!(
         "[worktree] Deleting archived worktree '{}' (branch: {}) in workspace '{}'",
         name,
@@ -2096,11 +1950,7 @@ pub fn delete_archived_worktree_impl(window_label: &str, name: String) -> Result
         workspace_path
     );
 
-    // Step 1: Close any related PTY sessions
-    log::info!(
-        "[worktree] Step 1/3: Closing PTY sessions for archived worktree '{}'",
-        name
-    );
+    // Step 1/5: Close any related PTY sessions
     {
         let worktree_path_str = worktree_path.to_string_lossy().to_string();
         if let Ok(mut manager) = PTY_MANAGER.lock() {
@@ -2111,59 +1961,168 @@ pub fn delete_archived_worktree_impl(window_label: &str, name: String) -> Result
                     "[worktree] Closed {} PTY sessions for deleted worktree",
                     closed.len()
                 );
-            } else {
-                log::info!("[worktree] No PTY sessions to close");
             }
         }
     }
 
-    // Step 2: 先删除目录（原子性关键）。worktree 工作树可从分支重建，是可逆性更高的一步；
-    // 若 remove_dir_all 失败则直接返回——此时分支尚未删除、配置未改，worktree 仍标记 archived
-    // 可恢复，彻底避免“分支已删（丢 commits）但目录删除失败”的数据丢失。
-    log::info!(
-        "[worktree] Step 2/3: Removing directory {}",
-        worktree_path.display()
-    );
-    fs::remove_dir_all(&worktree_path)
-        .map_err(|e| friendly_fs_error("删除归档 Worktree 失败", &e))?;
-
-    // Step 3: 仅在目录删除确认成功后才删除分支（不可逆操作放最后）。
-    // 个别项目分支删除失败不影响整体一致性（worktree 目录已不存在，后续会清理 archived 标记）。
-    log::info!(
-        "[worktree] Step 3/3: Deleting local branch '{}' from projects",
-        branch_name
-    );
-    let projects_path = root.join("projects");
-    if projects_path.exists() {
-        if let Ok(entries) = std::fs::read_dir(&projects_path) {
-            for entry in entries.flatten() {
-                let proj_path = entry.path();
-                if !proj_path.is_dir() {
-                    continue;
+    // Step 2/5: unregister the projects' git worktrees. `git worktree remove --force` also deletes
+    // the project directory; a failure here (typically a locked file on Windows) is only logged —
+    // the directory removal below decides whether the delete succeeded.
+    let main_projects = root.join("projects");
+    let projects_path = worktree_path.join("projects");
+    if let Ok(entries) = fs::read_dir(&projects_path) {
+        for entry in entries.flatten() {
+            let proj_path = entry.path();
+            if !proj_path.is_dir() {
+                continue;
+            }
+            let proj_name = proj_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            let main_proj_path = main_projects.join(&proj_name);
+            if !main_proj_path.exists() {
+                log::info!(
+                    "[worktree] Project '{}': main project missing, directory will be removed without git",
+                    proj_name
+                );
+                continue;
+            }
+            let wt_dir = proj_path.to_string_lossy().to_string();
+            match run_git_command_with_timeout_secs(
+                &["worktree", "remove", "--force", &wt_dir],
+                &main_proj_path.to_string_lossy(),
+                DELETE_GIT_TIMEOUT_SECS,
+            ) {
+                Ok(output) if output.status.success() => {
+                    log::info!(
+                        "[worktree] Project '{}': git worktree registration removed",
+                        proj_name
+                    );
                 }
+                Ok(output) => {
+                    log::warn!(
+                        "[worktree] Project '{}': git worktree remove returned non-zero (continuing): {}",
+                        proj_name,
+                        mask_url_credentials(String::from_utf8_lossy(&output.stderr).trim())
+                    );
+                }
+                Err(e) => {
+                    log::warn!(
+                        "[worktree] Project '{}': git worktree remove failed to run (continuing): {}",
+                        proj_name,
+                        e
+                    );
+                }
+            }
+        }
+    }
 
-                // Try to delete the branch (it may not exist in all projects)
-                let output = git_command()
-                    .args([
-                        "-C",
-                        proj_path.to_string_lossy().as_ref(),
-                        "branch",
-                        "-D",
+    // Step 3/5: 删除目录（原子性关键）。worktree 工作树可从分支重建，是可逆性更高的一步；
+    // 若 remove_dir_all 失败则直接返回——此时分支尚未删除、配置未改，worktree 仍标记 archived
+    // 可重试，彻底避免“分支已删（丢 commits）但目录删除失败”的数据丢失。
+    match fs::remove_dir_all(&worktree_path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            let mut message = friendly_fs_error("删除归档 Worktree 失败", &e);
+            // Windows: name the processes holding files so the user knows what to close.
+            let report = find_worktree_locking_processes(&worktree_path);
+            log::info!(
+                "[worktree] lock diagnostic for '{}': scanned_files={}, truncated={}, processes={}",
+                name,
+                report.scanned_files,
+                report.truncated,
+                report.processes.len()
+            );
+            if !report.processes.is_empty() {
+                let names = report
+                    .processes
+                    .iter()
+                    .map(|process| format!("{} (PID {})", process.name, process.pid))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                message.push_str(&format!(
+                    "\n以下进程正在占用该目录中的文件，请先关闭后重试：{}",
+                    names
+                ));
+            } else if let Some(warning) = report.warning {
+                log::warn!("[worktree] {}", warning);
+            }
+            log::error!(
+                "[worktree] Delete of '{}' failed while removing the directory ({} ms): {}",
+                name,
+                delete_start.elapsed().as_millis(),
+                message
+            );
+            return Err(message);
+        }
+    }
+
+    // Step 4/5: prune registrations whose directory is now gone (covers a failed
+    // `git worktree remove` above), so that `git branch -D` below is not refused.
+    if let Ok(entries) = fs::read_dir(&main_projects) {
+        for entry in entries.flatten() {
+            let proj_path = entry.path();
+            if !proj_path.is_dir() {
+                continue;
+            }
+            if let Err(e) = run_git_command_with_timeout_secs(
+                &["worktree", "prune"],
+                &proj_path.to_string_lossy(),
+                DELETE_GIT_TIMEOUT_SECS,
+            ) {
+                log::warn!(
+                    "[worktree] git worktree prune failed in {}: {}",
+                    proj_path.display(),
+                    e
+                );
+            }
+        }
+    }
+
+    // Step 5/5: 仅在目录删除确认成功后才删除分支（不可逆操作放最后）。
+    // 个别项目分支删除失败不影响整体一致性（worktree 目录已不存在）。
+    if let Ok(entries) = fs::read_dir(&main_projects) {
+        for entry in entries.flatten() {
+            let proj_path = entry.path();
+            if !proj_path.is_dir() {
+                continue;
+            }
+            let proj_name = proj_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            match run_git_command_with_timeout_secs(
+                &["branch", "-D", branch_name],
+                &proj_path.to_string_lossy(),
+                DELETE_GIT_TIMEOUT_SECS,
+            ) {
+                Ok(output) if output.status.success() => {
+                    log::info!(
+                        "Deleted branch '{}' from project '{}'",
                         branch_name,
-                    ])
-                    .output();
-
-                match output {
-                    Ok(o) if o.status.success() => {
-                        let proj_name =
-                            proj_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                        log::info!(
-                            "Deleted branch '{}' from project '{}'",
+                        proj_name
+                    );
+                }
+                Ok(output) => {
+                    // Branch might not exist in this project, that's fine; anything else is
+                    // worth a log line (e.g. still checked out in another worktree).
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    if !stderr.contains("not found") {
+                        log::warn!(
+                            "[worktree] git branch -D {} in '{}' returned non-zero: {}",
                             branch_name,
-                            proj_name
+                            proj_name,
+                            mask_url_credentials(stderr.trim())
                         );
                     }
-                    _ => {} // Branch might not exist in this project, that's fine
+                }
+                Err(e) => {
+                    log::warn!(
+                        "[worktree] git branch -D {} in '{}' failed to run: {}",
+                        branch_name,
+                        proj_name,
+                        e
+                    );
                 }
             }
         }
@@ -2177,18 +2136,15 @@ pub fn delete_archived_worktree_impl(window_label: &str, name: String) -> Result
         log::info!("[worktree] Removed mapping entry for '{}'", folder_key);
     }
 
-    // Step 4: Remove from archived list in config
+    // Remove from archived list in config
     let mut config = config;
     config.archived_worktrees.retain(|n| n != &name);
     save_workspace_config_internal(&workspace_path, &config)?;
-    log::info!(
-        "[worktree] Removed worktree '{}' from archived list in config",
-        name
-    );
 
     log::info!(
-        "[worktree] Successfully deleted archived worktree '{}'",
-        name
+        "[worktree] Successfully deleted archived worktree '{}' ({} ms)",
+        name,
+        delete_start.elapsed().as_millis()
     );
     Ok(())
 }
@@ -3229,7 +3185,14 @@ mod tests {
         assert_eq!(archived.len(), 1);
         assert_eq!(archived[0].name, "feature_roundtrip");
         assert!(archived[0].is_archived);
-        assert!(archived[0].projects.is_empty());
+        // Archiving is a pure list move: the project stays checked out and registered.
+        assert_eq!(archived[0].projects.len(), 1);
+        assert!(wt_project_path.join(".git").is_file());
+        assert_eq!(
+            git_output(&wt_project_path, &["branch", "--show-current"]),
+            "feature_roundtrip"
+        );
+        assert!(!git_output(&project_path, &["branch", "--list", "feature_roundtrip"]).is_empty());
     }
 
     #[serial]
@@ -3490,11 +3453,25 @@ mod tests {
             .archived_worktrees
             .contains(&"delete_folder".to_string()));
         assert!(worktree_path.exists());
+        let wt_project = worktree_path.join("projects").join("demo");
+        assert!(
+            wt_project.join(".git").is_file(),
+            "archive must keep the git worktree registration"
+        );
+        assert_eq!(
+            git_output(&wt_project, &["branch", "--show-current"]),
+            "delete_feature"
+        );
 
         delete_archived_worktree_impl(&label, "delete_folder".to_string())
             .expect("delete archived worktree");
 
         assert!(!worktree_path.exists());
+        let worktrees = git_output(&project_path, &["worktree", "list", "--porcelain"]);
+        assert!(
+            !worktrees.contains("delete_folder"),
+            "delete must unregister the git worktree: {worktrees}"
+        );
         let saved = load_workspace_config(&workspace_path);
         assert!(!saved
             .archived_worktrees
@@ -4643,5 +4620,125 @@ mod tests {
             git_output(&wt_project, &["config", "branch.upstream_feature.remote"]),
             "origin"
         );
+    }
+
+    #[serial]
+    #[test]
+    fn archive_and_restore_leave_healthy_project_untouched_even_on_another_branch() {
+        let workspace = tempfile::tempdir().expect("create workspace");
+        let project_path = make_origin_backed_project(workspace.path(), "demo");
+        let label = bind_workspace(
+            workspace.path(),
+            &workspace_config(vec![project_config("demo")]),
+        );
+        let workspace_path = workspace.path().to_string_lossy().to_string();
+
+        let created_path = create_worktree_impl(
+            &label,
+            CreateWorktreeRequest {
+                name: "switched_feature".to_string(),
+                folder_name: None,
+                projects: vec![CreateProjectRequest {
+                    name: "demo".to_string(),
+                    base_branch: "main".to_string(),
+                }],
+            },
+        )
+        .expect("create worktree");
+        let wt_project = PathBuf::from(created_path).join("projects").join("demo");
+        // The user switched branches inside the worktree and left uncommitted work behind.
+        run_git(&wt_project, &["checkout", "-b", "side_branch"]);
+        std::fs::write(wt_project.join("wip.txt"), "uncommitted\n").expect("write wip file");
+
+        archive_worktree_impl(&label, "switched_feature".to_string()).expect("archive");
+
+        assert!(
+            wt_project.join("wip.txt").exists(),
+            "archiving must not touch files"
+        );
+        assert_eq!(
+            git_output(&wt_project, &["branch", "--show-current"]),
+            "side_branch"
+        );
+        assert!(load_workspace_config(&workspace_path)
+            .archived_worktrees
+            .contains(&"switched_feature".to_string()));
+
+        restore_worktree_impl(&label, "switched_feature".to_string()).expect("restore");
+
+        assert!(
+            wt_project.join("wip.txt").exists(),
+            "restoring must not touch files"
+        );
+        assert_eq!(
+            git_output(&wt_project, &["branch", "--show-current"]),
+            "side_branch"
+        );
+        assert!(!load_workspace_config(&workspace_path)
+            .archived_worktrees
+            .contains(&"switched_feature".to_string()));
+        let worktrees = git_output(&project_path, &["worktree", "list", "--porcelain"]);
+        let registrations = worktrees
+            .lines()
+            .filter(|line| line.starts_with("worktree ") && line.contains("switched_feature"))
+            .count();
+        assert_eq!(registrations, 1, "{worktrees}");
+    }
+
+    #[serial]
+    #[test]
+    fn restore_worktree_repairs_project_whose_registration_was_lost() {
+        let workspace = tempfile::tempdir().expect("create workspace");
+        let project_path = make_origin_backed_project(workspace.path(), "demo");
+        let label = bind_workspace(
+            workspace.path(),
+            &workspace_config(vec![project_config("demo")]),
+        );
+        let workspace_path = workspace.path().to_string_lossy().to_string();
+
+        let created_path = create_worktree_impl(
+            &label,
+            CreateWorktreeRequest {
+                name: "lost_registration".to_string(),
+                folder_name: None,
+                projects: vec![CreateProjectRequest {
+                    name: "demo".to_string(),
+                    base_branch: "main".to_string(),
+                }],
+            },
+        )
+        .expect("create worktree");
+        let wt_project = PathBuf::from(created_path).join("projects").join("demo");
+
+        // Legacy damage: older versions ran `git worktree remove --force` on archive; on Windows
+        // that could drop the registration while (some) files stayed behind.
+        std::fs::remove_dir_all(project_path.join(".git").join("worktrees"))
+            .expect("drop worktree registrations");
+        let broken = std::process::Command::new("git")
+            .args(["rev-parse", "--is-inside-work-tree"])
+            .current_dir(&wt_project)
+            .output()
+            .expect("run git in broken worktree");
+        assert!(
+            !broken.status.success(),
+            "fixture must be unopenable by git"
+        );
+        let mut saved = load_workspace_config(&workspace_path);
+        saved
+            .archived_worktrees
+            .push("lost_registration".to_string());
+        save_workspace_config_internal(&workspace_path, &saved).expect("mark archived");
+
+        restore_worktree_impl(&label, "lost_registration".to_string())
+            .expect("restore repairs the broken project");
+
+        assert!(wt_project.join(".git").is_file());
+        assert_eq!(
+            git_output(&wt_project, &["branch", "--show-current"]),
+            "lost_registration"
+        );
+        assert!(!load_workspace_config(&workspace_path)
+            .archived_worktrees
+            .contains(&"lost_registration".to_string()));
     }
 }

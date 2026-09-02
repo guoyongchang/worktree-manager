@@ -43,7 +43,7 @@ activatedTerminals（标签栏显示）和 mountedTerminals（组件挂载/PTY �
 
 ### Windows 稳定性规则（tauri-apps/tauri#15408）
 - **禁止在非主线程 clone / drop `AppHandle` / `Window` / `Webview`**：tao 在 Windows 上用非原子 `Rc` 管理事件循环，跨线程引用计数会导致 ILLEGAL_INSTRUCTION / ACCESS_VIOLATION 崩溃。工作线程、tokio 任务、HTTP handler 一律用 `state::with_app_handle(|h| h.emit(...))` 借用，不要 `APP_HANDLE.lock().clone()`。PTY 读线程不得触碰 AppHandle（桌面端走轮询）。
-- Restart Manager 文件占用检查只是诊断（只注册普通文件、限批次/长度/时长），任何失败只降级为警告；归档是否被占用以目录重命名探测为准。
+- 归档/恢复只改 `archived_worktrees` 配置，不做任何 git / 文件操作（恢复仅修复 git 已无法打开的残缺项目目录，健康目录即使切了分支/有未提交改动也不碰）；`git worktree remove`、目录删除、`branch -D` 只发生在删除已归档 worktree 时。Restart Manager 文件占用检查只是诊断（只注册普通文件、限批次/长度/时长），仅在删除失败时用于提示占用进程。
 - Worktree 生命周期锁必须用 `state::lock_lifecycle_with_timeout` 获取，禁止无限期 `.lock()`。恢复归档 worktree 不做任何网络操作（upstream 用 `branch --set-upstream-to` 本地设置）。
 
 ### 双模式命令同步
