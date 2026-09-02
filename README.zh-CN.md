@@ -136,7 +136,7 @@
 |------|------|
 | 🖥️ **IDE 集成** | 一键用 VS Code、Cursor 或 IntelliJ IDEA 打开 |
 | 🤖 **AI 就绪 (MCP)** | 内置 [MCP 服务器](docs/MCP.md)，让 Claude Code、Cursor、Codex 通过自然语言管理 worktree |
-| 📁 **安全归档** | 归档前检查未提交更改和运行中的进程，随时一键恢复 |
+| 📁 **安全归档** | 归档只是隐藏，不动文件、分支和 git 状态；归档前提示未提交/未推送的改动，随时一键恢复 |
 
 ---
 
@@ -247,7 +247,7 @@ workspace/
 <details>
 <summary>面向贡献者和开发者</summary>
 
-**环境要求：** Node.js 20+、Rust 1.70+（[安装](https://rustup.rs)）、Git 2.0+
+**环境要求：** Node.js 22+、Rust 1.98（[安装 rustup](https://rustup.rs)，工具链会通过 rust-toolchain.toml 自动安装）、Git 2.0+
 
 ```bash
 git clone https://github.com/guoyongchang/worktree-manager.git

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use crate::commands::window::broadcast_lock_state;
 use crate::config::{
@@ -17,7 +18,8 @@ use crate::types::{
 };
 use crate::utils::{
     friendly_fs_error, git_command, mask_url_credentials, normalize_path,
-    run_git_command_with_timeout, scan_dir_for_linkable_folders, validate_git_ref_name,
+    run_git_command_with_timeout, run_git_command_with_timeout_secs, scan_dir_for_linkable_folders,
+    validate_git_ref_name,
 };
 
 /// Cross-platform symlink creation.
@@ -63,10 +65,46 @@ pub(crate) fn create_symlink(src: &std::path::Path, dst: &std::path::Path) -> st
 
 // ==================== Tauri 命令：Worktree 操作 ====================
 
+/// Result of the (Windows-only) Restart Manager file-usage diagnostic.
+///
+/// The Restart Manager query is strictly best-effort. Archiving never touches files, so the
+/// diagnostic is only consulted when deleting an archived worktree fails (to name the processes
+/// holding its files) and by the "terminate locking process" command. A failed or truncated
+/// query is surfaced as a `warning` and never blocks anything on its own.
+/// On non-Windows platforms the report is always empty.
+#[derive(Debug, Default)]
+pub struct LockCheckReport {
+    /// Processes holding files under the worktree (deduplicated by PID, current process excluded).
+    pub processes: Vec<LockedProcessInfo>,
+    /// User-facing (Chinese) note when the check could not be completed in full.
+    pub warning: Option<String>,
+    /// Number of regular files that were registered with the Restart Manager.
+    pub scanned_files: usize,
+    /// True when the scan or the query stopped early because of a size/time budget.
+    pub truncated: bool,
+}
+
+/// Restart Manager accepts *file* paths only and persists every registered resource in the
+/// registry for the session, so the diagnostic is bounded: at most this many regular files are
+/// registered per check (BFS order favours shallow files such as `.git` metadata).
 #[cfg(target_os = "windows")]
-const LOCK_CHECK_MAX_RESOURCES: usize = 4096;
+const LOCK_CHECK_MAX_RESOURCES: usize = 2048;
+/// Maximum number of files registered per Restart Manager session.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) const LOCK_CHECK_BATCH_SIZE: usize = 32;
+/// Maximum total UTF-16 units (NUL terminators included) registered per session. Oversized
+/// registrations fail with ERROR_WRITE_FAULT (29) because RM stores them in the registry.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) const LOCK_CHECK_BATCH_UTF16_BUDGET: usize = 8192;
+/// Files whose UTF-16 path is longer than this are not registered (RM rejects > MAX_PATH).
 #[cfg(target_os = "windows")]
-const LOCK_CHECK_BATCH_SIZE: usize = 128;
+const LOCK_CHECK_MAX_PATH_UTF16: usize = 240;
+/// Wall-clock budget for the directory scan.
+#[cfg(target_os = "windows")]
+const LOCK_CHECK_SCAN_BUDGET: std::time::Duration = std::time::Duration::from_secs(3);
+/// Wall-clock budget for the whole check (scan + all Restart Manager batches).
+#[cfg(target_os = "windows")]
+const LOCK_CHECK_TOTAL_BUDGET: std::time::Duration = std::time::Duration::from_secs(8);
 
 #[cfg(target_os = "windows")]
 fn wide_string(value: &std::ffi::OsStr) -> Vec<u16> {
@@ -103,42 +141,133 @@ fn rm_app_type_name(value: i32) -> String {
     .to_string()
 }
 
+/// Human-readable name for the Win32 error codes Restart Manager is known to return.
 #[cfg(target_os = "windows")]
-fn collect_lock_check_resources(root: &Path) -> Vec<PathBuf> {
-    let mut resources = Vec::new();
-    let mut stack = vec![root.to_path_buf()];
+fn rm_error_name(code: u32) -> &'static str {
+    match code {
+        5 => "ERROR_ACCESS_DENIED",
+        8 => "ERROR_NOT_ENOUGH_MEMORY",
+        29 => "ERROR_WRITE_FAULT",
+        87 => "ERROR_INVALID_PARAMETER",
+        121 => "ERROR_SEM_TIMEOUT",
+        234 => "ERROR_MORE_DATA",
+        353 => "ERROR_MAX_SESSIONS_REACHED",
+        1223 => "ERROR_CANCELLED",
+        _ => "unknown",
+    }
+}
 
-    while let Some(path) = stack.pop() {
-        if resources.len() >= LOCK_CHECK_MAX_RESOURCES {
-            break;
-        }
+/// Files collected for a Restart Manager query (NUL-terminated UTF-16 paths).
+#[cfg(target_os = "windows")]
+struct LockCheckScan {
+    paths: Vec<Vec<u16>>,
+    skipped_long: usize,
+    /// Stopped at `LOCK_CHECK_MAX_RESOURCES` (expected for any real repository).
+    capped: bool,
+    /// Stopped by `LOCK_CHECK_SCAN_BUDGET` (worth telling the user about).
+    timed_out: bool,
+}
 
-        resources.push(path.clone());
-        let Ok(entries) = fs::read_dir(&path) else {
+/// Breadth-first scan of the worktree collecting REGULAR FILES only.
+///
+/// * Directories are never registered (RmGetList answers ERROR_ACCESS_DENIED for them).
+/// * Reparse points (junctions/symlinks into the main project) are neither registered nor
+///   descended into.
+/// * Over-long paths are skipped, and the scan stops at `LOCK_CHECK_MAX_RESOURCES` files or
+///   after `LOCK_CHECK_SCAN_BUDGET`.
+#[cfg(target_os = "windows")]
+fn collect_lock_check_resources(root: &Path) -> LockCheckScan {
+    use std::collections::VecDeque;
+    use std::os::windows::fs::MetadataExt;
+
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+
+    let start = Instant::now();
+    let mut scan = LockCheckScan {
+        paths: Vec::new(),
+        skipped_long: 0,
+        capped: false,
+        timed_out: false,
+    };
+    let mut queue = VecDeque::new();
+    queue.push_back(root.to_path_buf());
+
+    'bfs: while let Some(dir) = queue.pop_front() {
+        let Ok(entries) = fs::read_dir(&dir) else {
             continue;
         };
 
         for entry in entries.flatten() {
-            if resources.len() >= LOCK_CHECK_MAX_RESOURCES {
-                break;
+            if scan.paths.len() >= LOCK_CHECK_MAX_RESOURCES {
+                // Expected for any real repository: the shallow files that matter are already
+                // registered, so this is logged but not surfaced as a warning.
+                scan.capped = true;
+                break 'bfs;
+            }
+            if start.elapsed() >= LOCK_CHECK_SCAN_BUDGET {
+                scan.timed_out = true;
+                break 'bfs;
+            }
+
+            // DirEntry::metadata() does not follow symlinks and is free on Windows.
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
+            if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+                continue;
             }
 
             let child = entry.path();
-            let Ok(metadata) = fs::symlink_metadata(&child) else {
+            if metadata.is_dir() {
+                queue.push_back(child);
                 continue;
-            };
-            use std::os::windows::fs::MetadataExt;
-            const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-            let is_reparse_point = metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0;
-
-            resources.push(child.clone());
-            if metadata.is_dir() && !is_reparse_point {
-                stack.push(child);
             }
+            if !metadata.is_file() {
+                continue;
+            }
+
+            let wide = wide_string(child.as_os_str());
+            if wide.len() > LOCK_CHECK_MAX_PATH_UTF16 + 1 {
+                scan.skipped_long += 1;
+                continue;
+            }
+            scan.paths.push(wide);
         }
     }
 
-    resources
+    scan
+}
+
+/// Split registered resources into Restart Manager batches, honouring both an item count and a
+/// total UTF-16 budget per batch. Returns index lists into `paths`. A single path larger than
+/// the budget still gets a batch of its own (it will fail on its own instead of poisoning
+/// neighbours).
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) fn split_lock_check_batches(
+    paths: &[Vec<u16>],
+    max_items: usize,
+    max_utf16_units: usize,
+) -> Vec<Vec<usize>> {
+    let mut batches = Vec::new();
+    let mut current: Vec<usize> = Vec::new();
+    let mut current_units = 0usize;
+
+    for (index, path) in paths.iter().enumerate() {
+        let units = path.len();
+        if !current.is_empty()
+            && (current.len() >= max_items || current_units + units > max_utf16_units)
+        {
+            batches.push(std::mem::take(&mut current));
+            current_units = 0;
+        }
+        current.push(index);
+        current_units += units;
+    }
+    if !current.is_empty() {
+        batches.push(current);
+    }
+
+    batches
 }
 
 #[cfg(target_os = "windows")]
@@ -146,9 +275,14 @@ fn filetime_to_string(value: windows_sys::Win32::Foundation::FILETIME) -> String
     (((value.dwHighDateTime as u64) << 32) | value.dwLowDateTime as u64).to_string()
 }
 
+/// Query the Restart Manager for one batch of NUL-terminated UTF-16 file paths.
+///
+/// Every failure (RmStartSession, RmRegisterResources, RmGetList, any error code) is returned as
+/// `Err` describing the stage and code; the caller turns it into a warning. A successfully
+/// started session is always ended.
 #[cfg(target_os = "windows")]
-fn query_restart_manager(paths: &[PathBuf]) -> Result<Vec<LockedProcessInfo>, String> {
-    use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_MORE_DATA, ERROR_SUCCESS};
+fn query_restart_manager(paths: &[&[u16]]) -> Result<Vec<LockedProcessInfo>, String> {
+    use windows_sys::Win32::Foundation::{ERROR_MORE_DATA, ERROR_SUCCESS};
     use windows_sys::Win32::System::RestartManager::{
         RmEndSession, RmGetList, RmRegisterResources, RmStartSession, CCH_RM_SESSION_KEY,
         RM_PROCESS_INFO,
@@ -157,21 +291,16 @@ fn query_restart_manager(paths: &[PathBuf]) -> Result<Vec<LockedProcessInfo>, St
     let mut session = 0u32;
     let mut session_key = vec![0u16; (CCH_RM_SESSION_KEY + 1) as usize];
     let start_result = unsafe { RmStartSession(&mut session, 0, session_key.as_mut_ptr()) };
-    if start_result == ERROR_ACCESS_DENIED {
-        log::warn!("Restart Manager RmStartSession returned ACCESS_DENIED – skipping lock check");
-        return Ok(Vec::new());
-    }
     if start_result != ERROR_SUCCESS {
-        return Err(format!("Restart Manager start failed: {}", start_result));
+        return Err(format!(
+            "RmStartSession failed with error {} ({})",
+            start_result,
+            rm_error_name(start_result)
+        ));
     }
 
     let result = (|| {
-        let wide_paths: Vec<Vec<u16>> = paths
-            .iter()
-            .map(|path| wide_string(path.as_os_str()))
-            .collect();
-        let path_ptrs: Vec<*const u16> = wide_paths.iter().map(|path| path.as_ptr()).collect();
-
+        let path_ptrs: Vec<*const u16> = paths.iter().map(|path| path.as_ptr()).collect();
         let register_result = unsafe {
             RmRegisterResources(
                 session,
@@ -183,14 +312,12 @@ fn query_restart_manager(paths: &[PathBuf]) -> Result<Vec<LockedProcessInfo>, St
                 std::ptr::null(),
             )
         };
-        if register_result == ERROR_ACCESS_DENIED {
-            log::warn!("Restart Manager RmRegisterResources returned ACCESS_DENIED – skipping");
-            return Ok(Vec::new());
-        }
         if register_result != ERROR_SUCCESS {
             return Err(format!(
-                "Restart Manager resource registration failed: {}",
-                register_result
+                "RmRegisterResources failed with error {} ({}) for a batch of {} files",
+                register_result,
+                rm_error_name(register_result),
+                path_ptrs.len()
             ));
         }
 
@@ -209,44 +336,44 @@ fn query_restart_manager(paths: &[PathBuf]) -> Result<Vec<LockedProcessInfo>, St
         if first_result == ERROR_SUCCESS && needed == 0 {
             return Ok(Vec::new());
         }
-        if first_result == ERROR_ACCESS_DENIED {
-            // Insufficient privileges to query locked processes (e.g. files held by
-            // elevated or system processes).  Treat as "no known locks" so that
-            // archiving is not blocked by the check itself.
-            log::warn!(
-                "Restart Manager RmGetList returned ACCESS_DENIED – skipping lock check for this batch"
-            );
-            return Ok(Vec::new());
-        }
         if first_result != ERROR_MORE_DATA && first_result != ERROR_SUCCESS {
             return Err(format!(
-                "Restart Manager process query failed: {}",
-                first_result
+                "RmGetList failed with error {} ({})",
+                first_result,
+                rm_error_name(first_result)
             ));
         }
 
-        // windows-sys does not derive Default for RM_PROCESS_INFO; use zeroed() instead.
-        let mut processes: Vec<RM_PROCESS_INFO> = (0..needed as usize)
-            .map(|_| unsafe { std::mem::zeroed() })
-            .collect();
-        count = needed;
-        let second_result = unsafe {
-            RmGetList(
-                session,
-                &mut needed,
-                &mut count,
-                processes.as_mut_ptr(),
-                &mut reboot_reasons,
-            )
-        };
-        if second_result == ERROR_ACCESS_DENIED {
-            log::warn!("Restart Manager RmGetList (2nd call) returned ACCESS_DENIED – skipping");
-            return Ok(Vec::new());
-        }
-        if second_result != ERROR_SUCCESS {
+        // Two-call protocol: the first call reports the required buffer size. The process list
+        // can grow in between, so allow a couple of resize-and-retry rounds.
+        let mut processes: Vec<RM_PROCESS_INFO>;
+        let mut attempts = 0;
+        loop {
+            attempts += 1;
+            // windows-sys does not derive Default for RM_PROCESS_INFO; use zeroed() instead.
+            processes = (0..needed as usize)
+                .map(|_| unsafe { std::mem::zeroed() })
+                .collect();
+            count = needed;
+            let second_result = unsafe {
+                RmGetList(
+                    session,
+                    &mut needed,
+                    &mut count,
+                    processes.as_mut_ptr(),
+                    &mut reboot_reasons,
+                )
+            };
+            if second_result == ERROR_SUCCESS {
+                break;
+            }
+            if second_result == ERROR_MORE_DATA && attempts < 3 {
+                continue;
+            }
             return Err(format!(
-                "Restart Manager process query failed: {}",
-                second_result
+                "RmGetList (buffer call) failed with error {} ({})",
+                second_result,
+                rm_error_name(second_result)
             ));
         }
 
@@ -278,93 +405,125 @@ fn query_restart_manager(paths: &[PathBuf]) -> Result<Vec<LockedProcessInfo>, St
     result
 }
 
+/// Best-effort Restart Manager diagnostic for a worktree. Never fails: batch errors and budget
+/// truncation are aggregated into `LockCheckReport::warning` and logged once.
 #[cfg(target_os = "windows")]
-pub fn find_worktree_locking_processes(path: &Path) -> Result<Vec<LockedProcessInfo>, String> {
-    let resources = collect_lock_check_resources(path);
-    let mut by_pid: HashMap<u32, LockedProcessInfo> = HashMap::new();
+pub fn find_worktree_locking_processes(path: &Path) -> LockCheckReport {
+    let start = Instant::now();
+    let scan = collect_lock_check_resources(path);
+    let scan_ms = start.elapsed().as_millis();
+    let batches = split_lock_check_batches(
+        &scan.paths,
+        LOCK_CHECK_BATCH_SIZE,
+        LOCK_CHECK_BATCH_UTF16_BUDGET,
+    );
+    let total_batches = batches.len();
 
-    for batch in resources.chunks(LOCK_CHECK_BATCH_SIZE) {
-        let processes = query_restart_manager(batch)?;
-        for mut process in processes {
-            if process.name.is_empty() {
-                process.name = format!("PID {}", process.pid);
+    let mut by_pid: HashMap<u32, LockedProcessInfo> = HashMap::new();
+    let mut failed_batches = 0usize;
+    let mut skipped_batches = 0usize;
+    let mut first_error: Option<String> = None;
+    // Only time-budget cut-offs count as "incomplete" for the user; the file-count cap is normal.
+    let mut budget_truncated = scan.timed_out;
+
+    for (batch_index, batch) in batches.iter().enumerate() {
+        if start.elapsed() >= LOCK_CHECK_TOTAL_BUDGET {
+            skipped_batches = total_batches - batch_index;
+            budget_truncated = true;
+            break;
+        }
+
+        let slices: Vec<&[u16]> = batch
+            .iter()
+            .map(|&index| scan.paths[index].as_slice())
+            .collect();
+        match query_restart_manager(&slices) {
+            Ok(processes) => {
+                for mut process in processes {
+                    if process.name.is_empty() {
+                        process.name = format!("PID {}", process.pid);
+                    }
+                    by_pid.entry(process.pid).or_insert(process);
+                }
             }
-            by_pid.entry(process.pid).or_insert(process);
+            Err(error) => {
+                failed_batches += 1;
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+            }
         }
     }
 
     let current_pid = std::process::id();
-    let mut result: Vec<LockedProcessInfo> = by_pid
+    let mut processes: Vec<LockedProcessInfo> = by_pid
         .into_values()
         .filter(|process| process.pid != current_pid)
         .collect();
-    result.sort_by(|a, b| a.name.cmp(&b.name).then(a.pid.cmp(&b.pid)));
-    Ok(result)
-}
+    processes.sort_by(|a, b| a.name.cmp(&b.name).then(a.pid.cmp(&b.pid)));
 
-#[cfg(not(target_os = "windows"))]
-pub fn find_worktree_locking_processes(_path: &Path) -> Result<Vec<LockedProcessInfo>, String> {
-    Ok(Vec::new())
-}
-
-#[cfg(target_os = "windows")]
-fn probe_windows_rename(path: &Path) -> Result<(), String> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| "Worktree path has no parent".to_string())?;
-    let name = path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .ok_or_else(|| "Invalid worktree path".to_string())?;
-    let probe_path = parent.join(format!(
-        ".{}.archive-lock-check-{}",
-        name,
-        std::process::id()
-    ));
-
-    match fs::remove_dir_all(&probe_path) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => {
-            return Err(friendly_fs_error("无法清理归档检查的临时目录", &e));
+    let scanned_files = scan.paths.len();
+    let warning = if failed_batches > 0 || budget_truncated {
+        let mut details = Vec::new();
+        if failed_batches > 0 {
+            details.push(format!(
+                "{} 个批次失败: {}",
+                failed_batches,
+                first_error.as_deref().unwrap_or("unknown")
+            ));
         }
+        if budget_truncated {
+            details.push("扫描因耗时上限被截断".to_string());
+        }
+        Some(format!(
+            "文件占用检查未完整执行（{}；已扫描 {} 个文件）",
+            details.join("；"),
+            scanned_files
+        ))
+    } else {
+        None
+    };
+
+    if warning.is_some() {
+        log::warn!(
+            "[lock-check] incomplete: path='{}', scanned_files={}, skipped_long={}, capped={}, batches={}, failed_batches={}, skipped_batches={}, budget_truncated={}, first_error={:?}, scan_ms={}, total_ms={}",
+            path.display(),
+            scanned_files,
+            scan.skipped_long,
+            scan.capped,
+            total_batches,
+            failed_batches,
+            skipped_batches,
+            budget_truncated,
+            first_error,
+            scan_ms,
+            start.elapsed().as_millis()
+        );
+    } else {
+        log::info!(
+            "[lock-check] complete: path='{}', scanned_files={}, skipped_long={}, capped={}, batches={}, processes={}, scan_ms={}, total_ms={}",
+            path.display(),
+            scanned_files,
+            scan.skipped_long,
+            scan.capped,
+            total_batches,
+            processes.len(),
+            scan_ms,
+            start.elapsed().as_millis()
+        );
     }
 
-    fs::rename(path, &probe_path).map_err(|e| {
-        friendly_fs_error("Worktree 正在被占用，无法归档。请关闭相关程序后重试", &e)
-    })?;
-    if let Err(e) = fs::rename(&probe_path, path) {
-        return Err(format!(
-            "归档检查后恢复目录失败：{}。\n请手动将 '{}' 重命名为 '{}'",
-            crate::utils::friendly_io_error(&e),
-            probe_path.display(),
-            path.display()
-        ));
+    LockCheckReport {
+        processes,
+        warning,
+        scanned_files,
+        truncated: scan.capped || budget_truncated,
     }
-    Ok(())
-}
-
-#[cfg(target_os = "windows")]
-fn ensure_windows_archive_file_usage_clear(path: &Path) -> Result<(), String> {
-    let locking_processes = find_worktree_locking_processes(path)?;
-    if !locking_processes.is_empty() {
-        let names = locking_processes
-            .iter()
-            .map(|process| format!("{} (PID {})", process.name, process.pid))
-            .collect::<Vec<_>>()
-            .join(", ");
-        return Err(format!(
-            "Worktree files are currently in use. End these processes before archiving: {}",
-            names
-        ));
-    }
-
-    probe_windows_rename(path)
 }
 
 #[cfg(not(target_os = "windows"))]
-fn ensure_windows_archive_file_usage_clear(_path: &Path) -> Result<(), String> {
-    Ok(())
+pub fn find_worktree_locking_processes(_path: &Path) -> LockCheckReport {
+    LockCheckReport::default()
 }
 
 pub fn terminate_worktree_locking_process_impl(
@@ -388,12 +547,20 @@ pub fn terminate_worktree_locking_process_impl(
         return Err("Worktree does not exist".to_string());
     }
 
-    let locking_processes = find_worktree_locking_processes(&worktree_path)?;
-    let is_current_blocker = locking_processes
+    let report = find_worktree_locking_processes(&worktree_path);
+    let is_current_blocker = report
+        .processes
         .iter()
         .any(|process| process.pid == pid && process.process_start_time == process_start_time);
 
     if !is_current_blocker {
+        if let Some(warning) = &report.warning {
+            log::warn!(
+                "[worktree] terminate_worktree_locking_process: PID {} not found; {}",
+                pid,
+                warning
+            );
+        }
         return Err("Process is no longer locking this worktree".to_string());
     }
 
@@ -927,9 +1094,10 @@ pub fn create_worktree_impl(
 
     // 串行化同一 workspace 的生命周期操作，防止并发同名创建留下半注册目录等竞态。
     let lifecycle_lock = crate::state::workspace_lifecycle_lock(&workspace_path);
-    let _lifecycle_guard = lifecycle_lock
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _lifecycle_guard = crate::state::lock_lifecycle_with_timeout(
+        &lifecycle_lock,
+        crate::state::LIFECYCLE_LOCK_TIMEOUT,
+    )?;
     // 锁内读取最新配置。
     let config = crate::config::load_workspace_config(&workspace_path);
 
@@ -1086,15 +1254,21 @@ pub(crate) async fn create_worktree(
     }
 }
 
+/// Archive a worktree = move it from the active list to the archived list. Nothing else
+/// happens: project directories, git worktree registrations and branches stay exactly as they
+/// are, so archiving is instant and can never be blocked by locked files. Everything
+/// destructive (`git worktree remove`, directory deletion, `git branch -D`) lives in
+/// `delete_archived_worktree_impl`.
 pub fn archive_worktree_impl(window_label: &str, name: String) -> Result<(), String> {
     let workspace_path =
         crate::config::get_window_workspace_path(window_label).ok_or("No workspace selected")?;
 
-    // 串行化同一 workspace 的生命周期操作，防止并发竞态破坏配置/git 状态。
+    // 串行化同一 workspace 的生命周期操作，防止并发竞态破坏配置。
     let lifecycle_lock = crate::state::workspace_lifecycle_lock(&workspace_path);
-    let _lifecycle_guard = lifecycle_lock
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _lifecycle_guard = crate::state::lock_lifecycle_with_timeout(
+        &lifecycle_lock,
+        crate::state::LIFECYCLE_LOCK_TIMEOUT,
+    )?;
     // 锁内读取最新配置，防止并发生命周期操作之间丢更新。
     let config = crate::config::load_workspace_config(&workspace_path);
 
@@ -1106,16 +1280,13 @@ pub fn archive_worktree_impl(window_label: &str, name: String) -> Result<(), Str
     }
 
     log::info!(
-        "[worktree] Archiving worktree '{}' in workspace '{}'",
+        "[worktree] Archiving worktree '{}' in workspace '{}' (config-only: files, git worktrees and branches are left untouched)",
         name,
         workspace_path
     );
 
-    // Step 1: Close all PTY sessions associated with this worktree
-    log::info!(
-        "[worktree] Step 1/4: Closing PTY sessions for worktree '{}'",
-        name
-    );
+    // Step 1/2: close the worktree's PTY sessions. The worktree leaves the active list and the
+    // frontend unmounts its terminals (cleanupTerminalsForPath); this is the backend safety net.
     {
         let worktree_path_str = worktree_path.to_string_lossy().to_string();
         if let Ok(mut manager) = PTY_MANAGER.lock() {
@@ -1127,84 +1298,16 @@ pub fn archive_worktree_impl(window_label: &str, name: String) -> Result<(), Str
                     closed.len(),
                     closed
                 );
-            } else {
-                log::info!("[worktree] No PTY sessions to close");
             }
         }
     }
 
-    // Step 2: On Windows, fail before mutating git worktree registrations if files are in use.
-    log::info!("[worktree] Step 2/4: Checking file usage for '{}'", name);
-    ensure_windows_archive_file_usage_clear(&worktree_path)?;
-
-    // Step 3: Remove git worktrees first
-    log::info!(
-        "[worktree] Step 3/4: Removing git worktree registrations for '{}'",
-        name
-    );
-    let projects_path = worktree_path.join("projects");
-    if projects_path.exists() {
-        if let Ok(entries) = std::fs::read_dir(&projects_path) {
-            for entry in entries.flatten() {
-                let proj_path = entry.path();
-                let proj_name = proj_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-
-                let main_proj_path = root.join("projects").join(proj_name);
-
-                log::info!(
-                    "[worktree] Removing git worktree for project '{}'",
-                    proj_name
-                );
-                let output = git_command()
-                    .args([
-                        "-C",
-                        main_proj_path.to_string_lossy().as_ref(),
-                        "worktree",
-                        "remove",
-                        proj_path.to_string_lossy().as_ref(),
-                        "--force",
-                    ])
-                    .output();
-
-                match &output {
-                    Ok(o) if o.status.success() => {
-                        log::info!(
-                            "[worktree] Successfully removed git worktree for '{}'",
-                            proj_name
-                        );
-                    }
-                    Ok(o) => {
-                        let stderr_for_log =
-                            mask_url_credentials(&String::from_utf8_lossy(&o.stderr));
-                        log::warn!(
-                            "[worktree] git worktree remove for '{}' returned non-zero: {}",
-                            proj_name,
-                            stderr_for_log
-                        );
-                    }
-                    Err(e) => {
-                        log::warn!(
-                            "[worktree] Failed to execute git worktree remove for '{}': {}",
-                            proj_name,
-                            e
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    // Step 4: Mark as archived in config (no folder rename)
-    log::info!("[worktree] Step 4/4: Marking worktree as archived in config");
+    // Step 2/2: mark as archived in config.
     let mut config = config;
     if !config.archived_worktrees.contains(&name) {
         config.archived_worktrees.push(name.clone());
     }
     save_workspace_config_internal(&workspace_path, &config)?;
-    log::info!(
-        "[worktree] Marked worktree '{}' as archived in config",
-        name
-    );
 
     log::info!("[worktree] Successfully archived worktree '{}'", name);
     Ok(())
@@ -1239,32 +1342,13 @@ pub fn check_worktree_status_impl(
         errors: vec![],
         projects: vec![],
         locked_processes: vec![],
-        lock_check_supported: cfg!(target_os = "windows"),
+        lock_check_supported: false,
         lock_check_error: None,
     };
 
-    #[cfg(target_os = "windows")]
-    {
-        match find_worktree_locking_processes(&worktree_path) {
-            Ok(processes) => {
-                if !processes.is_empty() {
-                    status.can_archive = false;
-                    status.errors.push(format!(
-                        "Worktree files are currently in use by {} process(es)",
-                        processes.len()
-                    ));
-                    status.locked_processes = processes;
-                }
-            }
-            Err(e) => {
-                status.can_archive = false;
-                status
-                    .errors
-                    .push(format!("File usage check failed: {}", e));
-                status.lock_check_error = Some(e);
-            }
-        }
-    }
+    // Archiving is a pure config change (see archive_worktree_impl): no file-lock check is
+    // needed here. Locked files only matter when an archived worktree is deleted, and that
+    // failure reports the holding processes itself.
 
     let projects_path = worktree_path.join("projects");
     if !projects_path.exists() {
@@ -1339,6 +1423,313 @@ pub(crate) async fn check_worktree_status(
         .map_err(|e| format!("Task join error: {}", e))?
 }
 
+/// Timeout for quick local git queries during restore (rev-parse / branch --list / prune).
+const RESTORE_GIT_QUERY_TIMEOUT_SECS: u64 = 60;
+/// Timeout for `git worktree add` during restore (large checkouts on slow disks).
+const RESTORE_WORKTREE_ADD_TIMEOUT_SECS: u64 = 600;
+
+/// Re-create the configured linked-folder symlinks for one restored project (best-effort).
+fn restore_project_links(
+    config: &crate::types::WorkspaceConfig,
+    main_proj_path: &Path,
+    wt_proj_path: &Path,
+    proj_name: &str,
+) {
+    let Some(proj_config) = config.projects.iter().find(|p| p.name == proj_name) else {
+        return;
+    };
+    for folder_name in &proj_config.linked_folders {
+        let main_folder = main_proj_path.join(folder_name);
+        let wt_folder = wt_proj_path.join(folder_name);
+
+        if main_folder.exists() && !wt_folder.exists() {
+            create_symlink(&main_folder, &wt_folder).ok();
+        }
+    }
+}
+
+/// Point `<branch>` at `origin/<branch>` when that remote-tracking ref already exists locally.
+/// Purely local (no fetch / push): restore must never wait on the network or a credential
+/// prompt. When the ref is missing the upstream is left for the first `git push -u`.
+fn set_local_upstream(wt_dir: &str, proj_name: &str, branch_name: &str) {
+    let remote_ref = format!("refs/remotes/origin/{}", branch_name);
+    let remote_exists = matches!(
+        run_git_command_with_timeout_secs(
+            &["rev-parse", "--verify", "--quiet", &remote_ref],
+            wt_dir,
+            RESTORE_GIT_QUERY_TIMEOUT_SECS,
+        ),
+        Ok(output) if output.status.success()
+    );
+    if !remote_exists {
+        log::info!(
+            "[worktree] Project '{}': origin/{} is not known locally; upstream will be set on first push",
+            proj_name,
+            branch_name
+        );
+        return;
+    }
+
+    let upstream_arg = format!("--set-upstream-to=origin/{}", branch_name);
+    match run_git_command_with_timeout_secs(
+        &["branch", &upstream_arg, branch_name],
+        wt_dir,
+        RESTORE_GIT_QUERY_TIMEOUT_SECS,
+    ) {
+        Ok(output) if output.status.success() => {
+            log::info!(
+                "[worktree] Project '{}': upstream of '{}' set to origin/{} (local, no network)",
+                proj_name,
+                branch_name,
+                branch_name
+            );
+        }
+        Ok(output) => {
+            log::warn!(
+                "[worktree] Project '{}': failed to set upstream of '{}' to origin/{}: {}",
+                proj_name,
+                branch_name,
+                branch_name,
+                mask_url_credentials(String::from_utf8_lossy(&output.stderr).trim())
+            );
+        }
+        Err(e) => {
+            log::warn!(
+                "[worktree] Project '{}': failed to run git branch --set-upstream-to: {}",
+                proj_name,
+                e
+            );
+        }
+    }
+}
+
+/// Check (and only if necessary repair) one project of a worktree being restored.
+///
+/// Healthy worktrees are left untouched. Directories git cannot open are re-added from the
+/// branch. Returns `Err(message)` (already prefixed with the project name) when a repair was
+/// needed but failed; the caller aggregates these and keeps the archived flag so a retry can pick
+/// up where this attempt stopped. Projects that cannot be repaired automatically for
+/// configuration reasons (invalid base branch) are skipped with a log line, as before.
+fn restore_project_worktree(
+    config: &crate::types::WorkspaceConfig,
+    main_proj_path: &Path,
+    wt_proj_path: &Path,
+    proj_name: &str,
+    branch_name: &str,
+) -> Result<(), String> {
+    let main_dir = main_proj_path.to_string_lossy().to_string();
+    let wt_dir = wt_proj_path.to_string_lossy().to_string();
+    let step = Instant::now();
+
+    // Step A: a healthy registered worktree needs nothing. Archiving is a pure list move, so in
+    // the normal case every project is still a valid git worktree — on whatever branch the user
+    // left it (a different branch, detached HEAD or uncommitted work is NOT a reason to touch
+    // it). Only directories git cannot open (legacy archives that ran `git worktree remove`,
+    // partially deleted trees on Windows) go through the repair path below.
+    if wt_proj_path.join(".git").exists() {
+        match run_git_command_with_timeout_secs(
+            &["rev-parse", "--is-inside-work-tree"],
+            &wt_dir,
+            RESTORE_GIT_QUERY_TIMEOUT_SECS,
+        ) {
+            Ok(output)
+                if output.status.success()
+                    && String::from_utf8_lossy(&output.stdout).trim() == "true" =>
+            {
+                log::info!(
+                    "[worktree] Project '{}': valid git worktree, left untouched ({} ms)",
+                    proj_name,
+                    step.elapsed().as_millis()
+                );
+                restore_project_links(config, main_proj_path, wt_proj_path, proj_name);
+                return Ok(());
+            }
+            Ok(output) => {
+                log::warn!(
+                    "[worktree] Project '{}': .git present but git cannot open the worktree (exit code {:?}: {}); repairing",
+                    proj_name,
+                    output.status.code(),
+                    mask_url_credentials(String::from_utf8_lossy(&output.stderr).trim())
+                );
+            }
+            Err(e) => {
+                // Never fall through to the destructive repair when the directory could not even
+                // be inspected (spawn failure / timeout): it may hold uncommitted work.
+                log::error!(
+                    "[worktree] Project '{}': could not inspect existing worktree: {}",
+                    proj_name,
+                    e
+                );
+                return Err(format!(
+                    "{}: 无法检查已存在的项目目录（{}），已跳过以免误删",
+                    proj_name, e
+                ));
+            }
+        }
+    }
+
+    // Step B: does the branch exist locally?
+    let branch_exists = match run_git_command_with_timeout_secs(
+        &["branch", "--list", branch_name],
+        &main_dir,
+        RESTORE_GIT_QUERY_TIMEOUT_SECS,
+    ) {
+        Ok(output) if output.status.success() => {
+            !String::from_utf8_lossy(&output.stdout).trim().is_empty()
+        }
+        Ok(_) => false,
+        Err(e) => {
+            log::warn!(
+                "[worktree] Project '{}': git branch --list failed ({}); assuming branch is missing",
+                proj_name,
+                e
+            );
+            false
+        }
+    };
+
+    // Step C: remove the stale, unregistered copy so `git worktree add` can recreate it.
+    // A failure here (typically a Windows file lock) is a hard failure for this project.
+    if wt_proj_path.exists() {
+        if let Err(e) = fs::remove_dir_all(wt_proj_path) {
+            log::error!(
+                "[worktree] Project '{}': failed to remove stale directory {}: {}",
+                proj_name,
+                wt_proj_path.display(),
+                e
+            );
+            return Err(format!(
+                "{}: {}",
+                proj_name,
+                friendly_fs_error("清理旧的项目目录失败", &e)
+            ));
+        }
+        log::info!(
+            "[worktree] Project '{}': removed stale directory ({} ms)",
+            proj_name,
+            step.elapsed().as_millis()
+        );
+    }
+
+    // Step D: prune stale registrations (best-effort).
+    match run_git_command_with_timeout_secs(
+        &["worktree", "prune"],
+        &main_dir,
+        RESTORE_GIT_QUERY_TIMEOUT_SECS,
+    ) {
+        Ok(output) if output.status.success() => {}
+        Ok(output) => {
+            log::warn!(
+                "[worktree] Project '{}': git worktree prune returned non-zero: {}",
+                proj_name,
+                mask_url_credentials(String::from_utf8_lossy(&output.stderr).trim())
+            );
+        }
+        Err(e) => {
+            log::warn!(
+                "[worktree] Project '{}': git worktree prune failed to run: {}",
+                proj_name,
+                e
+            );
+        }
+    }
+
+    // Step E: re-add the worktree (existing branch, or a new branch from origin/<base>).
+    let add_result = if branch_exists {
+        log::info!(
+            "Re-adding worktree for {} with existing branch {}",
+            proj_name,
+            branch_name
+        );
+        run_git_command_with_timeout_secs(
+            &["worktree", "add", &wt_dir, branch_name],
+            &main_dir,
+            RESTORE_WORKTREE_ADD_TIMEOUT_SECS,
+        )
+    } else {
+        // Find appropriate base branch from project config
+        let base_branch = config
+            .projects
+            .iter()
+            .find(|p| p.name == proj_name)
+            .map(|p| p.base_branch.clone())
+            .unwrap_or_else(|| "uat".to_string());
+        if let Err(e) = validate_git_ref_name(&base_branch) {
+            log::error!(
+                "[worktree] Invalid base branch '{}' for project '{}': {}",
+                base_branch,
+                proj_name,
+                e
+            );
+            return Ok(());
+        }
+
+        log::info!(
+            "Re-adding worktree for {} with new branch {} from origin/{}",
+            proj_name,
+            branch_name,
+            base_branch
+        );
+        let base_ref = format!("origin/{}", base_branch);
+        // --no-track: `-b <branch> origin/<base>` would otherwise record origin/<base> as the
+        // upstream, so a later `git pull` merges the base branch and `git push` is refused.
+        // The first `git push -u` sets the real upstream (create_worktree does the same push).
+        run_git_command_with_timeout_secs(
+            &[
+                "worktree",
+                "add",
+                &wt_dir,
+                "-b",
+                branch_name,
+                "--no-track",
+                &base_ref,
+            ],
+            &main_dir,
+            RESTORE_WORKTREE_ADD_TIMEOUT_SECS,
+        )
+    };
+
+    let add_failure = match add_result {
+        Ok(output) if output.status.success() => None,
+        Ok(output) => Some(mask_url_credentials(
+            String::from_utf8_lossy(&output.stderr).trim(),
+        )),
+        Err(e) => Some(e),
+    };
+    if let Some(reason) = add_failure {
+        log::error!("Failed to re-add worktree for {}: {}", proj_name, reason);
+        // Keep the project discoverable for the next attempt: an empty directory is enough for
+        // a retry to run `git worktree add` again once the user fixed the cause.
+        if !wt_proj_path.exists() {
+            if let Err(e) = fs::create_dir_all(wt_proj_path) {
+                log::warn!(
+                    "[worktree] Project '{}': could not recreate placeholder directory: {}",
+                    proj_name,
+                    e
+                );
+            }
+        }
+        return Err(format!("{}: git worktree add 失败: {}", proj_name, reason));
+    }
+    log::info!(
+        "Successfully re-added worktree for {} ({} ms)",
+        proj_name,
+        step.elapsed().as_millis()
+    );
+
+    // Step F: local upstream setup (replaces the former `git push -u origin <branch>`).
+    set_local_upstream(&wt_dir, proj_name, branch_name);
+
+    // Step G: restore project-level symlinks (linked_folders).
+    restore_project_links(config, main_proj_path, wt_proj_path, proj_name);
+    log::info!(
+        "[worktree] Project '{}': restore finished ({} ms)",
+        proj_name,
+        step.elapsed().as_millis()
+    );
+    Ok(())
+}
+
 pub fn restore_worktree_impl(window_label: &str, name: String) -> Result<(), String> {
     validate_git_ref_name(&name)?;
 
@@ -1346,10 +1737,12 @@ pub fn restore_worktree_impl(window_label: &str, name: String) -> Result<(), Str
         crate::config::get_window_workspace_path(window_label).ok_or("No workspace selected")?;
 
     // 串行化同一 workspace 的生命周期操作，防止 restore vs delete TOCTOU 竞态。
+    // 带超时：兄弟操作卡死时向用户报错，而不是永远显示“恢复中”。
     let lifecycle_lock = crate::state::workspace_lifecycle_lock(&workspace_path);
-    let _lifecycle_guard = lifecycle_lock
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _lifecycle_guard = crate::state::lock_lifecycle_with_timeout(
+        &lifecycle_lock,
+        crate::state::LIFECYCLE_LOCK_TIMEOUT,
+    )?;
     // 锁内读取最新配置，防止并发丢更新。
     let config = crate::config::load_workspace_config(&workspace_path);
 
@@ -1360,17 +1753,31 @@ pub fn restore_worktree_impl(window_label: &str, name: String) -> Result<(), Str
         return Err("Archived worktree does not exist".to_string());
     }
 
+    // The folder may be an alias of the real branch name (see create_worktree folder_name).
+    let mapping_path = root.join(&config.worktrees_dir).join("mapping.json");
+    let branch_name = load_worktree_mapping(&mapping_path)
+        .get(&name)
+        .cloned()
+        .unwrap_or_else(|| name.clone());
+    validate_git_ref_name(&branch_name)?;
+
+    let restore_start = Instant::now();
     log::info!(
-        "[worktree] Restoring worktree '{}' from archive in workspace '{}'",
+        "[worktree] Restoring worktree '{}' (branch: '{}') from archive in workspace '{}' (config-only unless a project directory needs repair)",
         name,
+        branch_name,
         workspace_path
     );
 
-    // Step 1: Re-register git worktrees for each project
+    // Step 1: make sure every project directory is a usable git worktree. Restoring is a pure
+    // list move for healthy worktrees; repairs only happen for directories that older versions
+    // (which ran `git worktree remove` on archive) or a failed deletion left behind.
     log::info!(
-        "[worktree] Step 1/2: Re-registering git worktrees for '{}'",
+        "[worktree] Step 1/3: Checking project worktrees for '{}'",
         name
     );
+    let mut failures: Vec<String> = Vec::new();
+    let mut restored_projects = 0usize;
     let projects_path = worktree_path.join("projects");
     if projects_path.exists() {
         if let Ok(entries) = std::fs::read_dir(&projects_path) {
@@ -1395,170 +1802,41 @@ pub fn restore_worktree_impl(window_label: &str, name: String) -> Result<(), Str
                     continue;
                 }
 
-                // Remove the old project directory content (it was archived without git worktree registration)
-                // We need to remove it and re-add via git worktree add
                 let wt_proj_path = projects_path.join(&proj_name);
-
-                // Check if branch exists
-                let branch_name = &name;
-                let branch_check = git_command()
-                    .args([
-                        "-C",
-                        main_proj_path.to_string_lossy().as_ref(),
-                        "branch",
-                        "--list",
-                        branch_name,
-                    ])
-                    .output();
-
-                let branch_exists = branch_check
-                    .as_ref()
-                    .map(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty())
-                    .unwrap_or(false);
-
-                // Remove the directory so git worktree add can recreate it
-                if wt_proj_path.exists() {
-                    fs::remove_dir_all(&wt_proj_path).ok();
-                }
-
-                // Prune stale worktrees first
-                git_command()
-                    .args([
-                        "-C",
-                        main_proj_path.to_string_lossy().as_ref(),
-                        "worktree",
-                        "prune",
-                    ])
-                    .output()
-                    .ok();
-
-                // Re-add worktree
-                let output = if branch_exists {
-                    log::info!(
-                        "Re-adding worktree for {} with existing branch {}",
-                        proj_name,
-                        branch_name
-                    );
-                    git_command()
-                        .args([
-                            "-C",
-                            main_proj_path.to_string_lossy().as_ref(),
-                            "worktree",
-                            "add",
-                            wt_proj_path.to_string_lossy().as_ref(),
-                            branch_name,
-                        ])
-                        .output()
-                } else {
-                    // Find appropriate base branch from project config
-                    let base_branch = config
-                        .projects
-                        .iter()
-                        .find(|p| p.name == proj_name)
-                        .map(|p| p.base_branch.clone())
-                        .unwrap_or_else(|| "uat".to_string());
-                    if let Err(e) = validate_git_ref_name(&base_branch) {
+                let project_start = Instant::now();
+                match restore_project_worktree(
+                    &config,
+                    &main_proj_path,
+                    &wt_proj_path,
+                    &proj_name,
+                    &branch_name,
+                ) {
+                    Ok(()) => {
+                        restored_projects += 1;
+                    }
+                    Err(failure) => {
                         log::error!(
-                            "[worktree] Invalid base branch '{}' for project '{}': {}",
-                            base_branch,
+                            "[worktree] Project '{}' restore failed after {} ms: {}",
                             proj_name,
-                            e
+                            project_start.elapsed().as_millis(),
+                            failure
                         );
-                        continue;
-                    }
-
-                    log::info!(
-                        "Re-adding worktree for {} with new branch {} from origin/{}",
-                        proj_name,
-                        branch_name,
-                        base_branch
-                    );
-                    git_command()
-                        .args([
-                            "-C",
-                            main_proj_path.to_string_lossy().as_ref(),
-                            "worktree",
-                            "add",
-                            wt_proj_path.to_string_lossy().as_ref(),
-                            "-b",
-                            branch_name,
-                            &format!("origin/{}", base_branch),
-                        ])
-                        .output()
-                };
-
-                match output {
-                    Ok(o) if o.status.success() => {
-                        log::info!("Successfully re-added worktree for {}", proj_name);
-                        // Set upstream for the branch so git push works without -u flag
-                        let push_output = run_git_command_with_timeout(
-                            &["push", "-u", "origin", branch_name],
-                            wt_proj_path.to_string_lossy().as_ref(),
-                        );
-                        match push_output {
-                            Ok(p) if p.status.success() => {
-                                log::info!(
-                                    "[worktree] Project '{}': git push -u origin {} succeeded",
-                                    proj_name,
-                                    branch_name
-                                );
-                            }
-                            Ok(p) => {
-                                let stderr = String::from_utf8_lossy(&p.stderr);
-                                let stderr_for_log = mask_url_credentials(&stderr);
-                                log::warn!(
-                                    "[worktree] Project '{}': git push -u origin {} failed (worktree restored successfully): {}",
-                                    proj_name,
-                                    branch_name,
-                                    stderr_for_log
-                                );
-                            }
-                            Err(e) => {
-                                log::warn!(
-                                    "[worktree] Project '{}': git push -u origin {} failed to execute (worktree restored successfully): {}",
-                                    proj_name,
-                                    branch_name,
-                                    e
-                                );
-                            }
-                        }
-                    }
-                    Ok(o) => {
-                        let stderr = String::from_utf8_lossy(&o.stderr);
-                        let stderr_for_log = mask_url_credentials(&stderr);
-                        log::error!(
-                            "Failed to re-add worktree for {}: {}",
-                            proj_name,
-                            stderr_for_log
-                        );
-                    }
-                    Err(e) => {
-                        log::error!(
-                            "Failed to execute git worktree add for {}: {}",
-                            proj_name,
-                            e
-                        );
-                    }
-                }
-
-                // Restore project-level symlinks (linked_folders)
-                let proj_config = config.projects.iter().find(|p| p.name == proj_name);
-                if let Some(pc) = proj_config {
-                    for folder_name in &pc.linked_folders {
-                        let main_folder = main_proj_path.join(folder_name);
-                        let wt_folder = wt_proj_path.join(folder_name);
-
-                        if main_folder.exists() && !wt_folder.exists() {
-                            create_symlink(&main_folder, &wt_folder).ok();
-                        }
+                        failures.push(failure);
                     }
                 }
             }
         }
     }
+    log::info!(
+        "[worktree] Step 1/3 done: {} project(s) restored, {} failed ({} ms)",
+        restored_projects,
+        failures.len(),
+        restore_start.elapsed().as_millis()
+    );
 
     // Step 2: Restore workspace-level symlinks
     // Merge linked_workspace_items + vault_linked_workspace_items, deduplicated
+    let step2_start = Instant::now();
     let mut all_linked: Vec<String> = config.linked_workspace_items.clone();
     for item in &config.vault_linked_workspace_items {
         if !all_linked.contains(item) {
@@ -1566,7 +1844,7 @@ pub fn restore_worktree_impl(window_label: &str, name: String) -> Result<(), Str
         }
     }
     log::info!(
-        "[worktree] Step 2/2: Restoring workspace-level symlinks ({} items)",
+        "[worktree] Step 2/3: Restoring workspace-level symlinks ({} items)",
         all_linked.len()
     );
     for item_name in &all_linked {
@@ -1576,8 +1854,30 @@ pub fn restore_worktree_impl(window_label: &str, name: String) -> Result<(), Str
             create_symlink(&src, &dst).ok();
         }
     }
+    log::info!(
+        "[worktree] Step 2/3 done ({} ms)",
+        step2_start.elapsed().as_millis()
+    );
+
+    if !failures.is_empty() {
+        log::error!(
+            "[worktree] Restore of '{}' incomplete: {} project(s) failed; keeping archived flag ({} ms)",
+            name,
+            failures.len(),
+            restore_start.elapsed().as_millis()
+        );
+        return Err(format!(
+            "恢复 Worktree '{}' 时以下项目失败：\n{}\n\n已成功恢复的项目在重试时会自动跳过；请关闭占用这些文件的程序后重试",
+            name,
+            failures.join("\n")
+        ));
+    }
 
     // Step 3: Remove from archived list in config
+    log::info!(
+        "[worktree] Step 3/3: Removing '{}' from archived list in config",
+        name
+    );
     let mut config = config;
     config.archived_worktrees.retain(|n| n != &name);
     save_workspace_config_internal(&workspace_path, &config)?;
@@ -1586,7 +1886,12 @@ pub fn restore_worktree_impl(window_label: &str, name: String) -> Result<(), Str
         name
     );
 
-    log::info!("Successfully restored worktree '{}'", name);
+    log::info!(
+        "Successfully restored worktree '{}' ({} project(s), {} ms)",
+        name,
+        restored_projects,
+        restore_start.elapsed().as_millis()
+    );
     Ok(())
 }
 
@@ -1598,15 +1903,21 @@ pub(crate) async fn restore_worktree(window: tauri::Window, name: String) -> Res
         .map_err(|e| format!("Task join error: {}", e))?
 }
 
+/// Timeout for the git calls made while deleting an archived worktree.
+const DELETE_GIT_TIMEOUT_SECS: u64 = 120;
+
+/// Delete an archived worktree. This is the only place where git worktree registrations, the
+/// directory and the local branches are removed (archiving itself is a pure config change).
 pub fn delete_archived_worktree_impl(window_label: &str, name: String) -> Result<(), String> {
     let workspace_path =
         crate::config::get_window_workspace_path(window_label).ok_or("No workspace selected")?;
 
     // 串行化同一 workspace 的生命周期操作，防止 delete vs restore TOCTOU、double-delete 竞态。
     let lifecycle_lock = crate::state::workspace_lifecycle_lock(&workspace_path);
-    let _lifecycle_guard = lifecycle_lock
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _lifecycle_guard = crate::state::lock_lifecycle_with_timeout(
+        &lifecycle_lock,
+        crate::state::LIFECYCLE_LOCK_TIMEOUT,
+    )?;
     // 锁内读取最新配置，防止并发丢更新。
     let config = crate::config::load_workspace_config(&workspace_path);
 
@@ -1631,6 +1942,7 @@ pub fn delete_archived_worktree_impl(window_label: &str, name: String) -> Result
         .map(|s| s.as_str())
         .unwrap_or(folder_key);
     validate_git_ref_name(branch_name)?;
+    let delete_start = Instant::now();
     log::info!(
         "[worktree] Deleting archived worktree '{}' (branch: {}) in workspace '{}'",
         name,
@@ -1638,11 +1950,7 @@ pub fn delete_archived_worktree_impl(window_label: &str, name: String) -> Result
         workspace_path
     );
 
-    // Step 1: Close any related PTY sessions
-    log::info!(
-        "[worktree] Step 1/3: Closing PTY sessions for archived worktree '{}'",
-        name
-    );
+    // Step 1/5: Close any related PTY sessions
     {
         let worktree_path_str = worktree_path.to_string_lossy().to_string();
         if let Ok(mut manager) = PTY_MANAGER.lock() {
@@ -1653,59 +1961,168 @@ pub fn delete_archived_worktree_impl(window_label: &str, name: String) -> Result
                     "[worktree] Closed {} PTY sessions for deleted worktree",
                     closed.len()
                 );
-            } else {
-                log::info!("[worktree] No PTY sessions to close");
             }
         }
     }
 
-    // Step 2: 先删除目录（原子性关键）。worktree 工作树可从分支重建，是可逆性更高的一步；
-    // 若 remove_dir_all 失败则直接返回——此时分支尚未删除、配置未改，worktree 仍标记 archived
-    // 可恢复，彻底避免“分支已删（丢 commits）但目录删除失败”的数据丢失。
-    log::info!(
-        "[worktree] Step 2/3: Removing directory {}",
-        worktree_path.display()
-    );
-    fs::remove_dir_all(&worktree_path)
-        .map_err(|e| friendly_fs_error("删除归档 Worktree 失败", &e))?;
-
-    // Step 3: 仅在目录删除确认成功后才删除分支（不可逆操作放最后）。
-    // 个别项目分支删除失败不影响整体一致性（worktree 目录已不存在，后续会清理 archived 标记）。
-    log::info!(
-        "[worktree] Step 3/3: Deleting local branch '{}' from projects",
-        branch_name
-    );
-    let projects_path = root.join("projects");
-    if projects_path.exists() {
-        if let Ok(entries) = std::fs::read_dir(&projects_path) {
-            for entry in entries.flatten() {
-                let proj_path = entry.path();
-                if !proj_path.is_dir() {
-                    continue;
+    // Step 2/5: unregister the projects' git worktrees. `git worktree remove --force` also deletes
+    // the project directory; a failure here (typically a locked file on Windows) is only logged —
+    // the directory removal below decides whether the delete succeeded.
+    let main_projects = root.join("projects");
+    let projects_path = worktree_path.join("projects");
+    if let Ok(entries) = fs::read_dir(&projects_path) {
+        for entry in entries.flatten() {
+            let proj_path = entry.path();
+            if !proj_path.is_dir() {
+                continue;
+            }
+            let proj_name = proj_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            let main_proj_path = main_projects.join(&proj_name);
+            if !main_proj_path.exists() {
+                log::info!(
+                    "[worktree] Project '{}': main project missing, directory will be removed without git",
+                    proj_name
+                );
+                continue;
+            }
+            let wt_dir = proj_path.to_string_lossy().to_string();
+            match run_git_command_with_timeout_secs(
+                &["worktree", "remove", "--force", &wt_dir],
+                &main_proj_path.to_string_lossy(),
+                DELETE_GIT_TIMEOUT_SECS,
+            ) {
+                Ok(output) if output.status.success() => {
+                    log::info!(
+                        "[worktree] Project '{}': git worktree registration removed",
+                        proj_name
+                    );
                 }
+                Ok(output) => {
+                    log::warn!(
+                        "[worktree] Project '{}': git worktree remove returned non-zero (continuing): {}",
+                        proj_name,
+                        mask_url_credentials(String::from_utf8_lossy(&output.stderr).trim())
+                    );
+                }
+                Err(e) => {
+                    log::warn!(
+                        "[worktree] Project '{}': git worktree remove failed to run (continuing): {}",
+                        proj_name,
+                        e
+                    );
+                }
+            }
+        }
+    }
 
-                // Try to delete the branch (it may not exist in all projects)
-                let output = git_command()
-                    .args([
-                        "-C",
-                        proj_path.to_string_lossy().as_ref(),
-                        "branch",
-                        "-D",
+    // Step 3/5: 删除目录（原子性关键）。worktree 工作树可从分支重建，是可逆性更高的一步；
+    // 若 remove_dir_all 失败则直接返回——此时分支尚未删除、配置未改，worktree 仍标记 archived
+    // 可重试，彻底避免“分支已删（丢 commits）但目录删除失败”的数据丢失。
+    match fs::remove_dir_all(&worktree_path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            let mut message = friendly_fs_error("删除归档 Worktree 失败", &e);
+            // Windows: name the processes holding files so the user knows what to close.
+            let report = find_worktree_locking_processes(&worktree_path);
+            log::info!(
+                "[worktree] lock diagnostic for '{}': scanned_files={}, truncated={}, processes={}",
+                name,
+                report.scanned_files,
+                report.truncated,
+                report.processes.len()
+            );
+            if !report.processes.is_empty() {
+                let names = report
+                    .processes
+                    .iter()
+                    .map(|process| format!("{} (PID {})", process.name, process.pid))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                message.push_str(&format!(
+                    "\n以下进程正在占用该目录中的文件，请先关闭后重试：{}",
+                    names
+                ));
+            } else if let Some(warning) = report.warning {
+                log::warn!("[worktree] {}", warning);
+            }
+            log::error!(
+                "[worktree] Delete of '{}' failed while removing the directory ({} ms): {}",
+                name,
+                delete_start.elapsed().as_millis(),
+                message
+            );
+            return Err(message);
+        }
+    }
+
+    // Step 4/5: prune registrations whose directory is now gone (covers a failed
+    // `git worktree remove` above), so that `git branch -D` below is not refused.
+    if let Ok(entries) = fs::read_dir(&main_projects) {
+        for entry in entries.flatten() {
+            let proj_path = entry.path();
+            if !proj_path.is_dir() {
+                continue;
+            }
+            if let Err(e) = run_git_command_with_timeout_secs(
+                &["worktree", "prune"],
+                &proj_path.to_string_lossy(),
+                DELETE_GIT_TIMEOUT_SECS,
+            ) {
+                log::warn!(
+                    "[worktree] git worktree prune failed in {}: {}",
+                    proj_path.display(),
+                    e
+                );
+            }
+        }
+    }
+
+    // Step 5/5: 仅在目录删除确认成功后才删除分支（不可逆操作放最后）。
+    // 个别项目分支删除失败不影响整体一致性（worktree 目录已不存在）。
+    if let Ok(entries) = fs::read_dir(&main_projects) {
+        for entry in entries.flatten() {
+            let proj_path = entry.path();
+            if !proj_path.is_dir() {
+                continue;
+            }
+            let proj_name = proj_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            match run_git_command_with_timeout_secs(
+                &["branch", "-D", branch_name],
+                &proj_path.to_string_lossy(),
+                DELETE_GIT_TIMEOUT_SECS,
+            ) {
+                Ok(output) if output.status.success() => {
+                    log::info!(
+                        "Deleted branch '{}' from project '{}'",
                         branch_name,
-                    ])
-                    .output();
-
-                match output {
-                    Ok(o) if o.status.success() => {
-                        let proj_name =
-                            proj_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                        log::info!(
-                            "Deleted branch '{}' from project '{}'",
+                        proj_name
+                    );
+                }
+                Ok(output) => {
+                    // Branch might not exist in this project, that's fine; anything else is
+                    // worth a log line (e.g. still checked out in another worktree).
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    if !stderr.contains("not found") {
+                        log::warn!(
+                            "[worktree] git branch -D {} in '{}' returned non-zero: {}",
                             branch_name,
-                            proj_name
+                            proj_name,
+                            mask_url_credentials(stderr.trim())
                         );
                     }
-                    _ => {} // Branch might not exist in this project, that's fine
+                }
+                Err(e) => {
+                    log::warn!(
+                        "[worktree] git branch -D {} in '{}' failed to run: {}",
+                        branch_name,
+                        proj_name,
+                        e
+                    );
                 }
             }
         }
@@ -1719,18 +2136,15 @@ pub fn delete_archived_worktree_impl(window_label: &str, name: String) -> Result
         log::info!("[worktree] Removed mapping entry for '{}'", folder_key);
     }
 
-    // Step 4: Remove from archived list in config
+    // Remove from archived list in config
     let mut config = config;
     config.archived_worktrees.retain(|n| n != &name);
     save_workspace_config_internal(&workspace_path, &config)?;
-    log::info!(
-        "[worktree] Removed worktree '{}' from archived list in config",
-        name
-    );
 
     log::info!(
-        "[worktree] Successfully deleted archived worktree '{}'",
-        name
+        "[worktree] Successfully deleted archived worktree '{}' ({} ms)",
+        name,
+        delete_start.elapsed().as_millis()
     );
     Ok(())
 }
@@ -1759,9 +2173,10 @@ pub fn add_project_to_worktree_impl(
 
     // 串行化同一 workspace 的生命周期操作，避免与 archive/delete 同一 worktree 交叉竞态。
     let lifecycle_lock = crate::state::workspace_lifecycle_lock(&workspace_path);
-    let _lifecycle_guard = lifecycle_lock
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _lifecycle_guard = crate::state::lock_lifecycle_with_timeout(
+        &lifecycle_lock,
+        crate::state::LIFECYCLE_LOCK_TIMEOUT,
+    )?;
     // 锁内读取最新配置，防止并发丢更新。
     let config = crate::config::load_workspace_config(&workspace_path);
 
@@ -2078,9 +2493,10 @@ pub fn deploy_to_main_impl(
 
     // 串行化同一 workspace 的生命周期操作。
     let lifecycle_lock = crate::state::workspace_lifecycle_lock(&workspace_path);
-    let _lifecycle_guard = lifecycle_lock
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _lifecycle_guard = crate::state::lock_lifecycle_with_timeout(
+        &lifecycle_lock,
+        crate::state::LIFECYCLE_LOCK_TIMEOUT,
+    )?;
     // 锁内读取最新配置，防止并发丢更新。
     let config = crate::config::load_workspace_config(&workspace_path);
 
@@ -2318,6 +2734,13 @@ pub(crate) async fn deploy_to_main(
 pub fn exit_main_occupation_impl(window_label: &str, force: bool) -> Result<(), String> {
     let (workspace_path, config) =
         get_window_workspace_config(window_label).ok_or("No workspace selected")?;
+
+    // 与 deploy_to_main 共用同一把 workspace 生命周期锁（带超时），避免交叉切换分支。
+    let lifecycle_lock = crate::state::workspace_lifecycle_lock(&workspace_path);
+    let _lifecycle_guard = crate::state::lock_lifecycle_with_timeout(
+        &lifecycle_lock,
+        crate::state::LIFECYCLE_LOCK_TIMEOUT,
+    )?;
 
     let occupation =
         load_occupation_state(&workspace_path).ok_or("Main workspace is not currently occupied")?;
@@ -2762,7 +3185,14 @@ mod tests {
         assert_eq!(archived.len(), 1);
         assert_eq!(archived[0].name, "feature_roundtrip");
         assert!(archived[0].is_archived);
-        assert!(archived[0].projects.is_empty());
+        // Archiving is a pure list move: the project stays checked out and registered.
+        assert_eq!(archived[0].projects.len(), 1);
+        assert!(wt_project_path.join(".git").is_file());
+        assert_eq!(
+            git_output(&wt_project_path, &["branch", "--show-current"]),
+            "feature_roundtrip"
+        );
+        assert!(!git_output(&project_path, &["branch", "--list", "feature_roundtrip"]).is_empty());
     }
 
     #[serial]
@@ -3023,11 +3453,25 @@ mod tests {
             .archived_worktrees
             .contains(&"delete_folder".to_string()));
         assert!(worktree_path.exists());
+        let wt_project = worktree_path.join("projects").join("demo");
+        assert!(
+            wt_project.join(".git").is_file(),
+            "archive must keep the git worktree registration"
+        );
+        assert_eq!(
+            git_output(&wt_project, &["branch", "--show-current"]),
+            "delete_feature"
+        );
 
         delete_archived_worktree_impl(&label, "delete_folder".to_string())
             .expect("delete archived worktree");
 
         assert!(!worktree_path.exists());
+        let worktrees = git_output(&project_path, &["worktree", "list", "--porcelain"]);
+        assert!(
+            !worktrees.contains("delete_folder"),
+            "delete must unregister the git worktree: {worktrees}"
+        );
         let saved = load_workspace_config(&workspace_path);
         assert!(!saved
             .archived_worktrees
@@ -3893,5 +4337,408 @@ mod tests {
             .expect("dist scan result");
         assert!(!dist.is_recommended);
         assert!(dist.size_bytes > scanned[0].size_bytes);
+    }
+    #[serial]
+    #[test]
+    fn split_lock_check_batches_respects_item_and_utf16_budgets() {
+        // 空输入 → 无批次
+        assert!(split_lock_check_batches(
+            &[],
+            LOCK_CHECK_BATCH_SIZE,
+            LOCK_CHECK_BATCH_UTF16_BUDGET
+        )
+        .is_empty());
+
+        // 单个超出预算的路径独占一个批次，不会拖累相邻路径
+        let short = vec![1u16; 10];
+        let huge = vec![1u16; LOCK_CHECK_BATCH_UTF16_BUDGET + 1];
+        let paths = vec![short.clone(), huge, short];
+        assert_eq!(
+            split_lock_check_batches(&paths, LOCK_CHECK_BATCH_SIZE, LOCK_CHECK_BATCH_UTF16_BUDGET),
+            vec![vec![0], vec![1], vec![2]]
+        );
+
+        // 条目数边界：恰好 max_items 个放同一批，第 max_items+1 个开新批
+        let many: Vec<Vec<u16>> = (0..(LOCK_CHECK_BATCH_SIZE * 2 + 1))
+            .map(|_| vec![1u16; 4])
+            .collect();
+        let batches =
+            split_lock_check_batches(&many, LOCK_CHECK_BATCH_SIZE, LOCK_CHECK_BATCH_UTF16_BUDGET);
+        assert_eq!(batches.len(), 3);
+        assert_eq!(batches[0].len(), LOCK_CHECK_BATCH_SIZE);
+        assert_eq!(batches[0][0], 0);
+        assert_eq!(batches[1].len(), LOCK_CHECK_BATCH_SIZE);
+        assert_eq!(batches[1][0], LOCK_CHECK_BATCH_SIZE);
+        assert_eq!(batches[2], vec![LOCK_CHECK_BATCH_SIZE * 2]);
+
+        // UTF-16 预算边界：10 + 10 = 20 恰好等于预算可同批；预算 19 时第 2 个路径开新批，第 3 个（1 单位）仍能并入
+        let paths = vec![vec![1u16; 10], vec![1u16; 10], vec![1u16; 1]];
+        assert_eq!(
+            split_lock_check_batches(&paths, 32, 20),
+            vec![vec![0, 1], vec![2]]
+        );
+        assert_eq!(
+            split_lock_check_batches(&paths, 32, 19),
+            vec![vec![0], vec![1, 2]]
+        );
+    }
+
+    #[serial]
+    #[test]
+    fn restore_worktree_is_idempotent_when_project_is_already_registered() {
+        let workspace = tempfile::tempdir().expect("create workspace");
+        let project_path = make_origin_backed_project(workspace.path(), "demo");
+        run_git(&project_path, &["branch", "idem_feature"]);
+
+        let mut config = workspace_config(vec![project_config("demo")]);
+        config.archived_worktrees = vec!["idem_feature".to_string()];
+        let label = bind_workspace(workspace.path(), &config);
+        let workspace_path = workspace.path().to_string_lossy().to_string();
+
+        let wt_project = workspace
+            .path()
+            .join("worktrees")
+            .join("idem_feature")
+            .join("projects")
+            .join("demo");
+        std::fs::create_dir_all(&wt_project).expect("create archived placeholder");
+        std::fs::write(wt_project.join("placeholder.txt"), "archived\n")
+            .expect("write placeholder");
+
+        restore_worktree_impl(&label, "idem_feature".to_string()).expect("first restore");
+
+        assert!(wt_project.join(".git").is_file());
+        assert_eq!(
+            git_output(&wt_project, &["branch", "--show-current"]),
+            "idem_feature"
+        );
+        assert!(
+            !wt_project.join("placeholder.txt").exists(),
+            "stale copy must be replaced by the checkout"
+        );
+
+        // Simulate a retry: mark archived again while the registration stays in place.
+        std::fs::write(wt_project.join("marker.txt"), "survives\n").expect("write marker");
+        let mut saved = load_workspace_config(&workspace_path);
+        saved.archived_worktrees.push("idem_feature".to_string());
+        save_workspace_config_internal(&workspace_path, &saved).expect("re-mark archived");
+
+        restore_worktree_impl(&label, "idem_feature".to_string()).expect("second restore");
+
+        assert!(
+            wt_project.join("marker.txt").exists(),
+            "already registered project must not be re-added"
+        );
+        assert_eq!(
+            git_output(&wt_project, &["branch", "--show-current"]),
+            "idem_feature"
+        );
+        let worktrees = git_output(&project_path, &["worktree", "list", "--porcelain"]);
+        let registrations = worktrees
+            .lines()
+            .filter(|line| line.starts_with("worktree ") && line.contains("idem_feature"))
+            .count();
+        assert_eq!(registrations, 1, "{worktrees}");
+        assert!(!load_workspace_config(&workspace_path)
+            .archived_worktrees
+            .contains(&"idem_feature".to_string()));
+    }
+
+    #[serial]
+    #[test]
+    fn restore_worktree_uses_mapped_branch_for_aliased_folder_without_recreating_branch() {
+        let workspace = tempfile::tempdir().expect("create workspace");
+        let project_path = make_origin_backed_project(workspace.path(), "demo");
+        let label = bind_workspace(
+            workspace.path(),
+            &workspace_config(vec![project_config("demo")]),
+        );
+        let workspace_path = workspace.path().to_string_lossy().to_string();
+
+        let created_path = create_worktree_impl(
+            &label,
+            CreateWorktreeRequest {
+                name: "alias_feature".to_string(),
+                folder_name: Some("alias_folder".to_string()),
+                projects: vec![CreateProjectRequest {
+                    name: "demo".to_string(),
+                    base_branch: "main".to_string(),
+                }],
+            },
+        )
+        .expect("create aliased worktree");
+        let wt_project = PathBuf::from(created_path).join("projects").join("demo");
+        std::fs::write(wt_project.join("marker.txt"), "survives\n").expect("write marker");
+
+        // Archived flag set while the registration is still intact (the situation left behind
+        // when `git worktree remove` fails on Windows because a file is locked).
+        let mut saved = load_workspace_config(&workspace_path);
+        saved.archived_worktrees.push("alias_folder".to_string());
+        save_workspace_config_internal(&workspace_path, &saved).expect("mark archived");
+
+        restore_worktree_impl(&label, "alias_folder".to_string())
+            .expect("restore aliased worktree");
+
+        assert!(wt_project.join("marker.txt").exists());
+        assert_eq!(
+            git_output(&wt_project, &["branch", "--show-current"]),
+            "alias_feature"
+        );
+        assert!(
+            git_output(&project_path, &["branch", "--list", "alias_folder"]).is_empty(),
+            "folder alias must not become a branch"
+        );
+        assert!(!load_workspace_config(&workspace_path)
+            .archived_worktrees
+            .contains(&"alias_folder".to_string()));
+    }
+
+    #[serial]
+    #[test]
+    fn restore_worktree_reports_failed_project_keeps_archive_flag_and_retry_skips_restored() {
+        let workspace = tempfile::tempdir().expect("create workspace");
+        let demo_path = make_origin_backed_project(workspace.path(), "demo");
+        let api_path = make_origin_backed_project(workspace.path(), "api");
+        run_git(&demo_path, &["branch", "partial_feature"]);
+
+        // `api` has no local branch and its base branch does not exist on origin, so
+        // `git worktree add -b partial_feature origin/does-not-exist` fails deterministically.
+        let mut api = project_config("api");
+        api.base_branch = "does-not-exist".to_string();
+        let mut config = workspace_config(vec![project_config("demo"), api]);
+        config.archived_worktrees = vec!["partial_feature".to_string()];
+        let label = bind_workspace(workspace.path(), &config);
+        let workspace_path = workspace.path().to_string_lossy().to_string();
+
+        let projects_dir = workspace
+            .path()
+            .join("worktrees")
+            .join("partial_feature")
+            .join("projects");
+        for name in ["demo", "api"] {
+            let dir = projects_dir.join(name);
+            std::fs::create_dir_all(&dir).expect("create placeholder");
+            std::fs::write(dir.join("placeholder.txt"), "archived\n").expect("write placeholder");
+        }
+
+        let err = restore_worktree_impl(&label, "partial_feature".to_string()).unwrap_err();
+
+        assert!(err.contains("api: git worktree add 失败"), "{err}");
+        assert!(err.contains("已成功恢复的项目在重试时会自动跳过"), "{err}");
+        assert!(!err.contains("demo:"), "{err}");
+        assert!(
+            load_workspace_config(&workspace_path)
+                .archived_worktrees
+                .contains(&"partial_feature".to_string()),
+            "archived flag must be kept when a project failed"
+        );
+        assert!(
+            projects_dir.join("demo").join(".git").is_file(),
+            "healthy project is restored"
+        );
+        assert!(
+            projects_dir.join("api").is_dir() && !projects_dir.join("api").join(".git").exists(),
+            "failed project stays discoverable for the retry"
+        );
+
+        // Fix the broken project and retry: demo must be skipped, api re-added, flag cleared.
+        std::fs::write(projects_dir.join("demo").join("marker.txt"), "survives\n")
+            .expect("write marker");
+        run_git(&api_path, &["branch", "partial_feature"]);
+
+        restore_worktree_impl(&label, "partial_feature".to_string()).expect("retry succeeds");
+
+        assert!(
+            projects_dir.join("demo").join("marker.txt").exists(),
+            "already restored project must be skipped on retry"
+        );
+        assert_eq!(
+            git_output(&projects_dir.join("api"), &["branch", "--show-current"]),
+            "partial_feature"
+        );
+        assert!(!load_workspace_config(&workspace_path)
+            .archived_worktrees
+            .contains(&"partial_feature".to_string()));
+    }
+
+    #[serial]
+    #[test]
+    fn restore_worktree_sets_local_upstream_without_network_when_remote_branch_exists() {
+        let workspace = tempfile::tempdir().expect("create workspace");
+        let project_path = make_origin_backed_project(workspace.path(), "demo");
+        run_git(&project_path, &["branch", "upstream_feature"]);
+        // Publish the branch without configuring an upstream, then make origin unreachable so
+        // that any fetch/push attempted during restore would fail.
+        run_git(
+            &project_path,
+            &[
+                "-c",
+                "push.autoSetupRemote=false",
+                "push",
+                "origin",
+                "upstream_feature",
+            ],
+        );
+        assert!(!git_output(
+            &project_path,
+            &["branch", "-r", "--list", "origin/upstream_feature"]
+        )
+        .is_empty());
+        run_git(
+            &project_path,
+            &[
+                "remote",
+                "set-url",
+                "origin",
+                "/nonexistent/unreachable-origin.git",
+            ],
+        );
+
+        let mut config = workspace_config(vec![project_config("demo")]);
+        config.archived_worktrees = vec!["upstream_feature".to_string()];
+        let label = bind_workspace(workspace.path(), &config);
+
+        let wt_project = workspace
+            .path()
+            .join("worktrees")
+            .join("upstream_feature")
+            .join("projects")
+            .join("demo");
+        std::fs::create_dir_all(&wt_project).expect("create archived placeholder");
+
+        restore_worktree_impl(&label, "upstream_feature".to_string())
+            .expect("restore without network access");
+
+        assert_eq!(
+            git_output(
+                &wt_project,
+                &["rev-parse", "--abbrev-ref", "upstream_feature@{upstream}"]
+            ),
+            "origin/upstream_feature"
+        );
+        assert_eq!(
+            git_output(&wt_project, &["config", "branch.upstream_feature.remote"]),
+            "origin"
+        );
+    }
+
+    #[serial]
+    #[test]
+    fn archive_and_restore_leave_healthy_project_untouched_even_on_another_branch() {
+        let workspace = tempfile::tempdir().expect("create workspace");
+        let project_path = make_origin_backed_project(workspace.path(), "demo");
+        let label = bind_workspace(
+            workspace.path(),
+            &workspace_config(vec![project_config("demo")]),
+        );
+        let workspace_path = workspace.path().to_string_lossy().to_string();
+
+        let created_path = create_worktree_impl(
+            &label,
+            CreateWorktreeRequest {
+                name: "switched_feature".to_string(),
+                folder_name: None,
+                projects: vec![CreateProjectRequest {
+                    name: "demo".to_string(),
+                    base_branch: "main".to_string(),
+                }],
+            },
+        )
+        .expect("create worktree");
+        let wt_project = PathBuf::from(created_path).join("projects").join("demo");
+        // The user switched branches inside the worktree and left uncommitted work behind.
+        run_git(&wt_project, &["checkout", "-b", "side_branch"]);
+        std::fs::write(wt_project.join("wip.txt"), "uncommitted\n").expect("write wip file");
+
+        archive_worktree_impl(&label, "switched_feature".to_string()).expect("archive");
+
+        assert!(
+            wt_project.join("wip.txt").exists(),
+            "archiving must not touch files"
+        );
+        assert_eq!(
+            git_output(&wt_project, &["branch", "--show-current"]),
+            "side_branch"
+        );
+        assert!(load_workspace_config(&workspace_path)
+            .archived_worktrees
+            .contains(&"switched_feature".to_string()));
+
+        restore_worktree_impl(&label, "switched_feature".to_string()).expect("restore");
+
+        assert!(
+            wt_project.join("wip.txt").exists(),
+            "restoring must not touch files"
+        );
+        assert_eq!(
+            git_output(&wt_project, &["branch", "--show-current"]),
+            "side_branch"
+        );
+        assert!(!load_workspace_config(&workspace_path)
+            .archived_worktrees
+            .contains(&"switched_feature".to_string()));
+        let worktrees = git_output(&project_path, &["worktree", "list", "--porcelain"]);
+        let registrations = worktrees
+            .lines()
+            .filter(|line| line.starts_with("worktree ") && line.contains("switched_feature"))
+            .count();
+        assert_eq!(registrations, 1, "{worktrees}");
+    }
+
+    #[serial]
+    #[test]
+    fn restore_worktree_repairs_project_whose_registration_was_lost() {
+        let workspace = tempfile::tempdir().expect("create workspace");
+        let project_path = make_origin_backed_project(workspace.path(), "demo");
+        let label = bind_workspace(
+            workspace.path(),
+            &workspace_config(vec![project_config("demo")]),
+        );
+        let workspace_path = workspace.path().to_string_lossy().to_string();
+
+        let created_path = create_worktree_impl(
+            &label,
+            CreateWorktreeRequest {
+                name: "lost_registration".to_string(),
+                folder_name: None,
+                projects: vec![CreateProjectRequest {
+                    name: "demo".to_string(),
+                    base_branch: "main".to_string(),
+                }],
+            },
+        )
+        .expect("create worktree");
+        let wt_project = PathBuf::from(created_path).join("projects").join("demo");
+
+        // Legacy damage: older versions ran `git worktree remove --force` on archive; on Windows
+        // that could drop the registration while (some) files stayed behind.
+        std::fs::remove_dir_all(project_path.join(".git").join("worktrees"))
+            .expect("drop worktree registrations");
+        let broken = std::process::Command::new("git")
+            .args(["rev-parse", "--is-inside-work-tree"])
+            .current_dir(&wt_project)
+            .output()
+            .expect("run git in broken worktree");
+        assert!(
+            !broken.status.success(),
+            "fixture must be unopenable by git"
+        );
+        let mut saved = load_workspace_config(&workspace_path);
+        saved
+            .archived_worktrees
+            .push("lost_registration".to_string());
+        save_workspace_config_internal(&workspace_path, &saved).expect("mark archived");
+
+        restore_worktree_impl(&label, "lost_registration".to_string())
+            .expect("restore repairs the broken project");
+
+        assert!(wt_project.join(".git").is_file());
+        assert_eq!(
+            git_output(&wt_project, &["branch", "--show-current"]),
+            "lost_registration"
+        );
+        assert!(!load_workspace_config(&workspace_path)
+            .archived_worktrees
+            .contains(&"lost_registration".to_string()));
     }
 }

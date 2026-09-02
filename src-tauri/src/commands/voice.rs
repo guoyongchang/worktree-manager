@@ -10,8 +10,6 @@ use tauri::Emitter;
 
 use crate::config::{load_global_config, save_global_config_internal};
 
-use crate::state::APP_HANDLE;
-
 // ==================== Voice Session State ====================
 
 struct VoiceSession {
@@ -22,9 +20,10 @@ struct VoiceSession {
 static VOICE_SESSION: Lazy<Mutex<Option<VoiceSession>>> = Lazy::new(|| Mutex::new(None));
 
 fn emit_event(event: &str, payload: serde_json::Value) {
-    if let Some(handle) = APP_HANDLE.lock().ok().and_then(|h| h.clone()) {
+    // Borrow, never clone: see state::with_app_handle (tauri-apps/tauri#15408).
+    crate::state::with_app_handle(|handle| {
         let _ = handle.emit(event, payload.clone());
-    }
+    });
     // Also broadcast to WebSocket clients
     if let Ok(json_str) = serde_json::to_string(&serde_json::json!({
         "event": event,

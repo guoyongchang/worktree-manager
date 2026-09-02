@@ -11,10 +11,10 @@ To keep changes safe and reviewable, tests are organized by *behavior layer* rat
 
 - API inventory and transport mirroring are tracked by the generated contract doc:
   - `docs/generated/command-contracts.md`
-- CI enforces:
-  - `npm run verify:contracts`
-  - `npm test`
-  - `cargo test`
+- CI enforces (see `.github/workflows/ci.yml`; Rust toolchain pinned by `rust-toolchain.toml`):
+  - `npx tsc --noEmit`, `npm run check-i18n`, `npm run verify:contracts`, `npm test`, `npm run build`
+  - `cargo fmt -- --check`, `cargo clippy --lib -- -D warnings`
+  - `cargo test -- --test-threads=1` (Linux + macOS; Windows compiles the tests with `--no-run`)
 
 This means: adding/removing a command must update both the backend registration and frontend usage. Contracts are the gate.
 

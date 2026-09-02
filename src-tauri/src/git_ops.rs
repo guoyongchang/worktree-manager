@@ -2,7 +2,7 @@ use git2::{Repository, StatusOptions};
 use serde::Serialize;
 use std::path::Path;
 
-use crate::utils::{git_command, run_git_logged};
+use crate::utils::{git_command, run_command_with_timeout, run_git_logged};
 
 fn command_without_window(program: &str) -> std::process::Command {
     #[cfg(target_os = "windows")]
@@ -18,138 +18,6 @@ fn command_without_window(program: &str) -> std::process::Command {
     {
         std::process::Command::new(program)
     }
-}
-
-/// Helper function to find the main worktree path for a given repository
-fn find_main_worktree(repo_path: &Path) -> Option<std::path::PathBuf> {
-    let git_path = repo_path.join(".git");
-    if git_path.is_dir() {
-        log::debug!(
-            "[merge] repo_path={} is the main worktree itself",
-            repo_path.display()
-        );
-        return Some(repo_path.to_path_buf());
-    } else if git_path.is_file() {
-        if let Ok(content) = std::fs::read_to_string(&git_path) {
-            if let Some(gitdir) = content.strip_prefix("gitdir: ") {
-                let gitdir = gitdir.trim();
-                let worktrees_idx_opt = gitdir
-                    .find("/.git/worktrees/")
-                    .or_else(|| gitdir.find("\\.git\\worktrees\\"));
-                if let Some(worktrees_idx) = worktrees_idx_opt {
-                    let main_path = &gitdir[..worktrees_idx];
-                    log::debug!(
-                        "[merge] Linked worktree detected. Main worktree: {}",
-                        main_path
-                    );
-                    return Some(std::path::PathBuf::from(main_path));
-                }
-            }
-        }
-    }
-    log::debug!(
-        "[merge] Could not find main worktree for {}",
-        repo_path.display()
-    );
-    None
-}
-
-/// Check if a branch is checked out in the main worktree and switch to detached HEAD if needed
-/// Returns (switched, original_branch) - switched=true if we switched to detached HEAD
-fn handle_branch_checkout_conflict(
-    main_worktree_path: &Path,
-    target_branch: &str,
-) -> Result<(bool, Option<String>), String> {
-    log::info!(
-        "[merge] Checking branch conflict: target_branch={}, main_worktree={}",
-        target_branch,
-        main_worktree_path.display()
-    );
-
-    let repo = Repository::open(main_worktree_path).map_err(|e| {
-        format!(
-            "无法打开主工作区仓库 ({}): {}",
-            main_worktree_path.display(),
-            e
-        )
-    })?;
-
-    if let Ok(head) = repo.head() {
-        let current_branch = head.shorthand().unwrap_or("<detached>");
-        log::info!(
-            "[merge] Main worktree current branch: {}, target: {}",
-            current_branch,
-            target_branch
-        );
-
-        if current_branch == target_branch {
-            log::info!("[merge] Branch conflict detected! Checking uncommitted changes...");
-
-            let status_output = git_command()
-                .arg("-C")
-                .arg(main_worktree_path)
-                .arg("status")
-                .arg("--porcelain")
-                .output()
-                .map_err(|e| format!("检查主工作区 git status 失败: {}", e))?;
-
-            let status_str = String::from_utf8_lossy(&status_output.stdout);
-            let has_changes = !status_str.is_empty();
-
-            if has_changes {
-                log::warn!(
-                    "[merge] Main worktree has uncommitted changes:\n{}",
-                    status_str.trim()
-                );
-                return Err(format!(
-                    "主工作区的 {} 分支有未提交的更改，无法自动切换。\n\
-                    请先在主工作区提交或撤销更改后再试。\n\
-                    未提交的文件: {}",
-                    target_branch,
-                    status_str.trim()
-                ));
-            }
-
-            let head_commit = head
-                .peel_to_commit()
-                .map_err(|e| format!("获取 HEAD commit 失败: {}", e))?;
-            let commit_sha = head_commit.id().to_string();
-
-            log::info!(
-                "[merge] Main worktree is clean. Switching to detached HEAD at {}",
-                &commit_sha[..8]
-            );
-
-            let mut checkout_cmd = git_command();
-            checkout_cmd
-                .arg("-C")
-                .arg(main_worktree_path)
-                .arg("checkout")
-                .arg("--detach")
-                .arg(&commit_sha);
-            let checkout_output = run_git_logged(&mut checkout_cmd, "merge checkout detach")
-                .map_err(|e| format!("执行 git checkout --detach 失败: {}", e))?;
-
-            if !checkout_output.status.success() {
-                let stderr = String::from_utf8_lossy(&checkout_output.stderr);
-                log::error!("[merge] Failed to detach HEAD: {}", stderr);
-                return Err(format!("无法将主工作区切换到 detached HEAD: {}", stderr));
-            }
-
-            log::info!("[merge] Successfully switched main worktree to detached HEAD");
-            return Ok((true, Some(target_branch.to_string())));
-        } else {
-            log::info!(
-                "[merge] No branch conflict (main={}, target={})",
-                current_branch,
-                target_branch
-            );
-        }
-    } else {
-        log::warn!("[merge] Cannot read HEAD of main worktree, skipping conflict check");
-    }
-
-    Ok((false, None))
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -465,12 +333,13 @@ pub fn sync_with_base_branch(path: &Path, base_branch: &str) -> Result<String, S
     log::info!("[git] Step 1/2: git fetch succeeded");
 
     // Step 2: Merge origin/base_branch into current branch
-    log::info!("[git] Step 2/2: git merge origin/{}", base_branch);
+    log::info!("[git] Step 2/2: git merge --no-edit origin/{}", base_branch);
     let mut merge_cmd = git_command();
     merge_cmd
         .arg("-C")
         .arg(path)
         .arg("merge")
+        .arg("--no-edit")
         .arg(format!("origin/{}", base_branch));
     let merge_output = run_git_logged(&mut merge_cmd, "sync merge base branch")
         .map_err(|e| format!("Failed to execute git merge: {}", e))?;
@@ -542,7 +411,12 @@ pub fn push_to_remote(path: &Path) -> Result<String, String> {
     Ok(format!("Successfully pushed {} to origin", current_branch))
 }
 
-/// Pull current branch from remote (git pull origin <current_branch>)
+/// Pull current branch from remote (`git pull --no-rebase --ff --no-edit origin <current_branch>`).
+///
+/// The merge strategy is spelled out explicitly: Git >= 2.33.1 refuses a plain `git pull` on a
+/// diverged branch ("Need to specify how to reconcile divergent branches") unless
+/// `pull.rebase` is configured, and `--ff` keeps the historical "fast-forward when possible,
+/// merge commit otherwise" behaviour even when `pull.ff=only` is set globally.
 pub fn pull_current_branch(path: &Path) -> Result<String, String> {
     log::info!("[git] Pulling current branch: path={}", path.display());
 
@@ -565,13 +439,16 @@ pub fn pull_current_branch(path: &Path) -> Result<String, String> {
         .trim()
         .to_string();
 
-    // Step 2: Pull from origin
+    // Step 2: Pull from origin (explicit merge strategy, see fn docs)
     log::info!("[git] Pulling branch '{}' from origin", current_branch);
     let mut pull_cmd = git_command();
     pull_cmd
         .arg("-C")
         .arg(path)
         .arg("pull")
+        .arg("--no-rebase")
+        .arg("--ff")
+        .arg("--no-edit")
         .arg("origin")
         .arg(&current_branch);
     let pull_output = run_git_logged(&mut pull_cmd, "pull current branch")
@@ -584,6 +461,12 @@ pub fn pull_current_branch(path: &Path) -> Result<String, String> {
             current_branch,
             stderr
         );
+        if stderr.contains("couldn't find remote ref") {
+            return Err(format!(
+                "远程 origin 不存在分支 {}，无法拉取",
+                current_branch
+            ));
+        }
         return Err(format!("Git pull failed: {}", stderr));
     }
 
@@ -594,457 +477,523 @@ pub fn pull_current_branch(path: &Path) -> Result<String, String> {
     ))
 }
 
-/// Helper to restore main worktree and checkout back to original branch on error/cleanup
-fn restore_merge_state(
+/// Run `git -C <path> <args>` through the shared logged runner.
+/// Only spawn failures are mapped to `Err`; callers inspect `status` themselves.
+fn run_git_in(path: &Path, args: &[&str], label: &str) -> Result<std::process::Output, String> {
+    let mut cmd = git_command();
+    cmd.arg("-C").arg(path).args(args);
+    run_git_logged(&mut cmd, label).map_err(|e| format!("执行 git {} 失败: {}", args.join(" "), e))
+}
+
+/// Timeout for `git fetch` inside the merge flow (network).
+const MERGE_FETCH_TIMEOUT_SECS: u64 = 180;
+/// Timeout for `git push` inside the merge flow (network; large pushes take a while).
+const MERGE_PUSH_TIMEOUT_SECS: u64 = 300;
+
+/// Like `run_git_in` but bounded: network steps must never leave the merge button spinning.
+/// A timeout is reported as `Err`, which the caller treats like any other failed step.
+fn run_git_in_with_timeout(
     path: &Path,
-    original_branch: &str,
-    switched_main: bool,
-    main_worktree_path: &Option<std::path::PathBuf>,
-    original_main_branch: &Option<String>,
-) {
-    // Checkout back to original branch in worktree
-    log::info!("[merge] Restoring worktree to branch: {}", original_branch);
-    let mut restore_cmd = git_command();
-    restore_cmd
-        .arg("-C")
-        .arg(path)
-        .arg("checkout")
-        .arg(original_branch);
-    let restore = run_git_logged(&mut restore_cmd, "merge restore worktree checkout");
-    match &restore {
-        Ok(output) if output.status.success() => {
-            log::info!("[merge] Restored worktree to {}", original_branch);
+    args: &[&str],
+    label: &str,
+    timeout_secs: u64,
+) -> Result<std::process::Output, String> {
+    let mut cmd = git_command();
+    cmd.arg("-C").arg(path).args(args);
+    run_command_with_timeout(
+        &mut cmd,
+        label,
+        std::time::Duration::from_secs(timeout_secs),
+    )
+}
+
+fn output_stderr(output: &std::process::Output) -> String {
+    String::from_utf8_lossy(&output.stderr).trim().to_string()
+}
+
+/// `git push` was rejected because the remote ref moved between our fetch and our push
+/// (someone else pushed in between). These are worth exactly one fetch/merge/push retry;
+/// anything else (auth, network, hooks, `[remote rejected]`) is not.
+fn is_push_rejected_non_fast_forward(stderr: &str) -> bool {
+    const MARKERS: [&str; 4] = [
+        "[rejected]",
+        "non-fast-forward",
+        "fetch first",
+        "stale info",
+    ];
+    MARKERS.iter().any(|marker| stderr.contains(marker))
+}
+
+/// Parse `git worktree list --porcelain` into `(worktree path, checked-out full branch ref)`.
+/// Detached / bare worktrees have `None` as branch; prunable entries (directory gone) are skipped.
+fn parse_worktree_list_porcelain(output: &str) -> Vec<(std::path::PathBuf, Option<String>)> {
+    let mut worktrees = Vec::new();
+    let mut path: Option<std::path::PathBuf> = None;
+    let mut branch: Option<String> = None;
+    let mut prunable = false;
+
+    let mut flush = |path: &mut Option<std::path::PathBuf>,
+                     branch: &mut Option<String>,
+                     prunable: &mut bool| {
+        if let Some(path) = path.take() {
+            if !*prunable {
+                worktrees.push((path, branch.take()));
+            }
         }
-        Ok(output) => {
-            log::error!(
-                "[merge] Failed to restore worktree to {}: {}",
-                original_branch,
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-        Err(e) => {
-            log::error!("[merge] Failed to execute git checkout for restore: {}", e);
+        *branch = None;
+        *prunable = false;
+    };
+
+    for line in output.lines() {
+        let line = line.trim_end_matches('\r');
+        if line.is_empty() {
+            flush(&mut path, &mut branch, &mut prunable);
+        } else if let Some(wt_path) = line.strip_prefix("worktree ") {
+            flush(&mut path, &mut branch, &mut prunable);
+            path = Some(std::path::PathBuf::from(wt_path));
+        } else if let Some(wt_branch) = line.strip_prefix("branch ") {
+            branch = Some(wt_branch.to_string());
+        } else if line == "prunable" || line.starts_with("prunable ") {
+            prunable = true;
         }
     }
+    flush(&mut path, &mut branch, &mut prunable);
+    worktrees
+}
 
-    // Restore main worktree if we switched it
-    if switched_main {
-        if let (Some(main_wt), Some(orig_branch)) = (main_worktree_path, original_main_branch) {
-            log::info!("[merge] Restoring main worktree to branch: {}", orig_branch);
-            let mut restore_cmd = git_command();
-            restore_cmd
-                .arg("-C")
-                .arg(main_wt)
-                .arg("checkout")
-                .arg(orig_branch);
-            let restore_output =
-                run_git_logged(&mut restore_cmd, "merge restore main worktree checkout");
-            match &restore_output {
-                Ok(output) if output.status.success() => {
-                    log::info!("[merge] Restored main worktree to {}", orig_branch);
-                }
-                Ok(output) => {
-                    log::error!(
-                        "[merge] Failed to restore main worktree to {}: {}",
-                        orig_branch,
-                        String::from_utf8_lossy(&output.stderr)
-                    );
-                }
-                Err(e) => {
-                    log::error!(
-                        "[merge] Failed to execute git checkout for main restore: {}",
-                        e
-                    );
-                }
+/// Read the current branch via git2; detached HEAD is an error because there is nothing to merge.
+fn current_branch_for_merge(path: &Path) -> Result<String, String> {
+    let repo =
+        Repository::open(path).map_err(|e| format!("无法打开仓库 ({}): {}", path.display(), e))?;
+    let head = repo
+        .head()
+        .map_err(|e| format!("无法读取 HEAD ({}): {}", path.display(), e))?;
+    if !head.is_branch() {
+        return Err("无法获取当前分支名 (HEAD 可能处于 detached 状态)".to_string());
+    }
+    head.shorthand()
+        .map(|name| name.to_string())
+        .ok_or_else(|| "无法获取当前分支名 (HEAD 可能处于 detached 状态)".to_string())
+}
+
+/// `true` when `git status --porcelain --untracked-files=no` is empty (untracked files are fine).
+fn has_clean_tracked_tree(path: &Path, label: &str) -> Result<bool, String> {
+    let status = run_git_in(
+        path,
+        &["status", "--porcelain", "--untracked-files=no"],
+        &format!("{} status", label),
+    )?;
+    if !status.status.success() {
+        return Err(format!("检查工作区状态失败: {}", output_stderr(&status)));
+    }
+    Ok(String::from_utf8_lossy(&status.stdout).trim().is_empty())
+}
+
+/// fetch origin/<target> → detach onto it → merge <current_branch> → push HEAD:<target>.
+/// Retries the whole sequence once when the push is rejected as non-fast-forward.
+/// Leaves the worktree detached (on success) or wherever it stopped (on failure);
+/// the caller always restores `current_branch` afterwards.
+fn fetch_merge_push_remote_target(
+    path: &Path,
+    current_branch: &str,
+    target: &str,
+    label: &str,
+) -> Result<(), String> {
+    let remote_ref = format!("refs/remotes/origin/{}", target);
+    let fetch_refspec = format!("+refs/heads/{}:{}", target, remote_ref);
+    let push_refspec = format!("HEAD:refs/heads/{}", target);
+    let merge_message = format!("Merge branch '{}' into {}", current_branch, target);
+    // Fully qualified: a plain `git merge <name>` resolves a same-named TAG before the branch
+    // (refs/tags/ wins over refs/heads/ in rev DWIM) and would silently merge the wrong thing.
+    let feature_ref = format!("refs/heads/{}", current_branch);
+
+    for attempt in 1..=2 {
+        // Step 2: bring origin/<target> up to date (explicit refspec: works even for
+        // single-branch clones and force-reset remote branches).
+        log::info!(
+            "[{}] Step 2: git fetch origin {} (attempt {}/2)",
+            label,
+            target,
+            attempt
+        );
+        let fetch = run_git_in_with_timeout(
+            path,
+            &["fetch", "origin", &fetch_refspec],
+            &format!("{} fetch target", label),
+            MERGE_FETCH_TIMEOUT_SECS,
+        )?;
+        if !fetch.status.success() {
+            let stderr = output_stderr(&fetch);
+            log::error!("[{}] Step 2 FAILED: fetch => {}", label, stderr);
+            if stderr.contains("couldn't find remote ref") {
+                return Err(format!("远程分支 origin/{} 不存在", target));
             }
+            return Err(format!("拉取 {} 最新代码失败: {}", target, stderr));
+        }
+        let verify = run_git_in(
+            path,
+            &["rev-parse", "--verify", "--quiet", &remote_ref],
+            &format!("{} verify remote ref", label),
+        )?;
+        if !verify.status.success() {
+            log::error!("[{}] Step 2 FAILED: {} does not exist", label, remote_ref);
+            return Err(format!("远程分支 origin/{} 不存在", target));
+        }
+        log::info!("[{}] Step 2 OK: origin/{} is up to date", label, target);
+
+        // Step 3: detached HEAD on the fresh remote tip. No local branch is checked out,
+        // so this never conflicts with the main worktree or any other linked worktree.
+        log::info!("[{}] Step 3: git checkout --detach {}", label, remote_ref);
+        let checkout = run_git_in(
+            path,
+            &["checkout", "--detach", &remote_ref],
+            &format!("{} checkout detach target", label),
+        )?;
+        if !checkout.status.success() {
+            let stderr = output_stderr(&checkout);
+            log::error!("[{}] Step 3 FAILED: checkout => {}", label, stderr);
+            return Err(format!("切换到 {} 分支失败: {}", target, stderr));
+        }
+        log::info!("[{}] Step 3 OK: detached at origin/{}", label, target);
+
+        // Step 4: merge (default fast-forward semantics).
+        log::info!("[{}] Step 4: git merge {}", label, current_branch);
+        let merge = run_git_in(
+            path,
+            // --ff: keep "fast-forward when possible" even if the user set merge.ff=only.
+            &[
+                "merge",
+                "--ff",
+                "--no-edit",
+                "-m",
+                &merge_message,
+                &feature_ref,
+            ],
+            &format!("{} merge current", label),
+        )?;
+        if !merge.status.success() {
+            let stderr = output_stderr(&merge);
+            let stdout = String::from_utf8_lossy(&merge.stdout).trim().to_string();
+            log::error!(
+                "[{}] Step 4 FAILED: merge => stderr={}, stdout={}",
+                label,
+                stderr,
+                stdout
+            );
+            let _ = run_git_in(
+                path,
+                &["merge", "--abort"],
+                &format!("{} merge abort", label),
+            );
+            return Err(format!(
+                "合并 {} 到 {} 失败: {}{}",
+                current_branch,
+                target,
+                stderr,
+                if stdout.is_empty() {
+                    String::new()
+                } else {
+                    format!("\n{}", stdout)
+                }
+            ));
+        }
+        log::info!(
+            "[{}] Step 4 OK: merged {} into origin/{}",
+            label,
+            current_branch,
+            target
+        );
+
+        // Step 5: push the detached HEAD straight to the remote branch.
+        log::info!("[{}] Step 5: git push origin {}", label, push_refspec);
+        let push = run_git_in_with_timeout(
+            path,
+            &["push", "origin", &push_refspec, "--no-verify"],
+            &format!("{} push target", label),
+            MERGE_PUSH_TIMEOUT_SECS,
+        )?;
+        if push.status.success() {
+            log::info!("[{}] Step 5 OK: pushed {}", label, target);
+            return Ok(());
+        }
+        let stderr = output_stderr(&push);
+        if attempt == 1 && is_push_rejected_non_fast_forward(&stderr) {
+            log::warn!(
+                "[{}] Step 5: push rejected (remote {} moved since fetch), retrying once: {}",
+                label,
+                target,
+                stderr
+            );
+            continue;
+        }
+        log::error!("[{}] Step 5 FAILED: push => {}", label, stderr);
+        return Err(format!("推送 {} 到远程失败: {}", target, stderr));
+    }
+
+    Err(format!("推送 {} 到远程失败: 重试后仍被远程拒绝", target))
+}
+
+/// Best-effort: bring the *local* `<target>` branch in line with what we just pushed.
+/// Never fails the merge; returns human-readable notes for the result message.
+fn sync_local_target_branch(path: &Path, target: &str, label: &str) -> Vec<String> {
+    let mut notes = Vec::new();
+    let target_ref = format!("refs/heads/{}", target);
+    let remote_ref = format!("refs/remotes/origin/{}", target);
+
+    let worktrees = match run_git_in(
+        path,
+        &["worktree", "list", "--porcelain"],
+        &format!("{} worktree list", label),
+    ) {
+        Ok(output) if output.status.success() => {
+            parse_worktree_list_porcelain(&String::from_utf8_lossy(&output.stdout))
+        }
+        Ok(output) => {
+            log::warn!(
+                "[{}] Step 6: git worktree list failed, skipping local {} sync: {}",
+                label,
+                target,
+                output_stderr(&output)
+            );
+            return notes;
+        }
+        Err(e) => {
+            log::warn!(
+                "[{}] Step 6: git worktree list failed, skipping local {} sync: {}",
+                label,
+                target,
+                e
+            );
+            return notes;
+        }
+    };
+
+    let holders: Vec<&std::path::PathBuf> = worktrees
+        .iter()
+        .filter(|(_, branch)| branch.as_deref() == Some(target_ref.as_str()))
+        .map(|(wt_path, _)| wt_path)
+        .collect();
+
+    if holders.is_empty() {
+        let exists = run_git_in(
+            path,
+            &["rev-parse", "--verify", "--quiet", &target_ref],
+            &format!("{} verify local target", label),
+        )
+        .map(|output| output.status.success())
+        .unwrap_or(false);
+        if !exists {
+            log::info!(
+                "[{}] Step 6: no local {} branch, nothing to sync",
+                label,
+                target
+            );
+            return notes;
+        }
+
+        let is_ancestor = run_git_in(
+            path,
+            &["merge-base", "--is-ancestor", &target_ref, &remote_ref],
+            &format!("{} local target is-ancestor", label),
+        )
+        .map(|output| output.status.success())
+        .unwrap_or(false);
+        if !is_ancestor {
+            log::warn!(
+                "[{}] Step 6: local {} has commits not on origin/{}, leaving it untouched",
+                label,
+                target,
+                target
+            );
+            notes.push(format!("⚠ 本地 {} 含有未推送的提交，已保留未动", target));
+            return notes;
+        }
+
+        match run_git_in(
+            path,
+            &["branch", "-f", target, &remote_ref],
+            &format!("{} force-update local target", label),
+        ) {
+            Ok(output) if output.status.success() => {
+                log::info!(
+                    "[{}] Step 6 OK: local {} moved to origin/{}",
+                    label,
+                    target,
+                    target
+                );
+                notes.push(format!("✓ 本地 {} 分支已同步到 origin/{}", target, target));
+            }
+            Ok(output) => {
+                log::warn!(
+                    "[{}] Step 6: git branch -f {} failed: {}",
+                    label,
+                    target,
+                    output_stderr(&output)
+                );
+                notes.push(format!(
+                    "⚠ 本地 {} 分支未能同步到 origin/{}（{}），请手动处理",
+                    target,
+                    target,
+                    output_stderr(&output)
+                ));
+            }
+            Err(e) => {
+                log::warn!("[{}] Step 6: git branch -f {} failed: {}", label, target, e);
+                notes.push(format!(
+                    "⚠ 本地 {} 分支未能同步到 origin/{}（{}），请手动处理",
+                    target, target, e
+                ));
+            }
+        }
+        return notes;
+    }
+
+    for wt_path in holders {
+        let ff_label = format!("{} fast-forward worktree target", label);
+        let clean =
+            wt_path.exists() && matches!(has_clean_tracked_tree(wt_path, &ff_label), Ok(true));
+        let fast_forwarded = clean
+            && run_git_in(wt_path, &["merge", "--ff-only", &remote_ref], &ff_label)
+                .map(|output| output.status.success())
+                .unwrap_or(false);
+        if fast_forwarded {
+            log::info!(
+                "[{}] Step 6 OK: {} on {} fast-forwarded to origin/{}",
+                label,
+                target,
+                wt_path.display(),
+                target
+            );
+            notes.push(format!(
+                "✓ {} 上的 {} 已快进到最新",
+                wt_path.display(),
+                target
+            ));
+        } else {
+            log::warn!(
+                "[{}] Step 6: {} on {} not updated (dirty or not fast-forwardable)",
+                label,
+                target,
+                wt_path.display()
+            );
+            notes.push(format!(
+                "⚠ {}: 本地 {} 未更新（有未提交更改或无法快进），请手动处理",
+                wt_path.display(),
+                target
+            ));
+        }
+    }
+    notes
+}
+
+/// `git checkout <branch> --`; returns a warning suffix for the user message when it fails.
+fn restore_original_branch(path: &Path, branch: &str, label: &str) -> Option<String> {
+    log::info!("[{}] Step 7: git checkout {}", label, branch);
+    let failure = match run_git_in(
+        path,
+        &["checkout", branch, "--"],
+        &format!("{} restore original branch", label),
+    ) {
+        Ok(output) if output.status.success() => {
+            log::info!("[{}] Step 7 OK: back on {}", label, branch);
+            return None;
+        }
+        Ok(output) => output_stderr(&output),
+        Err(e) => e,
+    };
+    log::error!(
+        "[{}] Step 7 FAILED: could not restore {}: {}",
+        label,
+        branch,
+        failure
+    );
+    Some(format!(
+        "\n⚠ 切回 {} 失败: {}，请手动执行 git checkout {}",
+        branch, failure, branch
+    ))
+}
+
+/// Merge the worktree's current branch into `origin/<target>` and push it back.
+///
+/// The local `<target>` branch is deliberately never checked out: we fetch the remote tip,
+/// detach onto it, merge, and push `HEAD:refs/heads/<target>`. That way a stale or diverged
+/// local `<target>`, or `<target>` being checked out in the main / another linked worktree,
+/// can neither block the merge nor leak junk merge commits into the remote. Afterwards the
+/// local `<target>` (wherever it lives) is fast-forwarded on a best-effort basis.
+fn merge_current_branch_into_remote_target(
+    path: &Path,
+    target: &str,
+    label: &str,
+) -> Result<String, String> {
+    log::info!("[{}] ===== START merge into {} =====", label, target);
+    log::info!("[{}] path={}, target={}", label, path.display(), target);
+
+    let current_branch = current_branch_for_merge(path)?;
+    log::info!("[{}] current_branch={}", label, current_branch);
+
+    // Step 1: refuse to shuffle HEAD around on top of uncommitted tracked changes.
+    log::info!(
+        "[{}] Step 1: checking for uncommitted tracked changes",
+        label
+    );
+    if !has_clean_tracked_tree(path, label)? {
+        log::warn!(
+            "[{}] Step 1 FAILED: uncommitted tracked changes on {}",
+            label,
+            current_branch
+        );
+        return Err(format!(
+            "当前分支有未提交的更改，请先提交或 git stash 贮藏后再合并到 {}",
+            target
+        ));
+    }
+    log::info!("[{}] Step 1 OK: tracked working tree is clean", label);
+
+    // Steps 2-5
+    let pipeline = fetch_merge_push_remote_target(path, &current_branch, target, label);
+
+    // Step 6 (only after a successful push)
+    let notes = if pipeline.is_ok() {
+        log::info!("[{}] Step 6: syncing local {} branch", label, target);
+        sync_local_target_branch(path, target, label)
+    } else {
+        Vec::new()
+    };
+
+    // Step 7: always go back to the feature branch.
+    let restore_warning = restore_original_branch(path, &current_branch, label);
+
+    match pipeline {
+        Ok(()) => {
+            let mut message = format!("成功将 {} 合并到 {}", current_branch, target);
+            if !notes.is_empty() {
+                message.push_str("\n\n");
+                message.push_str(&notes.join("\n"));
+            }
+            if let Some(warning) = restore_warning {
+                message.push_str(&warning);
+            }
+            log::info!("[{}] ===== DONE merge into {} =====", label, target);
+            Ok(message)
+        }
+        Err(mut error) => {
+            if let Some(warning) = restore_warning {
+                error.push_str(&warning);
+            }
+            log::error!("[{}] ===== FAILED merge into {} =====", label, target);
+            Err(error)
         }
     }
 }
 
 /// Merge current branch to test branch
 pub fn merge_to_test_branch(path: &Path, test_branch: &str) -> Result<String, String> {
-    log::info!("[merge-test] ===== START merge_to_test_branch =====");
-    log::info!(
-        "[merge-test] path={}, test_branch={}",
-        path.display(),
-        test_branch
-    );
-
-    let repo =
-        Repository::open(path).map_err(|e| format!("无法打开仓库 ({}): {}", path.display(), e))?;
-
-    let head = repo
-        .head()
-        .map_err(|e| format!("无法读取 HEAD ({}): {}", path.display(), e))?;
-    let current_branch = head
-        .shorthand()
-        .ok_or_else(|| "无法获取当前分支名 (HEAD 可能处于 detached 状态)".to_string())?;
-
-    log::info!("[merge-test] current_branch={}", current_branch);
-
-    // Find main worktree and handle potential checkout conflict
-    let mut main_worktree_path: Option<std::path::PathBuf> = None;
-    let mut switched_main = false;
-    let mut original_main_branch: Option<String> = None;
-
-    if let Some(main_wt) = find_main_worktree(path) {
-        main_worktree_path = Some(main_wt.clone());
-        log::info!("[merge-test] Step 1: Handling branch checkout conflict...");
-        let (switched, orig_branch) = handle_branch_checkout_conflict(&main_wt, test_branch)?;
-        switched_main = switched;
-        original_main_branch = orig_branch;
-        log::info!("[merge-test] Step 1 done: switched_main={}", switched_main);
-    } else {
-        log::info!("[merge-test] Step 1: No main worktree found, skipping conflict check");
-    }
-
-    // Step 2: Checkout test branch
-    log::info!("[merge-test] Step 2: git checkout {}", test_branch);
-    let mut checkout_cmd = git_command();
-    checkout_cmd
-        .arg("-C")
-        .arg(path)
-        .arg("checkout")
-        .arg(test_branch);
-    let checkout_output = run_git_logged(&mut checkout_cmd, "merge-test checkout target")
-        .map_err(|e| format!("执行 git checkout {} 失败: {}", test_branch, e))?;
-
-    if !checkout_output.status.success() {
-        let stderr = String::from_utf8_lossy(&checkout_output.stderr);
-        log::error!(
-            "[merge-test] Step 2 FAILED: checkout {} => {}",
-            test_branch,
-            stderr
-        );
-        if switched_main {
-            restore_merge_state(
-                path,
-                current_branch,
-                switched_main,
-                &main_worktree_path,
-                &original_main_branch,
-            );
-        }
-        return Err(format!("切换到 {} 分支失败: {}", test_branch, stderr));
-    }
-    log::info!("[merge-test] Step 2 OK: checked out {}", test_branch);
-
-    // Step 3: Pull latest
-    log::info!("[merge-test] Step 3: git pull origin {}", test_branch);
-    let mut pull_cmd = git_command();
-    pull_cmd
-        .arg("-C")
-        .arg(path)
-        .arg("pull")
-        .arg("origin")
-        .arg(test_branch);
-    let pull_output = run_git_logged(&mut pull_cmd, "merge-test pull target")
-        .map_err(|e| format!("执行 git pull origin {} 失败: {}", test_branch, e))?;
-
-    if !pull_output.status.success() {
-        let stderr = String::from_utf8_lossy(&pull_output.stderr);
-        log::error!("[merge-test] Step 3 FAILED: pull => {}", stderr);
-        restore_merge_state(
-            path,
-            current_branch,
-            switched_main,
-            &main_worktree_path,
-            &original_main_branch,
-        );
-        return Err(format!("拉取 {} 最新代码失败: {}", test_branch, stderr));
-    }
-    log::info!("[merge-test] Step 3 OK: pulled latest {}", test_branch);
-
-    // Step 4: Merge
-    log::info!("[merge-test] Step 4: git merge {}", current_branch);
-    let mut merge_cmd = git_command();
-    merge_cmd
-        .arg("-C")
-        .arg(path)
-        .arg("merge")
-        .arg(current_branch);
-    let merge_output = run_git_logged(&mut merge_cmd, "merge-test merge current")
-        .map_err(|e| format!("执行 git merge {} 失败: {}", current_branch, e))?;
-
-    if !merge_output.status.success() {
-        let stderr = String::from_utf8_lossy(&merge_output.stderr);
-        let stdout = String::from_utf8_lossy(&merge_output.stdout);
-        log::error!(
-            "[merge-test] Step 4 FAILED: merge => stderr={}, stdout={}",
-            stderr,
-            stdout
-        );
-        // Abort merge if in conflict state
-        let mut abort_cmd = git_command();
-        abort_cmd.arg("-C").arg(path).arg("merge").arg("--abort");
-        let _ = run_git_logged(&mut abort_cmd, "merge-test merge abort");
-        restore_merge_state(
-            path,
-            current_branch,
-            switched_main,
-            &main_worktree_path,
-            &original_main_branch,
-        );
-        return Err(format!(
-            "合并 {} 到 {} 失败: {}{}",
-            current_branch,
-            test_branch,
-            stderr,
-            if !stdout.is_empty() {
-                format!("\n{}", stdout)
-            } else {
-                String::new()
-            }
-        ));
-    }
-    log::info!(
-        "[merge-test] Step 4 OK: merged {} into {}",
-        current_branch,
-        test_branch
-    );
-
-    // Step 5: Push
-    log::info!("[merge-test] Step 5: git push origin {}", test_branch);
-    let mut push_cmd = git_command();
-    push_cmd
-        .arg("-C")
-        .arg(path)
-        .arg("push")
-        .arg("origin")
-        .arg(test_branch)
-        .arg("--no-verify");
-    let push_output = run_git_logged(&mut push_cmd, "merge-test push target")
-        .map_err(|e| format!("执行 git push origin {} 失败: {}", test_branch, e))?;
-
-    let push_failed = !push_output.status.success();
-    if push_failed {
-        log::error!(
-            "[merge-test] Step 5 FAILED: push => {}",
-            String::from_utf8_lossy(&push_output.stderr)
-        );
-    } else {
-        log::info!("[merge-test] Step 5 OK: pushed {}", test_branch);
-    }
-
-    // Step 6: Restore
-    log::info!("[merge-test] Step 6: Restoring original state...");
-    restore_merge_state(
-        path,
-        current_branch,
-        switched_main,
-        &main_worktree_path,
-        &original_main_branch,
-    );
-    log::info!("[merge-test] Step 6 OK: Restored");
-
-    if push_failed {
-        return Err(format!(
-            "推送 {} 到远程失败: {}",
-            test_branch,
-            String::from_utf8_lossy(&push_output.stderr)
-        ));
-    }
-
-    let mut result = format!("成功将 {} 合并到 {}", current_branch, test_branch);
-    if switched_main {
-        result.push_str("\n\n✓ 主工作区已临时切换并已恢复");
-    }
-
-    log::info!("[merge-test] ===== DONE merge_to_test_branch =====");
-    Ok(result)
+    merge_current_branch_into_remote_target(path, test_branch, "merge-test")
 }
 
 /// Merge current branch to base branch
 pub fn merge_to_base_branch(path: &Path, base_branch: &str) -> Result<String, String> {
-    log::info!("[merge-base] ===== START merge_to_base_branch =====");
-    log::info!(
-        "[merge-base] path={}, base_branch={}",
-        path.display(),
-        base_branch
-    );
-
-    let repo =
-        Repository::open(path).map_err(|e| format!("无法打开仓库 ({}): {}", path.display(), e))?;
-
-    let head = repo
-        .head()
-        .map_err(|e| format!("无法读取 HEAD ({}): {}", path.display(), e))?;
-    let current_branch = head
-        .shorthand()
-        .ok_or_else(|| "无法获取当前分支名 (HEAD 可能处于 detached 状态)".to_string())?;
-
-    log::info!("[merge-base] current_branch={}", current_branch);
-
-    // Find main worktree and handle potential checkout conflict
-    let mut main_worktree_path: Option<std::path::PathBuf> = None;
-    let mut switched_main = false;
-    let mut original_main_branch: Option<String> = None;
-
-    if let Some(main_wt) = find_main_worktree(path) {
-        main_worktree_path = Some(main_wt.clone());
-        log::info!("[merge-base] Step 1: Handling branch checkout conflict...");
-        let (switched, orig_branch) = handle_branch_checkout_conflict(&main_wt, base_branch)?;
-        switched_main = switched;
-        original_main_branch = orig_branch;
-        log::info!("[merge-base] Step 1 done: switched_main={}", switched_main);
-    } else {
-        log::info!("[merge-base] Step 1: No main worktree found, skipping conflict check");
-    }
-
-    // Step 2: Checkout base branch
-    log::info!("[merge-base] Step 2: git checkout {}", base_branch);
-    let mut checkout_cmd = git_command();
-    checkout_cmd
-        .arg("-C")
-        .arg(path)
-        .arg("checkout")
-        .arg(base_branch);
-    let checkout_output = run_git_logged(&mut checkout_cmd, "merge-base checkout target")
-        .map_err(|e| format!("执行 git checkout {} 失败: {}", base_branch, e))?;
-
-    if !checkout_output.status.success() {
-        let stderr = String::from_utf8_lossy(&checkout_output.stderr);
-        log::error!(
-            "[merge-base] Step 2 FAILED: checkout {} => {}",
-            base_branch,
-            stderr
-        );
-        if switched_main {
-            restore_merge_state(
-                path,
-                current_branch,
-                switched_main,
-                &main_worktree_path,
-                &original_main_branch,
-            );
-        }
-        return Err(format!("切换到 {} 分支失败: {}", base_branch, stderr));
-    }
-    log::info!("[merge-base] Step 2 OK: checked out {}", base_branch);
-
-    // Step 3: Pull latest
-    log::info!("[merge-base] Step 3: git pull origin {}", base_branch);
-    let mut pull_cmd = git_command();
-    pull_cmd
-        .arg("-C")
-        .arg(path)
-        .arg("pull")
-        .arg("origin")
-        .arg(base_branch);
-    let pull_output = run_git_logged(&mut pull_cmd, "merge-base pull target")
-        .map_err(|e| format!("执行 git pull origin {} 失败: {}", base_branch, e))?;
-
-    if !pull_output.status.success() {
-        let stderr = String::from_utf8_lossy(&pull_output.stderr);
-        log::error!("[merge-base] Step 3 FAILED: pull => {}", stderr);
-        restore_merge_state(
-            path,
-            current_branch,
-            switched_main,
-            &main_worktree_path,
-            &original_main_branch,
-        );
-        return Err(format!("拉取 {} 最新代码失败: {}", base_branch, stderr));
-    }
-    log::info!("[merge-base] Step 3 OK: pulled latest {}", base_branch);
-
-    // Step 4: Merge
-    log::info!("[merge-base] Step 4: git merge {}", current_branch);
-    let mut merge_cmd = git_command();
-    merge_cmd
-        .arg("-C")
-        .arg(path)
-        .arg("merge")
-        .arg(current_branch);
-    let merge_output = run_git_logged(&mut merge_cmd, "merge-base merge current")
-        .map_err(|e| format!("执行 git merge {} 失败: {}", current_branch, e))?;
-
-    if !merge_output.status.success() {
-        let stderr = String::from_utf8_lossy(&merge_output.stderr);
-        let stdout = String::from_utf8_lossy(&merge_output.stdout);
-        log::error!(
-            "[merge-base] Step 4 FAILED: merge => stderr={}, stdout={}",
-            stderr,
-            stdout
-        );
-        // Abort merge if in conflict state
-        let mut abort_cmd = git_command();
-        abort_cmd.arg("-C").arg(path).arg("merge").arg("--abort");
-        let _ = run_git_logged(&mut abort_cmd, "merge-base merge abort");
-        restore_merge_state(
-            path,
-            current_branch,
-            switched_main,
-            &main_worktree_path,
-            &original_main_branch,
-        );
-        return Err(format!(
-            "合并 {} 到 {} 失败: {}{}",
-            current_branch,
-            base_branch,
-            stderr,
-            if !stdout.is_empty() {
-                format!("\n{}", stdout)
-            } else {
-                String::new()
-            }
-        ));
-    }
-    log::info!(
-        "[merge-base] Step 4 OK: merged {} into {}",
-        current_branch,
-        base_branch
-    );
-
-    // Step 5: Push
-    log::info!("[merge-base] Step 5: git push origin {}", base_branch);
-    let mut push_cmd = git_command();
-    push_cmd
-        .arg("-C")
-        .arg(path)
-        .arg("push")
-        .arg("origin")
-        .arg(base_branch)
-        .arg("--no-verify");
-    let push_output = run_git_logged(&mut push_cmd, "merge-base push target")
-        .map_err(|e| format!("执行 git push origin {} 失败: {}", base_branch, e))?;
-
-    let push_failed = !push_output.status.success();
-    if push_failed {
-        log::error!(
-            "[merge-base] Step 5 FAILED: push => {}",
-            String::from_utf8_lossy(&push_output.stderr)
-        );
-    } else {
-        log::info!("[merge-base] Step 5 OK: pushed {}", base_branch);
-    }
-
-    // Step 6: Restore
-    log::info!("[merge-base] Step 6: Restoring original state...");
-    restore_merge_state(
-        path,
-        current_branch,
-        switched_main,
-        &main_worktree_path,
-        &original_main_branch,
-    );
-    log::info!("[merge-base] Step 6 OK: Restored");
-
-    if push_failed {
-        return Err(format!(
-            "推送 {} 到远程失败: {}",
-            base_branch,
-            String::from_utf8_lossy(&push_output.stderr)
-        ));
-    }
-
-    let mut result = format!("成功将 {} 合并到 {}", current_branch, base_branch);
-    if switched_main {
-        result.push_str("\n\n✓ 主工作区已临时切换并已恢复");
-    }
-
-    log::info!("[merge-base] ===== DONE merge_to_base_branch =====");
-    Ok(result)
+    merge_current_branch_into_remote_target(path, base_branch, "merge-base")
 }
 
 /// Get branch diff statistics
@@ -2038,51 +1987,102 @@ mod tests {
             .unwrap_or_else(|| panic!("missing changed file {path}; got {files:?}"))
     }
 
-    #[serial]
     #[test]
-    fn find_main_worktree_returns_main_for_linked_worktree() {
-        let repo = make_test_repo();
-        let path = repo.path();
-        let linked_parent = tempfile::tempdir().expect("create linked worktree parent");
-        let linked = linked_parent.path().join("linked-main");
+    fn is_push_rejected_non_fast_forward_matches_real_git_rejections_only() {
+        let fetch_first = "To /tmp/origin.git\n \
+             ! [rejected]        HEAD -> test (fetch first)\n\
+             error: failed to push some refs to '/tmp/origin.git'\n\
+             hint: Updates were rejected because the remote contains work that you do not\n\
+             hint: have locally. This is usually caused by another repository pushing to\n\
+             hint: the same ref. If you want to integrate the remote changes, use\n\
+             hint: 'git pull' before pushing again.";
+        let non_fast_forward = "To https://github.com/acme/app.git\n \
+             ! [rejected]        test -> test (non-fast-forward)\n\
+             error: failed to push some refs to 'https://github.com/acme/app.git'\n\
+             hint: Updates were rejected because the tip of your current branch is behind\n\
+             hint: its remote counterpart.";
+        let stale_info = "To https://github.com/acme/app.git\n \
+             ! [rejected]        test -> test (stale info)\n\
+             error: failed to push some refs to 'https://github.com/acme/app.git'";
 
-        run_git(path, &["worktree", "add", linked.to_str().unwrap(), "main"]);
+        assert!(is_push_rejected_non_fast_forward(fetch_first));
+        assert!(is_push_rejected_non_fast_forward(non_fast_forward));
+        assert!(is_push_rejected_non_fast_forward(stale_info));
+        assert!(is_push_rejected_non_fast_forward(
+            "! [rejected] test -> test (non-fast-forward)"
+        ));
 
-        let main = find_main_worktree(&linked).expect("linked worktree resolves main path");
-
-        assert_eq!(
-            std::fs::canonicalize(main).expect("canonical main worktree"),
-            std::fs::canonicalize(path).expect("canonical repo path")
-        );
+        // Anything that a second fetch/merge/push cannot fix must not trigger a retry.
+        assert!(!is_push_rejected_non_fast_forward(""));
+        assert!(!is_push_rejected_non_fast_forward(
+            "fatal: unable to access 'https://github.com/acme/app.git/': \
+             Could not resolve host: github.com"
+        ));
+        assert!(!is_push_rejected_non_fast_forward(
+            "remote: Permission to acme/app.git denied to bob.\n\
+             fatal: unable to access 'https://github.com/acme/app.git/': \
+             The requested URL returned error: 403"
+        ));
+        assert!(!is_push_rejected_non_fast_forward(
+            "fatal: Authentication failed for 'https://github.com/acme/app.git/'"
+        ));
+        assert!(!is_push_rejected_non_fast_forward(
+            "To https://github.com/acme/app.git\n \
+             ! [remote rejected] test -> test (pre-receive hook declined)\n\
+             error: failed to push some refs to 'https://github.com/acme/app.git'"
+        ));
+        assert!(!is_push_rejected_non_fast_forward("Everything up-to-date"));
     }
 
-    #[serial]
     #[test]
-    fn find_main_worktree_ignores_plain_dirs_and_malformed_git_files() {
-        let temp = tempfile::tempdir().expect("create temp dir");
+    fn parse_worktree_list_porcelain_reads_branches_and_skips_detached_bare_and_prunable() {
+        let output = "worktree /work/main\n\
+                      HEAD 1111111111111111111111111111111111111111\n\
+                      branch refs/heads/test\n\
+                      \n\
+                      worktree /work/feature\n\
+                      HEAD 2222222222222222222222222222222222222222\n\
+                      detached\n\
+                      \n\
+                      worktree /work/locked\n\
+                      HEAD 3333333333333333333333333333333333333333\n\
+                      branch refs/heads/main\n\
+                      locked reason with spaces\n\
+                      \n\
+                      worktree /work/gone\n\
+                      HEAD 4444444444444444444444444444444444444444\n\
+                      branch refs/heads/test\n\
+                      prunable gitdir file points to non-existent location\n\
+                      \n\
+                      worktree C:/work/windows\r\n\
+                      HEAD 5555555555555555555555555555555555555555\r\n\
+                      branch refs/heads/test\r\n\
+                      \r\n\
+                      worktree /work/bare.git\n\
+                      bare\n";
 
-        assert_eq!(find_main_worktree(temp.path()), None);
+        let parsed = parse_worktree_list_porcelain(output);
 
-        std::fs::write(temp.path().join(".git"), "not a gitdir pointer")
-            .expect("write malformed .git file");
-
-        assert_eq!(find_main_worktree(temp.path()), None);
-    }
-
-    #[serial]
-    #[test]
-    fn handle_branch_checkout_conflict_noops_when_main_on_different_branch() {
-        let repo = make_test_repo();
-        let path = repo.path();
-
-        let result = handle_branch_checkout_conflict(path, "main")
-            .expect("different current branch does not need detach");
-
-        assert_eq!(result, (false, None));
         assert_eq!(
-            git_output(path, &["branch", "--show-current"]),
-            "feature/demo"
+            parsed,
+            vec![
+                (
+                    std::path::PathBuf::from("/work/main"),
+                    Some("refs/heads/test".to_string())
+                ),
+                (std::path::PathBuf::from("/work/feature"), None),
+                (
+                    std::path::PathBuf::from("/work/locked"),
+                    Some("refs/heads/main".to_string())
+                ),
+                (
+                    std::path::PathBuf::from("C:/work/windows"),
+                    Some("refs/heads/test".to_string())
+                ),
+                (std::path::PathBuf::from("/work/bare.git"), None),
+            ]
         );
+        assert!(parse_worktree_list_porcelain("").is_empty());
     }
 
     #[serial]
@@ -2566,45 +2566,6 @@ mod tests {
 
     #[serial]
     #[test]
-    fn handle_branch_checkout_conflict_detaches_clean_matching_main_worktree() {
-        let repo = make_test_repo();
-        let path = repo.path();
-
-        let result = handle_branch_checkout_conflict(path, "feature/demo")
-            .expect("handle branch checkout conflict");
-
-        assert_eq!(result, (true, Some("feature/demo".to_string())));
-        assert_eq!(
-            git_output(path, &["rev-parse", "--abbrev-ref", "HEAD"]),
-            "HEAD"
-        );
-
-        run_git(path, &["checkout", "feature/demo"]);
-        assert_eq!(
-            git_output(path, &["branch", "--show-current"]),
-            "feature/demo"
-        );
-    }
-
-    #[serial]
-    #[test]
-    fn handle_branch_checkout_conflict_rejects_dirty_matching_main_worktree() {
-        let repo = make_test_repo();
-        let path = repo.path();
-        std::fs::write(path.join("dirty.txt"), "dirty\n").expect("write dirty file");
-
-        let err = handle_branch_checkout_conflict(path, "feature/demo").unwrap_err();
-
-        assert!(err.contains("feature/demo"), "{err}");
-        assert!(err.contains("未提交的更改"), "{err}");
-        assert_eq!(
-            git_output(path, &["branch", "--show-current"]),
-            "feature/demo"
-        );
-    }
-
-    #[serial]
-    #[test]
     fn merge_to_test_branch_merges_locally_pushes_to_local_origin_and_restores_branch() {
         let repo = make_test_repo();
         let path = repo.path();
@@ -2615,6 +2576,11 @@ mod tests {
             result.contains("成功将 feature/demo 合并到 test"),
             "{result}"
         );
+        assert!(
+            result.contains("✓ 本地 test 分支已同步到 origin/test"),
+            "{result}"
+        );
+        assert!(!result.contains("⚠"), "{result}");
         assert_eq!(
             git_output(path, &["branch", "--show-current"]),
             "feature/demo"
@@ -2623,20 +2589,34 @@ mod tests {
             path,
             &["merge-base", "--is-ancestor", "feature/demo", "origin/test"],
         );
+        // The bare origin really received the merge result.
+        let remote_test = git_output(path, &["ls-remote", "origin", "refs/heads/test"]);
+        assert!(
+            remote_test.starts_with(&git_output(path, &["rev-parse", "origin/test"])),
+            "{remote_test}"
+        );
+        // The idle local test branch (checked out nowhere) was fast-forwarded to origin/test.
+        assert_eq!(
+            git_output(path, &["rev-parse", "test"]),
+            git_output(path, &["rev-parse", "origin/test"])
+        );
+        // No leftover merge state, no detached HEAD.
+        assert_eq!(git_output(path, &["status", "--porcelain"]), "");
     }
 
     #[serial]
     #[test]
-    fn merge_to_base_branch_reports_checkout_error_for_nonexistent_branch() {
+    fn merge_to_base_branch_reports_missing_remote_branch_for_nonexistent_target() {
         let repo = make_test_repo();
 
         let err = merge_to_base_branch(repo.path(), "does-not-exist").unwrap_err();
 
-        assert!(err.contains("切换到 does-not-exist 分支失败"), "{err}");
+        assert_eq!(err, "远程分支 origin/does-not-exist 不存在");
         assert_eq!(
             git_output(repo.path(), &["branch", "--show-current"]),
             "feature/demo"
         );
+        assert_eq!(git_output(repo.path(), &["status", "--porcelain"]), "");
     }
 
     #[serial]
@@ -2717,6 +2697,10 @@ mod tests {
             result.contains("成功将 feature/demo 合并到 main"),
             "{result}"
         );
+        assert!(
+            result.contains("✓ 本地 main 分支已同步到 origin/main"),
+            "{result}"
+        );
         assert_eq!(
             git_output(path, &["branch", "--show-current"]),
             "feature/demo"
@@ -2725,6 +2709,10 @@ mod tests {
         run_git(
             path,
             &["merge-base", "--is-ancestor", "feature/demo", "origin/main"],
+        );
+        assert_eq!(
+            git_output(path, &["rev-parse", "main"]),
+            git_output(path, &["rev-parse", "origin/main"])
         );
     }
 
@@ -2876,12 +2864,14 @@ mod tests {
         let info = get_worktree_info_for_branches(path, "main", "test");
         assert_eq!(info.current_branch, "HEAD");
 
-        let result = merge_to_test_branch(path, "test").expect("merge detached HEAD to test");
-        assert!(result.contains("成功将 HEAD 合并到 test"), "{result}");
+        let err = merge_to_test_branch(path, "test").unwrap_err();
+        assert!(err.contains("detached"), "{err}");
+        // Nothing was touched: still detached at the same commit, origin/test unchanged.
         assert_eq!(
             git_output(path, &["rev-parse", "--abbrev-ref", "HEAD"]),
-            "test"
+            "HEAD"
         );
+        assert_eq!(git_output(path, &["rev-parse", "HEAD"]), head);
         let ancestor = Command::new("git")
             .args(["merge-base", "--is-ancestor", &head, "origin/test"])
             .current_dir(path)
@@ -2889,7 +2879,7 @@ mod tests {
             .expect("check detached commit ancestry");
         assert!(
             !ancestor.success(),
-            "detached commit should not currently be merged despite success message"
+            "detached commit must not have been merged into origin/test"
         );
     }
 
@@ -3022,5 +3012,309 @@ mod tests {
             git_output(path, &["log", "-1", "--format=%an <%ae>"]),
             "Override Name <override@example.com>"
         );
+    }
+
+    /// Second clone of the repo's bare origin, with its own identity, checked out on `branch`.
+    fn clone_origin_on_branch(repo: &Path, branch: &str) -> TempDir {
+        let origin_url = git_output(repo, &["remote", "get-url", "origin"]);
+        let other = tempfile::tempdir().expect("create second clone dir");
+        clone_repo(Path::new(&origin_url), other.path());
+        run_git(other.path(), &["config", "user.email", "other@example.com"]);
+        run_git(other.path(), &["config", "user.name", "Other User"]);
+        run_git(other.path(), &["checkout", branch]);
+        other
+    }
+
+    fn commit_file(repo: &Path, name: &str, content: &str, message: &str) -> String {
+        std::fs::write(repo.join(name), content).expect("write file to commit");
+        run_git(repo, &["add", name]);
+        run_git(repo, &["commit", "-m", message]);
+        git_output(repo, &["rev-parse", "HEAD"])
+    }
+
+    fn is_ancestor(repo: &Path, ancestor: &str, descendant: &str) -> bool {
+        Command::new("git")
+            .args(["merge-base", "--is-ancestor", ancestor, descendant])
+            .current_dir(repo)
+            .status()
+            .expect("run git merge-base --is-ancestor")
+            .success()
+    }
+
+    fn remote_head_of(repo: &Path, branch: &str) -> String {
+        let line = git_output(
+            repo,
+            &["ls-remote", "origin", &format!("refs/heads/{branch}")],
+        );
+        line.split_whitespace()
+            .next()
+            .unwrap_or_else(|| panic!("origin has no {branch}: {line:?}"))
+            .to_string()
+    }
+
+    #[serial]
+    #[test]
+    fn merge_to_test_branch_succeeds_when_local_test_has_diverged_from_origin() {
+        let repo = make_test_repo();
+        let path = repo.path();
+
+        // A local-only commit on test (e.g. left behind by an earlier failed push).
+        run_git(path, &["checkout", "test"]);
+        let local_only = commit_file(path, "local-only.txt", "local\n", "local-only test commit");
+        run_git(path, &["checkout", "feature/demo"]);
+
+        // Meanwhile origin/test moved on with a different commit: local test has diverged.
+        let other = clone_origin_on_branch(path, "test");
+        let origin_side = commit_file(
+            other.path(),
+            "origin-side.txt",
+            "origin\n",
+            "origin-side test commit",
+        );
+        run_git(other.path(), &["push", "origin", "test"]);
+
+        let result =
+            merge_to_test_branch(path, "test").expect("merge must not care about local test");
+
+        assert!(
+            result.contains("成功将 feature/demo 合并到 test"),
+            "{result}"
+        );
+        assert!(
+            result.contains("⚠ 本地 test 含有未推送的提交，已保留未动"),
+            "{result}"
+        );
+        assert_eq!(
+            git_output(path, &["branch", "--show-current"]),
+            "feature/demo"
+        );
+        assert_eq!(git_output(path, &["status", "--porcelain"]), "");
+
+        // origin/test = origin's commit + the feature commit, WITHOUT the local-only commit.
+        assert_eq!(
+            remote_head_of(path, "test"),
+            git_output(path, &["rev-parse", "origin/test"])
+        );
+        assert!(is_ancestor(path, &origin_side, "origin/test"));
+        assert!(is_ancestor(path, "feature/demo", "origin/test"));
+        assert!(!is_ancestor(path, &local_only, "origin/test"));
+
+        // Local test was left exactly where it was.
+        assert_eq!(git_output(path, &["rev-parse", "test"]), local_only);
+    }
+
+    #[serial]
+    #[test]
+    fn merge_to_test_branch_fast_forwards_clean_main_worktree_that_has_test_checked_out() {
+        let repo = make_test_repo();
+        let main = repo.path();
+        run_git(main, &["checkout", "test"]);
+        let linked_parent = tempfile::tempdir().expect("create linked worktree parent");
+        let linked = linked_parent.path().join("feature-wt");
+        run_git(
+            main,
+            &["worktree", "add", linked.to_str().unwrap(), "feature/demo"],
+        );
+        let main_before = git_output(main, &["rev-parse", "HEAD"]);
+
+        let result = merge_to_test_branch(&linked, "test").expect("merge from linked worktree");
+
+        assert!(
+            result.contains("成功将 feature/demo 合并到 test"),
+            "{result}"
+        );
+        assert!(result.contains("上的 test 已快进到最新"), "{result}");
+        assert!(!result.contains("⚠"), "{result}");
+
+        // Main stays on test (never detached) and now points at the pushed merge result.
+        assert_eq!(git_output(main, &["branch", "--show-current"]), "test");
+        assert_ne!(git_output(main, &["rev-parse", "HEAD"]), main_before);
+        assert_eq!(
+            git_output(main, &["rev-parse", "HEAD"]),
+            git_output(main, &["rev-parse", "origin/test"])
+        );
+        assert_eq!(
+            remote_head_of(main, "test"),
+            git_output(main, &["rev-parse", "test"])
+        );
+        assert!(is_ancestor(main, "feature/demo", "test"));
+        assert!(main.join("feature.txt").exists());
+        assert_eq!(git_output(main, &["status", "--porcelain"]), "");
+
+        // The feature worktree is back on its own branch.
+        assert_eq!(
+            git_output(&linked, &["branch", "--show-current"]),
+            "feature/demo"
+        );
+        assert_eq!(git_output(&linked, &["status", "--porcelain"]), "");
+    }
+
+    #[serial]
+    #[test]
+    fn merge_to_test_branch_warns_but_succeeds_when_dirty_linked_worktree_holds_test() {
+        let repo = make_test_repo();
+        let main = repo.path(); // on feature/demo
+        let linked_parent = tempfile::tempdir().expect("create linked worktree parent");
+        let linked = linked_parent.path().join("test-wt");
+        run_git(main, &["worktree", "add", linked.to_str().unwrap(), "test"]);
+        std::fs::write(linked.join("README.md"), "dirty in test worktree\n")
+            .expect("dirty a tracked file in the test worktree");
+        let linked_before = git_output(&linked, &["rev-parse", "HEAD"]);
+
+        let result = merge_to_test_branch(main, "test")
+            .expect("another worktree holding test must not block the merge");
+
+        assert!(
+            result.contains("成功将 feature/demo 合并到 test"),
+            "{result}"
+        );
+        assert!(result.contains("⚠"), "{result}");
+        assert!(result.contains("本地 test 未更新"), "{result}");
+        assert_eq!(
+            git_output(main, &["branch", "--show-current"]),
+            "feature/demo"
+        );
+        assert!(is_ancestor(main, "feature/demo", "origin/test"));
+        assert_eq!(
+            remote_head_of(main, "test"),
+            git_output(main, &["rev-parse", "origin/test"])
+        );
+
+        // The dirty worktree was left alone: same branch, same commit, same uncommitted change.
+        assert_eq!(git_output(&linked, &["branch", "--show-current"]), "test");
+        assert_eq!(git_output(&linked, &["rev-parse", "HEAD"]), linked_before);
+        assert_eq!(
+            std::fs::read_to_string(linked.join("README.md")).expect("read dirty file"),
+            "dirty in test worktree\n"
+        );
+    }
+
+    #[serial]
+    #[test]
+    fn merge_to_test_branch_from_test_itself_syncs_local_test_and_stays_on_it() {
+        let repo = make_test_repo();
+        let path = repo.path();
+        run_git(path, &["checkout", "test"]);
+        let other = clone_origin_on_branch(path, "test");
+        let origin_side = commit_file(
+            other.path(),
+            "origin-side.txt",
+            "origin\n",
+            "origin-side test commit",
+        );
+        run_git(other.path(), &["push", "origin", "test"]);
+
+        let result = merge_to_test_branch(path, "test").expect("merge test into itself");
+
+        assert!(result.contains("成功将 test 合并到 test"), "{result}");
+        assert!(
+            result.contains("✓ 本地 test 分支已同步到 origin/test"),
+            "{result}"
+        );
+        assert_eq!(git_output(path, &["branch", "--show-current"]), "test");
+        assert_eq!(git_output(path, &["rev-parse", "HEAD"]), origin_side);
+        assert!(path.join("origin-side.txt").exists());
+    }
+
+    #[serial]
+    #[test]
+    fn merge_to_test_branch_rejects_uncommitted_tracked_changes_but_ignores_untracked_files() {
+        let repo = make_test_repo();
+        let path = repo.path();
+        std::fs::write(path.join("feature.txt"), "work in progress\n")
+            .expect("modify tracked file");
+
+        let err = merge_to_test_branch(path, "test").unwrap_err();
+
+        assert!(err.contains("未提交"), "{err}");
+        assert!(err.contains("test"), "{err}");
+        assert_eq!(
+            git_output(path, &["branch", "--show-current"]),
+            "feature/demo"
+        );
+        assert_eq!(
+            std::fs::read_to_string(path.join("feature.txt")).expect("read modified file"),
+            "work in progress\n"
+        );
+        assert!(!is_ancestor(path, "feature/demo", "origin/test"));
+
+        // Untracked files are not a reason to refuse.
+        run_git(path, &["checkout", "--", "feature.txt"]);
+        std::fs::write(path.join("scratch.txt"), "untracked\n").expect("write untracked file");
+        let result =
+            merge_to_test_branch(path, "test").expect("untracked files do not block the merge");
+        assert!(
+            result.contains("成功将 feature/demo 合并到 test"),
+            "{result}"
+        );
+        assert!(path.join("scratch.txt").exists());
+        assert_eq!(
+            git_output(path, &["branch", "--show-current"]),
+            "feature/demo"
+        );
+    }
+
+    #[serial]
+    #[test]
+    fn merge_to_test_branch_restores_feature_branch_when_fetch_fails() {
+        let repo = make_test_repo();
+        let path = repo.path();
+        let broken_origin = path.join(".git").join("missing-origin.git");
+        run_git(
+            path,
+            &[
+                "remote",
+                "set-url",
+                "origin",
+                broken_origin.to_str().unwrap(),
+            ],
+        );
+
+        let err = merge_to_test_branch(path, "test").unwrap_err();
+
+        assert!(err.contains("拉取 test 最新代码失败"), "{err}");
+        assert!(!err.contains("切回"), "{err}");
+        assert_eq!(
+            git_output(path, &["branch", "--show-current"]),
+            "feature/demo"
+        );
+        assert_eq!(git_output(path, &["status", "--porcelain"]), "");
+    }
+
+    #[serial]
+    #[test]
+    fn pull_current_branch_merges_diverged_remote_and_reports_missing_remote_branch() {
+        let repo = make_test_repo();
+        let path = repo.path();
+        run_git(path, &["push", "origin", "feature/demo"]);
+
+        let other = clone_origin_on_branch(path, "feature/demo");
+        let remote_side = commit_file(
+            other.path(),
+            "remote-side.txt",
+            "remote\n",
+            "remote side commit",
+        );
+        run_git(other.path(), &["push", "origin", "feature/demo"]);
+        let local_side = commit_file(path, "local-side.txt", "local\n", "local side commit");
+
+        let message = pull_current_branch(path).expect("pull merges the diverged remote branch");
+
+        assert_eq!(message, "Successfully pulled feature/demo from origin");
+        let parents = git_output(path, &["rev-list", "--parents", "-n", "1", "HEAD"]);
+        assert_eq!(
+            parents.split_whitespace().count(),
+            3,
+            "expected a merge commit, got {parents}"
+        );
+        assert!(is_ancestor(path, &remote_side, "HEAD"));
+        assert!(is_ancestor(path, &local_side, "HEAD"));
+        assert!(path.join("remote-side.txt").exists());
+        assert!(path.join("local-side.txt").exists());
+        assert_eq!(git_output(path, &["status", "--porcelain"]), "");
+
+        run_git(path, &["checkout", "-b", "feature/never-pushed"]);
+        let err = pull_current_branch(path).unwrap_err();
+        assert_eq!(err, "远程 origin 不存在分支 feature/never-pushed，无法拉取");
     }
 }

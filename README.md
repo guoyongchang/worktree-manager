@@ -128,7 +128,7 @@ That's it. Your worktree is ready with all dependencies symlinked and terminals 
 |---------|-------------|
 | 🖥️ **IDE Integration** | One-click open in VS Code, Cursor, or IntelliJ IDEA |
 | 🤖 **AI-Ready (MCP)** | Built-in [MCP server](docs/MCP.md) — let Claude Code, Cursor, or Codex manage worktrees via natural language |
-| 📁 **Safe Archiving** | Pre-archive checks catch uncommitted changes and running processes. Restore anytime |
+| 📁 **Safe Archiving** | Archiving only hides a worktree (files, branches and git state stay untouched); pre-archive checks flag uncommitted or unpushed work. Restore instantly |
 
 ---
 
@@ -251,7 +251,7 @@ Shared items (`.claude`, `CLAUDE.md`, config files) are automatically symlinked 
 <details>
 <summary>For contributors and developers</summary>
 
-**Prerequisites:** Node.js 20+, Rust 1.70+ ([install](https://rustup.rs)), Git 2.0+
+**Prerequisites:** Node.js 22+, Rust 1.98 ([install rustup](https://rustup.rs); the toolchain is installed automatically via rust-toolchain.toml), Git 2.0+
 
 ```bash
 git clone https://github.com/guoyongchang/worktree-manager.git

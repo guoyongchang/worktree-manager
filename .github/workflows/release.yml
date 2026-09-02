@@ -25,13 +25,13 @@ concurrency:
 jobs:
   prepare:
     name: Generate version
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -142,6 +142,7 @@ jobs:
       matrix:
         include:
           - os: macos-latest
+          # Linux 打包固定 ubuntu-22.04：旧 glibc 让 AppImage/deb 兼容更多发行版，请勿升级。
           - os: ubuntu-22.04
           - os: windows-latest
 
@@ -149,15 +150,21 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
 
+      # 工具链版本必须与仓库根目录 rust-toolchain.toml 一致
+      # （dtolnay/rust-toolchain 不读取该文件，需在此显式指定）。
+      # macOS 需要双架构 target 以构建 universal 包；其他平台该输入为空。
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.0
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Cache Rust dependencies
         uses: swatinem/rust-cache@v2
@@ -166,10 +173,6 @@ jobs:
           cache-on-failure: true
           shared-key: release-build
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Add macOS targets
-        if: runner.os == 'macOS'
-        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
@@ -202,7 +205,7 @@ jobs:
           echo "Set version to $APP_VERSION"
 
       - name: Cache npm downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.npm
           key: npm-${{ runner.os }}-${{ hashFiles('package.json') }}
@@ -316,7 +319,7 @@ jobs:
 
   assemble-latest-json:
     name: Assemble latest.json
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     needs: [prepare, release]
     permissions:
       contents: write

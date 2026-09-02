@@ -38,6 +38,13 @@ activatedTerminals（标签栏显示）和 mountedTerminals（组件挂载/PTY �
 
 ### Git 操作混用规则
 读取用 git2 crate，写入用 Command。Command 更安全不会锁库。
+- 合并到 test/uat 走 `merge_current_branch_into_remote_target`：先 fetch，再在 detached HEAD 上基于 `origin/<target>` 合并并 `push HEAD:<target>`，绝不 checkout 本地 test/uat 分支（避免与主工作区/其他 worktree 的分支冲突、避免本地分支陈旧/分叉）。
+- 所有 `git pull` 必须带 `--no-rebase --no-edit`；所有 git 子进程通过 `utils::git_command()`（stdin=null、GIT_TERMINAL_PROMPT=0），长操作使用 `run_git_command_with_timeout_secs`。
+
+### Windows 稳定性规则（tauri-apps/tauri#15408）
+- **禁止在非主线程 clone / drop `AppHandle` / `Window` / `Webview`**：tao 在 Windows 上用非原子 `Rc` 管理事件循环，跨线程引用计数会导致 ILLEGAL_INSTRUCTION / ACCESS_VIOLATION 崩溃。工作线程、tokio 任务、HTTP handler 一律用 `state::with_app_handle(|h| h.emit(...))` 借用，不要 `APP_HANDLE.lock().clone()`。PTY 读线程不得触碰 AppHandle（桌面端走轮询）。
+- 归档/恢复只改 `archived_worktrees` 配置，不做任何 git / 文件操作（恢复仅修复 git 已无法打开的残缺项目目录，健康目录即使切了分支/有未提交改动也不碰）；`git worktree remove`、目录删除、`branch -D` 只发生在删除已归档 worktree 时。Restart Manager 文件占用检查只是诊断（只注册普通文件、限批次/长度/时长），仅在删除失败时用于提示占用进程。
+- Worktree 生命周期锁必须用 `state::lock_lifecycle_with_timeout` 获取，禁止无限期 `.lock()`。恢复归档 worktree 不做任何网络操作（upstream 用 `branch --set-upstream-to` 本地设置）。
 
 ### 双模式命令同步
 前端统一入口 callBackend(command, args)，自动路由到 IPC 或 HTTP。

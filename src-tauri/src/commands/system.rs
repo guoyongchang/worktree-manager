@@ -1668,9 +1668,9 @@ async fn download_with_mirror(app: &tauri::AppHandle, mirror_url: &str) -> Resul
     let update = update.ok_or_else(|| "No update available".to_string())?;
     log::info!("[system] Mirror update found: v{}", update.version);
 
-    // 6. Download and install with progress events emitted to the frontend
-    let app_for_chunk = app.clone();
-    let app_for_finish = app.clone();
+    // 6. Download and install with progress events emitted to the frontend.
+    // The callbacks run on the updater's worker thread: borrow the global handle instead of
+    // moving AppHandle clones into them (tauri-apps/tauri#15408).
     let mut first_chunk = true;
 
     update
@@ -1678,30 +1678,36 @@ async fn download_with_mirror(app: &tauri::AppHandle, mirror_url: &str) -> Resul
             move |chunk_len: usize, content_length: Option<u64>| {
                 if first_chunk {
                     first_chunk = false;
-                    let _ = app_for_chunk.emit(
+                    let _ = crate::state::with_app_handle(|h| {
+                        h.emit(
+                            "mirror-update-progress",
+                            serde_json::json!({
+                                "event": "Started",
+                                "data": { "contentLength": content_length.unwrap_or(0) }
+                            }),
+                        )
+                    });
+                }
+                let _ = crate::state::with_app_handle(|h| {
+                    h.emit(
                         "mirror-update-progress",
                         serde_json::json!({
-                            "event": "Started",
-                            "data": { "contentLength": content_length.unwrap_or(0) }
+                            "event": "Progress",
+                            "data": { "chunkLength": chunk_len }
                         }),
-                    );
-                }
-                let _ = app_for_chunk.emit(
-                    "mirror-update-progress",
-                    serde_json::json!({
-                        "event": "Progress",
-                        "data": { "chunkLength": chunk_len }
-                    }),
-                );
+                    )
+                });
             },
             move || {
-                let _ = app_for_finish.emit(
-                    "mirror-update-progress",
-                    serde_json::json!({
-                        "event": "Finished",
-                        "data": {}
-                    }),
-                );
+                let _ = crate::state::with_app_handle(|h| {
+                    h.emit(
+                        "mirror-update-progress",
+                        serde_json::json!({
+                            "event": "Finished",
+                            "data": {}
+                        }),
+                    )
+                });
             },
         )
         .await
