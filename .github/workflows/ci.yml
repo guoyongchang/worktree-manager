@@ -28,11 +28,12 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.npm
-          key: npm-${{ runner.os }}-${{ hashFiles('package.json') }}
+          key: npm-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
           restore-keys: npm-${{ runner.os }}-
 
+      # npm ci：锁文件即事实来源，与 package.json 不同步时立刻失败（release 同此）。
       - name: Install frontend dependencies
-        run: npm install
+        run: npm ci
 
       - name: Typecheck
         run: npx tsc --noEmit
@@ -106,8 +107,9 @@ jobs:
         with:
           node-version: '22'
 
+      # npm ci：锁文件即事实来源，与 package.json 不同步时立刻失败（release 同此）。
       - name: Install frontend dependencies
-        run: npm install
+        run: npm ci
 
       - name: Build frontend assets
         run: npm run build
