@@ -208,14 +208,15 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.npm
-          key: npm-${{ runner.os }}-${{ hashFiles('package.json') }}
+          key: npm-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
           restore-keys: npm-${{ runner.os }}-
 
+      # 必须用 npm ci（依赖锁文件）：删掉 package-lock.json 后的全新解析会踩到 npm 的
+      # arborist bug（vitest 的 peer 依赖链 → "Cannot read properties of null (reading
+      # 'edgesOut')"），三个平台都会失败。锁文件已记录各平台的原生可选依赖
+      # （esbuild / rollup / lightningcss 的 win32、darwin 包），跨平台安装无碍。
       - name: Install frontend dependencies
-        shell: bash
-        run: |
-          rm -rf node_modules package-lock.json
-          npm install
+        run: npm ci
 
       - name: Build Tauri App (macOS)
         if: runner.os == 'macOS'
