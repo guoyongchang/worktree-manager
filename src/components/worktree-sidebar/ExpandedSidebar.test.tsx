@@ -24,7 +24,9 @@ const { backendMock } = vi.hoisted(() => ({
   backendMock: {
   callBackend: vi.fn(),
   getAppVersion: vi.fn().mockResolvedValue('0.1.2'),
+  getProcessMemory: vi.fn().mockResolvedValue({ rss_mb: 0 }),
   isMainWindow: vi.fn().mockResolvedValue(true),
+  isTauri: () => false,
   openLink: vi.fn(),
   },
 }));
