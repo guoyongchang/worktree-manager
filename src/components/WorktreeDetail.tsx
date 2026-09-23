@@ -1261,7 +1261,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                     };
                     const status = getProjectStatus(projAsStatus);
                     return (
-                      <div key={proj.name} className={`bg-[var(--color-bg-surface)] border border-[var(--color-border)] border-l-2 ${statusBorderColor[status]} rounded-lg p-4 group hover:border-t-[var(--color-border)] hover:border-r-[var(--color-border)] hover:border-b-[var(--color-border)] hover:shadow-md hover:shadow-black/10 hover:-translate-y-px transition-all duration-150`}>
+                      <div key={proj.path} className={`bg-[var(--color-bg-surface)] border border-[var(--color-border)] border-l-2 ${statusBorderColor[status]} rounded-lg p-4 group hover:border-t-[var(--color-border)] hover:border-r-[var(--color-border)] hover:border-b-[var(--color-border)] hover:shadow-md hover:shadow-black/10 hover:-translate-y-px transition-all duration-150`}>
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-3">
                             <div>
@@ -1334,7 +1334,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                   };
 
                   return (
-                    <div key={proj.name} className="bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-lg p-4 group hover:border-[var(--color-border)] hover:shadow-md hover:shadow-black/10 hover:-translate-y-px transition-all duration-150">
+                    <div key={proj.path} className="bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-lg p-4 group hover:border-[var(--color-border)] hover:shadow-md hover:shadow-black/10 hover:-translate-y-px transition-all duration-150">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center min-w-0">
                           <span className="font-medium text-[var(--color-text-primary)]">{proj.name}</span>
@@ -1880,7 +1880,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                 ahead_of_test: liveStats.ahead_of_test,
               } : proj;
               return (
-              <div key={proj.name} className={`bg-[var(--color-bg-surface)] border border-[var(--color-border)] border-l-2 ${statusBorderColor[getProjectStatus(liveProj)]} rounded-lg p-4 group hover:border-t-[var(--color-border)] hover:border-r-[var(--color-border)] hover:border-b-[var(--color-border)] hover:shadow-md hover:shadow-black/10 hover:-translate-y-px transition-all duration-150`}>
+              <div key={proj.path} className={`bg-[var(--color-bg-surface)] border border-[var(--color-border)] border-l-2 ${statusBorderColor[getProjectStatus(liveProj)]} rounded-lg p-4 group hover:border-t-[var(--color-border)] hover:border-r-[var(--color-border)] hover:border-b-[var(--color-border)] hover:shadow-md hover:shadow-black/10 hover:-translate-y-px transition-all duration-150`}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div>

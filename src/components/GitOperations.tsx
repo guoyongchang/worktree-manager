@@ -224,6 +224,16 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
     };
   }, [projectPath]);
 
+  useEffect(() => {
+    clearTimeout(mergeProgressTimerRef.current);
+    progressGenRef.current += 1;
+    progressStartedAtRef.current = null;
+    activeActionRef.current = null;
+    setActiveAction(null);
+    setMergeStep(null);
+    setProgressDone(false);
+    setFetchingSyncing(false);
+  }, [projectPath]);
   const progressVisible = Boolean(mergeStep || fetchingSyncing);
   useEffect(() => {
     if (progressDone) {
@@ -740,7 +750,7 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
             className={`text-xs min-w-0${activeAction === 'sync' ? ' disabled:opacity-100' : ''}`}
             title={baseBranchExists === false ? t('git.remoteBranchNotExists', { branch: baseBranch }) : ''}
           >
-            <SyncIcon className={`w-3 h-3 mr-1 shrink-0${activeAction === 'sync' ? ' animate-spin' : ''}`} />
+            <SyncIcon className="w-3 h-3 mr-1 shrink-0" />
             <span className="truncate">{activeAction === 'sync' ? t('git.syncing') : t('git.syncBranch', { branch: baseBranch })}</span>
           </Button>
 
@@ -751,7 +761,7 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
             disabled={loading || actionsDisabled}
             className={`text-xs min-w-0${activeAction === 'pull' ? ' disabled:opacity-100' : ''}`}
           >
-            <DownloadIcon className={`w-3 h-3 mr-1 shrink-0${activeAction === 'pull' ? ' animate-spin' : ''}`} />
+            <DownloadIcon className="w-3 h-3 mr-1 shrink-0" />
             <span className="truncate">{activeAction === 'pull' ? t('git.pulling') : t('git.pull')}</span>
           </Button>
 
@@ -762,7 +772,7 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
             disabled={loading || actionsDisabled || committing}
             className={`text-xs min-w-0${activeAction === 'push' || committing ? ' disabled:opacity-100' : ''}`}
           >
-            <UploadIcon className={`w-3 h-3 mr-1 shrink-0${activeAction === 'push' || committing ? ' animate-spin' : ''}`} />
+            <UploadIcon className="w-3 h-3 mr-1 shrink-0" />
             <span className="truncate">
               {committing
                 ? t('git.committing')
@@ -787,7 +797,7 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
                 disabled={loading || testBranchExists === false || actionsDisabled || (stats?.ahead_of_test ?? 0) >= 100}
                 className={`text-xs min-w-0 w-full${activeAction === 'mergeTest' ? ' disabled:opacity-100' : ''}`}
               >
-                <GitMergeIcon className={`w-3 h-3 mr-1 shrink-0${activeAction === 'mergeTest' ? ' animate-spin' : ''}`} />
+                <GitMergeIcon className="w-3 h-3 mr-1 shrink-0" />
                 <span className="truncate">{activeAction === 'mergeTest' ? t('git.merging') : t('git.mergeToBranch', { branch: testBranch })}</span>
               </Button>
             );
@@ -809,7 +819,7 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
                 disabled={loading || baseBranchExists === false || actionsDisabled || (stats?.ahead ?? 0) >= 100}
                 className={`text-xs min-w-0 w-full border-orange-800/40 hover:bg-orange-900/20 hover:border-orange-700/50${activeAction === 'mergeBase' ? ' disabled:opacity-100' : ''}`}
               >
-                <GitMergeIcon className={`w-3 h-3 mr-1 shrink-0 text-orange-400${activeAction === 'mergeBase' ? ' animate-spin' : ''}`} />
+                <GitMergeIcon className="w-3 h-3 mr-1 shrink-0 text-orange-400" />
                 <span className="truncate text-orange-300">{activeAction === 'mergeBase' ? t('git.merging') : t('git.mergeToBranch', { branch: baseBranch })}</span>
               </Button>
             );
