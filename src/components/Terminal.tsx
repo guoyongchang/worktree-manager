@@ -206,6 +206,8 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
   const desktopTransportRef = useRef<'event' | 'polling' | null>(null);
   const initializedRef = useRef(false);
   const initInProgressRef = useRef(false);
+  const initGenerationRef = useRef(0);
+  const [adapterEpoch, setAdapterEpoch] = useState(0);
   const lastSentSizeRef = useRef<{ cols: number; rows: number } | null>(null);
   const resizeDebounceRef = useRef<number | null>(null);
   const handleResizeRef = useRef<(force?: boolean) => void>(() => {});
@@ -503,8 +505,12 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
 
     const adapter = TerminalRegistry.create();
     adapterRef.current = adapter;
+    setAdapterEpoch((epoch) => epoch + 1);
 
     return () => {
+      initGenerationRef.current += 1;
+      initializedRef.current = false;
+      initInProgressRef.current = false;
       mountedRef.current = false;
 
       // Clean up mouse handlers
@@ -675,6 +681,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
     // Guard against overlapping initPty runs (rapid visibility/reinit toggles during
     // async init) — a concurrent run could double pty_create or leak a reader/subscription.
     if (initInProgressRef.current) return;
+    const generation = initGenerationRef.current;
     initInProgressRef.current = true;
 
     setInitStatus('Preparing terminal...');
@@ -698,8 +705,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
           onRendererFallback: () => onRendererFallbackRef.current?.(),
         });
 
-        // Check if component was unmounted during async mount
-        if (!adapterRef.current) return;
+        if (initGenerationRef.current !== generation || adapterRef.current !== adapter) return;
 
         mountedRef.current = true;
 
@@ -943,8 +949,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
       }
 
       // Bail if the component was torn down during the awaits above — otherwise we
-      // would re-arm a reader/subscription after the unmount cleanup already ran.
-      if (!adapterRef.current || !mountedRef.current) return;
+      if (initGenerationRef.current !== generation || adapterRef.current !== adapter || !mountedRef.current) return;
 
       if (!gotFirstDataRef.current) setInitStatus('Subscribing output...');
       initializedRef.current = true;
@@ -991,7 +996,9 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
       setInitError(String(e));
       console.error('[terminal] Failed to initialize PTY:', e);
     } finally {
-      initInProgressRef.current = false;
+      if (initGenerationRef.current === generation) {
+        initInProgressRef.current = false;
+      }
     }
   }, [clientId, handleIncomingData, sendPastedText, startReading]);
 
@@ -999,7 +1006,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
   useEffect(() => {
     if (!adapterRef.current || !visible || initializedRef.current) return;
     initPty();
-  }, [visible, initPty, reinitTrigger]);
+  }, [visible, initPty, reinitTrigger, adapterEpoch]);
 
 
   const stopReading = useCallback(() => {

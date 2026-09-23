@@ -21,6 +21,7 @@ const backend = vi.hoisted(() => ({
   getGitUserGlobalConfig: vi.fn(),
   getSkipGitHooks: vi.fn(),
   setGitUserConfig: vi.fn(),
+  isTauri: vi.fn(() => false),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -176,5 +177,134 @@ describe('GitOperations', () => {
     expect(backend.checkCommitAiApiKey).not.toHaveBeenCalled();
     expect(backend.getGitDiff).not.toHaveBeenCalled();
     expect(backend.generateCommitMessage).not.toHaveBeenCalled();
+  });
+
+  it('shows sync progress and does not refresh every remote', async () => {
+    let resolveSync: (value: string) => void = () => {};
+    backend.syncWithBaseBranch.mockImplementation(
+      () => new Promise<string>((resolve) => {
+        resolveSync = resolve;
+      }),
+    );
+    const onSilentRefresh = vi.fn();
+
+    await act(async () => {
+      render(
+        <GitOperations
+          projectPath="/tmp/worktree/javascmapi"
+          projectName="javascmapi"
+          baseBranch="uat"
+          testBranch="test"
+          currentBranch="ERP-25666"
+          onSilentRefresh={onSilentRefresh}
+        />,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('git.syncBranch'));
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('git.syncing')).toBeInTheDocument();
+    expect(screen.getByText('git.opFetch')).toBeInTheDocument();
+    expect(screen.getByText('0s')).toBeInTheDocument();
+    expect(document.querySelector('[style*="width: 10%"]')).toBeTruthy();
+    expect(onSilentRefresh).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(400);
+    });
+    expect(document.querySelector('[style*="width: 20%"]')).toBeTruthy();
+
+    await act(async () => {
+      resolveSync('Successfully synced with uat');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(document.querySelector('[style*="width: 100%"]')).toBeTruthy();
+    expect(onSilentRefresh).toHaveBeenCalledTimes(1);
+    expect(backend.syncWithBaseBranch).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips auto-refresh while a git action is in flight', async () => {
+    backend.syncWithBaseBranch.mockImplementation(() => new Promise(() => {}));
+    const onSilentRefresh = vi.fn();
+
+    await act(async () => {
+      render(
+        <GitOperations
+          projectPath="/tmp/worktree/project-a"
+          projectName="project-a"
+          baseBranch="main"
+          testBranch="test"
+          currentBranch="feature/demo"
+          autoRefreshSlot={0}
+          onSilentRefresh={onSilentRefresh}
+        />,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('git.syncBranch'));
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(61_000);
+      await Promise.resolve();
+    });
+
+    expect(onSilentRefresh).not.toHaveBeenCalled();
+  });
+
+  it('resets the progress bar when a new action starts after completion', async () => {
+    let resolveSync: (value: string) => void = () => {};
+    backend.syncWithBaseBranch.mockImplementation(
+      () => new Promise<string>((resolve) => {
+        resolveSync = resolve;
+      }),
+    );
+    backend.pullCurrentBranch.mockImplementation(() => new Promise(() => {}));
+
+    await act(async () => {
+      render(
+        <GitOperations
+          projectPath="/tmp/worktree/project-a"
+          projectName="project-a"
+          baseBranch="main"
+          testBranch="test"
+          currentBranch="feature/demo"
+        />,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('git.syncBranch'));
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      resolveSync('Successfully synced with main');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(document.querySelector('[style*="width: 100%"]')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('git.pull'));
+      await Promise.resolve();
+    });
+
+    expect(document.querySelector('[style*="width: 10%"]')).toBeTruthy();
+    expect(document.querySelector('[style*="width: 100%"]')).toBeFalsy();
+    expect(screen.getByText('0s')).toBeInTheDocument();
   });
 });

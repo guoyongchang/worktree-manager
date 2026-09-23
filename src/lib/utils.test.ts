@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { GIT_BATCH_CONCURRENCY, GIT_FETCH_CONCURRENCY, basename, mapWithConcurrency, normalizePath } from './utils';
+import { GIT_BATCH_CONCURRENCY, GIT_FETCH_CONCURRENCY, basename, mapWithConcurrency, normalizePath, uniqueFetchProjectPaths } from './utils';
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -42,9 +42,55 @@ describe('mapWithConcurrency', () => {
   });
 
   it('exposes a small default fan-out for git batches', () => {
-    expect(GIT_BATCH_CONCURRENCY).toBeGreaterThanOrEqual(2);
-    expect(GIT_BATCH_CONCURRENCY).toBeLessThanOrEqual(8);
-    expect(GIT_FETCH_CONCURRENCY).toBeGreaterThanOrEqual(GIT_BATCH_CONCURRENCY);
+    expect(GIT_BATCH_CONCURRENCY).toBe(2);
+    expect(GIT_FETCH_CONCURRENCY).toBe(GIT_BATCH_CONCURRENCY);
+  });
+});
+
+describe('uniqueFetchProjectPaths', () => {
+  it('keeps one path per project and prefers the main workspace checkout', () => {
+    const paths = uniqueFetchProjectPaths(
+      [
+        {
+          is_archived: false,
+          projects: [
+            { name: 'javascmapi', path: '/ws/worktrees/a/projects/javascmapi' },
+            { name: 'webapp', path: '/ws/worktrees/a/projects/webapp' },
+          ],
+        },
+        {
+          is_archived: false,
+          projects: [{ name: 'javascmapi', path: '/ws/worktrees/b/projects/javascmapi' }],
+        },
+        {
+          is_archived: true,
+          projects: [{ name: 'only-archived', path: '/ws/worktrees/old/projects/only-archived' }],
+        },
+      ],
+      {
+        projects: [{ name: 'javascmapi', path: '/ws/projects/javascmapi' }],
+      },
+    );
+
+    expect(paths).toEqual(['/ws/projects/javascmapi', '/ws/worktrees/a/projects/webapp']);
+  });
+
+  it('falls back to the first live worktree when main workspace is missing', () => {
+    const paths = uniqueFetchProjectPaths(
+      [
+        {
+          is_archived: true,
+          projects: [{ name: 'webapp', path: '/ws/worktrees/old/projects/webapp' }],
+        },
+        {
+          is_archived: false,
+          projects: [{ name: 'webapp', path: '/ws/worktrees/a/projects/webapp' }],
+        },
+      ],
+      null,
+    );
+
+    expect(paths).toEqual(['/ws/worktrees/a/projects/webapp']);
   });
 });
 

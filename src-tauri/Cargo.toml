@@ -76,10 +76,20 @@ windows-sys = { version = "=0.61.2", features = [
     "Win32_System_Console",
     "Win32_System_Kernel",
     "Win32_System_Diagnostics_Debug",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Threading",
     "Win32_System_LibraryLoader",
 ] }
 windows-icons = "=0.3.0"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+mach2 = "=0.4.2"
+
 [dev-dependencies]
 tempfile = "=3.24.0"
 serial_test = "=3.2.0"
+
+# Windows-only: EventLoopRunnerShared is Arc instead of Rc (tauri-apps/tauri#15408).
+# Source stays in the cargo git cache, not in this repo. Based on tao 0.35.3.
+[patch.crates-io]
+tao = { git = "https://github.com/guoyongchang/tao", rev = "2c3ae6447376647e2ed093a69540e4c32a3f2abe" }

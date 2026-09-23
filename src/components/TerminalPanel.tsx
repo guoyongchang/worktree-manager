@@ -5,6 +5,7 @@ import { Terminal } from './Terminal';
 import { TerminalSearchBar } from './TerminalSearchBar';
 import type { TerminalHandle } from './Terminal';
 import type { SearchOptions } from '../terminal';
+import { XTERM_ADAPTER_REVISION } from '../terminal/adapters/webgl-support';
 import {
   FolderIcon,
   FolderOpenIcon,
@@ -813,7 +814,7 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
           <>
             {Array.from(mountedTerminals).map(path => (
               <div
-                key={path}
+                key={`${path}::r${XTERM_ADAPTER_REVISION}`}
                 className="absolute inset-0"
                 style={{ display: path === activeTerminalTab ? 'block' : 'none' }}
               >

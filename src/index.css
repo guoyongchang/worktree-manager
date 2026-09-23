@@ -379,26 +379,22 @@
   animation: badge-marquee 4s linear infinite alternate;
 }
 
-/* Indeterminate progress bar animation */
+/* Indeterminate progress bar: a chunk slides across the track */
 @keyframes progress-indeterminate {
   0% {
-    width: 0%;
-    margin-left: 0%;
+    transform: translateX(-120%);
   }
-
-  50% {
-    width: 60%;
-    margin-left: 20%;
-  }
-
   100% {
-    width: 0%;
-    margin-left: 100%;
+    transform: translateX(320%);
   }
 }
 
 .animate-progress-indeterminate {
-  animation: progress-indeterminate 1.5s ease-in-out infinite;
+  width: 35%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, var(--accent), var(--accent-hover), var(--accent), transparent);
+  animation: progress-indeterminate 2.2s ease-in-out infinite;
 }
 
 /* Disable browser-like behaviors for native app feel (Tauri desktop mode) */

@@ -267,10 +267,20 @@ pub(crate) fn open_in_terminal(
             "ghostty" => "Ghostty",
             _ => "Terminal", // "terminal", "auto", or unknown
         };
-        match Command::new("open")
-            .args(["-a", app_name, &normalized])
-            .spawn()
-        {
+        let mut open_cmd = Command::new("open");
+        if term == "ghostty" {
+            // Ghostty does not treat a directory operand as cwd; `open -a Ghostty /dir`
+            // often starts the app with no visible window.
+            open_cmd.args([
+                "-na",
+                "Ghostty",
+                "--args",
+                &format!("--working-directory={normalized}"),
+            ]);
+        } else {
+            open_cmd.args(["-a", app_name, &normalized]);
+        }
+        match open_cmd.spawn() {
             Ok(_) => log::info!("[system] Spawned {} for: {}", app_name, normalized),
             Err(e) => {
                 log::error!("[system] Failed to spawn {}: {}", app_name, e);
@@ -1513,6 +1523,293 @@ pub(crate) fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+#[derive(Serialize, Clone, Copy)]
+pub struct ProcessMemory {
+    pub rss_mb: u64,
+}
+
+fn current_rss_bytes() -> u64 {
+    #[cfg(target_os = "macos")]
+    {
+        unsafe {
+            let mut info: libc::mach_task_basic_info = std::mem::zeroed();
+            let mut count = libc::MACH_TASK_BASIC_INFO_COUNT;
+            let kr = libc::task_info(
+                mach2::traps::mach_task_self() as libc::mach_port_t,
+                libc::MACH_TASK_BASIC_INFO,
+                std::ptr::addr_of_mut!(info) as libc::task_info_t,
+                &mut count,
+            );
+            if kr == libc::KERN_SUCCESS {
+                // mach_task_basic_info is #[repr(packed(4))]; resident_size is u64.
+                std::ptr::addr_of!(info.resident_size).read_unaligned()
+            } else {
+                0
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let page_size = {
+            let n = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+            if n > 0 {
+                n as u64
+            } else {
+                4096
+            }
+        };
+        std::fs::read_to_string("/proc/self/statm")
+            .ok()
+            .and_then(|line| line.split_whitespace().nth(1)?.parse::<u64>().ok())
+            .map(|pages| pages.saturating_mul(page_size))
+            .unwrap_or(0)
+    }
+    #[cfg(target_os = "windows")]
+    {
+        #[repr(C)]
+        struct ProcessMemoryCounters {
+            cb: u32,
+            page_fault_count: u32,
+            peak_working_set_size: usize,
+            working_set_size: usize,
+            quota_peak_paged_pool_usage: usize,
+            quota_paged_pool_usage: usize,
+            quota_peak_non_paged_pool_usage: usize,
+            quota_non_paged_pool_usage: usize,
+            pagefile_usage: usize,
+            peak_pagefile_usage: usize,
+        }
+        #[link(name = "psapi")]
+        unsafe extern "system" {
+            fn GetProcessMemoryInfo(
+                process: *mut core::ffi::c_void,
+                ppsmem_counters: *mut ProcessMemoryCounters,
+                cb: u32,
+            ) -> i32;
+        }
+        unsafe {
+            let mut counters = std::mem::zeroed::<ProcessMemoryCounters>();
+            counters.cb = std::mem::size_of::<ProcessMemoryCounters>() as u32;
+            let current_process = usize::MAX as *mut core::ffi::c_void;
+            if GetProcessMemoryInfo(current_process, &mut counters, counters.cb) != 0 {
+                counters.working_set_size as u64
+            } else {
+                0
+            }
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        0
+    }
+}
+
+#[tauri::command]
+pub(crate) fn get_process_memory() -> ProcessMemory {
+    ProcessMemory {
+        rss_mb: (current_rss_bytes().saturating_add(descendant_rss_bytes())) / (1024 * 1024),
+    }
+}
+
+fn descendant_rss_bytes() -> u64 {
+    let root = std::process::id();
+    let mut children: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+    for (pid, ppid) in process_parents() {
+        children.entry(ppid).or_default().push(pid);
+    }
+    let mut total = 0u64;
+    let mut stack = children.remove(&root).unwrap_or_default();
+    let mut seen = std::collections::HashSet::new();
+    while let Some(pid) = stack.pop() {
+        if pid == root || !seen.insert(pid) {
+            continue;
+        }
+        total = total.saturating_add(pid_rss_bytes(pid));
+        if let Some(kids) = children.remove(&pid) {
+            stack.extend(kids);
+        }
+    }
+    total
+}
+
+#[cfg(target_os = "macos")]
+fn process_parents() -> Vec<(u32, u32)> {
+    unsafe {
+        let bytes = libc::proc_listallpids(std::ptr::null_mut(), 0);
+        if bytes <= 0 {
+            return Vec::new();
+        }
+        let count = (bytes as usize) / std::mem::size_of::<i32>() + 64;
+        let mut pids = vec![0i32; count];
+        let wrote = libc::proc_listallpids(
+            pids.as_mut_ptr().cast(),
+            (pids.len() * std::mem::size_of::<i32>()) as i32,
+        );
+        if wrote <= 0 {
+            return Vec::new();
+        }
+        let n = (wrote as usize) / std::mem::size_of::<i32>();
+        let mut out = Vec::new();
+        for pid in pids.into_iter().take(n).filter(|pid| *pid > 0) {
+            let mut info = std::mem::zeroed::<libc::proc_bsdinfo>();
+            let size = std::mem::size_of::<libc::proc_bsdinfo>() as i32;
+            let got = libc::proc_pidinfo(
+                pid,
+                libc::PROC_PIDTBSDINFO,
+                0,
+                (&mut info as *mut libc::proc_bsdinfo).cast(),
+                size,
+            );
+            if got == size {
+                out.push((info.pbi_pid, info.pbi_ppid));
+            }
+        }
+        out
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn pid_rss_bytes(pid: u32) -> u64 {
+    unsafe {
+        let mut info = std::mem::zeroed::<libc::proc_taskinfo>();
+        let size = std::mem::size_of::<libc::proc_taskinfo>() as i32;
+        let got = libc::proc_pidinfo(
+            pid as i32,
+            libc::PROC_PIDTASKINFO,
+            0,
+            (&mut info as *mut libc::proc_taskinfo).cast(),
+            size,
+        );
+        if got == size {
+            info.pti_resident_size
+        } else {
+            0
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn process_parents() -> Vec<(u32, u32)> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
+            continue;
+        };
+        let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+            continue;
+        };
+        let Some((_, rest)) = stat.rsplit_once(')') else {
+            continue;
+        };
+        let mut fields = rest.split_whitespace();
+        let _state = fields.next();
+        if let Some(ppid) = fields.next().and_then(|s| s.parse().ok()) {
+            out.push((pid, ppid));
+        }
+    }
+    out
+}
+
+#[cfg(target_os = "linux")]
+fn pid_rss_bytes(pid: u32) -> u64 {
+    let page_size = {
+        let n = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+        if n > 0 {
+            n as u64
+        } else {
+            4096
+        }
+    };
+    std::fs::read_to_string(format!("/proc/{pid}/statm"))
+        .ok()
+        .and_then(|line| line.split_whitespace().nth(1)?.parse::<u64>().ok())
+        .map(|pages| pages.saturating_mul(page_size))
+        .unwrap_or(0)
+}
+
+#[cfg(target_os = "windows")]
+fn process_parents() -> Vec<(u32, u32)> {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+    unsafe {
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snap == INVALID_HANDLE_VALUE {
+            return Vec::new();
+        }
+        let mut entry = std::mem::zeroed::<PROCESSENTRY32W>();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        let mut out = Vec::new();
+        if Process32FirstW(snap, &mut entry) != 0 {
+            loop {
+                out.push((entry.th32ProcessID, entry.th32ParentProcessID));
+                if Process32NextW(snap, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+        CloseHandle(snap);
+        out
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn pid_rss_bytes(pid: u32) -> u64 {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    #[repr(C)]
+    struct Counters {
+        cb: u32,
+        page_fault_count: u32,
+        peak_working_set_size: usize,
+        working_set_size: usize,
+        quota_peak_paged_pool_usage: usize,
+        quota_paged_pool_usage: usize,
+        quota_peak_non_paged_pool_usage: usize,
+        quota_non_paged_pool_usage: usize,
+        pagefile_usage: usize,
+        peak_pagefile_usage: usize,
+    }
+    #[link(name = "psapi")]
+    unsafe extern "system" {
+        fn GetProcessMemoryInfo(
+            process: *mut core::ffi::c_void,
+            ppsmem_counters: *mut Counters,
+            cb: u32,
+        ) -> i32;
+    }
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return 0;
+        }
+        let mut counters = std::mem::zeroed::<Counters>();
+        counters.cb = std::mem::size_of::<Counters>() as u32;
+        let ok = GetProcessMemoryInfo(handle.cast(), &mut counters, counters.cb) != 0;
+        CloseHandle(handle);
+        if ok {
+            counters.working_set_size as u64
+        } else {
+            0
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+fn process_parents() -> Vec<(u32, u32)> {
+    Vec::new()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+fn pid_rss_bytes(_pid: u32) -> u64 {
+    0
+}
+
 // ==================== 更新镜像检测 ====================
 
 /// 通过 gh-proxy.org 镜像检测最新版本（仅检测，不下载）
@@ -1576,7 +1873,7 @@ pub(crate) async fn check_mirror_update(mirror_url: String) -> Result<serde_json
 // ==================== 更新镜像下载 ====================
 
 /// 通过镜像下载更新的内部实现（单个镜像源）
-async fn download_with_mirror(app: &tauri::AppHandle, mirror_url: &str) -> Result<(), String> {
+async fn download_with_mirror(mirror_url: &str) -> Result<(), String> {
     use tauri::Emitter;
     use tauri_plugin_updater::UpdaterExt;
 
@@ -1652,12 +1949,17 @@ async fn download_with_mirror(app: &tauri::AppHandle, mirror_url: &str) -> Resul
 
     log::info!("[system] Local manifest server at: {}", local_endpoint);
 
-    let updater = app
-        .updater_builder()
-        .endpoints(vec![local_endpoint])
-        .map_err(|e| format!("Failed to set endpoints: {}", e))?
-        .build()
-        .map_err(|e| format!("Failed to build updater: {}", e))?;
+    let updater = crate::state::with_app_handle(|app| {
+        app.updater_builder()
+            .endpoints(vec![local_endpoint.clone()])
+            .map_err(|e| format!("Failed to set endpoints: {}", e))
+            .and_then(|builder| {
+                builder
+                    .build()
+                    .map_err(|e| format!("Failed to build updater: {}", e))
+            })
+    })
+    .ok_or_else(|| "App handle unavailable".to_string())??;
 
     // 5. Check for update (reads from local server → gets proxied download URLs)
     let update: Option<tauri_plugin_updater::Update> = updater
@@ -1727,12 +2029,8 @@ async fn download_with_mirror(app: &tauri::AppHandle, mirror_url: &str) -> Resul
 
 /// 通过镜像下载更新，支持自动 fallback 到其他可用镜像源
 #[tauri::command]
-pub(crate) async fn download_update_via_mirror(
-    app: tauri::AppHandle,
-    mirror_url: String,
-) -> Result<(), String> {
+pub(crate) async fn download_update_via_mirror(mirror_url: String) -> Result<(), String> {
     use tauri::Emitter;
-
     log::info!(
         "[system] Starting mirror update download via {}...",
         mirror_url
@@ -1762,16 +2060,18 @@ pub(crate) async fn download_update_via_mirror(
                 attempt + 1,
                 url
             );
-            let _ = app.emit(
-                "mirror-update-progress",
-                serde_json::json!({
-                    "event": "Fallback",
-                    "data": { "mirror": url, "attempt": attempt + 1 }
-                }),
-            );
+            let _ = crate::state::with_app_handle(|h| {
+                h.emit(
+                    "mirror-update-progress",
+                    serde_json::json!({
+                        "event": "Fallback",
+                        "data": { "mirror": url, "attempt": attempt + 1 }
+                    }),
+                )
+            });
         }
 
-        match download_with_mirror(&app, url).await {
+        match download_with_mirror(url).await {
             Ok(()) => return Ok(()),
             Err(e) => {
                 log::warn!(
@@ -2843,9 +3143,10 @@ mod tests {
         assert_eq!(
             read_recorded_args(&open_record),
             vec![
-                "-a".to_string(),
+                "-na".to_string(),
                 "Ghostty".to_string(),
-                target.to_string_lossy().to_string()
+                "--args".to_string(),
+                format!("--working-directory={}", target.to_string_lossy()),
             ]
         );
 

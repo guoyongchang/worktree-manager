@@ -79,12 +79,39 @@ const LONG_RUNNING_COMMANDS = new Set([
   'create_worktree', 'archive_worktree', 'restore_worktree', 'delete_archived_worktree',
   'clone_project', 'deploy_to_main', 'start_sharing', 'start_ngrok_tunnel', 'start_wms_tunnel',
   'fetch_project_remote', 'sync_with_base_branch', 'sync_all_projects_to_base',
-  'push_to_remote', 'pull_current_branch', 'push_sync_to_base_branch', 'merge_base_branch',
+  'push_to_remote', 'pull_current_branch', 'push_sync_to_base_branch',
+  'merge_to_test_branch', 'merge_to_base_branch',
   'download_update_via_mirror',
 ]);
 const GET_COMMANDS = new Set(['get_crash_report']);
-const DEFAULT_TIMEOUT_MS = 30_000;
+const SCAN_COMMANDS = new Set(['list_worktrees', 'get_main_workspace_status']);
+export const IPC_TIMEOUT_SECONDS_KEY = 'ipc_timeout_seconds';
+export const DEFAULT_IPC_TIMEOUT_SECONDS = 60;
+export const MIN_IPC_TIMEOUT_SECONDS = 30;
+const MAX_IPC_TIMEOUT_SECONDS = 300;
 const LONG_TIMEOUT_MS = 600_000; // 10 min
+
+function clampIpcTimeoutSeconds(value: number): number {
+  return Math.min(MAX_IPC_TIMEOUT_SECONDS, Math.max(MIN_IPC_TIMEOUT_SECONDS, Math.round(value)));
+}
+
+export function readIpcTimeoutMs(): number {
+  const raw = localStorage.getItem(IPC_TIMEOUT_SECONDS_KEY);
+  if (raw == null) return DEFAULT_IPC_TIMEOUT_SECONDS * 1000;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return DEFAULT_IPC_TIMEOUT_SECONDS * 1000;
+  if (n < MIN_IPC_TIMEOUT_SECONDS) {
+    localStorage.setItem(IPC_TIMEOUT_SECONDS_KEY, String(DEFAULT_IPC_TIMEOUT_SECONDS));
+    return DEFAULT_IPC_TIMEOUT_SECONDS * 1000;
+  }
+  return clampIpcTimeoutSeconds(n) * 1000;
+}
+
+export function writeIpcTimeoutSeconds(seconds: number): number {
+  const clamped = clampIpcTimeoutSeconds(seconds);
+  localStorage.setItem(IPC_TIMEOUT_SECONDS_KEY, String(clamped));
+  return clamped;
+}
 
 export async function callBackend<T = unknown>(
   command: string,
@@ -92,7 +119,12 @@ export async function callBackend<T = unknown>(
 ): Promise<T> {
   const t0 = performance.now();
   const QUIET_COMMANDS = new Set(['pty_read', 'pty_write']);
-  const timeoutMs = LONG_RUNNING_COMMANDS.has(command) ? LONG_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
+  const SOFT_FAIL_COMMANDS = new Set(['fetch_project_remote']);
+  const timeoutMs = LONG_RUNNING_COMMANDS.has(command)
+    ? LONG_TIMEOUT_MS
+    : SCAN_COMMANDS.has(command)
+      ? Math.max(readIpcTimeoutMs(), DEFAULT_IPC_TIMEOUT_SECONDS * 1000)
+      : readIpcTimeoutMs();
   const logResult = (result: T) => {
     const elapsed = performance.now() - t0;
     if (!QUIET_COMMANDS.has(command) || elapsed > 100) {
@@ -101,13 +133,21 @@ export async function callBackend<T = unknown>(
     return result;
   };
   const logError = (err: unknown) => {
-    console.error(`[ipc] ${command} FAILED (${(performance.now() - t0).toFixed(1)}ms):`, err);
+    const elapsed = (performance.now() - t0).toFixed(1);
+    if (SOFT_FAIL_COMMANDS.has(command)) {
+      console.debug(`[ipc] ${command} failed (${elapsed}ms):`, err);
+    } else {
+      console.error(`[ipc] ${command} FAILED (${elapsed}ms):`, err);
+    }
     throw err;
   };
 
   if (isTauri()) {
     const { invoke } = await import('@tauri-apps/api/core');
-    const result = invoke<T>(command, args);
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    const windowLabel = getCurrentWindow().label || 'main';
+    const payload = { ...(args ?? {}), windowLabel };
+    const result = invoke<T>(command, payload);
     // Tauri IPC timeout guard: reject if backend doesn't respond
     let timerId: ReturnType<typeof setTimeout>;
     const timer = new Promise<never>((_, reject) => {
@@ -199,12 +239,16 @@ export async function getAppVersion(): Promise<string> {
     const { getVersion } = await import('@tauri-apps/api/app');
     return getVersion();
   }
-  // In browser mode, fetch from backend
   try {
     return await callBackend<string>('get_app_version');
   } catch {
     return 'web';
   }
+}
+
+/** Current process resident set size in MiB. */
+export async function getProcessMemory(): Promise<{ rss_mb: number }> {
+  return callBackend<{ rss_mb: number }>('get_process_memory');
 }
 
 /** Extract the icon of an app / exe as a base64 data URL. Returns null if not available. */
@@ -794,12 +838,12 @@ export async function getFileDiff(path: string, filePath: string): Promise<impor
 
 import type { VaultStatus, VaultLinkResponse, VaultItemChild, CommitPrefixConfig, GitUserConfig } from '../types';
 
-export async function getVaultStatus(): Promise<VaultStatus> {
-  return callBackend<VaultStatus>('vault_status');
+export async function getVaultStatus(workspacePath?: string): Promise<VaultStatus> {
+  return callBackend<VaultStatus>('vault_status', { workspacePath });
 }
 
-export async function vaultLink(path: string | null, keepSymlinks?: boolean): Promise<VaultLinkResponse> {
-  return callBackend<VaultLinkResponse>('vault_link', { path, keepSymlinks });
+export async function vaultLink(path: string | null, keepSymlinks?: boolean, workspacePath?: string): Promise<VaultLinkResponse> {
+  return callBackend<VaultLinkResponse>('vault_link', { path, keepSymlinks, workspacePath });
 }
 
 export async function listVaultItemChildren(

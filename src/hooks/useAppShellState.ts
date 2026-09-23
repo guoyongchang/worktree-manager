@@ -14,6 +14,7 @@ import {
 } from "./index";
 import { useVoiceInput } from "./useVoiceInput";
 import { callBackend, isTauri, setWindowTitle, getShareInfo, clearSessionId } from "../lib/backend";
+import { readUiRestoreSnapshot, updateUiRestoreSnapshot } from "../lib/uiRestore";
 import { getWebSocketManager } from "../lib/websocket";
 import { useCellContext } from '../contexts/CellContext';
 import type { SettingsSection } from "../components/SettingsView";
@@ -83,7 +84,7 @@ export function useAppShellState(t: TFunction, initialWorkspacePath?: string, sh
   const share = useShareFeature(workspace.setError);
   const locks = useWorktreeLocks(workspace.currentWorkspace?.path, workspace.getLockedWorktrees);
   const mainOccupation = useMainOccupation(workspace.currentWorkspace?.path);
-  const terminalHook = useTerminal(selectedWorktree, workspace.mainWorkspace, workspace.currentWorkspace?.path);
+  const terminalHook = useTerminal(selectedWorktree, workspace.mainWorkspace, workspace.currentWorkspace?.path, undefined, !shellMode && isPrimary);
   const actions = useWorkspaceActions(
     workspace,
     modals,
@@ -217,6 +218,44 @@ export function useAppShellState(t: TFunction, initialWorkspacePath?: string, sh
   ]);
 
   useEffect(() => {
+    if (shellMode || !isPrimary) return;
+    if (!workspace.currentWorkspace) return;
+    updateUiRestoreSnapshot({
+      workspacePath: workspace.currentWorkspace.path,
+      selectedWorktreeName: actions.selectedWorktree?.name ?? null,
+    });
+  }, [shellMode, isPrimary, workspace.currentWorkspace, actions.selectedWorktree]);
+
+  useEffect(() => {
+    if (shellMode || !isPrimary) return;
+    if (!workspace.currentWorkspace) return;
+    if (actions.hasUserSelected) return;
+    const snap = readUiRestoreSnapshot();
+    if (!snap || snap.workspacePath !== workspace.currentWorkspace.path) return;
+
+    if (!snap.selectedWorktreeName) {
+      actions.setHasUserSelected(true);
+      return;
+    }
+    if (workspace.worktrees.length === 0) return;
+    const target = workspace.worktrees.find((w) => w.name === snap.selectedWorktreeName);
+    if (!target) {
+      actions.setHasUserSelected(true);
+      return;
+    }
+    actions.setSelectedWorktree(target);
+    actions.setHasUserSelected(true);
+    if (isTauri()) {
+      workspace.lockWorktree(workspace.currentWorkspace.path, target.name).catch(() => {});
+    }
+  }, [
+    actions,
+    isPrimary,
+    shellMode,
+    workspace,
+  ]);
+
+  useEffect(() => {
     if (!isPrimary || shellMode) return; // Only primary cell sets window title; shell skips
     const wsName = workspace.currentWorkspace?.name;
     const title = !wsName
@@ -235,10 +274,9 @@ export function useAppShellState(t: TFunction, initialWorkspacePath?: string, sh
   );
 
   const openSettings = useCallback((section?: SettingsSection) => {
-    setInitialSettingsSection(section);
-    // Bump the nonce so SettingsView re-navigates even when section is unchanged
-    // (e.g. clicking "Go to Login" again while already on the cloud tab).
-    if (section) setSettingsNavNonce((n) => n + 1);
+    const next = section ?? 'workspaces';
+    setInitialSettingsSection(next);
+    setSettingsNavNonce((n) => n + 1);
     setViewMode("settings");
   }, []);
 

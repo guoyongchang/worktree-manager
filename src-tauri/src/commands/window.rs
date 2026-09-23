@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 use crate::config::{load_global_config, load_occupation_state};
 use crate::state::{
@@ -34,10 +34,10 @@ pub fn set_window_workspace_impl(window_label: &str, workspace_path: String) -> 
 
 #[tauri::command]
 pub(crate) fn set_window_workspace(
-    window: tauri::Window,
+    window_label: String,
     workspace_path: String,
 ) -> Result<(), String> {
-    set_window_workspace_impl(window.label(), workspace_path)
+    set_window_workspace_impl(window_label.as_str(), workspace_path)
 }
 
 #[tauri::command]
@@ -86,8 +86,8 @@ pub fn unregister_window_impl(window_label: &str) {
 }
 
 #[tauri::command]
-pub(crate) fn unregister_window(window: tauri::Window) {
-    unregister_window_impl(window.label())
+pub(crate) fn unregister_window(window_label: String) {
+    unregister_window_impl(window_label.as_str())
 }
 
 /// 锁定 worktree 到当前窗口，如果该 worktree 已被其他窗口锁定则返回错误
@@ -128,14 +128,14 @@ pub fn lock_worktree_impl(
 
 #[tauri::command]
 pub(crate) fn lock_worktree(
-    window: tauri::Window,
+    window_label: String,
     workspace_path: String,
     worktree_name: String,
     cell_id: Option<String>,
 ) -> Result<(), String> {
     let label = match cell_id {
-        Some(id) => format!("{}:{}", window.label(), id),
-        None => window.label().to_string(),
+        Some(id) => format!("{}:{}", window_label.as_str(), id),
+        None => window_label.clone(),
     };
     lock_worktree_impl(&label, workspace_path, worktree_name)
 }
@@ -165,14 +165,14 @@ pub fn unlock_worktree_impl(window_label: &str, workspace_path: String, worktree
 
 #[tauri::command]
 pub(crate) fn unlock_worktree(
-    window: tauri::Window,
+    window_label: String,
     workspace_path: String,
     worktree_name: String,
     cell_id: Option<String>,
 ) {
     let label = match cell_id {
-        Some(id) => format!("{}:{}", window.label(), id),
-        None => window.label().to_string(),
+        Some(id) => format!("{}:{}", window_label.as_str(), id),
+        None => window_label.clone(),
     };
     unlock_worktree_impl(&label, workspace_path, worktree_name)
 }
@@ -274,15 +274,10 @@ pub(crate) fn broadcast_terminal_state(
     });
 }
 
-// NOTE(tauri#15408): this async command builds a window from a tokio thread, which clones the
-// runtime context off the main thread. It is a rare, user-initiated operation and building the
-// window from a *sync* command would deadlock on Windows (see tauri's WebviewWindowBuilder docs),
-// so it is exempt from the "borrow via state::with_app_handle" rule.
+// Build the window on the UI thread. Cloning AppHandle onto tokio races tao's Rc
+// on Windows (tauri-apps/tauri#15408).
 #[tauri::command]
-pub(crate) async fn open_workspace_window(
-    app: tauri::AppHandle,
-    workspace_path: String,
-) -> Result<String, String> {
+pub(crate) async fn open_workspace_window(workspace_path: String) -> Result<String, String> {
     log::info!(
         "[window] Opening new workspace window for: {}",
         workspace_path
@@ -315,19 +310,33 @@ pub(crate) async fn open_workspace_window(
         "index.html?workspace={}",
         urlencoding::encode(&workspace_path)
     );
+    let title = format!("Worktree Manager - {}", ws_name);
+    let label_for_build = window_label.clone();
 
-    let _webview =
-        tauri::WebviewWindowBuilder::new(&app, &window_label, tauri::WebviewUrl::App(url.into()))
-            .title(format!("Worktree Manager - {}", ws_name))
-            .inner_size(1300.0, 900.0)
-            .min_inner_size(900.0, 500.0)
-            .build()
-            .map_err(|e| {
-                log::error!("[window] Failed to create window: {}", e);
-                format!("Failed to create window: {}", e)
-            })?;
+    tokio::task::spawn_blocking(move || {
+        crate::state::run_on_main_thread_blocking(move || {
+            crate::state::with_app_handle(|app| {
+                tauri::WebviewWindowBuilder::new(
+                    app,
+                    &label_for_build,
+                    tauri::WebviewUrl::App(url.into()),
+                )
+                .title(title)
+                .inner_size(1300.0, 900.0)
+                .min_inner_size(900.0, 500.0)
+                .build()
+                .map(|_| ())
+                .map_err(|e| {
+                    log::error!("[window] Failed to create window: {}", e);
+                    format!("Failed to create window: {}", e)
+                })
+            })
+            .unwrap_or_else(|| Err("App handle unavailable".to_string()))
+        })
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))???;
 
-    // 注册窗口绑定
     {
         let mut map = WINDOW_WORKSPACES
             .lock()
@@ -381,14 +390,26 @@ pub(crate) fn broadcast_lock_state(workspace_path: &str) {
 // ==================== DevTools ====================
 
 #[tauri::command]
-pub(crate) fn open_devtools(webview_window: tauri::WebviewWindow) {
-    #[cfg(any(debug_assertions, feature = "devtools"))]
-    webview_window.open_devtools();
-    #[cfg(not(any(debug_assertions, feature = "devtools")))]
-    {
-        log::warn!("[window] DevTools requested but this build was compiled without devtools");
-        let _ = webview_window;
-    }
+pub(crate) async fn open_devtools(window_label: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        crate::state::run_on_main_thread_blocking(move || {
+            crate::state::with_app_handle(|handle| match handle.get_webview_window(&window_label) {
+                Some(w) => {
+                    #[cfg(any(debug_assertions, feature = "devtools"))]
+                    w.open_devtools();
+                    #[cfg(not(any(debug_assertions, feature = "devtools")))]
+                    log::warn!(
+                        "[window] DevTools requested but this build was compiled without devtools"
+                    );
+                    Ok(())
+                }
+                None => Err("Main window not found".to_string()),
+            })
+            .unwrap_or_else(|| Err("App handle unavailable".to_string()))
+        })
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))??
 }
 
 #[cfg(test)]

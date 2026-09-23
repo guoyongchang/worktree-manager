@@ -204,12 +204,12 @@ pub async fn start_sharing_internal(
 
 #[tauri::command]
 pub(crate) async fn start_sharing(
-    window: tauri::Window,
+    window_label: String,
     port: u16,
     password: String,
 ) -> Result<String, String> {
     let workspace_path =
-        get_window_workspace_path(window.label()).ok_or("No workspace selected")?;
+        get_window_workspace_path(window_label.as_str()).ok_or("No workspace selected")?;
     start_sharing_internal(workspace_path, port, password).await
 }
 

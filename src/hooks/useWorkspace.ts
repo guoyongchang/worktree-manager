@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { callBackend, fetchProjectRemote, isTauri, updateWorktreeColor as updateWorktreeColorBackend } from '../lib/backend';
+import { callBackend, isTauri, updateWorktreeColor as updateWorktreeColorBackend } from '../lib/backend';
 import { useCellContext } from '../contexts/CellContext';
 import { getPreferredExternalTerminal, getShellForTerminalLaunch, logTerminalPreferenceDebugInfo } from '../lib/terminalPreferences';
-import { GIT_FETCH_CONCURRENCY, mapWithConcurrency } from '../lib/utils';
 import type {
   WorkspaceRef,
   WorkspaceConfig,
@@ -72,6 +71,15 @@ export function useWorkspace(ready = true, initialWorkspacePath?: string, shellM
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const initialLoadDone = useRef(false);
+  const spinnerOwners = useRef(0);
+  const acquireSpinner = () => {
+    spinnerOwners.current += 1;
+    setRefreshing(true);
+  };
+  const releaseSpinner = () => {
+    spinnerOwners.current = Math.max(0, spinnerOwners.current - 1);
+    if (spinnerOwners.current === 0) setRefreshing(false);
+  };
   const loadVersion = useRef(0);
   const { isPrimary, cellId } = useCellContext();
   const explicitPath = !isPrimary ? initialWorkspacePath : undefined;
@@ -96,13 +104,15 @@ export function useWorkspace(ready = true, initialWorkspacePath?: string, shellM
     const t0 = performance.now();
     try {
       const extra = explicitPath ? { workspacePath: explicitPath } : {};
-      const [wsList, current] = await Promise.all([
-        callBackend<WorkspaceRef[]>("list_workspaces"),
-        callBackend<WorkspaceRef | null>("get_current_workspace", extra),
-      ]);
+      const wsList = await callBackend<WorkspaceRef[]>("list_workspaces");
       setWorkspaces(wsList);
-      setCurrentWorkspace(current);
-      console.log(`[ws] loadWorkspaces: ${(performance.now() - t0).toFixed(1)}ms`);
+      try {
+        const current = await callBackend<WorkspaceRef | null>("get_current_workspace", extra);
+        setCurrentWorkspace(current);
+      } catch (e) {
+        console.error('[ws] get_current_workspace failed:', e);
+      }
+      console.log(`[ws] loadWorkspaces: ${(performance.now() - t0).toFixed(1)}ms (${wsList.length} workspaces)`);
     } catch (e) {
       setError(String(e));
     }
@@ -111,11 +121,12 @@ export function useWorkspace(ready = true, initialWorkspacePath?: string, shellM
   const loadData = useCallback(async (options?: { silent?: boolean }) => {
     const version = ++loadVersion.current;
     const t0 = performance.now();
+    const showSpinner = !options?.silent && initialLoadDone.current;
     if (!options?.silent) {
       if (!initialLoadDone.current) {
         setLoading(true);
       } else {
-        setRefreshing(true);
+        acquireSpinner();
       }
     }
     setError(null);
@@ -142,35 +153,18 @@ export function useWorkspace(ready = true, initialWorkspacePath?: string, shellM
       if (version !== loadVersion.current) return;
       setError(String(e));
     } finally {
-      if (version === loadVersion.current && !options?.silent) {
+      if (showSpinner) releaseSpinner();
+      if (version === loadVersion.current) {
         setLoading(false);
-        setRefreshing(false);
       }
     }
   }, [explicitPath]);
 
-  // Fetch all project remotes, then reload local state.
-  // Used by sidebar refresh to get up-to-date remote branch info.
+  // Sidebar refresh: rescan local worktree/main status only.
+  // Mass `git fetch` of every repo is a per-project sync action, not a list refresh.
   const refreshWithFetch = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      // Collect all project paths from current worktrees
-      const projectPaths = worktrees
-        .filter(wt => !wt.is_archived)
-        .flatMap(wt => wt.projects.map(p => p.path));
-      // Also include main workspace projects
-      if (mainWorkspace) {
-        for (const p of mainWorkspace.projects) {
-          if (!projectPaths.includes(p.path)) projectPaths.push(p.path);
-        }
-      }
-      // Fetch with bounded fan-out (ignore individual failures)
-      await mapWithConcurrency(projectPaths, GIT_FETCH_CONCURRENCY, p => fetchProjectRemote(p));
-    } catch {
-      // fetch failures are non-fatal
-    }
     await loadData();
-  }, [worktrees, mainWorkspace, loadData]);
+  }, [loadData]);
 
   useEffect(() => {
     if (!ready) return;

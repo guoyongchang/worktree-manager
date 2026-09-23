@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::{Emitter, Manager};
+use tauri::Emitter;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex as TokioMutex;
 use tower_http::limit::RequestBodyLimitLayer;
@@ -196,20 +196,6 @@ fn to_snake(s: &str) -> String {
         result.push(c.to_ascii_lowercase());
     }
     result
-}
-
-/// Clone the global `AppHandle` for the few handlers that must hand an owned handle to
-/// Tauri APIs (updater download, window/devtools access).
-///
-/// NOTE(tauri#15408): cloning/dropping an AppHandle on a tokio worker races tao's non-atomic
-/// Rc refcount on Windows. Only use this for rare, user-initiated operations that need an
-/// owned handle; everything else (emit, reads) must borrow via `state::with_app_handle`.
-fn current_app_handle() -> Result<tauri::AppHandle, String> {
-    crate::APP_HANDLE
-        .lock()
-        .map_err(|_| "Internal app state error".to_string())?
-        .clone()
-        .ok_or("App handle unavailable".to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -1428,6 +1414,10 @@ async fn h_get_app_version() -> Response {
     Json(json!(env!("CARGO_PKG_VERSION"))).into_response()
 }
 
+async fn h_get_process_memory() -> Response {
+    Json(json!(crate::commands::system::get_process_memory())).into_response()
+}
+
 async fn h_check_mirror_update(Json(payload): Json<Value>) -> Response {
     let mirror_url = payload["mirrorUrl"]
         .as_str()
@@ -1437,15 +1427,11 @@ async fn h_check_mirror_update(Json(payload): Json<Value>) -> Response {
 }
 
 async fn h_download_update_via_mirror(Json(payload): Json<Value>) -> Response {
-    let app = match current_app_handle() {
-        Ok(app) => app,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
-    };
     let mirror_url = payload["mirrorUrl"]
         .as_str()
         .unwrap_or("https://gh-proxy.org/")
         .to_string();
-    result_ok(crate::commands::system::download_update_via_mirror(app, mirror_url).await)
+    result_ok(crate::commands::system::download_update_via_mirror(mirror_url).await)
 }
 
 async fn h_test_mirror_speed() -> Response {
@@ -1473,25 +1459,27 @@ async fn h_save_custom_mirrors(Json(payload): Json<Value>) -> Response {
 }
 
 async fn h_open_devtools() -> Response {
-    let app = match current_app_handle() {
-        Ok(app) => app,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
-    };
-    let window = match app.get_webview_window("main") {
-        Some(window) => window,
-        None => return (StatusCode::BAD_REQUEST, "Main window not found").into_response(),
-    };
-    crate::commands::window::open_devtools(window);
-    result_void_ok()
+    result_ok(crate::commands::window::open_devtools("main".to_string()).await)
 }
 
 // ---------------------------------------------------------------------------
 // Vault Handlers
 // ---------------------------------------------------------------------------
 
-pub async fn h_vault_status(headers: HeaderMap) -> axum::response::Response {
+pub async fn h_vault_status(
+    headers: HeaderMap,
+    args: Option<axum::extract::Json<serde_json::Value>>,
+) -> axum::response::Response {
     let sid = session_id(&headers);
-    result_json(crate::commands::vault::vault_status_impl(&sid))
+    let workspace_path = args.as_ref().and_then(|Json(v)| {
+        v.get("workspacePath")
+            .or_else(|| v.get("workspace_path"))
+            .and_then(|x| x.as_str())
+    });
+    result_json(crate::commands::vault::vault_status_impl(
+        &sid,
+        workspace_path,
+    ))
 }
 
 pub async fn h_vault_link(
@@ -1510,10 +1498,15 @@ pub async fn h_vault_link(
         .get("keepSymlinks")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    let workspace_path = args
+        .get("workspacePath")
+        .or_else(|| args.get("workspace_path"))
+        .and_then(|v| v.as_str());
     result_json(crate::commands::vault::vault_link_impl(
         &sid,
         path,
         keep_symlinks,
+        workspace_path,
     ))
 }
 
@@ -4169,13 +4162,13 @@ mod http_server_coverage_tests {
         assert_text_contains(
             h_download_update_via_mirror(Json(json!({"mirrorUrl": "https://mirror.invalid/"})))
                 .await,
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "App handle unavailable",
+            StatusCode::BAD_REQUEST,
+            "Failed to fetch update manifest",
         )
         .await;
         assert_text_contains(
             h_open_devtools().await,
-            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::BAD_REQUEST,
             "App handle unavailable",
         )
         .await;
@@ -4363,7 +4356,7 @@ mod http_server_coverage_tests {
         let headers = auth_headers("coverage-vault");
 
         assert_text_contains(
-            h_vault_status(headers.clone()).await,
+            h_vault_status(headers.clone(), None).await,
             StatusCode::BAD_REQUEST,
             "No workspace bound to window",
         )

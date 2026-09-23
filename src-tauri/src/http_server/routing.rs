@@ -22,9 +22,9 @@ use super::{
     h_get_dashscope_base_url, h_get_file_diff, h_get_git_diff, h_get_git_user_config,
     h_get_git_user_global_config, h_get_last_share_password, h_get_last_share_port,
     h_get_locked_worktrees, h_get_main_occupation, h_get_main_workspace_status,
-    h_get_mirror_sources, h_get_ngrok_token, h_get_opened_workspaces, h_get_remote_branches,
-    h_get_share_info, h_get_share_state, h_get_shell_integration_enabled, h_get_skip_git_hooks,
-    h_get_terminal_state, h_get_voice_asr_model, h_get_voice_refine_base_url,
+    h_get_mirror_sources, h_get_ngrok_token, h_get_opened_workspaces, h_get_process_memory,
+    h_get_remote_branches, h_get_share_info, h_get_share_state, h_get_shell_integration_enabled,
+    h_get_skip_git_hooks, h_get_terminal_state, h_get_voice_asr_model, h_get_voice_refine_base_url,
     h_get_voice_refine_enabled, h_get_voice_refine_model, h_get_workspace_config,
     h_import_external_project, h_kick_client, h_list_dashscope_models, h_list_vault_item_children,
     h_list_workspaces, h_list_worktrees, h_load_workspace_config_by_path, h_lock_worktree,
@@ -356,6 +356,7 @@ pub(super) fn build_api_router(cert_pem: Option<String>) -> Router {
         .route("/api/get_git_user_config", post(h_get_git_user_config))
         .route("/api/set_git_user_config", post(h_set_git_user_config))
         .route("/api/get_app_version", post(h_get_app_version))
+        .route("/api/get_process_memory", post(h_get_process_memory))
         .route("/api/get_app_icon", post(h_get_app_icon))
         .route("/api/check_mirror_update", post(h_check_mirror_update))
         .route(

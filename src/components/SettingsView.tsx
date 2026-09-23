@@ -30,6 +30,7 @@ import { BranchCombobox } from './BranchCombobox';
 import type { WorkspaceRef, WorkspaceConfig, ProjectConfig, ScannedFolder, VaultStatus, VaultItemChild, FailedVaultItem, TagDefinition } from '../types';
 import { getAppVersion, getAppIcon, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, getVoiceAsrModel, setVoiceAsrModel as saveVoiceAsrModel, getVoiceRefineModel, setVoiceRefineModel as saveVoiceRefineModel, voiceStart, voiceStop, voiceRefineText, isTauri, getPlatform, getRemoteBranches, openLink, callBackend, loadWorkspaceConfigByPath, saveWorkspaceConfigByPath, getVaultStatus, vaultLink, listVaultItemChildren, getCommitPrefixConfig, setCommitPrefixConfig, getGitUserGlobalConfig, setGitUserGlobalConfig, getSkipGitHooks, setSkipGitHooks as saveSkipGitHooks, getShellIntegrationEnabled, setShellIntegrationEnabled as saveShellIntegrationEnabled, cloudGetStatus, cloudStartPairing, cloudCheckPairingStatus, cloudApprovePairing, cloudRejectPairing, cloudDisconnect, getCommitAiApiKey, setCommitAiApiKey as saveCommitAiApiKey, setCommitAiEnabled as saveCommitAiEnabled, getCommitAiEnabled, getCommitAiModel, setCommitAiModel as saveCommitAiModel, listDashscopeModels, getVoiceRefineBaseUrl, setVoiceRefineBaseUrl as saveVoiceRefineBaseUrl } from '../lib/backend';
 import type { CloudStatus, PairingStatus } from '../lib/backend';
+import { readIpcTimeoutMs, writeIpcTimeoutSeconds, DEFAULT_IPC_TIMEOUT_SECONDS, MIN_IPC_TIMEOUT_SECONDS } from '../lib/backend';
 
 const isWindowsPowerShellId = (id?: string) => id === 'powershell' || id === 'pwsh';
 
@@ -100,6 +101,36 @@ const VaultItemTree: FC<VaultItemTreeProps> = ({
   const [tooMany, setTooMany] = useState(false);
   const isDir = itemType === 'directory';
 
+  const loadChildren = useCallback(async () => {
+    if (!isDir) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await listVaultItemChildren(vaultPath, relativePath);
+      setChildren(result);
+      setTooMany(false);
+    } catch (e: unknown) {
+      const msg = String(e instanceof Error ? e.message : e);
+      if (msg.includes('too many') || msg.includes('>99')) {
+        setTooMany(true);
+      } else {
+        setError(msg);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [isDir, vaultPath, relativePath]);
+
+  useEffect(() => {
+    if (depth !== 0 || !isDir) return;
+    let cancelled = false;
+    (async () => {
+      await loadChildren();
+      if (!cancelled) setExpanded(true);
+    })();
+    return () => { cancelled = true; };
+  }, [depth, isDir, loadChildren]);
+
   const handleToggle = async () => {
     if (!isDir || tooMany) return;
     if (expanded) {
@@ -107,21 +138,7 @@ const VaultItemTree: FC<VaultItemTreeProps> = ({
       return;
     }
     if (children.length === 0 && !error) {
-      setLoading(true);
-      try {
-        const result = await listVaultItemChildren(vaultPath, relativePath);
-        setChildren(result);
-        setTooMany(false);
-      } catch (e: any) {
-        const msg = String(e?.message || e);
-        if (msg.includes('too many') || msg.includes('>99')) {
-          setTooMany(true);
-        } else {
-          setError(msg);
-        }
-      } finally {
-        setLoading(false);
-      }
+      await loadChildren();
     }
     setExpanded(true);
   };
@@ -131,7 +148,7 @@ const VaultItemTree: FC<VaultItemTreeProps> = ({
   return (
     <div>
       <div
-        className={`flex items-center gap-1 text-xs ${isDir ? 'text-[var(--color-text-secondary)] cursor-pointer hover:text-[var(--color-text-primary)]' : 'text-[var(--color-text-secondary)]'}`}
+        className={`flex items-center gap-1 text-xs cursor-pointer ${isDir ? 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]' : 'text-[var(--color-text-secondary)]'}`}
         style={{ paddingLeft: `${indent}px` }}
         onClick={isDir ? handleToggle : undefined}
       >
@@ -184,37 +201,47 @@ const VaultItemTree: FC<VaultItemTreeProps> = ({
 };
 
 
-// ==================== WorkspaceVaultSection ====================
-export const WorkspaceVaultSection: FC = () => {
+export const WorkspaceVaultSection: FC<{
+  workspacePath?: string;
+  onStatusChange?: (status: VaultStatus | null) => void;
+}> = ({ workspacePath, onStatusChange }) => {
   const { t } = useTranslation();
   const [vaultStatus, setVaultStatus] = useState<VaultStatus | null>(null);
   const [inputPath, setInputPath] = useState('');
   const [linking, setLinking] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showItems, setShowItems] = useState(false);
+  const [showItems, setShowItems] = useState(true);
   const [failedItems, setFailedItems] = useState<FailedVaultItem[]>([]);
   const [showFailedItems, setShowFailedItems] = useState(false);
 
-  const loadStatus = useCallback(async () => {
-    if (!isTauri()) {
-      setVaultStatus(null);
-      setError(null);
-      setLoading(false);
-      return;
-    }
-    try {
-      const s = await getVaultStatus();
-      setVaultStatus(s);
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!isTauri()) {
+        if (cancelled) return;
+        setVaultStatus(null);
+        setError(null);
+        setLoading(false);
+        onStatusChange?.(null);
+        return;
+      }
+      try {
+        const s = await getVaultStatus(workspacePath);
+        if (cancelled) return;
+        setVaultStatus(s);
+        setError(null);
+        onStatusChange?.(s);
+      } catch (e) {
+        if (cancelled) return;
+        setError(String(e));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [workspacePath, onStatusChange]);
 
-  useEffect(() => { loadStatus(); }, [loadStatus]);
 
   const handleConnect = async (selectedPath: string) => {
     if (!selectedPath.trim()) return;
@@ -222,15 +249,17 @@ export const WorkspaceVaultSection: FC = () => {
     setFailedItems([]);
     setLinking(true);
     try {
-      const result = await vaultLink(selectedPath.trim());
+      const result = await vaultLink(selectedPath.trim(), undefined, workspacePath);
       if (result.error) {
         setError(result.error);
       } else {
-        setVaultStatus({
+        const next = {
           connected: result.connected,
           vault_path: selectedPath.trim(),
           synced_items: result.synced_items,
-        });
+        };
+        setVaultStatus(next);
+        onStatusChange?.(next);
         setInputPath('');
         if (result.warning) setError(result.warning);
       }
@@ -266,15 +295,17 @@ export const WorkspaceVaultSection: FC = () => {
     setFailedItems([]);
     setLinking(true);
     try {
-      const result = await vaultLink(vaultStatus.vault_path);
+      const result = await vaultLink(vaultStatus.vault_path, undefined, workspacePath);
       if (result.error) {
         setError(result.error);
       } else {
-        setVaultStatus({
+        const next = {
           connected: result.connected,
           vault_path: vaultStatus.vault_path,
           synced_items: result.synced_items,
-        });
+        };
+        setVaultStatus(next);
+        onStatusChange?.(next);
         if (result.warning) setError(result.warning);
       }
       if (result.failed_items && result.failed_items.length > 0) {
@@ -295,8 +326,10 @@ export const WorkspaceVaultSection: FC = () => {
     setError(null);
     setLinking(true);
     try {
-      await vaultLink(null, keepSymlinks);
-      setVaultStatus({ connected: false, vault_path: null, synced_items: [] });
+      await vaultLink(null, keepSymlinks, workspacePath);
+      const next = { connected: false, vault_path: null, synced_items: [] };
+      setVaultStatus(next);
+      onStatusChange?.(next);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -321,16 +354,31 @@ export const WorkspaceVaultSection: FC = () => {
             </span>
           </div>
           {vaultStatus.vault_path && (
-            <div className="flex items-center gap-1">
-              <span className="text-xs text-[var(--color-text-muted)] font-mono truncate max-w-[200px]" title={vaultStatus.vault_path}>
-                {vaultStatus.vault_path}
+            <div className="flex items-center gap-1.5 min-w-0 w-full">
+              <span
+                data-testid="vault-mounted-path"
+                className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-xs font-mono text-[var(--color-text-muted)] [direction:rtl] text-left"
+                title={vaultStatus.vault_path}
+              >
+                <bdi>{vaultStatus.vault_path}</bdi>
               </span>
+              <button
+                type="button"
+                data-testid="vault-open-path"
+                className="shrink-0 p-0.5 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] cursor-pointer"
+                aria-label={t('detail.revealInFinder')}
+                onClick={() => {
+                  callBackend('reveal_in_finder', { path: vaultStatus.vault_path }).catch(() => {});
+                }}
+              >
+                <FolderOpen className="w-3.5 h-3.5" />
+              </button>
             </div>
           )}
           {/* Synced items toggle */}
           <div>
             <button
-              className="flex items-center gap-1 text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+              className="flex items-center gap-1 text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors cursor-pointer"
               onClick={() => setShowItems(!showItems)}
             >
               <span className="w-3 h-3 inline-flex items-center justify-center text-[10px]">
@@ -340,7 +388,7 @@ export const WorkspaceVaultSection: FC = () => {
               <span className="text-[var(--color-text-muted)]">({vaultStatus.synced_items.length})</span>
             </button>
             {showItems && vaultStatus.vault_path && (
-              <div className="mt-1 space-y-0.5 max-h-32 overflow-y-auto pr-1">
+              <div className="mt-1 space-y-0.5 max-h-56 overflow-y-auto pr-1">
                 {vaultStatus.synced_items.map((item) => (
                   <VaultItemTree
                     key={item.name}
@@ -550,18 +598,39 @@ export const SettingsView: FC<SettingsViewProps> = ({
   // Section navigation
   const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection ?? 'workspaces');
 
-  // SettingsView is permanently mounted (toggled via display:none), so the
-  // initial useState only applies on first mount. To support navigating to a
-  // section on demand (and re-navigating to the same section on repeated
-  // requests), watch a self-incrementing nonce alongside initialSection.
+  // Permanently mounted behind display:none. Re-apply the requested section
+  // whenever the opener bumps settingsNavNonce (including default workspaces).
   useEffect(() => {
-    if (initialSection) setActiveSection(initialSection);
+    setActiveSection(initialSection ?? 'workspaces');
   }, [initialSection, settingsNavNonce]);
 
   // ==================== Workspace editing state ====================
-  // Which workspace is selected for editing (defaults to current)
   const [selectedWsPath, setSelectedWsPath] = useState<string>(currentWorkspace?.path || workspaces[0]?.path || '');
   const isCurrentWs = selectedWsPath === currentWorkspace?.path;
+
+  const prevSettingsNavNonceRef = useRef(settingsNavNonce);
+  const prevCurrentWsPathRef = useRef(currentWorkspace?.path);
+
+  useEffect(() => {
+    const currentPath = currentWorkspace?.path;
+    const preferred = (currentPath && workspaces.some((w) => w.path === currentPath))
+      ? currentPath
+      : (workspaces[0]?.path || '');
+
+    const reopened = prevSettingsNavNonceRef.current !== settingsNavNonce;
+    prevSettingsNavNonceRef.current = settingsNavNonce;
+    const currentSwitched = prevCurrentWsPathRef.current !== currentPath;
+    prevCurrentWsPathRef.current = currentPath;
+
+    if (!preferred) return;
+
+    setSelectedWsPath((prev) => {
+      if (reopened || currentSwitched || !prev || !workspaces.some((w) => w.path === prev)) {
+        return preferred;
+      }
+      return prev;
+    });
+  }, [currentWorkspace, workspaces, settingsNavNonce]);
 
   // The config being edited
   const [config, setConfig] = useState<WorkspaceConfig>(() => JSON.parse(JSON.stringify(workspaceConfig)));
@@ -570,11 +639,9 @@ export const SettingsView: FC<SettingsViewProps> = ({
   const [scanResultsMap, setScanResultsMap] = useState<Record<string, ScannedFolder[]>>({});
   const [vaultStatus, setVaultStatus] = useState<VaultStatus | null>(null);
 
-  // Load vault status
   useEffect(() => {
-    if (!isTauri()) return;
-    getVaultStatus().then(setVaultStatus).catch(() => setVaultStatus(null));
-  }, []);
+    setVaultStatus(null);
+  }, [selectedWsPath]);
 
   // Project view mode: form or json
   const [projectViewMode, setProjectViewMode] = useState<'form' | 'json'>('form');
@@ -642,14 +709,14 @@ export const SettingsView: FC<SettingsViewProps> = ({
   const addLinkedItem = useCallback((item: string) => {
     setConfig(prev => ({
       ...prev,
-      linked_workspace_items: [...prev.linked_workspace_items, item],
+      linked_workspace_items: [...(prev.linked_workspace_items ?? []), item],
     }));
   }, []);
 
   const removeLinkedItem = useCallback((index: number) => {
     setConfig(prev => ({
       ...prev,
-      linked_workspace_items: prev.linked_workspace_items.filter((_, i) => i !== index),
+      linked_workspace_items: (prev.linked_workspace_items ?? []).filter((_, i) => i !== index),
     }));
   }, []);
 
@@ -827,6 +894,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
 
   // DEV settings
   const [devConsoleEnabled, setDevConsoleEnabled] = useState(() => localStorage.getItem('dev-console-enabled') === 'true');
+  const [ipcTimeoutSeconds, setIpcTimeoutSeconds] = useState(() => Math.round(readIpcTimeoutMs() / 1000));
 
   // Microphone
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
@@ -1143,6 +1211,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
     try {
       const info = await cloudStartPairing()
       setPairingCode(info.code)
+      void openLink('https://wms.kirov-opensource.com/')
       const interval = setInterval(async () => {
         try {
           const status = await cloudCheckPairingStatus()
@@ -1193,7 +1262,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
     { id: 'workspaces' as SettingsSection, label: t('settings.workspaceConfig'), icon: <Settings className="w-3.5 h-3.5" />, group: 'common' },
     { id: 'appearance' as SettingsSection, label: t('settings.appearance'), icon: <Palette className="w-3.5 h-3.5" />, group: 'common' },
     // Advanced group
-    { id: 'models' as SettingsSection, label: t('settings.modelsNav', '模型管理'), icon: <Brain className="w-3.5 h-3.5" />, group: 'advanced' },
+    { id: 'models' as SettingsSection, label: t('settings.modelsNav', 'AI'), icon: <Brain className="w-3.5 h-3.5" />, group: 'advanced' },
     { id: 'tools' as SettingsSection, label: t('settings.toolsNav', '工具'), icon: <Wrench className="w-3.5 h-3.5" />, group: 'advanced' },
     ...(isTauri() ? [{ id: 'share' as SettingsSection, label: t('settings.externalShareNav', '外网分享'), icon: <Globe className="w-3.5 h-3.5" />, group: 'advanced' as const }] : []),
     { id: 'commit' as SettingsSection, label: t('settings.commitNav', '提交设置'), icon: <FileText className="w-3.5 h-3.5" />, group: 'advanced' },
@@ -1314,11 +1383,11 @@ export const SettingsView: FC<SettingsViewProps> = ({
                       {(() => {
                         const vaultMap = new Map<string, { name: string; item_type: 'file' | 'directory' }>();
                         if (vaultStatus?.connected) {
-                          for (const si of vaultStatus.synced_items) {
+                          for (const si of vaultStatus.synced_items ?? []) {
                             vaultMap.set(si.name, si);
                           }
                         }
-                        const allItems = [...config.linked_workspace_items];
+                        const allItems = [...(config.linked_workspace_items ?? [])];
                         for (const [name] of vaultMap) {
                           if (!allItems.includes(name)) allItems.push(name);
                         }
@@ -1335,14 +1404,14 @@ export const SettingsView: FC<SettingsViewProps> = ({
                         return allItems.map((item, index) => {
                           const vaultItem = vaultMap.get(item);
                           const isVaultManaged = vaultItem !== undefined;
-                          const isInConfig = config.linked_workspace_items.includes(item);
+                          const isInConfig = (config.linked_workspace_items ?? []).includes(item);
                           const isDir = vaultItem?.item_type === 'directory';
                           return (
                             <span key={index} className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs ${isVaultManaged ? 'bg-emerald-900/30 border border-emerald-700/40 text-emerald-300' : 'bg-[var(--color-bg-elevated)]/50 border border-[var(--color-border)]/50 text-[var(--color-text-secondary)]'}`}>
                               {isVaultManaged && <Link2 className="w-3 h-3 text-emerald-400" />}
                               {item}{isDir ? '/' : ''}
                               {isInConfig && !isVaultManaged && (
-                                <button type="button" onClick={() => removeLinkedItem(config.linked_workspace_items.indexOf(item))} className="text-[var(--color-text-muted)] hover:text-[var(--color-error)] transition-colors ml-0.5">&times;</button>
+                                <button type="button" onClick={() => removeLinkedItem((config.linked_workspace_items ?? []).indexOf(item))} className="text-[var(--color-text-muted)] hover:text-[var(--color-error)] transition-colors ml-0.5">&times;</button>
                               )}
                             </span>
                           );
@@ -1378,7 +1447,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                       <p>{t('settings.vaultGuideLine2', '支持 Obsidian、Zettelkasten、Roam Research 等任意笔记工具。挂载后支持软链接和同步项管理。')}</p>
                     </div>
                   </details>
-                  <WorkspaceVaultSection />
+                  <WorkspaceVaultSection key={selectedWsPath} workspacePath={selectedWsPath} onStatusChange={setVaultStatus} />
                 </div>
 
                 {/* Projects Config */}
@@ -2087,7 +2156,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
             {/* ==================== Model Management ==================== */}
             {activeSection === 'models' && dashscopeKeyLoaded && commitAiKeyLoaded && (
               <div>
-                <h2 className="text-lg font-medium mb-4">{t('settings.modelsTitle', '模型管理')}</h2>
+                <h2 className="text-lg font-medium mb-4">{t('settings.modelsTitle', 'AI')}</h2>
                 <div className="space-y-4">
                   <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)]/50 rounded-lg p-4 space-y-4">
                     <div>
@@ -2424,8 +2493,53 @@ export const SettingsView: FC<SettingsViewProps> = ({
                       </div>
                     )}
                   </div>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-2 border-t border-[var(--color-border)]/40">
+                    <div className="space-y-2">
+                      <div>
+                        <p className="text-sm text-[var(--color-text-secondary)]">{t('settings.voiceAsrTitle')}</p>
+                        <p className="text-xs text-[var(--color-text-muted)]">{t('settings.voiceAsrModelHint')}</p>
+                      </div>
+                      <BranchCombobox
+                        value={voiceAsrModel}
+                        onChange={(v) => { setVoiceAsrModel(v); saveVoiceAsrModel(v.trim()); }}
+                        onLoadBranches={async () => [
+                          'paraformer-realtime-v2',
+                          'paraformer-realtime-v1',
+                          'paraformer-realtime-8k-v2',
+                          'paraformer-realtime-8k-v1',
+                        ]}
+                        placeholder="paraformer-realtime-v2"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm text-[var(--color-text-secondary)]">{t('settings.voiceRefineTitle')}</p>
+                          <p className="text-xs text-[var(--color-text-muted)]">{t('settings.voiceRefineDesc')}</p>
+                        </div>
+                        <SettingsToggle
+                          checked={voiceRefineEnabled}
+                          disabled={!voiceRefineLoaded}
+                          ariaLabel={t('settings.voiceRefineTitle')}
+                          onChange={(newVal) => {
+                            setVoiceRefineEnabled(newVal);
+                            saveVoiceRefineEnabled(newVal).catch(() => {});
+                          }}
+                        />
+                      </div>
+                      <BranchCombobox
+                        value={voiceRefineModel}
+                        onChange={(v) => { setVoiceRefineModel(v); saveVoiceRefineModel(v.trim()); }}
+                        onLoadBranches={async () => {
+                          const models = await listDashscopeModels();
+                          return models.filter(m => m.includes('qwen'));
+                        }}
+                        placeholder="qwen3.7-max"
+                      />
+                    </div>
+                  </div>
                   <p className="text-xs text-[var(--color-text-muted)]">
-                    {t('settings.voiceModelManagementHint', '语音识别和 AI 精炼模型请在「模型管理」中配置。')}
+                    {t('settings.voiceModelManagementHint', 'API Key 请在「AI」中配置。')}
                   </p>
                 </div>
               </div>
@@ -2464,6 +2578,39 @@ export const SettingsView: FC<SettingsViewProps> = ({
                         saveSkipGitHooks(newVal).catch(() => {});
                       }}
                     />
+                  </div>
+
+                  <div className="space-y-2 pt-1 border-t border-[var(--color-border)]/40">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm text-[var(--color-text-secondary)]">{t('settings.commitAiLabel', 'AI 生成 commit message')}</p>
+                        <p className="text-xs text-[var(--color-text-muted)]">{t('settings.commitAiDesc', '根据 diff 自动生成提交信息')}</p>
+                      </div>
+                      <SettingsToggle
+                        checked={commitAiEnabled}
+                        disabled={!commitAiKeyLoaded}
+                        ariaLabel={t('settings.commitAiLabel', 'AI 生成 commit message')}
+                        onChange={(newVal) => {
+                          setCommitAiEnabled(newVal);
+                          saveCommitAiEnabled(newVal).catch((e) => setCommitAiError(String(e)));
+                        }}
+                      />
+                    </div>
+                    <BranchCombobox
+                      value={commitAiModel}
+                      onChange={(v) => setCommitAiModel(v)}
+                      onCommit={(v) => {
+                        saveCommitAiModel(v.trim()).catch((e) => setCommitAiError(String(e)));
+                      }}
+                      onLoadBranches={async () => {
+                        const models = await listDashscopeModels('commit_ai');
+                        return models.filter(m => m.includes('qwen'));
+                      }}
+                      placeholder="qwen3.7-max"
+                    />
+                    <p className="text-xs text-[var(--color-text-muted)]">{t('settings.commitAiModelHint', '留空使用默认模型 qwen3.7-max')}</p>
+                    {commitAiError && <p className="text-sm text-[var(--color-error)]">{commitAiError}</p>}
+                    {commitAiSaved && <p className="text-xs text-[var(--color-success)]">{t('settings.savedSuccess')}</p>}
                   </div>
 
                   {/* 模板列表 */}
@@ -2591,8 +2738,11 @@ export const SettingsView: FC<SettingsViewProps> = ({
                     </div>
                   ) : pairingCode ? (
                     <div className="space-y-3 p-4 bg-[var(--color-bg-base)]/35 border border-[var(--color-border)]/50 rounded-lg text-[var(--color-text-primary)]">
-                      <p className="text-sm text-[var(--color-text-secondary)]">{t('settings.cloudPairingHint', '请在 WMS 管理后台输入以下配对码：')}</p>
+                      <p className="text-sm text-[var(--color-text-secondary)]">{t('settings.cloudPairingHint')}</p>
                       <p className="text-3xl font-mono font-bold text-center tracking-wider text-[var(--color-text-primary)]">{pairingCode}</p>
+                      <Button variant="secondary" size="sm" onClick={() => openLink('https://wms.kirov-opensource.com/')}>
+                        {t('settings.cloudOpenAdmin')}
+                      </Button>
                       {pairingStatus?.status === 'claimed' && (
                         <div className="p-3 bg-[var(--color-warning)]/10 border border-[var(--color-warning)]/30 rounded text-[var(--color-text-primary)]">
                           <p className="text-sm">{t('settings.cloudPairingRequest', '用户')} <strong className="text-[var(--color-warning)]">{pairingStatus.user_email || pairingStatus.username}</strong> {t('settings.cloudPairingRequestSuffix', '请求连接此设备')}</p>
@@ -2660,6 +2810,30 @@ export const SettingsView: FC<SettingsViewProps> = ({
                       />
                     </div>
                   )}
+                  <div className="flex items-center justify-between mt-4 pt-4 border-t border-[var(--color-border)]/50 gap-4">
+                    <div className="min-w-0">
+                      <label className="text-sm text-[var(--color-text-secondary)]">{t('settings.ipcTimeout')}</label>
+                      <p className="text-xs text-[var(--color-text-muted)]">{t('settings.ipcTimeoutDesc')}</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Input
+                        type="number"
+                        min={MIN_IPC_TIMEOUT_SECONDS}
+                        max={300}
+                        step={1}
+                        value={ipcTimeoutSeconds}
+                        onChange={(e) => setIpcTimeoutSeconds(Number(e.target.value))}
+                        onBlur={() => {
+                          const saved = writeIpcTimeoutSeconds(
+                            Number.isFinite(ipcTimeoutSeconds) ? ipcTimeoutSeconds : DEFAULT_IPC_TIMEOUT_SECONDS,
+                          );
+                          setIpcTimeoutSeconds(saved);
+                        }}
+                        className="w-20 h-8 text-sm text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      />
+                      <span className="text-xs text-[var(--color-text-muted)]">{t('settings.ipcTimeoutUnit')}</span>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}

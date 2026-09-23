@@ -254,10 +254,10 @@ pub fn clone_project_impl(window_label: &str, request: CloneProjectRequest) -> R
 
 #[tauri::command]
 pub(crate) async fn clone_project(
-    window: tauri::Window,
+    window_label: String,
     request: CloneProjectRequest,
 ) -> Result<(), String> {
-    let label = window.label().to_string();
+    let label = window_label.clone();
     blocking(move || clone_project_impl(&label, request)).await
 }
 
@@ -331,9 +331,9 @@ pub fn scan_existing_projects_impl(
 
 #[tauri::command]
 pub(crate) async fn scan_existing_projects(
-    window: tauri::Window,
+    window_label: String,
 ) -> Result<Vec<crate::types::ExistingProjectInfo>, String> {
-    let label = window.label().to_string();
+    let label = window_label.clone();
     blocking(move || scan_existing_projects_impl(&label)).await
 }
 
@@ -391,13 +391,13 @@ pub fn add_existing_project_impl(
 
 #[tauri::command]
 pub(crate) async fn add_existing_project(
-    window: tauri::Window,
+    window_label: String,
     name: String,
     base_branch: String,
     test_branch: String,
     merge_strategy: String,
 ) -> Result<(), String> {
-    let label = window.label().to_string();
+    let label = window_label.clone();
     blocking(move || {
         add_existing_project_impl(&label, name, base_branch, test_branch, merge_strategy)
     })
@@ -577,10 +577,10 @@ fn copy_symlink(src: &Path, dst: &Path) -> std::io::Result<()> {
 
 #[tauri::command]
 pub(crate) async fn import_external_project(
-    window: tauri::Window,
+    window_label: String,
     source_path: String,
 ) -> Result<crate::types::ExistingProjectInfo, String> {
-    let label = window.label().to_string();
+    let label = window_label.clone();
     blocking(move || import_external_project_impl(&label, source_path)).await
 }
 
@@ -646,10 +646,10 @@ pub fn remove_project_from_config_impl(window_label: &str, name: String) -> Resu
 
 #[tauri::command]
 pub(crate) async fn remove_project_from_config(
-    window: tauri::Window,
+    window_label: String,
     name: String,
 ) -> Result<(), String> {
-    let label = window.label().to_string();
+    let label = window_label.clone();
     blocking(move || remove_project_from_config_impl(&label, name)).await
 }
 
@@ -948,7 +948,7 @@ pub fn switch_branch_internal(request: &SwitchBranchRequest) -> Result<(), Strin
 /// Upper bound on projects synced concurrently by "sync all to base".
 /// Kept deliberately low: Windows credential helpers (and some corporate proxies)
 /// misbehave when many `git fetch`/`git push` processes authenticate at once.
-const SYNC_ALL_MAX_CONCURRENT: usize = 4;
+const SYNC_ALL_MAX_CONCURRENT: usize = 2;
 
 #[derive(Debug, serde::Serialize, Clone)]
 pub struct SyncBaseResult {
@@ -1194,10 +1194,10 @@ fn sync_single_project_to_base(
 
 #[tauri::command]
 pub(crate) async fn sync_all_projects_to_base(
-    window: tauri::Window,
+    window_label: String,
     project_paths: Vec<String>,
 ) -> Result<Vec<SyncBaseResult>, String> {
-    let label = window.label().to_string();
+    let label = window_label.clone();
     blocking(move || sync_all_projects_to_base_impl(&label, project_paths)).await
 }
 

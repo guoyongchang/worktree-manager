@@ -1308,7 +1308,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                             baseBranch={proj.base_branch}
                             testBranch={proj.test_branch}
                             currentBranch={proj.current_branch}
-                            onRefresh={onRefresh}
+                            onSilentRefresh={onSilentRefresh}
                             onOpenTerminal={onOpenTerminalPanel}
                             onStatsChanged={(stats) => handleStatsChanged(projectPath, stats)}
                           />
@@ -1525,7 +1525,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                           baseBranch={proj.base_branch}
                           testBranch={proj.test_branch}
                           currentBranch={proj.current_branch}
-                          onRefresh={onRefresh}
+                          onSilentRefresh={onSilentRefresh}
                           onOpenTerminal={onOpenTerminalPanel}
                           onStatsChanged={(stats) => handleStatsChanged(proj.path, stats)}
                         />
@@ -1973,7 +1973,6 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                     testBranch={proj.test_branch}
                     currentBranch={proj.current_branch}
                     worktreeDisplayName={selectedWorktree.display_name || selectedWorktree.name}
-                    onRefresh={onRefresh}
                     onSilentRefresh={onSilentRefresh}
                     onOpenTerminal={onOpenTerminalPanel}
                     autoRefreshSlot={selectedWorktree.is_archived ? undefined : index}

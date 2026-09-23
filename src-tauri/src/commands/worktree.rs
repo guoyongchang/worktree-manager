@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::Instant;
 
 use crate::commands::window::broadcast_lock_state;
@@ -8,7 +9,7 @@ use crate::config::{
     clear_occupation_state, get_window_workspace_config, load_occupation_state,
     save_occupation_state, save_workspace_config_internal,
 };
-use crate::git_ops::{get_branch_status, get_worktree_info_for_branches};
+use crate::git_ops::{get_branch_status, get_worktree_info_for_list};
 use crate::state::{PTY_MANAGER, WINDOW_WORKSPACES};
 use crate::types::{
     AddProjectToWorktreeRequest, CreateProjectRequest, CreateWorktreeRequest, DeployProjectError,
@@ -569,12 +570,12 @@ pub fn terminate_worktree_locking_process_impl(
 
 #[tauri::command]
 pub(crate) async fn terminate_worktree_locking_process(
-    window: tauri::Window,
+    window_label: String,
     name: String,
     pid: u32,
     process_start_time: String,
 ) -> Result<(), String> {
-    let label = window.label().to_string();
+    let label = window_label.clone();
     tokio::task::spawn_blocking(move || {
         terminate_worktree_locking_process_impl(&label, name, pid, process_start_time)
     })
@@ -603,7 +604,7 @@ pub fn list_worktrees_impl(
 
 #[tauri::command]
 pub(crate) async fn list_worktrees(
-    window: tauri::Window,
+    window_label: String,
     include_archived: bool,
     workspace_path: Option<String>,
 ) -> Result<Vec<WorktreeListItem>, String> {
@@ -619,7 +620,7 @@ pub(crate) async fn list_worktrees(
         .await
         .map_err(|e| format!("Task join error: {}", e))?
     } else {
-        let label = window.label().to_string();
+        let label = window_label.clone();
         tokio::task::spawn_blocking(move || list_worktrees_impl(&label, include_archived))
             .await
             .map_err(|e| format!("Task join error: {}", e))?
@@ -644,7 +645,7 @@ pub fn update_worktree_color_impl(
 
 #[tauri::command]
 pub(crate) async fn update_worktree_color(
-    window: tauri::Window,
+    window_label: String,
     worktree_name: String,
     color: Option<crate::types::WorktreeColor>,
     workspace_path: Option<String>,
@@ -657,7 +658,7 @@ pub(crate) async fn update_worktree_color(
         };
         crate::commands::workspace::save_workspace_config_by_path(path, config)
     } else {
-        let label = window.label().to_string();
+        let label = window_label.clone();
         tokio::task::spawn_blocking(move || {
             update_worktree_color_impl(&label, worktree_name, color)
         })
@@ -683,64 +684,134 @@ fn save_worktree_mapping(mapping_path: &std::path::Path, mapping: &HashMap<Strin
         }
     }
 }
+fn par_map<T, R>(items: Vec<T>, f: impl Fn(T) -> R + Sync) -> Vec<R>
+where
+    T: Send,
+    R: Send,
+{
+    let len = items.len();
+    if len <= 1 {
+        return items.into_iter().map(f).collect();
+    }
+    let workers = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .clamp(2, 8)
+        .min(len);
+    let queue = Mutex::new(items.into_iter().enumerate());
+    let slots: Vec<Mutex<Option<R>>> = (0..len).map(|_| Mutex::new(None)).collect();
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| loop {
+                let job = queue.lock().unwrap_or_else(|p| p.into_inner()).next();
+                let Some((i, item)) = job else { break };
+                let value = f(item);
+                *slots[i].lock().unwrap_or_else(|p| p.into_inner()) = Some(value);
+            });
+        }
+    });
+    slots
+        .into_iter()
+        .map(|slot| {
+            slot.into_inner()
+                .unwrap_or_else(|p| p.into_inner())
+                .expect("parallel slot filled")
+        })
+        .collect()
+}
+
+fn project_status_from_info(
+    name: String,
+    path: PathBuf,
+    proj_config: &ProjectConfig,
+    info: crate::git_ops::WorktreeInfo,
+) -> ProjectStatus {
+    ProjectStatus {
+        name,
+        path: normalize_path(&path.to_string_lossy()),
+        current_branch: info.current_branch,
+        base_branch: proj_config.base_branch.clone(),
+        test_branch: proj_config.test_branch.clone(),
+        has_uncommitted: info.uncommitted_count > 0,
+        uncommitted_count: info.uncommitted_count,
+        is_merged_to_test: info.is_merged_to_test,
+        is_merged_to_base: info.is_merged_to_base,
+        ahead_of_base: info.ahead_of_base,
+        behind_base: info.behind_base,
+        ahead_of_test: info.ahead_of_test,
+        unpushed_commits: info.unpushed_commits,
+        remote_url: info.remote_url,
+    }
+}
 
 fn scan_worktrees_dir(
     dir: &PathBuf,
     config: &crate::types::WorkspaceConfig,
     include_archived: bool,
 ) -> Result<Vec<WorktreeListItem>, String> {
-    let mut result = vec![];
-
-    // Load display name mapping
-    let mapping_path = dir.join("mapping.json");
-    let mapping = load_worktree_mapping(&mapping_path);
-
+    let mapping = load_worktree_mapping(&dir.join("mapping.json"));
     let entries = std::fs::read_dir(dir).map_err(|e| friendly_fs_error("无法读取目录", &e))?;
+
+    struct WtShell {
+        name: String,
+        path: String,
+        is_archived: bool,
+        color: Option<crate::types::WorktreeColor>,
+        display_name: Option<String>,
+    }
+    struct ProjJob {
+        wt_idx: usize,
+        name: String,
+        path: PathBuf,
+        base_branch: String,
+        test_branch: String,
+        extra: ProjectConfig,
+    }
+
+    let mut shells = Vec::new();
+    let mut jobs = Vec::new();
 
     for entry in entries {
         let entry = entry.map_err(|e| friendly_fs_error("无法读取目录项", &e))?;
         let path = entry.path();
-
         if !path.is_dir() {
             continue;
         }
-
         let name = path
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("")
             .to_string();
-
         if name.starts_with('.') {
             continue;
         }
-
         let is_archived = config.archived_worktrees.contains(&name);
-
         if is_archived && !include_archived {
             continue;
         }
-
         let projects_path = path.join("projects");
-        let mut projects = vec![];
-
         if !projects_path.exists() || !projects_path.is_dir() {
             continue;
         }
-
+        let wt_idx = shells.len();
+        shells.push(WtShell {
+            display_name: mapping.get(&name).cloned(),
+            color: config.worktree_colors.get(&name).cloned(),
+            is_archived,
+            path: normalize_path(&path.to_string_lossy()),
+            name,
+        });
         if let Ok(proj_entries) = std::fs::read_dir(&projects_path) {
             for proj_entry in proj_entries.flatten() {
                 let proj_path = proj_entry.path();
                 if !proj_path.is_dir() {
                     continue;
                 }
-
                 let proj_name = proj_path
                     .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("")
                     .to_string();
-
                 let proj_config = config
                     .projects
                     .iter()
@@ -757,47 +828,43 @@ fn scan_worktrees_dir(
                         git_user_email: None,
                         tags: vec![],
                     });
-
-                let info = get_worktree_info_for_branches(
-                    &proj_path,
-                    &proj_config.base_branch,
-                    &proj_config.test_branch,
-                );
-
-                projects.push(ProjectStatus {
+                jobs.push(ProjJob {
+                    wt_idx,
                     name: proj_name,
-                    path: normalize_path(&proj_path.to_string_lossy()),
-                    current_branch: info.current_branch,
-                    base_branch: proj_config.base_branch,
-                    test_branch: proj_config.test_branch,
-                    has_uncommitted: info.uncommitted_count > 0,
-                    uncommitted_count: info.uncommitted_count,
-                    is_merged_to_test: info.is_merged_to_test,
-                    is_merged_to_base: info.is_merged_to_base,
-                    ahead_of_base: info.ahead_of_base,
-                    behind_base: info.behind_base,
-                    ahead_of_test: info.ahead_of_test,
-                    unpushed_commits: info.unpushed_commits,
-                    remote_url: info.remote_url,
+                    path: proj_path,
+                    base_branch: proj_config.base_branch.clone(),
+                    test_branch: proj_config.test_branch.clone(),
+                    extra: proj_config,
                 });
             }
         }
-
-        // Look up display name from mapping
-        let lookup_key = &name;
-        let display_name = mapping.get(lookup_key).cloned();
-
-        result.push(WorktreeListItem {
-            name: name.clone(),
-            display_name,
-            path: normalize_path(&path.to_string_lossy()),
-            is_archived,
-            color: config.worktree_colors.get(&name).cloned(),
-            projects,
-        });
     }
 
-    Ok(result)
+    let outs = par_map(jobs, |job| {
+        let info = get_worktree_info_for_list(&job.path, &job.base_branch, &job.test_branch);
+        (
+            job.wt_idx,
+            project_status_from_info(job.name, job.path, &job.extra, info),
+        )
+    });
+
+    let mut grouped: Vec<Vec<ProjectStatus>> = shells.iter().map(|_| Vec::new()).collect();
+    for (wt_idx, status) in outs {
+        grouped[wt_idx].push(status);
+    }
+
+    Ok(shells
+        .into_iter()
+        .enumerate()
+        .map(|(i, shell)| WorktreeListItem {
+            name: shell.name,
+            display_name: shell.display_name,
+            path: shell.path,
+            is_archived: shell.is_archived,
+            color: shell.color,
+            projects: std::mem::take(&mut grouped[i]),
+        })
+        .collect())
 }
 
 fn get_main_workspace_status_by_path(
@@ -808,21 +875,20 @@ fn get_main_workspace_status_by_path(
     let root_path = PathBuf::from(workspace_path);
     let projects_path = root_path.join("projects");
 
-    let mut projects = vec![];
+    let jobs: Vec<&ProjectConfig> = config
+        .projects
+        .iter()
+        .filter(|proj| projects_path.join(&proj.name).exists())
+        .collect();
 
-    for proj_config in &config.projects {
+    let projects = par_map(jobs, |proj_config| {
         let proj_path = projects_path.join(&proj_config.name);
-        if !proj_path.exists() {
-            continue;
-        }
-
-        let info = get_worktree_info_for_branches(
+        let info = get_worktree_info_for_list(
             &proj_path,
             &proj_config.base_branch,
             &proj_config.test_branch,
         );
-
-        projects.push(MainProjectStatus {
+        MainProjectStatus {
             name: proj_config.name.clone(),
             path: normalize_path(&proj_path.to_string_lossy()),
             current_branch: info.current_branch,
@@ -837,8 +903,8 @@ fn get_main_workspace_status_by_path(
             base_branch: proj_config.base_branch.clone(),
             test_branch: proj_config.test_branch.clone(),
             linked_folders: proj_config.linked_folders.clone(),
-        });
-    }
+        }
+    });
 
     let result = MainWorkspaceStatus {
         path: normalize_path(&root_path.to_string_lossy()),
@@ -857,7 +923,7 @@ pub fn get_main_workspace_status_impl(window_label: &str) -> Result<MainWorkspac
 
 #[tauri::command]
 pub(crate) async fn get_main_workspace_status(
-    window: tauri::Window,
+    window_label: String,
     workspace_path: Option<String>,
 ) -> Result<MainWorkspaceStatus, String> {
     if let Some(path) = workspace_path {
@@ -868,7 +934,7 @@ pub(crate) async fn get_main_workspace_status(
         .await
         .map_err(|e| format!("Task join error: {}", e))?
     } else {
-        let label = window.label().to_string();
+        let label = window_label.clone();
         tokio::task::spawn_blocking(move || get_main_workspace_status_impl(&label))
             .await
             .map_err(|e| format!("Task join error: {}", e))?
@@ -1236,10 +1302,10 @@ const CREATE_WORKTREE_TIMEOUT_SECS: u64 = 600;
 
 #[tauri::command]
 pub(crate) async fn create_worktree(
-    window: tauri::Window,
+    window_label: String,
     request: CreateWorktreeRequest,
 ) -> Result<String, String> {
-    let label = window.label().to_string();
+    let label = window_label.clone();
     match tokio::time::timeout(
         std::time::Duration::from_secs(CREATE_WORKTREE_TIMEOUT_SECS),
         tokio::task::spawn_blocking(move || create_worktree_impl(&label, request)),
@@ -1314,8 +1380,8 @@ pub fn archive_worktree_impl(window_label: &str, name: String) -> Result<(), Str
 }
 
 #[tauri::command]
-pub(crate) async fn archive_worktree(window: tauri::Window, name: String) -> Result<(), String> {
-    let label = window.label().to_string();
+pub(crate) async fn archive_worktree(window_label: String, name: String) -> Result<(), String> {
+    let label = window_label.clone();
     tokio::task::spawn_blocking(move || archive_worktree_impl(&label, name))
         .await
         .map_err(|e| format!("Task join error: {}", e))?
@@ -1414,10 +1480,10 @@ pub fn check_worktree_status_impl(
 
 #[tauri::command]
 pub(crate) async fn check_worktree_status(
-    window: tauri::Window,
+    window_label: String,
     name: String,
 ) -> Result<WorktreeArchiveStatus, String> {
-    let label = window.label().to_string();
+    let label = window_label.clone();
     tokio::task::spawn_blocking(move || check_worktree_status_impl(&label, name))
         .await
         .map_err(|e| format!("Task join error: {}", e))?
@@ -1896,8 +1962,8 @@ pub fn restore_worktree_impl(window_label: &str, name: String) -> Result<(), Str
 }
 
 #[tauri::command]
-pub(crate) async fn restore_worktree(window: tauri::Window, name: String) -> Result<(), String> {
-    let label = window.label().to_string();
+pub(crate) async fn restore_worktree(window_label: String, name: String) -> Result<(), String> {
+    let label = window_label.clone();
     tokio::task::spawn_blocking(move || restore_worktree_impl(&label, name))
         .await
         .map_err(|e| format!("Task join error: {}", e))?
@@ -2151,10 +2217,10 @@ pub fn delete_archived_worktree_impl(window_label: &str, name: String) -> Result
 
 #[tauri::command]
 pub(crate) async fn delete_archived_worktree(
-    window: tauri::Window,
+    window_label: String,
     name: String,
 ) -> Result<(), String> {
-    let label = window.label().to_string();
+    let label = window_label.clone();
     tokio::task::spawn_blocking(move || delete_archived_worktree_impl(&label, name))
         .await
         .map_err(|e| format!("Task join error: {}", e))?
@@ -2445,10 +2511,10 @@ pub fn add_project_to_worktree_impl(
 
 #[tauri::command]
 pub(crate) async fn add_project_to_worktree(
-    window: tauri::Window,
+    window_label: String,
     request: AddProjectToWorktreeRequest,
 ) -> Result<(), String> {
-    let label = window.label().to_string();
+    let label = window_label.clone();
     tokio::task::spawn_blocking(move || add_project_to_worktree_impl(&label, request))
         .await
         .map_err(|e| format!("Task join error: {}", e))?
@@ -2722,10 +2788,10 @@ pub fn deploy_to_main_impl(
 
 #[tauri::command]
 pub(crate) async fn deploy_to_main(
-    window: tauri::Window,
+    window_label: String,
     worktree_name: String,
 ) -> Result<DeployToMainResult, String> {
-    let label = window.label().to_string();
+    let label = window_label.clone();
     tokio::task::spawn_blocking(move || deploy_to_main_impl(&label, worktree_name))
         .await
         .map_err(|e| format!("Task join error: {}", e))?
@@ -2918,8 +2984,8 @@ pub fn exit_main_occupation_impl(window_label: &str, force: bool) -> Result<(), 
 }
 
 #[tauri::command]
-pub(crate) async fn exit_main_occupation(window: tauri::Window, force: bool) -> Result<(), String> {
-    let label = window.label().to_string();
+pub(crate) async fn exit_main_occupation(window_label: String, force: bool) -> Result<(), String> {
+    let label = window_label.clone();
     tokio::task::spawn_blocking(move || exit_main_occupation_impl(&label, force))
         .await
         .map_err(|e| format!("Task join error: {}", e))?
@@ -2956,9 +3022,9 @@ pub fn get_main_occupation_impl(
 
 #[tauri::command]
 pub(crate) async fn get_main_occupation(
-    window: tauri::Window,
+    window_label: String,
 ) -> Result<Option<MainWorkspaceOccupation>, String> {
-    let label = window.label().to_string();
+    let label = window_label.clone();
     tokio::task::spawn_blocking(move || get_main_occupation_impl(&label))
         .await
         .map_err(|e| format!("Task join error: {}", e))?

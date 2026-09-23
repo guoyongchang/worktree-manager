@@ -19,6 +19,7 @@ import type {
 import { OscParser } from '../shell-integration/osc-parser'
 import { CommandDetection } from '../shell-integration/command-detection'
 import type { CommandInfo } from '../shell-integration/types'
+import { shouldSkipWebglRenderer } from './webgl-support'
 
 const XTERM_THEME = {
   background: '#0f172a',
@@ -85,18 +86,20 @@ export class XtermAdapter implements TerminalAdapter {
     }
 
     term.open(container)
+    if (term.element) {
+      term.element.style.width = '100%'
+      term.element.style.height = '100%'
+    }
 
     // Unicode11: correct CJK character widths
     const unicode11 = new Unicode11Addon()
     term.loadAddon(unicode11)
     term.unicode.activeVersion = '11'
 
-    // WebGL: GPU-accelerated rendering with fallback
-    // Skip on iOS — all iOS browsers use WebKit which silently fails to render
-    // WebGL xterm content (loads without error but shows blank screen)
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-    if (!isIOS) {
+    // WebGL: GPU-accelerated rendering with fallback.
+    // WebKit (Tauri macOS WKWebView, Safari, iOS, WebKitGTK) loads WebglAddon
+    // without error but paints a blank screen.
+    if (!shouldSkipWebglRenderer(navigator.userAgent, navigator.platform, navigator.maxTouchPoints)) {
       try {
         const webglAddon = new WebglAddon()
         webglAddon.onContextLoss(() => {

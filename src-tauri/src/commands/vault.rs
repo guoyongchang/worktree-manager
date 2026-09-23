@@ -678,12 +678,23 @@ fn restore_previous_vault_state(
     Ok(())
 }
 
-// ==================== Impl Functions ====================
+fn vault_workspace_root(
+    window_label: &str,
+    workspace_path: Option<&str>,
+) -> Result<String, String> {
+    if let Some(path) = workspace_path.map(str::trim).filter(|s| !s.is_empty()) {
+        return Ok(path.to_string());
+    }
+    get_window_workspace_path(window_label)
+        .ok_or_else(|| "No workspace bound to window".to_string())
+}
 
-/// Returns the current vault status for the workspace bound to the given window.
-pub fn vault_status_impl(window_label: &str) -> Result<VaultStatus, String> {
-    let workspace_path =
-        get_window_workspace_path(window_label).ok_or("No workspace bound to window")?;
+/// Returns vault status for `workspace_path`, or the window-bound workspace.
+pub fn vault_status_impl(
+    window_label: &str,
+    workspace_path: Option<&str>,
+) -> Result<VaultStatus, String> {
+    let workspace_path = vault_workspace_root(window_label, workspace_path)?;
     let workspace_root = Path::new(&workspace_path);
 
     let vault_full_path = read_vault_path_from_overrides(workspace_root);
@@ -698,7 +709,7 @@ pub fn vault_status_impl(window_label: &str) -> Result<VaultStatus, String> {
     })
 }
 
-/// Links or unlinks a vault for the workspace bound to the given window.
+/// Links or unlinks a vault for `workspace_path`, or the window-bound workspace.
 ///
 /// - `path = Some(...)`: validate, create symlinks, save overrides
 /// - `path = None`: remove .vault/, clear overrides
@@ -706,9 +717,9 @@ pub fn vault_link_impl(
     window_label: &str,
     path: Option<String>,
     keep_symlinks: bool,
+    workspace_path: Option<&str>,
 ) -> Result<VaultLinkResponse, String> {
-    let workspace_path =
-        get_window_workspace_path(window_label).ok_or("No workspace bound to window")?;
+    let workspace_path = vault_workspace_root(window_label, workspace_path)?;
     let workspace_root = Path::new(&workspace_path);
 
     match path {
@@ -857,17 +868,26 @@ pub fn vault_link_impl(
 // ==================== Tauri IPC Wrappers ====================
 
 #[tauri::command]
-pub(crate) fn vault_status(window: tauri::Window) -> Result<VaultStatus, String> {
-    vault_status_impl(window.label())
+pub(crate) fn vault_status(
+    window_label: String,
+    workspace_path: Option<String>,
+) -> Result<VaultStatus, String> {
+    vault_status_impl(window_label.as_str(), workspace_path.as_deref())
 }
 
 #[tauri::command]
 pub(crate) fn vault_link(
-    window: tauri::Window,
+    window_label: String,
     path: Option<String>,
     keep_symlinks: Option<bool>,
+    workspace_path: Option<String>,
 ) -> Result<VaultLinkResponse, String> {
-    vault_link_impl(window.label(), path, keep_symlinks.unwrap_or(false))
+    vault_link_impl(
+        window_label.as_str(),
+        path,
+        keep_symlinks.unwrap_or(false),
+        workspace_path.as_deref(),
+    )
 }
 
 /// List children of a vault item (file or directory).
@@ -1320,7 +1340,7 @@ mod tests {
         let name = Path::new(v).file_name().unwrap().to_str().unwrap();
         save_vault_to_overrides(workspace.path(), parent, name).unwrap();
 
-        let status = vault_status_impl(window_label).unwrap();
+        let status = vault_status_impl(window_label, None).unwrap();
         assert!(status.connected);
         assert_eq!(
             status.vault_path,
@@ -1525,6 +1545,7 @@ mod tests {
             window_label,
             Some(vault_source.path().to_string_lossy().to_string()),
             false,
+            None,
         )
         .unwrap_err();
 

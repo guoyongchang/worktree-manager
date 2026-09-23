@@ -167,4 +167,20 @@ describe('Terminal', () => {
     // The native ClipboardEvent paste handler takes care of the actual paste
     expect(keyHandler?.(metaV)).toBe(false);
   });
+
+  it('mounts a new adapter after the terminal remounts', async () => {
+    const { unmount } = render(<Terminal cwd="F:/repo" visible />);
+    await waitFor(() => {
+      expect(mockAdapter.mount).toHaveBeenCalled();
+    });
+
+    unmount();
+    expect(mockAdapter.dispose).toHaveBeenCalledTimes(1);
+
+    render(<Terminal cwd="F:/repo" visible />);
+
+    await waitFor(() => {
+      expect(mockAdapter.mount).toHaveBeenCalledTimes(2);
+    });
+  });
 });

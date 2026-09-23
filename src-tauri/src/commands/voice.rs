@@ -233,7 +233,7 @@ fn resolve_local_chat_config(
     let api_key = if purpose == "commit_ai" {
         non_empty_config_value(&config.commit_ai_api_key)
             .or_else(|| non_empty_config_value(&config.dashscope_api_key))
-            .ok_or("未配置 AI API Key，请在模型管理中配置")?
+            .ok_or("未配置 AI API Key，请在 AI 设置中配置")?
     } else {
         non_empty_config_value(&config.dashscope_api_key)
             .ok_or("未配置 AI 能力（无云端连接且无本地 API Key）")?

@@ -28,7 +28,8 @@ pub(crate) fn list_workspaces() -> Vec<WorkspaceRef> {
 
 pub fn get_current_workspace_impl(window_label: &str) -> Option<WorkspaceRef> {
     let global = load_global_config();
-    let current_path = get_window_workspace_path(window_label)?;
+    let current_path =
+        get_window_workspace_path(window_label).or_else(|| global.current_workspace.clone())?;
     global
         .workspaces
         .iter()
@@ -42,7 +43,7 @@ pub fn get_current_workspace_impl(window_label: &str) -> Option<WorkspaceRef> {
 
 #[tauri::command]
 pub(crate) fn get_current_workspace(
-    window: tauri::Window,
+    window_label: Option<String>,
     workspace_path: Option<String>,
 ) -> Option<WorkspaceRef> {
     if let Some(path) = workspace_path {
@@ -57,7 +58,7 @@ pub(crate) fn get_current_workspace(
                 w
             })
     } else {
-        get_current_workspace_impl(window.label())
+        get_current_workspace_impl(window_label.as_deref().unwrap_or("main"))
     }
 }
 
@@ -107,7 +108,7 @@ pub fn switch_workspace_impl(window_label: &str, path: String) -> Result<(), Str
 
 #[tauri::command]
 pub(crate) fn switch_workspace(
-    window: tauri::Window,
+    window_label: String,
     path: String,
     workspace_path: Option<String>,
 ) -> Result<(), String> {
@@ -124,7 +125,7 @@ pub(crate) fn switch_workspace(
         *cache = None;
         Ok(())
     } else {
-        switch_workspace_impl(window.label(), path)
+        switch_workspace_impl(window_label.as_str(), path)
     }
 }
 
@@ -281,13 +282,13 @@ pub fn get_workspace_config_impl(window_label: &str) -> Result<WorkspaceConfig, 
 
 #[tauri::command]
 pub(crate) fn get_workspace_config(
-    window: tauri::Window,
+    window_label: String,
     workspace_path: Option<String>,
 ) -> Result<WorkspaceConfig, String> {
     if let Some(path) = workspace_path {
         Ok(crate::config::load_workspace_config(&path))
     } else {
-        get_workspace_config_impl(window.label())
+        get_workspace_config_impl(window_label.as_str())
     }
 }
 
@@ -301,14 +302,14 @@ pub fn save_workspace_config_impl(
 
 #[tauri::command]
 pub(crate) fn save_workspace_config(
-    window: tauri::Window,
+    window_label: String,
     config: WorkspaceConfig,
     workspace_path: Option<String>,
 ) -> Result<(), String> {
     if let Some(path) = workspace_path {
         save_workspace_config_internal(&path, &config)
     } else {
-        save_workspace_config_impl(window.label(), config)
+        save_workspace_config_impl(window_label.as_str(), config)
     }
 }
 
@@ -334,14 +335,11 @@ pub fn get_config_path_info_impl(window_label: &str) -> String {
 }
 
 #[tauri::command]
-pub(crate) fn get_config_path_info(
-    window: tauri::Window,
-    workspace_path: Option<String>,
-) -> String {
+pub(crate) fn get_config_path_info(window_label: String, workspace_path: Option<String>) -> String {
     if let Some(path) = workspace_path {
         normalize_path(&get_workspace_config_path(&path).to_string_lossy())
     } else {
-        get_config_path_info_impl(window.label())
+        get_config_path_info_impl(window_label.as_str())
     }
 }
 

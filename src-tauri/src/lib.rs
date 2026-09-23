@@ -605,6 +605,7 @@ pub fn run() {
             get_app_icon,
             get_crash_report,
             get_app_version,
+            get_process_memory,
             // 多窗口管理
             set_window_workspace,
             get_opened_workspaces,

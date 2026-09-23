@@ -129,6 +129,31 @@ pub(crate) fn with_app_handle<R>(f: impl FnOnce(&tauri::AppHandle) -> R) -> Opti
         .map(f)
 }
 
+/// Run `f` on the UI thread and wait for the result.
+///
+/// Must be called from a worker/tokio thread. On the main thread `run_on_main_thread`
+/// runs `f` inline while `APP_HANDLE` is still locked.
+/// Keep `f` short: window create/destroy/devtools only — never git or disk I/O.
+pub(crate) fn run_on_main_thread_blocking<T, F>(f: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    let (tx, rx) = std::sync::mpsc::channel();
+    let posted = with_app_handle(|handle| {
+        handle.run_on_main_thread(move || {
+            let _ = tx.send(f());
+        })
+    });
+    match posted {
+        Some(Ok(())) => rx
+            .recv()
+            .map_err(|_| "main thread did not return a result".to_string()),
+        Some(Err(e)) => Err(format!("failed to post to main thread: {e}")),
+        None => Err("App handle unavailable".to_string()),
+    }
+}
+
 // Auth rate limiter
 pub(crate) static AUTH_RATE_LIMITER: Lazy<Mutex<AuthRateLimiter>> =
     Lazy::new(|| Mutex::new(AuthRateLimiter::new()));

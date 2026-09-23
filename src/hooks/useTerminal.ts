@@ -3,6 +3,7 @@ import i18next from 'i18next';
 import type { TerminalTab, MainWorkspaceStatus, WorktreeListItem } from '../types';
 import { TERMINAL, clampTerminalHeight } from '../constants';
 import { callBackend, closePtySessionsByPath, isTauri, broadcastTerminalState as broadcastTerminalStateBackend, getTerminalState } from '../lib/backend';
+import { readUiRestoreSnapshot, updateUiRestoreSnapshot } from '../lib/uiRestore';
 import { getWebSocketManager } from '../lib/websocket';
 import { listen } from '@tauri-apps/api/event';
 import { basename } from '@/lib/utils';
@@ -44,6 +45,9 @@ export function useTerminal(
   mainWorkspace: MainWorkspaceStatus | null,
   workspacePathParam?: string,
   windowId?: string,
+  // Only the primary non-shell cell may write the shared UI-restore snapshot;
+  // secondary/shell cells would clobber it with their own (or null) state.
+  persistSnapshot: boolean = true,
 ): UseTerminalReturn {
   const [terminalVisible, setTerminalVisible] = useState(false);
   const [terminalHeight, setTerminalHeightState] = useState<number>(() => {
@@ -75,6 +79,15 @@ export function useTerminal(
   );
   const broadcastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastBroadcastTime = useRef<number>(0);
+  // Bumped on local terminal UI mutations so a delayed getTerminalState()
+  // from a worktree switch cannot overwrite an already-opened panel.
+  const terminalStateEpochRef = useRef(0);
+  const bumpTerminalStateEpoch = () => {
+    terminalStateEpochRef.current += 1;
+  };
+  // sessionStorage snapshot is frozen until the next persistAndReload.
+  // Apply it once for the matching worktree, never on later switches back.
+  const uiRestoreConsumedRef = useRef(false);
 
   const currentWorkspaceRoot = selectedWorktree?.path || mainWorkspace?.path || '';
   const _isTauri = isTauri();
@@ -225,58 +238,93 @@ export function useTerminal(
       activatedPerWorkspace.current.set(prev, new Set(activatedTerminalsRef.current));
       visiblePerWorkspace.current.set(prev, terminalVisibleRef.current);
     }
-
     if (currentWorkspaceRoot && currentWorkspaceRoot !== prev) {
-      const savedActivated = activatedPerWorkspace.current.get(currentWorkspaceRoot);
-      const savedTab = activeTabPerWorkspace.current.get(currentWorkspaceRoot);
-      const savedVisible = visiblePerWorkspace.current.get(currentWorkspaceRoot);
+      const snap = readUiRestoreSnapshot();
+      const snapMatches = !uiRestoreConsumedRef.current
+        && !!snap
+        && snap.workspacePath === workspacePath
+        && (snap.selectedWorktreeName || '') === (worktreeName || '');
 
-      const restoredActivated = savedActivated || new Set<string>();
-      const restoredTab = (savedTab && savedActivated?.has(savedTab)) ? savedTab : null;
-      const restoredVisible = savedVisible ?? false;
+      if (snapMatches) {
+        uiRestoreConsumedRef.current = true;
+        const restoredActivated = new Set(snap.activatedTerminals);
+        const restoredTab = snap.activeTerminalTab && restoredActivated.has(snap.activeTerminalTab)
+          ? snap.activeTerminalTab
+          : null;
+        setActivatedTerminals(restoredActivated);
+        setTerminalVisible(snap.terminalVisible);
+        setActiveTerminalTab(restoredTab);
+        activatedTerminalsRef.current = restoredActivated;
+        activeTerminalTabRef.current = restoredTab;
+        terminalVisibleRef.current = snap.terminalVisible;
+        if (snap.terminalHeight) setTerminalHeight(snap.terminalHeight);
+        activatedPerWorkspace.current.set(currentWorkspaceRoot, restoredActivated);
+        if (restoredTab) activeTabPerWorkspace.current.set(currentWorkspaceRoot, restoredTab);
+        visiblePerWorkspace.current.set(currentWorkspaceRoot, snap.terminalVisible);
+      } else {
+        const savedActivated = activatedPerWorkspace.current.get(currentWorkspaceRoot);
+        const savedTab = activeTabPerWorkspace.current.get(currentWorkspaceRoot);
+        const savedVisible = visiblePerWorkspace.current.get(currentWorkspaceRoot);
 
-      setActivatedTerminals(restoredActivated);
-      setTerminalVisible(restoredVisible);
-      setActiveTerminalTab(restoredTab);
+        const restoredActivated = savedActivated || new Set<string>();
+        const restoredTab = (savedTab && savedActivated?.has(savedTab)) ? savedTab : null;
+        const restoredVisible = savedVisible ?? false;
 
-      activatedTerminalsRef.current = restoredActivated;
-      activeTerminalTabRef.current = restoredTab;
-      terminalVisibleRef.current = restoredVisible;
+        setActivatedTerminals(restoredActivated);
+        setTerminalVisible(restoredVisible);
+        setActiveTerminalTab(restoredTab);
 
-      // Fetch authoritative state from backend cache
-      const wsRoot = currentWorkspaceRoot;
-      getTerminalState(workspacePath, worktreeName).then((cached) => {
-        if (!cached || prevWorkspaceRoot.current !== wsRoot) return;
+        activatedTerminalsRef.current = restoredActivated;
+        activeTerminalTabRef.current = restoredTab;
+        terminalVisibleRef.current = restoredVisible;
 
-        const cachedActivated = new Set(cached.activated_terminals);
-        const localActivated = activatedTerminalsRef.current;
-        const changed =
-          cachedActivated.size !== localActivated.size ||
-          !Array.from(cachedActivated).every(t => localActivated.has(t)) ||
-          cached.active_terminal_tab !== activeTerminalTabRef.current ||
-          cached.terminal_visible !== terminalVisibleRef.current;
+        const wsRoot = currentWorkspaceRoot;
+        const epochAtSwitch = terminalStateEpochRef.current;
+        getTerminalState(workspacePath, worktreeName).then((cached) => {
+          if (!cached || prevWorkspaceRoot.current !== wsRoot) return;
+          if (epochAtSwitch !== terminalStateEpochRef.current) return;
 
-        if (!changed) return;
+          const cachedActivated = new Set(cached.activated_terminals);
+          const localActivated = activatedTerminalsRef.current;
+          const changed =
+            cachedActivated.size !== localActivated.size ||
+            !Array.from(cachedActivated).every(t => localActivated.has(t)) ||
+            cached.active_terminal_tab !== activeTerminalTabRef.current ||
+            cached.terminal_visible !== terminalVisibleRef.current;
 
-        setActivatedTerminals(cachedActivated);
-        setActiveTerminalTab(cached.active_terminal_tab);
-        setTerminalVisible(cached.terminal_visible);
+          if (!changed) return;
 
-        activatedTerminalsRef.current = cachedActivated;
-        activeTerminalTabRef.current = cached.active_terminal_tab;
-        terminalVisibleRef.current = cached.terminal_visible;
+          setActivatedTerminals(cachedActivated);
+          setActiveTerminalTab(cached.active_terminal_tab);
+          setTerminalVisible(cached.terminal_visible);
 
-        // Update local map for fast restore
-        activatedPerWorkspace.current.set(wsRoot, cachedActivated);
-        if (cached.active_terminal_tab) {
-          activeTabPerWorkspace.current.set(wsRoot, cached.active_terminal_tab);
-        }
-        visiblePerWorkspace.current.set(wsRoot, cached.terminal_visible);
-      }).catch(() => { });
+          activatedTerminalsRef.current = cachedActivated;
+          activeTerminalTabRef.current = cached.active_terminal_tab;
+          terminalVisibleRef.current = cached.terminal_visible;
+
+          activatedPerWorkspace.current.set(wsRoot, cachedActivated);
+          if (cached.active_terminal_tab) {
+            activeTabPerWorkspace.current.set(wsRoot, cached.active_terminal_tab);
+          }
+          visiblePerWorkspace.current.set(wsRoot, cached.terminal_visible);
+        }).catch(() => { });
+      }
     }
 
     prevWorkspaceRoot.current = currentWorkspaceRoot;
   }, [currentWorkspaceRoot, workspacePath, worktreeName]);
+
+  useEffect(() => {
+    if (!persistSnapshot || !workspacePath) return;
+    updateUiRestoreSnapshot({
+      workspacePath,
+      selectedWorktreeName: worktreeName || null,
+      activatedTerminals: Array.from(activatedTerminals),
+      activeTerminalTab,
+      terminalVisible,
+      terminalHeight,
+    });
+  }, [persistSnapshot, workspacePath, worktreeName, activatedTerminals, activeTerminalTab, terminalVisible, terminalHeight]);
 
   // Shared handler for incoming terminal state messages
   const handleTerminalStateMessage = useCallback((msg: {
@@ -426,6 +474,7 @@ export function useTerminal(
   }, [setTerminalHeight]);
 
   const handleTerminalTabClick = useCallback((projectPath: string) => {
+    bumpTerminalStateEpoch();
     if (!terminalVisibleRef.current) setTerminalVisible(true);
     setActiveTerminalTab(projectPath);
     if (!activatedTerminalsRef.current.has(projectPath)) {
@@ -447,6 +496,7 @@ export function useTerminal(
   }, [scheduleBroadcast]);
 
   const handleCloseTerminalTab = useCallback((path: string) => {
+    bumpTerminalStateEpoch();
     const newActivated = new Set(activatedTerminalsRef.current);
     newActivated.delete(path);
     setActivatedTerminals(newActivated);
@@ -480,6 +530,7 @@ export function useTerminal(
   }, [scheduleBroadcast, windowId]);
 
   const handleCloseOtherTerminalTabs = useCallback((keepPath: string) => {
+    bumpTerminalStateEpoch();
     const toClose = Array.from(activatedTerminalsRef.current).filter(p => p !== keepPath);
     if (toClose.length === 0) return;
 
@@ -504,6 +555,7 @@ export function useTerminal(
   }, [scheduleBroadcast, windowId]);
 
   const handleCloseAllTerminalTabs = useCallback(() => {
+    bumpTerminalStateEpoch();
     const toClose = Array.from(activatedTerminalsRef.current);
     if (toClose.length === 0) return;
 
@@ -528,6 +580,7 @@ export function useTerminal(
   }, [scheduleBroadcast, windowId]);
 
   const handleDuplicateTerminal = useCallback((path: string) => {
+    bumpTerminalStateEpoch();
     const basePath = path.split('#')[0];
     const existing = activatedTerminalsRef.current;
     let n = 2;
@@ -542,6 +595,7 @@ export function useTerminal(
   }, [scheduleBroadcast]);
 
   const handleToggleTerminal = useCallback(() => {
+    bumpTerminalStateEpoch();
     const newVisible = !terminalVisibleRef.current;
     setTerminalVisible(newVisible);
     terminalVisibleRef.current = newVisible;
@@ -562,6 +616,7 @@ export function useTerminal(
 
   // Remove all terminals matching a path prefix (e.g. worktree archive)
   const cleanupTerminalsForPath = useCallback(async (pathPrefix: string) => {
+    bumpTerminalStateEpoch();
     // Match the exact worktree path or a true child path (prefix + '/'), never a hyphen/name
     // sibling like `<prefix>-extra`. A bare startsWith over-matched siblings, so archiving one
     // worktree wiped a sibling worktree's terminals. Strip any '#<timestamp>' duplicated-tab
@@ -624,6 +679,7 @@ export function useTerminal(
   // UI-only cleanup: clear local terminal state without closing backend PTY sessions.
   // Used when a grid cell is unmounted — other cells may still share the same PTY sessions.
   const cleanupTerminalUIForPath = useCallback((pathPrefix: string) => {
+    bumpTerminalStateEpoch();
     // Path-boundary match (exact or `<prefix>/child`), not a bare startsWith that also caught
     // hyphen/name siblings like `<prefix>-extra`. Strip '#<timestamp>' tab suffixes.
     const norm = (s: string) => s.replace(/\\/g, '/').replace(/\/+$/, '');

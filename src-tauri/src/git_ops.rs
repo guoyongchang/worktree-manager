@@ -1,9 +1,26 @@
 use git2::{Repository, StatusOptions};
 use serde::Serialize;
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock, Mutex};
+use std::time::Duration;
 
-use crate::utils::{git_command, run_command_with_timeout, run_git_logged};
+use crate::utils::{
+    git_command, mask_url_credentials, run_command_with_timeout, run_git_logged, truncate_log_text,
+};
 
+fn emit_git_progress(path: &Path, target: &str, current_branch: &str, step: &str) {
+    let payload = serde_json::json!({
+        "path": path.to_string_lossy(),
+        "target": target,
+        "currentBranch": current_branch,
+        "step": step,
+    });
+    let _ = crate::state::with_app_handle(|app| {
+        use tauri::Emitter;
+        app.emit("git-progress", &payload)
+    });
+}
 fn command_without_window(program: &str) -> std::process::Command {
     #[cfg(target_os = "windows")]
     {
@@ -74,6 +91,24 @@ pub fn get_worktree_info_for_branches(
     base_branch: &str,
     test_branch: &str,
 ) -> WorktreeInfo {
+    get_worktree_info_for_branches_with(path, base_branch, test_branch, true)
+}
+
+/// Listing path: skip untracked walk (the expensive part on large Java trees).
+pub(crate) fn get_worktree_info_for_list(
+    path: &Path,
+    base_branch: &str,
+    test_branch: &str,
+) -> WorktreeInfo {
+    get_worktree_info_for_branches_with(path, base_branch, test_branch, false)
+}
+
+fn get_worktree_info_for_branches_with(
+    path: &Path,
+    base_branch: &str,
+    test_branch: &str,
+    include_untracked: bool,
+) -> WorktreeInfo {
     let repo = match Repository::open(path) {
         Ok(r) => r,
         Err(_) => return WorktreeInfo::default(),
@@ -95,9 +130,10 @@ pub fn get_worktree_info_for_branches(
         }
     }
 
-    // Get uncommitted changes count
     let mut opts = StatusOptions::new();
-    opts.include_untracked(true).recurse_untracked_dirs(false);
+    opts.include_untracked(include_untracked)
+        .recurse_untracked_dirs(false)
+        .exclude_submodules(true);
 
     if let Ok(statuses) = repo.statuses(Some(&mut opts)) {
         info.uncommitted_count = statuses.len();
@@ -309,15 +345,21 @@ pub fn sync_with_base_branch(path: &Path, base_branch: &str) -> Result<String, S
         base_branch
     );
 
-    // Step 1: Fetch from remote
+    emit_git_progress(path, base_branch, "", "syncFetch");
     log::info!("[git] Step 1/2: git fetch origin {}", base_branch);
+    crate::utils::validate_git_ref_name(base_branch)?;
+    let fetch_refspec = format!("+refs/heads/{0}:refs/remotes/origin/{0}", base_branch);
     let mut fetch_cmd = git_command();
     fetch_cmd
+        .env("GIT_LFS_SKIP_SMUDGE", "1")
+        .arg("-c")
+        .arg("protocol.version=2")
         .arg("-C")
         .arg(path)
         .arg("fetch")
+        .arg("--no-tags")
         .arg("origin")
-        .arg(base_branch);
+        .arg(&fetch_refspec);
     let fetch_output = run_git_logged(&mut fetch_cmd, "sync fetch base branch")
         .map_err(|e| format!("Failed to execute git fetch: {}", e))?;
 
@@ -332,7 +374,7 @@ pub fn sync_with_base_branch(path: &Path, base_branch: &str) -> Result<String, S
     }
     log::info!("[git] Step 1/2: git fetch succeeded");
 
-    // Step 2: Merge origin/base_branch into current branch
+    emit_git_progress(path, base_branch, "", "syncMerge");
     log::info!("[git] Step 2/2: git merge --no-edit origin/{}", base_branch);
     let mut merge_cmd = git_command();
     merge_cmd
@@ -384,7 +426,7 @@ pub fn push_to_remote(path: &Path) -> Result<String, String> {
         .trim()
         .to_string();
 
-    log::info!("[git] Pushing branch '{}' to origin", current_branch);
+    emit_git_progress(path, &current_branch, &current_branch, "pushRemote");
     let mut push_cmd = git_command();
     push_cmd
         .arg("-C")
@@ -439,7 +481,7 @@ pub fn pull_current_branch(path: &Path) -> Result<String, String> {
         .trim()
         .to_string();
 
-    // Step 2: Pull from origin (explicit merge strategy, see fn docs)
+    emit_git_progress(path, &current_branch, &current_branch, "pull");
     log::info!("[git] Pulling branch '{}' from origin", current_branch);
     let mut pull_cmd = git_command();
     pull_cmd
@@ -610,17 +652,24 @@ fn fetch_merge_push_remote_target(
     for attempt in 1..=2 {
         // Step 2: bring origin/<target> up to date (explicit refspec: works even for
         // single-branch clones and force-reset remote branches).
+        emit_git_progress(path, target, current_branch, "fetch");
         log::info!(
             "[{}] Step 2: git fetch origin {} (attempt {}/2)",
             label,
             target,
             attempt
         );
-        let fetch = run_git_in_with_timeout(
-            path,
-            &["fetch", "origin", &fetch_refspec],
+        let mut fetch_cmd = git_command();
+        fetch_cmd
+            .env("GIT_LFS_SKIP_SMUDGE", "1")
+            .arg("-C")
+            .arg(path)
+            .args(["-c", "protocol.version=2", "fetch", "--no-tags", "origin"])
+            .arg(&fetch_refspec);
+        let fetch = run_command_with_timeout(
+            &mut fetch_cmd,
             &format!("{} fetch target", label),
-            MERGE_FETCH_TIMEOUT_SECS,
+            std::time::Duration::from_secs(MERGE_FETCH_TIMEOUT_SECS),
         )?;
         if !fetch.status.success() {
             let stderr = output_stderr(&fetch);
@@ -641,8 +690,7 @@ fn fetch_merge_push_remote_target(
         }
         log::info!("[{}] Step 2 OK: origin/{} is up to date", label, target);
 
-        // Step 3: detached HEAD on the fresh remote tip. No local branch is checked out,
-        // so this never conflicts with the main worktree or any other linked worktree.
+        emit_git_progress(path, target, current_branch, "checkout");
         log::info!("[{}] Step 3: git checkout --detach {}", label, remote_ref);
         let checkout = run_git_in(
             path,
@@ -656,7 +704,7 @@ fn fetch_merge_push_remote_target(
         }
         log::info!("[{}] Step 3 OK: detached at origin/{}", label, target);
 
-        // Step 4: merge (default fast-forward semantics).
+        emit_git_progress(path, target, current_branch, "merge");
         log::info!("[{}] Step 4: git merge {}", label, current_branch);
         let merge = run_git_in(
             path,
@@ -704,7 +752,7 @@ fn fetch_merge_push_remote_target(
             target
         );
 
-        // Step 5: push the detached HEAD straight to the remote branch.
+        emit_git_progress(path, target, current_branch, "push");
         log::info!("[{}] Step 5: git push origin {}", label, push_refspec);
         let push = run_git_in_with_timeout(
             path,
@@ -932,6 +980,7 @@ fn merge_current_branch_into_remote_target(
     log::info!("[{}] current_branch={}", label, current_branch);
 
     // Step 1: refuse to shuffle HEAD around on top of uncommitted tracked changes.
+    emit_git_progress(path, target, &current_branch, "status");
     log::info!(
         "[{}] Step 1: checking for uncommitted tracked changes",
         label
@@ -952,15 +1001,15 @@ fn merge_current_branch_into_remote_target(
     // Steps 2-5
     let pipeline = fetch_merge_push_remote_target(path, &current_branch, target, label);
 
-    // Step 6 (only after a successful push)
     let notes = if pipeline.is_ok() {
+        emit_git_progress(path, target, &current_branch, "syncLocal");
         log::info!("[{}] Step 6: syncing local {} branch", label, target);
         sync_local_target_branch(path, target, label)
     } else {
         Vec::new()
     };
 
-    // Step 7: always go back to the feature branch.
+    emit_git_progress(path, target, &current_branch, "restore");
     let restore_warning = restore_original_branch(path, &current_branch, label);
 
     match pipeline {
@@ -1373,21 +1422,112 @@ pub fn create_pull_request(
     }
 }
 
-/// Fetch from remote origin (updates remote-tracking branches)
+fn canonicalize_fetch_key(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+pub(crate) fn resolve_git_common_dir(path: &Path) -> PathBuf {
+    let output = git_command()
+        .arg("-C")
+        .arg(path)
+        .args(["rev-parse", "--git-common-dir"])
+        .output();
+    let raw = match output {
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim().to_string(),
+        _ => return canonicalize_fetch_key(path),
+    };
+    if raw.is_empty() {
+        return canonicalize_fetch_key(path);
+    }
+    let parsed = PathBuf::from(&raw);
+    let abs = if parsed.is_absolute() {
+        parsed
+    } else {
+        path.join(parsed)
+    };
+    canonicalize_fetch_key(&abs)
+}
+
+/// Per-repo fetch serialization.
+///
+/// Lock order — never invert, never nest:
+/// 1. `GATES` map mutex: insert/clone `Arc`, then drop before any fetch.
+/// 2. per-common-dir `Mutex<()>`: only around `git fetch`, never while holding (1).
+///
+/// `fetch_remote` is not re-entrant. Callers already holding a gate must use
+/// `fetch_remote_unlocked`. Poisoned mutexes recover via `into_inner` so a
+/// panicked fetch cannot wedge later syncs.
+fn fetch_gate_for(common_dir: PathBuf) -> Arc<Mutex<()>> {
+    static GATES: LazyLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
+    let mut map = GATES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    map.entry(common_dir)
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone()
+}
+
+fn compact_git_stderr(stderr: &str) -> String {
+    let one_line = stderr
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .take(2)
+        .collect::<Vec<_>>()
+        .join("; ");
+    truncate_log_text(&mask_url_credentials(&one_line), 300)
+}
+
+fn is_ref_lock_race(stderr: &str) -> bool {
+    stderr.contains("cannot lock ref") || stderr.contains("unable to update local ref")
+}
+
+/// Fetch from remote origin (updates remote-tracking branches).
+/// Worktrees that share a git common dir are serialized so concurrent
+/// `git fetch` cannot fight over `refs/remotes/origin/*`.
 pub fn fetch_remote(path: &Path) -> Result<(), String> {
-    log::info!("[git] Fetching remote origin: path={}", path.display());
+    let gate = fetch_gate_for(resolve_git_common_dir(path));
+    let _guard = gate.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match fetch_remote_unlocked(path) {
+        Ok(()) => Ok(()),
+        Err(stderr) if is_ref_lock_race(&stderr) => {
+            std::thread::sleep(Duration::from_millis(80));
+            fetch_remote_unlocked(path).map_err(|stderr| {
+                log::warn!(
+                    "[git] fetch failed path={} {}",
+                    path.display(),
+                    compact_git_stderr(&stderr)
+                );
+                format!("Git fetch failed: {stderr}")
+            })
+        }
+        Err(stderr) => {
+            log::warn!(
+                "[git] fetch failed path={} {}",
+                path.display(),
+                compact_git_stderr(&stderr)
+            );
+            Err(format!("Git fetch failed: {stderr}"))
+        }
+    }
+}
+
+fn fetch_remote_unlocked(path: &Path) -> Result<(), String> {
     let mut fetch_cmd = git_command();
-    fetch_cmd.arg("-C").arg(path).arg("fetch").arg("origin");
+    fetch_cmd
+        .env("GIT_LFS_SKIP_SMUDGE", "1")
+        .arg("-C")
+        .arg(path)
+        .arg("fetch")
+        .arg("origin");
     let output = run_git_logged(&mut fetch_cmd, "fetch remote")
-        .map_err(|e| format!("Failed to execute git fetch: {}", e))?;
+        .map_err(|e| format!("Failed to execute git fetch: {e}"))?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        log::error!("[git] Fetch failed for {}: {}", path.display(), stderr);
-        return Err(format!("Git fetch failed: {}", stderr));
+        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
     }
-
-    log::info!("[git] Fetch succeeded for {}", path.display());
+    log::debug!("[git] fetch ok path={}", path.display());
     Ok(())
 }
 
@@ -1438,7 +1578,12 @@ pub fn get_remote_branches(path: &Path) -> Result<Vec<String>, String> {
     // Fetch from remote to ensure we have the latest branch info
     log::info!("[git] Step 1/2: git fetch origin");
     let mut fetch_cmd = git_command();
-    fetch_cmd.arg("-C").arg(path).arg("fetch").arg("origin");
+    fetch_cmd
+        .env("GIT_LFS_SKIP_SMUDGE", "1")
+        .arg("-C")
+        .arg(path)
+        .arg("fetch")
+        .arg("origin");
     let fetch_output = run_git_logged(&mut fetch_cmd, "get remote branches fetch")
         .map_err(|e| format!("Failed to execute git fetch: {}", e))?;
 
@@ -1574,7 +1719,7 @@ pub fn commit_all(
         skip_hooks
     );
 
-    // git add -A
+    emit_git_progress(path, "", "", "commitStage");
     let add_output = git_command()
         .arg("-C")
         .arg(path)
@@ -1587,7 +1732,7 @@ pub fn commit_all(
         return Err(format!("git add failed: {}", stderr));
     }
 
-    // git commit -m with optional author override
+    emit_git_progress(path, "", "", "commitWrite");
     let mut cmd = git_command();
     cmd.arg("-C").arg(path);
     if let Some(name) = author_name {
@@ -2915,6 +3060,44 @@ mod tests {
 
         let branches_err = get_remote_branches(non_git.path()).unwrap_err();
         assert!(branches_err.contains("Git fetch failed"), "{branches_err}");
+    }
+
+    #[serial]
+    #[test]
+    fn fetch_remote_serializes_main_and_worktree_sharing_git_dir() {
+        let repo = make_test_repo();
+        let path = repo.path();
+        let wt_root = tempfile::tempdir().expect("worktree parent");
+        let wt_path = wt_root.path().join("wt-fetch");
+        run_git(
+            path,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "wt-fetch",
+                wt_path.to_str().expect("utf8 worktree path"),
+                "main",
+            ],
+        );
+
+        assert_eq!(
+            resolve_git_common_dir(path),
+            resolve_git_common_dir(&wt_path)
+        );
+
+        std::thread::scope(|s| {
+            let main_fetch = s.spawn(|| fetch_remote(path));
+            let worktree_fetch = s.spawn(|| fetch_remote(&wt_path));
+            main_fetch
+                .join()
+                .expect("join main fetch")
+                .expect("main fetch");
+            worktree_fetch
+                .join()
+                .expect("join worktree fetch")
+                .expect("worktree fetch");
+        });
     }
 
     #[serial]

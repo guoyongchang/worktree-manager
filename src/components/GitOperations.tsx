@@ -46,6 +46,7 @@ import {
   getGitUserGlobalConfig,
   setGitUserConfig,
   getSkipGitHooks,
+  isTauri,
   type BranchDiffStats,
 } from '@/lib/backend';
 import type { WorkspaceConfig } from '@/types';
@@ -55,6 +56,22 @@ import { basename } from '@/lib/utils';
 const AUTO_REFRESH_INTERVAL_MS = 60_000;
 const AUTO_REFRESH_STAGGER_MS = 15_000;
 const AUTO_REFRESH_SLOTS = 4;
+const OP_STEP_I18N: Record<string, string> = {
+  fetch: 'git.opFetch',
+  syncFetch: 'git.opFetch',
+  checkout: 'git.opCheckout',
+  merge: 'git.opMerge',
+  push: 'git.opPush',
+  pushRemote: 'git.opPush',
+  restore: 'git.opRestore',
+  syncMerge: 'git.opSyncMerge',
+  pull: 'git.opPull',
+  commitStage: 'git.opCommitStage',
+  commitWrite: 'git.opCommit',
+  commitGenerate: 'git.opGenerate',
+  status: 'git.opStatus',
+  syncLocal: 'git.opSyncLocal',
+};
 
 // Heuristic: detect merge conflict errors from git output
 function isConflictError(msg: string): boolean {
@@ -87,7 +104,6 @@ interface GitOperationsProps {
   currentBranch: string;
   worktreeDisplayName?: string;
   workspaceConfig?: WorkspaceConfig;
-  onRefresh?: () => void;
   onSilentRefresh?: () => void;
   onOpenTerminal?: (path: string) => void;
   autoRefreshSlot?: number;
@@ -108,7 +124,6 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
   currentBranch,
   worktreeDisplayName,
   workspaceConfig,
-  onRefresh,
   onSilentRefresh,
   onOpenTerminal,
   autoRefreshSlot,
@@ -122,6 +137,12 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
   const [error, setError] = useState<string | null>(null);
   const [errorPersistent, setErrorPersistent] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
+  const [mergeStep, setMergeStep] = useState<string | null>(null);
+  const [mergeStepTarget, setMergeStepTarget] = useState('');
+  const [mergeStepCurrentBranch, setMergeStepCurrentBranch] = useState('');
+  const [progressDone, setProgressDone] = useState(false);
+  const [displayPercent, setDisplayPercent] = useState(10);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [testBranchExists, setTestBranchExists] = useState<boolean | null>(null);
   const [baseBranchExists, setBaseBranchExists] = useState<boolean | null>(null);
   const [dismissing, setDismissing] = useState<'error' | 'success' | null>(null);
@@ -145,6 +166,10 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
   const loadStatsVersionRef = useRef(0);
   const onStatsChangedRef = useRef(onStatsChanged);
   const onSilentRefreshRef = useRef(onSilentRefresh);
+  const mergeProgressTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const progressStartedAtRef = useRef<number | null>(null);
+  const progressGenRef = useRef(0);
+
 
   useEffect(() => {
     onStatsChangedRef.current = onStatsChanged;
@@ -161,6 +186,63 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
   useEffect(() => {
     activeActionRef.current = activeAction;
   }, [activeAction]);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    const stopSafe = (stop?: () => void | Promise<void>) => {
+      try {
+        const result = stop?.();
+        if (result && typeof result.catch === 'function') result.catch(() => {});
+      } catch {
+        // Tauri already dropped this listener (HMR or worktree switch).
+      }
+    };
+    void import('@tauri-apps/api/event').then(async ({ listen }) => {
+      const stop = await listen<{
+        path: string;
+        target: string;
+        currentBranch: string;
+        step: string;
+      }>('git-progress', (event) => {
+        const payload = event.payload;
+        const incoming = payload.path.replace(/\\/g, '/');
+        const local = projectPath.replace(/\\/g, '/');
+        if (incoming !== local) return;
+        if (!activeActionRef.current && !fetchingSyncingRef.current) return;
+        setMergeStep(payload.step);
+        setMergeStepTarget(payload.target);
+        setMergeStepCurrentBranch(payload.currentBranch);
+      });
+      if (cancelled) stopSafe(stop);
+      else unlisten = () => stopSafe(stop);
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [projectPath]);
+
+  const progressVisible = Boolean(mergeStep || fetchingSyncing);
+  useEffect(() => {
+    if (progressDone) {
+      setDisplayPercent(100);
+      return;
+    }
+    if (!progressVisible) return;
+    if (progressStartedAtRef.current == null) progressStartedAtRef.current = Date.now();
+    const id = window.setInterval(() => {
+      const startedAt = progressStartedAtRef.current ?? Date.now();
+      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+      setDisplayPercent((prev) => {
+        if (prev >= 90) return 99;
+        return prev + 10;
+      });
+    }, 400);
+    return () => window.clearInterval(id);
+  }, [progressVisible, progressDone]);
+
 
   const setErrorMsg = useCallback((msg: string | null, persistent = false) => {
     clearTimeout(errorTimerRef.current);
@@ -186,7 +268,28 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
       }, 5000);
     }
   }, []);
-
+  const startProgress = (step: string, target = '', current = '') => {
+    clearTimeout(mergeProgressTimerRef.current);
+    const gen = ++progressGenRef.current;
+    progressStartedAtRef.current = Date.now();
+    setProgressDone(false);
+    setDisplayPercent(10);
+    setElapsedSeconds(0);
+    setMergeStep(step);
+    setMergeStepTarget(target);
+    setMergeStepCurrentBranch(current);
+    return gen;
+  };
+  const completeProgress = (gen: number) => {
+    if (progressGenRef.current !== gen) return;
+    setProgressDone(true);
+    clearTimeout(mergeProgressTimerRef.current);
+    mergeProgressTimerRef.current = setTimeout(() => {
+      if (progressGenRef.current !== gen) return;
+      setMergeStep(null);
+      setProgressDone(false);
+    }, 600);
+  };
   const dismissError = useCallback(() => {
     clearTimeout(errorTimerRef.current);
     setError(null);
@@ -262,6 +365,7 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
     return () => {
       clearTimeout(errorTimerRef.current);
       clearTimeout(successTimerRef.current);
+      clearTimeout(mergeProgressTimerRef.current);
     };
   }, [loadLocalState]);
 
@@ -306,8 +410,15 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
     operation: () => Promise<string>,
   ) => {
     setActiveAction(action);
+    activeActionRef.current = action;
     setErrorMsg(null);
     setSuccessWithAutoDismiss(null);
+    let progressGen = progressGenRef.current;
+    if (action === 'sync') progressGen = startProgress('syncFetch', baseBranch, currentBranch);
+    else if (action === 'pull') progressGen = startProgress('pull', currentBranch, currentBranch);
+    else if (action === 'push') progressGen = startProgress('pushRemote', currentBranch, currentBranch);
+    else if (action === 'mergeTest') progressGen = startProgress('status', testBranch, currentBranch);
+    else if (action === 'mergeBase') progressGen = startProgress('status', baseBranch, currentBranch);
     const actionName = action ?? 'unknown';
     addLog(projectPath, { level: 'info', operation: actionName, message: `Starting ${actionName}...` });
     try {
@@ -315,15 +426,15 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
       setSuccessWithAutoDismiss(result);
       addLog(projectPath, { level: 'success', operation: actionName, message: result || `${actionName} completed` });
       await loadStats();
-      onRefresh?.();
       onSilentRefresh?.();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       addLog(projectPath, { level: 'error', operation: actionName, message: msg, detail: msg });
-      // Conflict errors are persistent (no auto-dismiss)
       setErrorMsg(msg, isConflictError(msg));
     } finally {
       setActiveAction(null);
+      activeActionRef.current = null;
+      completeProgress(progressGen);
     }
   };
 
@@ -334,14 +445,17 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
   }));
 
   const handleRefresh = async () => {
+    const progressGen = startProgress('syncFetch', baseBranch, currentBranch);
     try {
       await syncRemoteState();
       addLog(projectPath, { level: 'success', operation: 'refresh', message: 'Remote state synced' });
-      onRefresh?.();
+      onSilentRefresh?.();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       addLog(projectPath, { level: 'error', operation: 'refresh', message: msg, detail: msg });
       throw err;
+    } finally {
+      completeProgress(progressGen);
     }
   };
 
@@ -378,6 +492,7 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
     setPrefix('');
     setContent('');
     setGeneratingMessage(true);
+    startProgress('commitGenerate');
     try {
       const commitAiEnabled = await getCommitAiEnabled();
 
@@ -426,11 +541,13 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
       }
     } finally {
       setGeneratingMessage(false);
+      setMergeStep(null);
     }
   };
 
   const handleRegenerateMessage = async () => {
     setGeneratingMessage(true);
+    startProgress('commitGenerate');
     try {
       const commitAiEnabled = await getCommitAiEnabled();
       if (!commitAiEnabled) {
@@ -448,6 +565,7 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
       setErrorMsg(err instanceof Error ? err.message : String(err));
     } finally {
       setGeneratingMessage(false);
+      setMergeStep(null);
     }
   };
 
@@ -471,6 +589,7 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
     const fullMessage = (prefix + content).trim();
     if (!fullMessage) return;
     setCommitting(true);
+    let progressGen = startProgress('commitStage');
     try {
       const projectConfig = workspaceConfig?.projects.find((p: { name: string }) => p.name === projectName);
       const globalConfig = await getGitUserGlobalConfig();
@@ -483,6 +602,7 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
       await commitAll(projectPath, fullMessage, resolvedName, resolvedEmail, skipHooks);
       setShowCommitDialog(false);
       if (withPush) {
+        progressGen = startProgress('pushRemote', currentBranch, currentBranch);
         try {
           await pushToRemote(projectPath);
           setSuccessWithAutoDismiss(t('git.commitAndPushSuccess'));
@@ -494,12 +614,12 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
         setSuccessWithAutoDismiss(t('git.commitSuccess'));
       }
       await loadStats();
-      onRefresh?.();
       onSilentRefresh?.();
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err));
     } finally {
       setCommitting(false);
+      completeProgress(progressGen);
     }
   };
 
@@ -513,6 +633,7 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
       runGitAction('push', () => pushToRemote(projectPath));
     }
   };
+
 
   const actionsDisabled = fetchingSyncing || activeAction !== null;
 
@@ -560,6 +681,28 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
           <CloseIcon className="w-3 h-3 shrink-0 text-[var(--color-success)]" />
         </div>
       )}
+      {(mergeStep || fetchingSyncing) && (
+        <div className="space-y-1.5">
+          <div className="h-2.5 w-full rounded-full bg-[var(--color-bg-elevated)] overflow-hidden">
+            <div
+              className={`h-full rounded-full bg-[var(--color-accent)] ${
+                progressDone ? 'transition-[width] duration-200' : 'transition-[width] duration-300 ease-out'
+              }`}
+              style={{ width: `${displayPercent}%` }}
+            />
+          </div>
+          <div className="flex items-center justify-between gap-2 text-xs font-mono text-[var(--color-accent)]">
+            <span className="truncate min-w-0">
+              {mergeStep
+                ? t(OP_STEP_I18N[mergeStep] ?? 'git.merging', {
+                    branch: mergeStep === 'restore' ? mergeStepCurrentBranch : (mergeStepTarget || currentBranch),
+                  })
+                : t('git.syncRemote')}
+            </span>
+            <span className="tabular-nums shrink-0">{elapsedSeconds}s</span>
+          </div>
+        </div>
+      )}
 
       <div className="flex items-center justify-between">
         <div className="text-xs text-[var(--color-text-secondary)]">
@@ -594,10 +737,10 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
             size="sm"
             onClick={() => runGitAction('sync', () => syncWithBaseBranch(projectPath, baseBranch))}
             disabled={loading || baseBranchExists === false || actionsDisabled}
-            className="text-xs min-w-0"
+            className={`text-xs min-w-0${activeAction === 'sync' ? ' disabled:opacity-100' : ''}`}
             title={baseBranchExists === false ? t('git.remoteBranchNotExists', { branch: baseBranch }) : ''}
           >
-            <SyncIcon className="w-3 h-3 mr-1 shrink-0" />
+            <SyncIcon className={`w-3 h-3 mr-1 shrink-0${activeAction === 'sync' ? ' animate-spin' : ''}`} />
             <span className="truncate">{activeAction === 'sync' ? t('git.syncing') : t('git.syncBranch', { branch: baseBranch })}</span>
           </Button>
 
@@ -606,9 +749,9 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
             size="sm"
             onClick={() => runGitAction('pull', () => pullCurrentBranch(projectPath))}
             disabled={loading || actionsDisabled}
-            className="text-xs min-w-0"
+            className={`text-xs min-w-0${activeAction === 'pull' ? ' disabled:opacity-100' : ''}`}
           >
-            <DownloadIcon className="w-3 h-3 mr-1 shrink-0" />
+            <DownloadIcon className={`w-3 h-3 mr-1 shrink-0${activeAction === 'pull' ? ' animate-spin' : ''}`} />
             <span className="truncate">{activeAction === 'pull' ? t('git.pulling') : t('git.pull')}</span>
           </Button>
 
@@ -617,9 +760,9 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
             size="sm"
             onClick={handleCommitAndPush}
             disabled={loading || actionsDisabled || committing}
-            className="text-xs min-w-0"
+            className={`text-xs min-w-0${activeAction === 'push' || committing ? ' disabled:opacity-100' : ''}`}
           >
-            <UploadIcon className="w-3 h-3 mr-1 shrink-0" />
+            <UploadIcon className={`w-3 h-3 mr-1 shrink-0${activeAction === 'push' || committing ? ' animate-spin' : ''}`} />
             <span className="truncate">
               {committing
                 ? t('git.committing')
@@ -642,9 +785,9 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
                 size="sm"
                 onClick={() => runGitAction('mergeTest', () => mergeToTestBranch(projectPath, testBranch))}
                 disabled={loading || testBranchExists === false || actionsDisabled || (stats?.ahead_of_test ?? 0) >= 100}
-                className="text-xs min-w-0 w-full"
+                className={`text-xs min-w-0 w-full${activeAction === 'mergeTest' ? ' disabled:opacity-100' : ''}`}
               >
-                <GitMergeIcon className="w-3 h-3 mr-1 shrink-0" />
+                <GitMergeIcon className={`w-3 h-3 mr-1 shrink-0${activeAction === 'mergeTest' ? ' animate-spin' : ''}`} />
                 <span className="truncate">{activeAction === 'mergeTest' ? t('git.merging') : t('git.mergeToBranch', { branch: testBranch })}</span>
               </Button>
             );
@@ -664,9 +807,9 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
                 size="sm"
                 onClick={handleMergeBaseClick}
                 disabled={loading || baseBranchExists === false || actionsDisabled || (stats?.ahead ?? 0) >= 100}
-                className="text-xs min-w-0 w-full border-orange-800/40 hover:bg-orange-900/20 hover:border-orange-700/50"
+                className={`text-xs min-w-0 w-full border-orange-800/40 hover:bg-orange-900/20 hover:border-orange-700/50${activeAction === 'mergeBase' ? ' disabled:opacity-100' : ''}`}
               >
-                <GitMergeIcon className="w-3 h-3 mr-1 shrink-0 text-orange-400" />
+                <GitMergeIcon className={`w-3 h-3 mr-1 shrink-0 text-orange-400${activeAction === 'mergeBase' ? ' animate-spin' : ''}`} />
                 <span className="truncate text-orange-300">{activeAction === 'mergeBase' ? t('git.merging') : t('git.mergeToBranch', { branch: baseBranch })}</span>
               </Button>
             );
@@ -682,14 +825,6 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
         </TooltipProvider>
       </div>
 
-      {fetchingSyncing && (
-        <div className="flex items-center gap-2 text-xs text-[var(--color-accent)]/80">
-          <div className="flex-1 h-1 bg-[var(--color-bg-elevated)] rounded-full overflow-hidden">
-            <div className="h-full rounded-full animate-progress-indeterminate animate-gradient" />
-          </div>
-          <span className="whitespace-nowrap">{t('git.syncRemote')}</span>
-        </div>
-      )}
 
       {(testBranchExists === false || baseBranchExists === false) && (
         <div className="text-xs text-[var(--color-warning)]/80 flex items-center gap-1">

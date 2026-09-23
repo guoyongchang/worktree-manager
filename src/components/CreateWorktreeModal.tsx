@@ -441,7 +441,7 @@ export const CreateWorktreeModal: FC<CreateWorktreeModalProps> = ({
           <div className="px-5 pb-1">
             <div className="flex items-center gap-2 text-xs text-[var(--color-accent)]/80">
               <div className="flex-1 h-1 bg-[var(--color-bg-elevated)] rounded-full overflow-hidden">
-                <div className="h-full rounded-full animate-progress-indeterminate animate-gradient" />
+                <div className="h-full rounded-full animate-progress-indeterminate" />
               </div>
               <span className="whitespace-nowrap tabular-nums">{t('common.creating')} {formatElapsed(elapsedSeconds)}</span>
             </div>

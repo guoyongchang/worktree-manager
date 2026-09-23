@@ -31,6 +31,7 @@ interface MobileWorktreeDetailProps {
     onOpenTerminalPanel?: (path: string) => void;
     onAddProjectToWorktree?: () => void;
     onRefresh?: () => void;
+    onSilentRefresh?: () => void;
     selectedEditor?: EditorType;
     onSelectEditor?: (e: EditorType) => void;
     error?: string | null;
@@ -83,7 +84,8 @@ export const MobileWorktreeDetail: FC<MobileWorktreeDetailProps> = ({
     onRevealInFinder: _onRevealInFinder,
     onOpenTerminalPanel,
     onAddProjectToWorktree,
-    onRefresh,
+    onRefresh: _onRefresh,
+    onSilentRefresh,
     selectedEditor: _selectedEditor = 'cursor',
     error,
     onClearError,
@@ -330,7 +332,7 @@ export const MobileWorktreeDetail: FC<MobileWorktreeDetailProps> = ({
                                                 testBranch={project.test_branch || ''}
                                                 currentBranch={project.current_branch}
                                                 worktreeDisplayName={selectedWorktree.display_name || selectedWorktree.name}
-                                                onRefresh={onRefresh}
+                                                onSilentRefresh={onSilentRefresh}
                                                 autoRefreshSlot={selectedWorktree.is_archived ? undefined : index}
                                             />
 

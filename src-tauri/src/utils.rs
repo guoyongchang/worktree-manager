@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use wait_timeout::ChildExt;
 
@@ -16,6 +16,18 @@ pub(crate) const GIT_COMMAND_TIMEOUT_SECS: u64 = 30;
 // Custom git path set by user (empty = auto-detect)
 static CUSTOM_GIT_PATH: Mutex<String> = Mutex::new(String::new());
 
+pub(crate) const GIT_CANCELLED: &str = "已取消";
+const GIT_CANCEL_POLL: Duration = Duration::from_millis(200);
+
+static GIT_CANCEL: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
+
+fn git_cancel_guard() -> std::sync::MutexGuard<'static, HashSet<String>> {
+    GIT_CANCEL.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+fn git_cancel_requested(key: &str) -> bool {
+    git_cancel_guard().contains(key)
+}
 /// Set a custom git executable path. Empty string reverts to auto-detect.
 pub(crate) fn set_custom_git_path(path: &str) {
     if let Ok(mut p) = CUSTOM_GIT_PATH.lock() {
@@ -181,6 +193,8 @@ pub(crate) fn git_command() -> Command {
     };
     cmd.stdin(Stdio::null());
     cmd.env("GIT_TERMINAL_PROMPT", "0");
+    // Do not set GIT_LFS_SKIP_SMUDGE here: clone, checkout, pull, merge, and
+    // `worktree add` populate the working tree and must materialize LFS files.
     // Deterministic (English) git messages: several callers match on git's stderr text
     // ("couldn't find remote ref", "CONFLICT", ...) and Git for Windows otherwise follows the
     // Windows UI language. Only the message catalogue is pinned (not LC_ALL/LC_CTYPE), so
@@ -258,13 +272,6 @@ fn command_cwd_for_log(cmd: &Command) -> String {
         })
 }
 
-fn command_for_log(cmd: &Command) -> String {
-    let mut parts = Vec::new();
-    parts.push(cmd.get_program().to_string_lossy().to_string());
-    parts.extend(cmd.get_args().map(|arg| arg.to_string_lossy().to_string()));
-    mask_url_credentials(&parts.join(" "))
-}
-
 fn exit_code_for_log(status: &std::process::ExitStatus) -> String {
     status
         .code()
@@ -273,54 +280,16 @@ fn exit_code_for_log(status: &std::process::ExitStatus) -> String {
 }
 
 pub(crate) fn run_git_logged(cmd: &mut Command, label: &str) -> std::io::Result<Output> {
-    let command = command_for_log(cmd);
-    let cwd = command_cwd_for_log(cmd);
-    let start = Instant::now();
-
-    log::info!(
-        "[git:{}] starting: command='{}', cwd='{}'",
-        label,
-        command,
-        cwd
-    );
-
-    match cmd.output() {
-        Ok(output) => {
-            let elapsed_ms = start.elapsed().as_millis();
-            let exit_code = exit_code_for_log(&output.status);
-            log::info!(
-                "[git:{}] finished: elapsed_ms={}, exit_code={}",
-                label,
-                elapsed_ms,
-                exit_code
-            );
-
-            if !output.status.success() {
-                log::error!(
-                    "[git:{}] failed: command='{}', cwd='{}', elapsed_ms={}, exit_code={}, stderr='{}'",
-                    label,
-                    command,
-                    cwd,
-                    elapsed_ms,
-                    exit_code,
-                    stderr_for_log(&output.stderr)
-                );
-            }
-
-            Ok(output)
-        }
-        Err(e) => {
-            log::error!(
-                "[git:{}] spawn failed: command='{}', cwd='{}', elapsed_ms={}, stderr='<not available: {}>'",
-                label,
-                command,
-                cwd,
-                start.elapsed().as_millis(),
-                e
-            );
-            Err(e)
-        }
-    }
+    run_command_with_timeout(cmd, label, Duration::from_secs(3600)).map_err(|e| {
+        let kind = if e == GIT_CANCELLED {
+            std::io::ErrorKind::Interrupted
+        } else if e.contains("timed out") {
+            std::io::ErrorKind::TimedOut
+        } else {
+            std::io::ErrorKind::Other
+        };
+        std::io::Error::new(kind, e)
+    })
 }
 
 /// Grace period for the stdout/stderr reader threads to observe EOF after the child has been
@@ -404,12 +373,26 @@ pub(crate) fn run_command_with_timeout(
         .map(|arg| mask_url_credentials(&arg.to_string_lossy()))
         .collect();
     let cwd = command_cwd_for_log(cmd);
+    let repo_key = {
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        args.windows(2)
+            .find(|pair| pair[0] == "-C")
+            .map(|pair| normalize_path(&pair[1]))
+            .unwrap_or_else(|| normalize_path(&cwd))
+    };
     log::info!(
         "[git:{}] starting: args={:?}, cwd='{}'",
         label,
         args_for_log,
         cwd
     );
+
+    if git_cancel_requested(&repo_key) {
+        return Err(GIT_CANCELLED.to_string());
+    }
 
     let mut child = cmd
         .stdin(Stdio::null())
@@ -430,40 +413,27 @@ pub(crate) fn run_command_with_timeout(
 
     let stdout_reader = PipeReader::spawn("stdout", child.stdout.take());
     let stderr_reader = PipeReader::spawn("stderr", child.stderr.take());
+    let deadline = start + timeout;
 
-    match child.wait_timeout(timeout) {
-        Ok(Some(status)) => {
-            let deadline = Instant::now() + PIPE_DRAIN_GRACE;
-            let stdout = stdout_reader.collect(deadline);
-            let stderr = stderr_reader.collect(deadline);
-            let exit_code = exit_code_for_log(&status);
-            let elapsed_ms = start.elapsed().as_millis();
+    loop {
+        if git_cancel_requested(&repo_key) {
+            let _ = child.kill();
+            let _ = child.wait();
+            drop(stdout_reader);
+            let stderr = stderr_reader.collect(Instant::now() + PIPE_DRAIN_GRACE);
             log::info!(
-                "[git:{}] finished: args={:?}, cwd='{}', elapsed_ms={}, exit_code={}",
+                "[git:{}] cancelled: args={:?}, cwd='{}', elapsed_ms={}, stderr='{}'",
                 label,
                 args_for_log,
                 cwd,
-                elapsed_ms,
-                exit_code
+                start.elapsed().as_millis(),
+                stderr_for_log(&stderr)
             );
-            if !status.success() {
-                log::error!(
-                    "[git:{}] failed: args={:?}, cwd='{}', elapsed_ms={}, exit_code={}, stderr='{}'",
-                    label,
-                    args_for_log,
-                    cwd,
-                    elapsed_ms,
-                    exit_code,
-                    stderr_for_log(&stderr)
-                );
-            }
-            Ok(Output {
-                status,
-                stdout,
-                stderr,
-            })
+            return Err(GIT_CANCELLED.to_string());
         }
-        Ok(None) => {
+
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
             let _ = child.kill();
             let _ = child.wait();
             drop(stdout_reader);
@@ -476,26 +446,61 @@ pub(crate) fn run_command_with_timeout(
                 start.elapsed().as_millis(),
                 stderr_for_log(&stderr)
             );
-            Err(format!(
+            return Err(format!(
                 "Git command timed out after {} seconds",
                 timeout.as_secs()
-            ))
+            ));
         }
-        Err(e) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            drop(stdout_reader);
-            let stderr = stderr_reader.collect(Instant::now() + PIPE_DRAIN_GRACE);
-            log::error!(
-                "[git:{}] wait failed: args={:?}, cwd='{}', elapsed_ms={}, stderr='{}', error={}",
-                label,
-                args_for_log,
-                cwd,
-                start.elapsed().as_millis(),
-                stderr_for_log(&stderr),
-                e
-            );
-            Err(format!("Failed to wait for git command: {}", e))
+
+        match child.wait_timeout(remaining.min(GIT_CANCEL_POLL)) {
+            Ok(Some(status)) => {
+                let drain_deadline = Instant::now() + PIPE_DRAIN_GRACE;
+                let stdout = stdout_reader.collect(drain_deadline);
+                let stderr = stderr_reader.collect(drain_deadline);
+                let exit_code = exit_code_for_log(&status);
+                let elapsed_ms = start.elapsed().as_millis();
+                log::info!(
+                    "[git:{}] finished: args={:?}, cwd='{}', elapsed_ms={}, exit_code={}",
+                    label,
+                    args_for_log,
+                    cwd,
+                    elapsed_ms,
+                    exit_code
+                );
+                if !status.success() {
+                    log::error!(
+                        "[git:{}] failed: args={:?}, cwd='{}', elapsed_ms={}, exit_code={}, stderr='{}'",
+                        label,
+                        args_for_log,
+                        cwd,
+                        elapsed_ms,
+                        exit_code,
+                        stderr_for_log(&stderr)
+                    );
+                }
+                return Ok(Output {
+                    status,
+                    stdout,
+                    stderr,
+                });
+            }
+            Ok(None) => continue,
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                drop(stdout_reader);
+                let stderr = stderr_reader.collect(Instant::now() + PIPE_DRAIN_GRACE);
+                log::error!(
+                    "[git:{}] wait failed: args={:?}, cwd='{}', elapsed_ms={}, stderr='{}', error={}",
+                    label,
+                    args_for_log,
+                    cwd,
+                    start.elapsed().as_millis(),
+                    stderr_for_log(&stderr),
+                    e
+                );
+                return Err(format!("Failed to wait for git command: {}", e));
+            }
         }
     }
 }
@@ -1175,6 +1180,11 @@ mod tests {
             .map(|(_, value)| value);
 
         assert_eq!(prompt, Some(Some(std::ffi::OsStr::new("0"))));
+        assert!(
+            cmd.get_envs()
+                .all(|(key, _)| key != std::ffi::OsStr::new("GIT_LFS_SKIP_SMUDGE")),
+            "git_command() must not skip LFS smudge; clone/checkout need real file content"
+        );
     }
 
     #[cfg(unix)]

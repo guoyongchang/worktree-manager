@@ -130,7 +130,7 @@ export function WorkspaceCell({ initialWorkspacePath, closable, onClose }: Works
               workspaces={workspace.workspaces}
               currentWorkspace={workspace.currentWorkspace}
               onRemoveWorkspace={workspace.removeWorkspace}
-              initialSection={initialSettingsSection}
+              initialSection={initialSettingsSection ?? 'workspaces'}
               settingsNavNonce={settingsNavNonce}
             />
           )}

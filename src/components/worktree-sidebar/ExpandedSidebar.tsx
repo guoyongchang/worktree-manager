@@ -19,6 +19,8 @@ import {
 } from '@dnd-kit/sortable';
 
 import { openLink } from '@/lib/backend';
+import { useProcessMemory, writeMemoryWatchEnabled, writeMemoryWatchMb } from '@/hooks/useMemoryWatch';
+import { persistAndReload } from '@/lib/uiRestore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -916,6 +918,60 @@ const StatusBadge: FC<{
     </TooltipProvider>
   );
 };
+function memoryPressureColor(percent: number): string {
+  const t = Math.min(1, Math.max(0, (percent - 10) / 80));
+  const green: [number, number, number] = [34, 197, 94];
+  const yellow: [number, number, number] = [234, 179, 8];
+  const red: [number, number, number] = [239, 68, 68];
+  const [from, to, u] = t < 0.5 ? [green, yellow, t * 2] : [yellow, red, (t - 0.5) * 2];
+  const mix = (a: number, b: number) => Math.round(a + (b - a) * u);
+  return `rgb(${mix(from[0], to[0])}, ${mix(from[1], to[1])}, ${mix(from[2], to[2])})`;
+}
+
+const MemoryReloadIcon: FC = () => {
+  const { percent } = useProcessMemory();
+  const color = memoryPressureColor(percent);
+  return (
+    <span className="relative inline-flex w-3.5 h-3.5">
+      <RefreshIcon className="w-3.5 h-3.5 text-[var(--color-text-muted)]" />
+      <span className="absolute inset-0 overflow-hidden" style={{ clipPath: `inset(${100 - percent}% 0 0 0)`, color }}>
+        <RefreshIcon className="w-3.5 h-3.5" />
+      </span>
+    </span>
+  );
+};
+
+const MemoryReloadTip: FC = () => {
+  const { t } = useTranslation();
+  const { rssMb, threshold, enabled, percent } = useProcessMemory();
+  const [draftMb, setDraftMb] = useState(String(threshold));
+  useEffect(() => { setDraftMb(String(threshold)); }, [threshold]);
+  return (
+    <div className="space-y-2 min-w-[180px]" onPointerDown={(e) => e.stopPropagation()}>
+      <div>{t('sidebar.memoryUsage', { mb: rssMb, percent })}</div>
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => writeMemoryWatchEnabled(e.target.checked)}
+        />
+        <span>{t('sidebar.memoryAutoClean')}</span>
+      </label>
+      <label className="flex items-center gap-2">
+        <span className="shrink-0">{t('sidebar.memoryOver')}</span>
+        <input
+          type="number"
+          min={256}
+          value={draftMb}
+          onChange={(e) => setDraftMb(e.target.value)}
+          onBlur={() => setDraftMb(String(writeMemoryWatchMb(Number(draftMb))))}
+          className="w-20 h-6 px-1 rounded bg-[var(--color-bg)] border border-[var(--color-border)] text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+        />
+        <span>MB</span>
+      </label>
+    </div>
+  );
+};
 
 const SidebarBottomBar: FC<{
   appVersion: string;
@@ -988,6 +1044,21 @@ const SidebarBottomBar: FC<{
       )}
 
       <div className="flex items-center gap-1">
+        <TooltipProvider delayDuration={300}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => persistAndReload()}
+                className="h-7 w-7"
+              >
+                <MemoryReloadIcon />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top"><MemoryReloadTip /></TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
         {isTauri && (
           <TooltipProvider delayDuration={300}>
             <Tooltip>

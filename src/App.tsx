@@ -20,6 +20,7 @@ import {
   TunnelRouteSelector,
 } from "./components";
 import { useAppShellState } from "./hooks/useAppShellState";
+import { useMemoryWatch } from "./hooks/useMemoryWatch";
 import { Input } from "@/components/ui/input";
 import { isTauri, callBackend } from "./lib/backend";
 import { shouldUseTunnelRouteSelection } from "./lib/tunnelRoute";
@@ -48,6 +49,11 @@ if (typeof window !== 'undefined' && isTauri()) {
   }, true);
 } else if (typeof window !== 'undefined') {
   document.body.classList.add('browser');
+}
+// Mounted once inside ToastProvider: polls RSS and reloads/reminds over the threshold.
+function MemoryWatch() {
+  useMemoryWatch();
+  return null;
 }
 
 function App() {
@@ -208,6 +214,7 @@ function App() {
 
   return (
     <ToastProvider>
+      <MemoryWatch />
       <>
         {/* Loading overlay */}
         {workspace.loading && (
@@ -290,6 +297,7 @@ function App() {
                   onOpenTerminalPanel={terminalHook.handleTerminalTabClick}
                   onAddProjectToWorktree={() => modals.setModal('showAddProjectToWorktreeModal', true)}
                   onRefresh={workspace.loadData}
+                  onSilentRefresh={() => workspace.loadData({ silent: true })}
                   selectedEditor={actions.selectedEditor}
                   error={workspace.error}
                   onClearError={() => workspace.setError(null)}

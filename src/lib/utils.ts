@@ -28,14 +28,42 @@ export function basename(path: string): string {
  * Kept small on purpose: dozens of simultaneous git processes trigger credential-helper
  * prompts and lock contention on Windows. Mirrors SYNC_ALL_MAX_CONCURRENT in the backend.
  */
-export const GIT_BATCH_CONCURRENCY = 4;
+export const GIT_BATCH_CONCURRENCY = 2;
+/**
+ * Fan-out for the read-only remote fetch sweep (sidebar refresh).
+ * Matches SYNC_ALL_MAX_CONCURRENT: worktrees of the same repo share refs, so the
+ * sweep already dedupes by project name. Higher fan-out mostly burns SSH slots.
+ */
+export const GIT_FETCH_CONCURRENCY = GIT_BATCH_CONCURRENCY;
+
+type FetchableProject = { name: string; path: string };
 
 /**
- * Fan-out for the read-only remote fetch sweep (sidebar refresh). Fetches do not write to the
- * working tree, so a larger bound keeps the "fetching" phase short for big workspaces while
- * still avoiding dozens of simultaneous git processes.
+ * One fetch path per project name. Main-workspace checkout wins when present
+ * (same git common dir as that project's worktrees).
  */
-export const GIT_FETCH_CONCURRENCY = 8;
+export function uniqueFetchProjectPaths(
+  worktrees: ReadonlyArray<{ is_archived: boolean; projects: ReadonlyArray<FetchableProject> }>,
+  mainWorkspace: { projects: ReadonlyArray<FetchableProject> } | null | undefined,
+): string[] {
+  const byName = new Map<string, string>();
+  if (mainWorkspace) {
+    for (const project of mainWorkspace.projects) {
+      if (project.name && project.path) {
+        byName.set(project.name, project.path);
+      }
+    }
+  }
+  for (const worktree of worktrees) {
+    if (worktree.is_archived) continue;
+    for (const project of worktree.projects) {
+      if (project.name && project.path && !byName.has(project.name)) {
+        byName.set(project.name, project.path);
+      }
+    }
+  }
+  return [...byName.values()];
+}
 
 /**
  * Run `fn` over `items` with at most `limit` promises in flight at once.
