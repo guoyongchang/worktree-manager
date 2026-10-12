@@ -460,7 +460,9 @@ jobs:
             echo "@worktree-manager/mcp@${VERSION} already exists; skip"
             exit 0
           fi
-          npm ci
+          # setup-node 配了 registry-url + token 后，npm ci 默认的 audit 会带着 token
+          # 去请求 audit 接口，npm 在退出阶段挂住（本次 CI 报 "Exit handler never called!"）。
+          npm ci --no-audit --no-fund
           npm test
           npm version "$VERSION" --no-git-tag-version --allow-same-version
           npm publish --access public
