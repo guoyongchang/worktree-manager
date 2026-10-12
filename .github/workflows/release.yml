@@ -14,6 +14,13 @@ on:
         description: '大版本号'
         required: false
         default: '0'
+      force_mcp:
+        description: '即便 packages/mcp 没改动也重新发布 MCP 包'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+        default: 'false'
 
 permissions:
   contents: write
@@ -433,6 +440,11 @@ jobs:
         id: changes
         working-directory: .
         run: |
+          if [ "${{ inputs.force_mcp }}" = "true" ]; then
+            echo "force_mcp=true; publishing even though packages/mcp may be unchanged"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           TAG="${{ needs.prepare.outputs.tag }}"
           PREV=$(git tag --sort=-creatordate | grep -E '^v[0-9]' | grep -v "^${TAG}$" | head -1 || true)
           echo "Previous tag: ${PREV:-<none>}"

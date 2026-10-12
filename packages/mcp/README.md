@@ -246,6 +246,16 @@ When app is not running → reads from config file fallback (read-only core tool
 
 The MCP process reads the registered port from `~/.config/worktree-manager/mcp.json`; if that port is not answering, it scans `42800-42900` and connects to the app it finds. If the app has to move ports, it registers the new one.
 
+### Versioning
+
+The published package version follows the desktop release timestamp: `1.<YYYYMMDD>.<HHMMSS>`. The app itself is versioned `0.<YYYYMMDD>.<HHMMSS>`, so the package keeps its own `1.x` line instead of inheriting the app's `0.x`.
+
+A release publishes this package only when `packages/mcp` changed since the previous release tag. If a publish run fails for infrastructure reasons, later runs will skip it; re-run the release workflow with the `force_mcp` input set to `true` to publish anyway.
+
+### Confirmations
+
+`worktree_archive`, `worktree_restore`, and `worktree_delete_archived` are gated by the desktop app. The tool call blocks until the user confirms in a dialog and fails on cancel or timeout. They cannot be executed without the desktop app running.
+
 ---
 
 ## Requirements
