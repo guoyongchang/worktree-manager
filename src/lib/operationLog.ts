@@ -1,3 +1,5 @@
+import { recordTimeSaved } from './timeSaved';
+
 export type LogLevel = 'info' | 'success' | 'warn' | 'error';
 
 export interface LogEntry {
@@ -28,6 +30,7 @@ export function addLog(
     entries.splice(0, entries.length - MAX_ENTRIES);
   }
   store.set(projectPath, entries);
+  if (entry.level === 'success') recordTimeSaved(entry.operation);
 }
 
 export function getLogs(projectPath: string): LogEntry[] {
@@ -45,6 +48,10 @@ export function markAsRead(projectPath: string): void {
 }
 
 export function getUnreadErrorCount(projectPath: string): number {
+  return entriesUnread(projectPath);
+}
+
+function entriesUnread(projectPath: string): number {
   const entries = store.get(projectPath) ?? [];
   const readIdx = lastReadIndex.get(projectPath) ?? 0;
   return entries.slice(readIdx).filter((e) => e.level === 'error').length;

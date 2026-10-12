@@ -2,6 +2,7 @@
 export interface WorkspaceRef {
   name: string;
   path: string;
+  worktrees_dir?: string;
 }
 
 // Worktree list item
@@ -42,6 +43,9 @@ export interface ActiveWorkspaceResult {
   workspace: WorkspaceRef | null;
   worktree_name: string | null;
   project_name: string | null;
+  recommended_cwd: string | null;
+  open_at_root: boolean;
+  guidance: string | null;
   matched_by: 'prefix';
 }
 
@@ -68,8 +72,8 @@ export interface McpError {
 // Transport mode
 export type TransportMode = 'http' | 'config';
 
-// Capability levels
-export type CapabilityLevel = 'core' | 'details' | 'advanced';
+// Capability levels. Older configs may still say core/details/advanced.
+export type CapabilityLevel = 'read' | 'operate';
 
 // MCP config
 export interface McpConfig {

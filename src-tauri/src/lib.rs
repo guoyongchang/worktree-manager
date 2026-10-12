@@ -50,6 +50,7 @@ pub use commands::worktree::{
 use commands::cloud::*;
 use commands::config::*;
 use commands::git::*;
+use commands::mcp::*;
 use commands::pty::*;
 use commands::sharing::*;
 use commands::system::*;
@@ -706,10 +707,19 @@ pub fn run() {
             cloud_approve_pairing,
             cloud_reject_pairing,
             cloud_disconnect,
+            get_usage_report_enabled,
+            set_usage_report_enabled,
+            get_usage_machine_id,
+            reset_usage_machine_id,
+            report_time_saved,
+            get_mcp_settings,
+            set_mcp_capability,
+            set_mcp_port,
+            install_mcp_client,
+            resolve_mcp_confirm,
         ])
         .setup(|app| {
             use tauri::Manager;
-            // Initialize APP_HANDLE for use in WebSocket handlers
             *APP_HANDLE
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(app.handle().clone());
@@ -725,12 +735,9 @@ pub fn run() {
                 pty_manager::init_shell_integration(dir);
             }
 
-            // Start MCP server on the port expected by @worktree-manager/mcp.
-            let mcp_port = MCP_SERVER_PORT;
+            // MCP server follows ~/.config/worktree-manager/mcp.json, default 42819.
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = http_server::start_mcp_server(mcp_port).await {
-                    log::error!("[MCP] Server failed: {}", e);
-                }
+                http_server::run_mcp_server().await;
             });
 
             log::info!(

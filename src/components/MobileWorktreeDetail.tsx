@@ -5,6 +5,7 @@ import { BackIcon } from './Icons';
 import { GitOperations } from './GitOperations';
 import { Terminal as TerminalIcon, Plus, FolderGit2 } from 'lucide-react';
 import { TerminalPanel } from './TerminalPanel';
+import { copyText } from '../lib/clipboard';
 import type {
     WorktreeListItem,
     MainWorkspaceStatus,
@@ -153,7 +154,7 @@ export const MobileWorktreeDetail: FC<MobileWorktreeDetailProps> = ({
     }, [selectedWorktree, onSwitchBranch]);
 
     const handleCopyPath = useCallback(async (path: string) => {
-        try { await navigator.clipboard.writeText(path); } catch { /* clipboard API may not be available */ }
+        await copyText(path);
     }, []);
 
     // Lock body scroll when terminal tab is active (prevent page bounce on mobile)

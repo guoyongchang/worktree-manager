@@ -14,6 +14,7 @@ import type {
   EditorType,
 } from '../types';
 import { isTauri, getWindowLabel, removeProjectFromConfig, callBackend, syncAllProjectsToBase } from '../lib/backend';
+import { recordWorkspaceSwitch } from '../lib/timeSaved';
 
 export interface UseWorkspaceActionsReturn {
   // Selected worktree
@@ -258,13 +259,16 @@ export function useWorkspaceActions(
     if (!wsPath) return;
 
     setSwitchingWorktree(true);
+    const currentName = selectedWorktree?.name ?? null;
+    const nextName = worktree?.name ?? null;
+    const projectCount = worktree
+      ? worktree.projects.length
+      : (workspace.config?.projects.length ?? 0);
     try {
+      if (currentName !== nextName) recordWorkspaceSwitch(projectCount);
       if (!isTauri()) {
         setHasUserSelected(true);
         setSelectedWorktree(worktree);
-        if (isMobileWeb) {
-          // Handled by caller (setSidebarCollapsed)
-        }
         return;
       }
 

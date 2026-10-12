@@ -112,7 +112,6 @@ export function buildAdvancedHandlers(transport: Transport): Record<string, Tool
       const force = args?.force === true;
       if (fetchFirst) await transport.fetchProjectRemote(projectPath);
       const stats = (await transport.getBranchDiffStats(projectPath, baseBranch)) as BranchDiffStats;
-      // fail-closed：diff 全 0 且未 fetch 时视为「算不出」，拒绝而非放行
       const certainty = evaluateDiffCertainty(stats, { fetched: fetchFirst, force });
       if (!certainty.allow) return errorResult(`合并到 base 被拦截：${certainty.reason}`);
       const gate = evaluateMergeGate(
@@ -120,7 +119,45 @@ export function buildAdvancedHandlers(transport: Transport): Record<string, Tool
         gateOptsFromArgs(args)
       );
       if (!gate.allow) return errorResult(`合并到 base 被拦截：${gate.reason}`);
+      await transport.requestConfirm('合并到基线', `将把 ${projectPath} 的当前分支合并到 ${baseBranch}。`);
       return textResult(await transport.mergeToBase(projectPath, baseBranch));
+    },
+
+    merge_to_uat: async (args) => {
+      const projectPath = args?.project_path as string;
+      const uatBranch = (args?.uat_branch as string) || 'uat';
+      if (!projectPath) throw new Error('project_path is required');
+      const fetchFirst = args?.fetch_first === true;
+      if (fetchFirst) await transport.fetchProjectRemote(projectPath);
+      await transport.requestConfirm('合并到 UAT', `将把 ${projectPath} 的当前分支合并到 ${uatBranch}。`);
+      return textResult(await transport.mergeToBase(projectPath, uatBranch));
+    },
+
+    workspace_create: async (args) => {
+      const name = args?.name as string;
+      const path = args?.path as string;
+      if (!name || !path) throw new Error('name and path are required');
+      return textResult(await transport.createWorkspace(name, path));
+    },
+
+    workspace_remove: async (args) => {
+      const path = args?.path as string;
+      if (!path) throw new Error('path is required');
+      await transport.requestConfirm('移除工作区', `将从应用中移除工作区 ${path}。这不删除磁盘上的仓库。`);
+      return textResult(await transport.removeWorkspace(path));
+    },
+
+    worktree_restore: async (args) => {
+      const name = args?.name as string;
+      if (!name) throw new Error('name is required');
+      return textResult(await transport.restoreWorktree(name));
+    },
+
+    deploy_to_main: async (args) => {
+      const name = args?.worktree_name as string;
+      if (!name) throw new Error('worktree_name is required');
+      await transport.requestConfirm('部署到主工作区', `将把需求工作区 ${name} 部署到主工作区。`);
+      return textResult(await transport.deployToMain(name));
     },
   };
 }
@@ -151,7 +188,7 @@ export const ADVANCED_TOOLS = [
   },
   {
     name: 'worktree_archive',
-    description: 'Archive an existing worktree',
+    description: '归档需求工作区。后端会弹出桌面确认框，用户确认前不会执行。工具不能直接完成。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -162,7 +199,7 @@ export const ADVANCED_TOOLS = [
   },
   {
     name: 'worktree_delete_archived',
-    description: 'Permanently delete an archived worktree',
+    description: '永久删除已归档工作区。后端会弹出桌面确认框，用户确认前不会执行。工具不能直接完成。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -219,7 +256,7 @@ export const ADVANCED_TOOLS = [
   },
   {
     name: 'sync_base',
-    description: 'Sync the latest base branch into the current branch (fetch origin/base + merge). Requires advanced capability.',
+    description: '同步项目：把基线分支 fetch 后合并进当前分支。对应页面上的同步按钮。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -231,7 +268,7 @@ export const ADVANCED_TOOLS = [
   },
   {
     name: 'pull',
-    description: 'git pull the current branch from origin (fetch + merge into working branch). Unlike git_fetch (which only downloads refs without touching the working tree), this updates the checked-out branch. To push, use git_push. Requires advanced capability.',
+    description: '拉取当前分支：git pull origin 当前分支。对应页面上的拉取按钮。',
     inputSchema: {
       type: 'object',
       properties: { project_path: { type: 'string' } },
@@ -255,7 +292,7 @@ export const ADVANCED_TOOLS = [
   },
   {
     name: 'merge_to_test',
-    description: 'Merge the current branch into the test branch, guarded by a "not too many commits" threshold. Blocks if ahead_of_test > max_ahead (default 50) or worktree is dirty. Also blocks (fail-closed) when all diff stats are 0 and no fetch was done, since the backend cannot tell "no diff" from "could not compute" (e.g. test ref not fetched) — pass fetch_first:true. All guards bypassable with force:true. Requires advanced capability.',
+    description: '合并到 test。有提交数量和干净工作区护栏。对应页面上的合并到 test。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -272,7 +309,7 @@ export const ADVANCED_TOOLS = [
   },
   {
     name: 'merge_to_base',
-    description: 'Merge the current branch into the base branch, guarded by a "not too many commits" threshold. Blocks if ahead (of base) > max_ahead (default 50) or worktree is dirty. Also blocks (fail-closed) when all diff stats are 0 and no fetch was done, since the backend cannot tell "no diff" from "could not compute" (e.g. base ref not fetched) — pass fetch_first:true. All guards bypassable with force:true. Requires advanced capability.',
+    description: '合并到基线分支。会先在桌面端弹窗，等用户确认后才执行。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -284,6 +321,58 @@ export const ADVANCED_TOOLS = [
         force: { type: 'boolean', description: 'Bypass all guards (threshold + unverifiable-diff check)' },
       },
       required: ['project_path', 'base_branch'],
+    },
+  },
+  {
+    name: 'merge_to_uat',
+    description: '合并到 UAT。默认目标分支 uat，可用 uat_branch 覆盖。会先在桌面端弹窗，等用户确认后才执行。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_path: { type: 'string' },
+        uat_branch: { type: 'string', description: '默认 uat' },
+        fetch_first: { type: 'boolean' },
+      },
+      required: ['project_path'],
+    },
+  },
+  {
+    name: 'workspace_create',
+    description: '新建工作区。对应页面上的新建工作区。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        path: { type: 'string', description: '工作区根目录绝对路径' },
+      },
+      required: ['name', 'path'],
+    },
+  },
+  {
+    name: 'workspace_remove',
+    description: '从应用移除工作区，不删除磁盘文件。会先在桌面端弹窗，等用户确认后才执行。',
+    inputSchema: {
+      type: 'object',
+      properties: { path: { type: 'string' } },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'worktree_restore',
+    description: '恢复已归档的需求工作区。后端会弹出桌面确认框，用户确认前不会执行。工具不能直接完成。',
+    inputSchema: {
+      type: 'object',
+      properties: { name: { type: 'string' } },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'deploy_to_main',
+    description: '把需求工作区部署到主工作区。会先在桌面端弹窗，等用户确认后才执行。',
+    inputSchema: {
+      type: 'object',
+      properties: { worktree_name: { type: 'string' } },
+      required: ['worktree_name'],
     },
   },
 ];

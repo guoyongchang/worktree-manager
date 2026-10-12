@@ -100,7 +100,7 @@ Create a new worktree called feature-abc with all projects
 │  / Cursor            │     (stdio)         │       /mcp         │
 └─────────────────────┘                      └────────┬────────────┘
                                                      │
-                                            HTTP (localhost:42819)
+                                            HTTP (localhost:42819 by default)
                                                      │
                                                      ▼
                                             ┌─────────────────────┐
@@ -110,6 +110,8 @@ Create a new worktree called feature-abc with all projects
 ```
 
 When the Worktree Manager desktop app is running, the MCP server connects via HTTP for real-time data. When the app is not running, it falls back to reading the config file.
+
+The app registers its port in `~/.config/worktree-manager/mcp.json` (default `42819`). If that port is taken, the app moves to a free port in `42800-42900` and updates the registration; the MCP process reads the registration and scans that range, so client configs do not hardcode a port.
 
 ## Requirements
 

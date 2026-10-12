@@ -1,6 +1,7 @@
 pub(crate) mod cloud;
 pub(crate) mod config;
 pub(crate) mod git;
+pub(crate) mod mcp;
 pub(crate) mod pty;
 pub(crate) mod sharing;
 pub(crate) mod system;

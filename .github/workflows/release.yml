@@ -407,3 +407,60 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.prepare.outputs.tag }}
         run: gh release upload "$TAG" latest.json --clobber --repo "$GITHUB_REPOSITORY"
+
+  publish-mcp:
+    name: Publish MCP if changed
+    needs: prepare
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: packages/mcp
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: packages/mcp/package-lock.json
+
+      - name: Skip when the MCP package did not change
+        id: changes
+        working-directory: .
+        run: |
+          TAG="${{ needs.prepare.outputs.tag }}"
+          PREV=$(git tag --sort=-creatordate | grep -E '^v[0-9]' | grep -v "^${TAG}$" | head -1 || true)
+          echo "Previous tag: ${PREV:-<none>}"
+          if [ -z "$PREV" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --quiet "$PREV" HEAD -- packages/mcp; then
+            echo "MCP unchanged since ${PREV}; skip publish"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install, test, and publish
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          # MCP 包用 1.<日期>.<时间>，不套主项目的 0.x（套了在 npm 上看起来是降级）。
+          VERSION="1.${RELEASE_VERSION#*.}"
+          echo "Publishing @worktree-manager/mcp@${VERSION} (app ${RELEASE_VERSION})"
+          if npm view "@worktree-manager/mcp@${VERSION}" version >/dev/null 2>&1; then
+            echo "@worktree-manager/mcp@${VERSION} already exists; skip"
+            exit 0
+          fi
+          npm ci
+          npm test
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          npm publish --access public

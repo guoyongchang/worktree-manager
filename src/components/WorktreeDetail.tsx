@@ -34,6 +34,7 @@ import {
   DownloadIcon,
 } from './Icons';
 import { Badge } from '@/components/ui/badge';
+import { copyText } from '../lib/clipboard';
 import {
   Dialog,
   DialogContent,
@@ -539,12 +540,9 @@ const PathDisplay: FC<{ path: string }> = ({ path }) => {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(path);
+    if (await copyText(path)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error('Failed to copy path:', err);
     }
   };
 
@@ -577,12 +575,9 @@ const CopyableTitle: FC<{ text: string; className?: string }> = ({ text, classNa
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
+    if (await copyText(text)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error('Failed to copy:', err);
     }
   };
 

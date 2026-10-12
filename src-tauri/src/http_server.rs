@@ -13,9 +13,11 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, LazyLock, Mutex};
 use tauri::Emitter;
 use tokio::net::TcpListener;
+use tokio::sync::oneshot;
 use tokio::sync::Mutex as TokioMutex;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::services::{ServeDir, ServeFile};
@@ -2243,6 +2245,119 @@ async fn h_cloud_get_status() -> Response {
     result_json(crate::commands::cloud::cloud_get_status().await)
 }
 
+async fn h_report_time_saved(
+    Json(payload): Json<crate::commands::cloud::TimeSavedReport>,
+) -> Response {
+    result_json(crate::commands::cloud::report_time_saved(payload).await)
+}
+
+async fn h_get_usage_report_enabled() -> Response {
+    result_json(Ok::<_, String>(
+        crate::commands::cloud::get_usage_report_enabled(),
+    ))
+}
+
+async fn h_get_mcp_settings() -> Response {
+    result_json(crate::commands::mcp::get_mcp_settings())
+}
+
+async fn h_set_mcp_capability_level(Json(payload): Json<serde_json::Value>) -> Response {
+    let level = get_param(&payload, "capability_level");
+    result_ok(crate::commands::mcp::set_mcp_capability(level))
+}
+
+async fn h_set_mcp_port(Json(payload): Json<serde_json::Value>) -> Response {
+    let port = payload
+        .get("port")
+        .and_then(|value| {
+            value
+                .as_u64()
+                .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
+        })
+        .and_then(|value| u16::try_from(value).ok())
+        .unwrap_or(0);
+    result_ok(set_mcp_listening_port(port).await)
+}
+
+async fn h_install_mcp_client(Json(payload): Json<serde_json::Value>) -> Response {
+    let client = payload["client"].as_str().unwrap_or("").to_string();
+    result_json(crate::commands::mcp::install_mcp_client(client))
+}
+
+async fn h_request_mcp_confirm(Json(payload): Json<serde_json::Value>) -> Response {
+    let action = payload["action"].as_str().unwrap_or("").to_string();
+    let summary = payload["summary"].as_str().unwrap_or("").to_string();
+    result_ok(crate::commands::mcp::request_mcp_confirm(action, summary).await)
+}
+
+async fn h_resolve_mcp_confirm(Json(payload): Json<serde_json::Value>) -> Response {
+    let id = payload["id"].as_str().unwrap_or("").to_string();
+    let approved = payload["approved"].as_bool().unwrap_or(false);
+    result_ok(crate::commands::mcp::resolve_mcp_confirm(id, approved))
+}
+
+async fn confirmed_worktree_action(
+    headers: &HeaderMap,
+    name: String,
+    action: &str,
+    summary: String,
+    run: impl FnOnce(&str, String) -> Result<(), String>,
+) -> Response {
+    if let Err(error) = crate::commands::mcp::request_mcp_confirm(action.to_string(), summary).await
+    {
+        return (StatusCode::BAD_REQUEST, error).into_response();
+    }
+    result_ok(run(&session_id(headers), name))
+}
+
+async fn h_mcp_archive_worktree(headers: HeaderMap, Json(args): Json<Value>) -> Response {
+    let name = args["name"].as_str().unwrap_or("").to_string();
+    confirmed_worktree_action(
+        &headers,
+        name.clone(),
+        "归档需求工作区",
+        format!("将归档 {name}。这不会删除目录，但会把它移出当前使用列表。"),
+        archive_worktree_impl,
+    )
+    .await
+}
+
+async fn h_mcp_restore_worktree(headers: HeaderMap, Json(args): Json<Value>) -> Response {
+    let name = args["name"].as_str().unwrap_or("").to_string();
+    confirmed_worktree_action(
+        &headers,
+        name.clone(),
+        "恢复需求工作区",
+        format!("将恢复已归档的需求工作区 {name}。"),
+        restore_worktree_impl,
+    )
+    .await
+}
+
+async fn h_mcp_delete_archived_worktree(headers: HeaderMap, Json(args): Json<Value>) -> Response {
+    let name = args["name"].as_str().unwrap_or("").to_string();
+    confirmed_worktree_action(
+        &headers,
+        name.clone(),
+        "删除已归档工作区",
+        format!("将永久删除已归档工作区 {name}。"),
+        delete_archived_worktree_impl,
+    )
+    .await
+}
+async fn h_set_usage_report_enabled(Json(payload): Json<serde_json::Value>) -> Response {
+    let enabled = payload["enabled"].as_bool().unwrap_or(false);
+    result_ok(crate::commands::cloud::set_usage_report_enabled(enabled))
+}
+
+async fn h_get_usage_machine_id() -> Response {
+    result_json(crate::commands::cloud::get_usage_machine_id())
+}
+
+async fn h_reset_usage_machine_id() -> Response {
+    result_json(crate::commands::cloud::reset_usage_machine_id())
+}
+
 async fn h_cloud_start_pairing() -> Response {
     result_json(crate::commands::cloud::cloud_start_pairing().await)
 }
@@ -3192,36 +3307,148 @@ pub fn save_mcp_config(config: &McpConfig) -> Result<(), String> {
     Ok(())
 }
 
-/// Start the MCP HTTP server on the specified port.
-/// This runs as a background task.
-pub async fn start_mcp_server(port: u16) -> Result<(), String> {
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+static MCP_RESTART_REQUESTED: AtomicBool = AtomicBool::new(false);
+static MCP_SHUTDOWN: LazyLock<Mutex<Option<oneshot::Sender<()>>>> =
+    LazyLock::new(|| Mutex::new(None));
 
-    // Save MCP config（保留已有 capability_level，缺省 details；不覆盖用户设置）
-    let capability_level = load_mcp_config()
-        .map(|c| c.capability_level)
-        .filter(|l| matches!(l.as_str(), "core" | "details" | "advanced"))
-        .unwrap_or_else(|| "details".to_string());
-    let config = McpConfig {
+pub fn configured_mcp_port() -> u16 {
+    load_mcp_config()
+        .map(|config| config.http_port)
+        .filter(|port| (1024..=65535).contains(port))
+        .unwrap_or(crate::state::MCP_SERVER_PORT)
+}
+
+pub fn request_mcp_restart() {
+    MCP_RESTART_REQUESTED.store(true, Ordering::SeqCst);
+    if let Ok(mut slot) = MCP_SHUTDOWN.lock() {
+        if let Some(sender) = slot.take() {
+            let _ = sender.send(());
+        }
+    }
+}
+
+pub async fn set_mcp_listening_port(port: u16) -> Result<(), String> {
+    if !(1024..=65535).contains(&port) {
+        return Err("端口需要在 1024 到 65535 之间".to_string());
+    }
+    let mut config = load_mcp_config().unwrap_or(McpConfig {
         version: env!("CARGO_PKG_VERSION").to_string(),
         http_port: port,
         installed_at: chrono::Utc::now().to_rfc3339(),
-        capability_level,
-    };
+        capability_level: "read".to_string(),
+    });
+    config.http_port = port;
+    config.capability_level = crate::commands::mcp::normalize_capability(&config.capability_level)
+        .unwrap_or("read")
+        .to_string();
     save_mcp_config(&config)?;
+    if port != crate::state::MCP_ACTIVE_PORT.load(Ordering::Relaxed) {
+        request_mcp_restart();
+    }
+    Ok(())
+}
 
-    log::info!("[MCP] Starting HTTP server on {}", addr);
+const MCP_PORT_SCAN_START: u16 = 42800;
+const MCP_PORT_SCAN_END: u16 = 42900;
 
+async fn bind_mcp_listener(preferred: u16) -> Result<(TcpListener, u16), String> {
+    if preferred == 0 {
+        let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+            .await
+            .map_err(|error| format!("Failed to bind MCP server: {error}"))?;
+        return Ok((listener, 0));
+    }
+    if let Ok(listener) = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], preferred))).await {
+        return Ok((listener, preferred));
+    }
+    for port in MCP_PORT_SCAN_START..=MCP_PORT_SCAN_END {
+        if port == preferred {
+            continue;
+        }
+        if let Ok(listener) = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], port))).await {
+            let _ = crate::state::with_app_handle(|app| {
+                app.emit(
+                    "mcp-port-moved",
+                    serde_json::json!({ "from": preferred, "to": port }),
+                )
+            });
+            return Ok((listener, port));
+        }
+    }
+    Err(format!(
+        "端口 {preferred} 已被占用，且 {MCP_PORT_SCAN_START}-{MCP_PORT_SCAN_END} 没有空闲端口"
+    ))
+}
+
+pub async fn run_mcp_server() {
+    loop {
+        let _ = MCP_RESTART_REQUESTED.swap(false, Ordering::SeqCst);
+        let port = configured_mcp_port();
+        match start_mcp_server(port).await {
+            Ok(()) => MCP_BIND_ERROR_REPORTED.store(false, Ordering::SeqCst),
+            Err(error) => {
+                log::error!("[MCP] {}", error);
+                report_port_unavailable(port, &error);
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+        }
+    }
+}
+
+static MCP_BIND_ERROR_REPORTED: AtomicBool = AtomicBool::new(false);
+
+fn report_port_unavailable(port: u16, message: &str) {
+    if MCP_BIND_ERROR_REPORTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let _ = crate::state::with_app_handle(|app| {
+        app.emit(
+            "mcp-port-unavailable",
+            serde_json::json!({ "port": port, "message": message }),
+        )
+    });
+}
+
+/// Start the MCP HTTP server on the specified port.
+/// This runs as a background task.
+pub async fn start_mcp_server(port: u16) -> Result<(), String> {
+    let (listener, bound) = bind_mcp_listener(port).await?;
+    let capability_level = load_mcp_config()
+        .and_then(|config| crate::commands::mcp::normalize_capability(&config.capability_level))
+        .unwrap_or("read")
+        .to_string();
+    if bound >= 1024 {
+        save_mcp_config(&McpConfig {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            http_port: bound,
+            installed_at: chrono::Utc::now().to_rfc3339(),
+            capability_level,
+        })?;
+        crate::state::MCP_ACTIVE_PORT.store(bound, Ordering::Relaxed);
+        if let Err(error) = crate::commands::mcp::sync_installed_client_configs() {
+            log::warn!("[MCP] Could not refresh client config: {}", error);
+        }
+    }
+    if MCP_BIND_ERROR_REPORTED.swap(false, Ordering::SeqCst) {
+        let _ = crate::state::with_app_handle(|app| {
+            app.emit("mcp-port-available", serde_json::json!({ "port": bound }))
+        });
+    }
+    log::info!("[MCP] Listening on 127.0.0.1:{bound}");
+    let (sender, receiver) = oneshot::channel();
+    if let Ok(mut slot) = MCP_SHUTDOWN.lock() {
+        *slot = Some(sender);
+    }
+    if MCP_RESTART_REQUESTED.swap(false, Ordering::SeqCst) {
+        return Ok(());
+    }
     let router = build_api_router(None);
-
-    let listener = TcpListener::bind(addr)
-        .await
-        .map_err(|e| format!("Failed to bind MCP server: {}", e))?;
-
     serve(listener, router)
+        .with_graceful_shutdown(async move {
+            let _ = receiver.await;
+        })
         .await
         .map_err(|e| format!("MCP server error: {}", e))?;
-
     Ok(())
 }
 
@@ -5182,7 +5409,7 @@ mod http_server_coverage_tests {
         .await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(capability["success"], true);
-        assert_eq!(load_mcp_config().unwrap().capability_level, "advanced");
+        assert_eq!(load_mcp_config().unwrap().capability_level, "operate");
     }
 
     #[serial]
@@ -5476,7 +5703,7 @@ mod http_server_coverage_tests {
 
     #[serial]
     #[tokio::test]
-    async fn mcp_server_start_attempt_saves_config_and_never_hangs() {
+    async fn mcp_server_start_attempt_registers_real_port_and_never_hangs() {
         let _serial = lock_coverage_tests();
         let guard = TempConfigRootGuard::new(crate::types::GlobalConfig::default());
         let handle = tokio::spawn(start_mcp_server(0));
@@ -5486,7 +5713,8 @@ mod http_server_coverage_tests {
             assert!(result.unwrap_err().contains("Failed to bind MCP server"));
         } else {
             handle.abort();
-            assert!(guard.mcp_config_path().exists());
+            // 端口 0 是临时端口，不能写进登记文件，否则客户端会去连一个不存在的端口。
+            assert!(!guard.mcp_config_path().exists());
         }
     }
 

@@ -230,8 +230,11 @@ pub struct GlobalConfig {
     // NEW: commit message 生成模型（None 时回退 DEFAULT_COMMIT_AI_MODEL）
     #[serde(default)]
     pub commit_ai_model: Option<String>,
+    #[serde(default)]
+    pub usage_machine_id: Option<String>,
+    #[serde(default)]
+    pub usage_report_opt_in: bool,
 }
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CustomMirror {
     pub name: String,
@@ -278,6 +281,8 @@ impl Default for GlobalConfig {
             commit_ai_api_key: None,
             commit_ai_enabled: true,
             commit_ai_model: None,
+            usage_machine_id: None,
+            usage_report_opt_in: false,
         }
     }
 }

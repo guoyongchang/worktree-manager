@@ -79,7 +79,7 @@ pub async fn start_sharing_internal(
         ));
     }
 
-    if port == crate::state::MCP_SERVER_PORT {
+    if port == crate::state::MCP_SERVER_PORT || port == crate::http_server::configured_mcp_port() {
         log::warn!(
             "[sharing] Rejected: port {} conflicts with MCP server",
             port

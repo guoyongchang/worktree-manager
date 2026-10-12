@@ -19,7 +19,7 @@ import type {
 import { OscParser } from '../shell-integration/osc-parser'
 import { CommandDetection } from '../shell-integration/command-detection'
 import type { CommandInfo } from '../shell-integration/types'
-import { shouldSkipWebglRenderer } from './webgl-support'
+import { probeWebgl2, shouldUseWebglRenderer } from './webgl-support'
 
 const XTERM_THEME = {
   background: '#0f172a',
@@ -97,9 +97,9 @@ export class XtermAdapter implements TerminalAdapter {
     term.unicode.activeVersion = '11'
 
     // WebGL: GPU-accelerated rendering with fallback.
-    // WebKit (Tauri macOS WKWebView, Safari, iOS, WebKitGTK) loads WebglAddon
-    // without error but paints a blank screen.
-    if (!shouldSkipWebglRenderer(navigator.userAgent, navigator.platform, navigator.maxTouchPoints)) {
+    // auto mode keeps WebKit on the DOM renderer (WebglAddon used to paint blank
+    // there); `wm_terminal_renderer=webgl` in localStorage forces it for testing.
+    if (shouldUseWebglRenderer(navigator.userAgent, navigator.platform, navigator.maxTouchPoints)) {
       try {
         const webglAddon = new WebglAddon()
         webglAddon.onContextLoss(() => {
@@ -274,7 +274,7 @@ export class XtermAdapter implements TerminalAdapter {
   }
 
   getDebugInfo(): Record<string, string> {
-    const renderer = this.webglAddon ? 'WebGL' : 'Canvas'
+    const renderer = this.webglAddon ? 'WebGL' : 'DOM'
     const unicodeVersion = this.term?.unicode.activeVersion ?? 'unknown'
     const addons: string[] = []
     if (this.webglAddon) addons.push('WebGL')
@@ -285,6 +285,7 @@ export class XtermAdapter implements TerminalAdapter {
     const fontFamily = this.term?.options.fontFamily ?? 'unknown'
     return {
       'Renderer': renderer,
+      'WebGL probe': probeWebgl2().detail,
       'Font': `${fontFamily} @ ${fontSize}px`,
       'Unicode Version': unicodeVersion,
       'Loaded Add-ons': addons.join(', ') || 'none',

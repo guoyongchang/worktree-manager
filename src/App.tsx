@@ -6,6 +6,7 @@ import {
   AddWorkspaceModal,
   CreateWorktreeModal,
   AddProjectToWorktreeModal,
+  McpConfirmDialog,
   ArchiveConfirmationModal,
   CrashReportModal,
   WorktreeContextMenu,
@@ -186,6 +187,7 @@ function App() {
           onAddWorkspace={() => modals.setModal('showAddWorkspaceModal', true)}
           onCreateWorkspace={() => modals.setModal('showAddWorkspaceModal', true)}
         />
+        <McpConfirmDialog />
         <AddWorkspaceModal
           open={modals.showAddWorkspaceModal}
           onOpenChange={(v) => modals.setModal('showAddWorkspaceModal', v)}
@@ -432,6 +434,7 @@ function App() {
             onClose={() => setCrashReport(null)}
           />
         )}
+        <McpConfirmDialog />
       </>
     </ToastProvider >
   );

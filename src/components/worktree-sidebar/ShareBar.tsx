@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/tooltip';
 
 import type { ConnectedClient } from '../../lib/backend';
+import { copyText } from '../../lib/clipboard';
 import {
   CheckCircleIcon,
   CopyIcon,
@@ -104,6 +105,7 @@ export const ShareBar: FC<ShareBarProps> = ({
   const [passwordDirty, setPasswordDirty] = useState(false);
   const [passwordConfirmed, setPasswordConfirmed] = useState(false);
   const [showShareDialog, setShowShareDialog] = useState(false);
+  const [shareTipOpen, setShareTipOpen] = useState(false);
   const [sharePort, setSharePort] = useState<number>(0);
   const [portError, setPortError] = useState<string | null>(null);
   const [kickingSessionId, setKickingSessionId] = useState<string | null>(null);
@@ -296,12 +298,15 @@ export const ShareBar: FC<ShareBarProps> = ({
 
       <div className="flex items-center justify-between pt-1">
         <TooltipProvider delayDuration={300}>
-          <Tooltip>
+          <Tooltip open={shareTipOpen && !showShareDialog} onOpenChange={setShareTipOpen}>
             <TooltipTrigger asChild>
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={handleOpenShareDialog}
+                onClick={() => {
+                  setShareTipOpen(false);
+                  handleOpenShareDialog();
+                }}
                 className="h-6 w-6 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
               >
                 <SettingsIcon className="w-3 h-3" />
@@ -630,7 +635,7 @@ const QrActions: FC<{
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => navigator.clipboard.writeText(url)}
+              onClick={() => void copyText(url)}
               className="h-5 w-5"
             >
               <CopyIcon className="w-3 h-3" />
@@ -676,7 +681,7 @@ const LanUrls: FC<{
                   <Button
                     variant="ghost"
                     size="icon"
-                    onClick={() => navigator.clipboard.writeText(lanUrl)}
+                    onClick={() => void copyText(lanUrl)}
                     className="h-5 w-5"
                   >
                     <CopyIcon className="w-3 h-3" />
@@ -689,7 +694,7 @@ const LanUrls: FC<{
                   <Button
                     variant="ghost"
                     size="icon"
-                    onClick={() => navigator.clipboard.writeText(`${lanUrl}#pwd=${encodeURIComponent(password)}`)}
+                    onClick={() => void copyText(`${lanUrl}#pwd=${encodeURIComponent(password)}`)}
                     className="h-5 w-5 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
                   >
                     <LinkIcon className="w-3 h-3" />
@@ -787,7 +792,7 @@ const PasswordRow: FC<{
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => navigator.clipboard.writeText(password)}
+                  onClick={() => void copyText(password)}
                   className="h-5 w-5"
                 >
                   <CopyIcon className="w-3 h-3" />

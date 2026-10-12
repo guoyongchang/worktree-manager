@@ -98,6 +98,11 @@ export const WelcomeView: FC<WelcomeViewProps> = ({ onAddWorkspace, onCreateWork
               {t('welcome.createNew')}
             </Button>
           </div>
+          <div className="p-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-surface)] text-left">
+            <div className="text-sm font-medium">{t('welcome.mcpTitle')}</div>
+            <p className="mt-1 text-xs leading-5 text-[var(--color-text-secondary)]">{t('welcome.mcpDesc')}</p>
+            <code className="mt-2 block break-all rounded bg-[var(--color-bg-base)] px-2 py-1 text-[11px]">npx -y @worktree-manager/mcp</code>
+          </div>
 
           <p className="text-xs text-[var(--color-text-muted)]">
             {t('welcome.hint')}

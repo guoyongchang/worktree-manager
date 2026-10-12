@@ -597,7 +597,7 @@ pub fn list_worktrees_impl(
         return Ok(vec![]);
     }
 
-    let result = scan_worktrees_dir(&worktrees_path, &config, include_archived);
+    let result = scan_worktrees_dir(&workspace_path, &worktrees_path, &config, include_archived);
     log::info!("list_worktrees took {:?}", start.elapsed());
     result
 }
@@ -615,7 +615,7 @@ pub(crate) async fn list_worktrees(
             if !worktrees_path.exists() {
                 return Ok(vec![]);
             }
-            scan_worktrees_dir(&worktrees_path, &config, include_archived)
+            scan_worktrees_dir(&path, &worktrees_path, &config, include_archived)
         })
         .await
         .map_err(|e| format!("Task join error: {}", e))?
@@ -745,6 +745,7 @@ fn project_status_from_info(
 }
 
 fn scan_worktrees_dir(
+    workspace_path: &str,
     dir: &PathBuf,
     config: &crate::types::WorkspaceConfig,
     include_archived: bool,
@@ -792,6 +793,14 @@ fn scan_worktrees_dir(
         let projects_path = path.join("projects");
         if !projects_path.exists() || !projects_path.is_dir() {
             continue;
+        }
+        if !path.join(WORKTREE_LOCAL_FILE).exists() {
+            let _ = write_worktree_local(
+                workspace_path,
+                config,
+                &name,
+                mapping.get(&name).map(String::as_str),
+            );
         }
         let wt_idx = shells.len();
         shells.push(WtShell {
@@ -1141,6 +1150,60 @@ fn setup_project_worktree(
 
     Ok(())
 }
+const WORKTREE_LOCAL_FILE: &str = ".worktree.local.json";
+
+fn write_worktree_local(
+    workspace_path: &str,
+    config: &crate::types::WorkspaceConfig,
+    folder_name: &str,
+    display_name: Option<&str>,
+) -> Result<(), String> {
+    let root = PathBuf::from(workspace_path);
+    let worktree_path = root.join(&config.worktrees_dir).join(folder_name);
+    let projects_dir = worktree_path.join("projects");
+    let mut projects = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&projects_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if name.starts_with('.') {
+                continue;
+            }
+            let proj = config.projects.iter().find(|p| p.name == name);
+            projects.push(serde_json::json!({
+                "name": name,
+                "path": normalize_path(&path.to_string_lossy()),
+                "main_path": normalize_path(&root.join("projects").join(name).to_string_lossy()),
+                "base_branch": proj.map(|p| p.base_branch.as_str()).unwrap_or("main"),
+                "test_branch": proj.map(|p| p.test_branch.as_str()).unwrap_or("test"),
+            }));
+        }
+    }
+    projects.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+    let file = serde_json::json!({
+        "kind": "worktree",
+        "name": display_name.unwrap_or(folder_name),
+        "folder": folder_name,
+        "path": normalize_path(&worktree_path.to_string_lossy()),
+        "open_here": true,
+        "guidance": "在本目录打开 AI 工具，不要进入 projects/。文档和 projects 平级。 Open the agent here, not inside projects/. Docs sit beside projects.",
+        "workspace": {
+            "name": config.name,
+            "path": normalize_path(workspace_path),
+            "worktrees_dir": config.worktrees_dir,
+            "main_projects_dir": normalize_path(&root.join("projects").to_string_lossy()),
+        },
+        "projects": projects,
+    });
+    let text = serde_json::to_string_pretty(&file).map_err(|e| e.to_string())?;
+    std::fs::write(worktree_path.join(WORKTREE_LOCAL_FILE), text)
+        .map_err(|e| friendly_fs_error("无法写入 .worktree.local.json", &e))
+}
 
 pub fn create_worktree_impl(
     window_label: &str,
@@ -1288,6 +1351,12 @@ pub fn create_worktree_impl(
         );
     }
 
+    write_worktree_local(
+        &workspace_path,
+        &config,
+        actual_folder_name,
+        Some(&request.name),
+    )?;
     log::info!(
         "[worktree] Successfully created worktree '{}' (folder: '{}') with {} projects",
         request.name,
@@ -2501,6 +2570,12 @@ pub fn add_project_to_worktree_impl(
         }
     }
 
+    let _ = write_worktree_local(
+        &workspace_path,
+        &config,
+        &request.worktree_name,
+        mapping.get(&request.worktree_name).map(String::as_str),
+    );
     log::info!(
         "Successfully added project '{}' to worktree '{}'",
         request.project_name,
@@ -3295,6 +3370,32 @@ mod tests {
         assert!(!saved
             .archived_worktrees
             .contains(&"restore_feature".to_string()));
+    }
+
+    #[test]
+    fn write_worktree_local_describes_the_requirement_root() {
+        let workspace = tempfile::tempdir().expect("create workspace");
+        let folder = workspace.path().join("worktrees").join("feature-pay");
+        std::fs::create_dir_all(folder.join("projects").join("api")).expect("create project dir");
+        let config = workspace_config(vec![project_config("api")]);
+        write_worktree_local(
+            workspace.path().to_str().unwrap(),
+            &config,
+            "feature-pay",
+            Some("支付需求"),
+        )
+        .expect("write local descriptor");
+        let text =
+            std::fs::read_to_string(folder.join(".worktree.local.json")).expect("read descriptor");
+        let value: serde_json::Value = serde_json::from_str(&text).expect("parse descriptor");
+        assert_eq!(value["kind"], "worktree");
+        assert_eq!(value["name"], "支付需求");
+        assert_eq!(value["folder"], "feature-pay");
+        assert_eq!(value["projects"][0]["name"], "api");
+        assert!(value["guidance"]
+            .as_str()
+            .unwrap_or("")
+            .contains("projects"));
     }
 
     #[serial]

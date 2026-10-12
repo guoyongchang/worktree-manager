@@ -6,23 +6,46 @@ import type { CapabilityLevel, TransportMode, WorkspaceRef } from '../types.js';
 
 const GLOBAL_CONFIG_PATH = '.config/worktree-manager/global.json';
 
-// mcp.json 路径 + capability_level 的读取/校验/默认值（server.ts 与 index.ts 共用，避免重复）
+// mcp.json 路径 + capability_level / http_port 的读取（server.ts 与 index.ts 共用）
 export const MCP_CONFIG_PATH = join(homedir(), '.config', 'worktree-manager', 'mcp.json');
-const VALID_CAPABILITY_LEVELS: readonly CapabilityLevel[] = ['core', 'details', 'advanced'];
+const DEFAULT_HTTP_PORT = 42819;
 
-export function isCapabilityLevel(v: unknown): v is CapabilityLevel {
-  return typeof v === 'string' && (VALID_CAPABILITY_LEVELS as readonly string[]).includes(v);
+export function normalizeCapability(value: unknown): CapabilityLevel | null {
+  if (value === 'operate' || value === 'advanced') return 'operate';
+  if (value === 'read' || value === 'core' || value === 'details') return 'read';
+  return null;
 }
 
-// 读取 mcp.json 的 capability_level；文件缺失/非法/解析失败时回退到 fallback（默认 'details'）
-export function readCapabilityLevel(fallback: CapabilityLevel = 'details'): CapabilityLevel {
+export function isCapabilityLevel(v: unknown): v is CapabilityLevel {
+  return normalizeCapability(v) !== null;
+}
+
+export function readCapabilityLevel(fallback: CapabilityLevel = 'read'): CapabilityLevel {
   try {
     if (existsSync(MCP_CONFIG_PATH)) {
       const cfg = JSON.parse(readFileSync(MCP_CONFIG_PATH, 'utf-8'));
-      if (isCapabilityLevel(cfg?.capability_level)) return cfg.capability_level;
+      return normalizeCapability(cfg?.capability_level) ?? fallback;
     }
   } catch {}
   return fallback;
+}
+
+export function readSavedHttpPort(fallback = DEFAULT_HTTP_PORT): number {
+  try {
+    if (existsSync(MCP_CONFIG_PATH)) {
+      const cfg = JSON.parse(readFileSync(MCP_CONFIG_PATH, 'utf-8'));
+      const port = Number(cfg?.http_port);
+      if (Number.isInteger(port) && port >= 1024 && port <= 65535) return port;
+    }
+  } catch {}
+  return fallback;
+}
+
+export function readHttpPort(fallback = DEFAULT_HTTP_PORT): number {
+  const index = process.argv.indexOf('--port');
+  const fromArg = index < 0 ? Number.NaN : Number(process.argv[index + 1]);
+  if (Number.isInteger(fromArg) && fromArg >= 1024 && fromArg <= 65535) return fromArg;
+  return readSavedHttpPort(fallback);
 }
 
 // Base transport interface for common operations
@@ -63,6 +86,11 @@ export interface Transport extends BaseTransport {
   syncWithBase(projectPath: string, baseBranch: string): Promise<unknown>;
   mergeToTest(projectPath: string, testBranch: string): Promise<unknown>;
   mergeToBase(projectPath: string, baseBranch: string): Promise<unknown>;
+  requestConfirm(action: string, summary: string): Promise<void>;
+  createWorkspace(name: string, path: string): Promise<unknown>;
+  removeWorkspace(path: string): Promise<unknown>;
+  restoreWorktree(name: string): Promise<unknown>;
+  deployToMain(worktreeName: string): Promise<unknown>;
 }
 
 export class ConfigTransport implements BaseTransport {

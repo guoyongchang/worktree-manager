@@ -431,7 +431,117 @@ pub(crate) async fn cloud_disconnect() -> Result<(), String> {
 
     Ok(())
 }
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TimeSavedReport {
+    #[serde(default)]
+    total_minutes: f64,
+    #[serde(default)]
+    today_minutes: f64,
+    #[serde(default)]
+    counts: serde_json::Value,
+}
 
+fn usage_machine_id() -> Result<String, String> {
+    let mut config = load_global_config();
+    if let Some(id) = config.usage_machine_id.clone().filter(|id| !id.is_empty()) {
+        return Ok(id);
+    }
+    let id = uuid::Uuid::new_v4().to_string();
+    config.usage_machine_id = Some(id.clone());
+    save_global_config_internal(&config)?;
+    Ok(id)
+}
+
+#[tauri::command]
+pub(crate) fn get_usage_report_enabled() -> bool {
+    load_global_config().usage_report_opt_in
+}
+
+#[tauri::command]
+pub(crate) fn set_usage_report_enabled(enabled: bool) -> Result<(), String> {
+    let mut config = load_global_config();
+    config.usage_report_opt_in = enabled;
+    save_global_config_internal(&config)
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct UsageReportResult {
+    pub skipped: bool,
+    pub request: serde_json::Value,
+    pub status: u16,
+    pub response: String,
+}
+
+#[tauri::command]
+pub(crate) fn get_usage_machine_id() -> Result<String, String> {
+    usage_machine_id()
+}
+
+#[tauri::command]
+pub(crate) fn reset_usage_machine_id() -> Result<String, String> {
+    let mut config = load_global_config();
+    let id = uuid::Uuid::new_v4().to_string();
+    config.usage_machine_id = Some(id.clone());
+    save_global_config_internal(&config)?;
+    Ok(id)
+}
+
+/// POST /api/usage/time-saved with machine id, minutes, and operation counts only.
+#[tauri::command]
+pub(crate) async fn report_time_saved(
+    report: TimeSavedReport,
+) -> Result<UsageReportResult, String> {
+    let config = load_global_config();
+    if !config.usage_report_opt_in {
+        return Ok(UsageReportResult {
+            skipped: true,
+            request: serde_json::json!({}),
+            status: 0,
+            response: String::new(),
+        });
+    }
+    let machine_id = usage_machine_id()?;
+    let server = config
+        .cloud
+        .server_url
+        .clone()
+        .unwrap_or_else(|| DEFAULT_WMS_URL.to_string());
+    let url = format!("{}/api/usage/time-saved", server.trim_end_matches('/'));
+    let body = serde_json::json!({
+        "machineId": machine_id,
+        "totalMinutes": report.total_minutes,
+        "todayMinutes": report.today_minutes,
+        "counts": report.counts,
+    });
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .map_err(|e| e.to_string())?;
+    match client.post(&url).json(&body).send().await {
+        Ok(resp) => {
+            let status = resp.status().as_u16();
+            let text = resp.text().await.unwrap_or_default();
+            let response = text.chars().take(500).collect::<String>();
+            if !(200..300).contains(&status) {
+                log::warn!("[usage] time-saved report status {}", status);
+            }
+            Ok(UsageReportResult {
+                skipped: false,
+                request: body,
+                status,
+                response,
+            })
+        }
+        Err(e) => Ok(UsageReportResult {
+            skipped: false,
+            request: body,
+            status: 0,
+            response: e.to_string(),
+        }),
+    }
+}
 #[cfg(test)]
 pub(crate) fn clear_pairing_state_for_test() {
     let mut state = PAIRING_STATE

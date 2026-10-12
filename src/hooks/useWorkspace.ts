@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { callBackend, isTauri, updateWorktreeColor as updateWorktreeColorBackend } from '../lib/backend';
 import { useCellContext } from '../contexts/CellContext';
 import { getPreferredExternalTerminal, getShellForTerminalLaunch, logTerminalPreferenceDebugInfo } from '../lib/terminalPreferences';
+import { recordWorkspaceSwitch, recordBranchSwitch } from '../lib/timeSaved';
+import { recordActivity } from '../lib/timeSaved';
 import type {
   WorkspaceRef,
   WorkspaceConfig,
@@ -26,7 +28,7 @@ export interface UseWorkspaceReturn {
   error: string | null;
   setError: (error: string | null) => void;
   loadWorkspaces: () => Promise<void>;
-  loadData: (options?: { silent?: boolean }) => Promise<void>;
+  loadData: (options?: { silent?: boolean }) => Promise<WorkspaceConfig | undefined>;
   refreshWithFetch: () => Promise<void>;
   switchWorkspace: (path: string) => Promise<void>;
   addWorkspace: (name: string, path: string) => Promise<void>;
@@ -118,7 +120,7 @@ export function useWorkspace(ready = true, initialWorkspacePath?: string, shellM
     }
   }, [explicitPath]);
 
-  const loadData = useCallback(async (options?: { silent?: boolean }) => {
+  const loadData = useCallback(async (options?: { silent?: boolean }): Promise<WorkspaceConfig | undefined> => {
     const version = ++loadVersion.current;
     const t0 = performance.now();
     const showSpinner = !options?.silent && initialLoadDone.current;
@@ -149,6 +151,7 @@ export function useWorkspace(ready = true, initialWorkspacePath?: string, shellM
       setConfigPath(path);
       initialLoadDone.current = true;
       console.log(`[ws] loadData: ${(performance.now() - t0).toFixed(1)}ms (${wts.length} worktrees)`);
+      return cfg;
     } catch (e) {
       if (version !== loadVersion.current) return;
       setError(String(e));
@@ -195,7 +198,8 @@ export function useWorkspace(ready = true, initialWorkspacePath?: string, shellM
       await callBackend("switch_workspace", { path, ...extra });
       console.log(`[ws]   backend switch: ${(performance.now() - t1).toFixed(1)}ms`);
       // loadWorkspaces and loadData are independent after switch — run in parallel
-      await Promise.all([loadWorkspaces(), loadData()]);
+      const [, loaded] = await Promise.all([loadWorkspaces(), loadData()]);
+      recordWorkspaceSwitch(loaded?.projects.length ?? 0);
       console.log(`[ws] switchWorkspace total: ${(performance.now() - t0).toFixed(1)}ms`);
     } catch (e) {
       setError(String(e));
@@ -232,6 +236,7 @@ export function useWorkspace(ready = true, initialWorkspacePath?: string, shellM
 
   const createWorktree = useCallback(async (name: string, projects: CreateProjectRequest[], folderName?: string) => {
     await callBackend("create_worktree", { request: { name, folderName: folderName || null, projects } });
+    recordActivity('create');
     await loadData();
   }, [loadData]);
 
@@ -249,6 +254,7 @@ export function useWorkspace(ready = true, initialWorkspacePath?: string, shellM
 
   const archiveWorktree = useCallback(async (name: string) => {
     await callBackend("archive_worktree", { name });
+    recordActivity('archive');
     await loadData();
   }, [loadData]);
 
@@ -318,6 +324,7 @@ export function useWorkspace(ready = true, initialWorkspacePath?: string, shellM
   const switchBranch = useCallback(async (projectPath: string, branch: string) => {
     try {
       await callBackend("switch_branch", { request: { project_path: projectPath, branch } });
+      recordBranchSwitch();
       await loadData();
     } catch (e) {
       setError(String(e));

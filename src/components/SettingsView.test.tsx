@@ -202,6 +202,17 @@ describe('SettingsToggle', () => {
     const toggle = screen.getByRole('switch', { name: 'AI 精炼' });
     expect(toggle).toHaveAttribute('aria-checked', 'true');
     expect(toggle).toHaveClass('h-5', 'w-8', 'shrink-0');
-    expect(toggle.firstElementChild).toHaveClass('h-3', 'w-3', 'translate-x-3.5');
+    expect(toggle.firstElementChild).toHaveClass('h-3', 'w-3', 'translate-x-4');
+  });
+
+  it('keeps the same 4px inset on both sides of the knob', () => {
+    // track 32px wide, knob 12px: off x = 4px, on x = 32 - 12 - 4 = 16px
+    const { rerender } = render(
+      <SettingsToggle checked={false} onChange={() => {}} ariaLabel="GPU 加速" />,
+    );
+    expect(screen.getByRole('switch').firstElementChild).toHaveClass('translate-x-1');
+
+    rerender(<SettingsToggle checked onChange={() => {}} ariaLabel="GPU 加速" />);
+    expect(screen.getByRole('switch').firstElementChild).toHaveClass('translate-x-4');
   });
 });

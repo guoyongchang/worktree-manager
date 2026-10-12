@@ -33,13 +33,14 @@ npx -y @worktree-manager/mcp uninstall
 
 ## Capability Levels
 
-Tools are grouped into three capability levels. The default level is **`details`** (all read tools enabled). Write tools require explicit opt-in to `advanced`.
+The desktop app exposes two permissions. The MCP process reads `capability_level` from `~/.config/worktree-manager/mcp.json`.
 
 | Level | What's available | Requires |
 |-------|-----------------|----------|
-| `core` | Basic workspace/worktree read tools (stdio or HTTP) | Always available |
-| `details` | All core tools + project/branch read tools | HTTP transport (Worktree Manager app running) |
-| `advanced` | All of the above + write/git tools | HTTP transport + explicit user opt-in |
+| `read` | Workspace, worktree, branch, and diff reads | Desktop app for branch/diff tools |
+| `operate` | Everything in `read`, plus create, commit, merge, and other writes | Desktop app. Archive, restore, and delete wait for the desktop confirmation dialog |
+
+Older configs may still say `core`, `details`, or `advanced`. Those are read as `read`, `read`, and `operate`.
 
 ### Changing the Capability Level
 
@@ -48,20 +49,21 @@ Tools are grouped into three capability levels. The default level is **`details`
 ```json
 // ~/.config/worktree-manager/mcp.json
 {
-  "capability_level": "advanced"
+  "capability_level": "operate",
+  "http_port": 42819
 }
 ```
 
-Valid values: `"core"`, `"details"`, `"advanced"`. The server reads this file on startup; restart the MCP server after editing.
+Valid values: `"read"`, `"operate"`. The server reads this file on startup; restart the MCP server after editing. `http_port` defaults to `42819` and can be changed in the desktop app. The MCP process uses the saved port and does not reset it on startup.
 
 **Option B — Via the Worktree Manager desktop app:**
 
-Call the REST endpoint while the app is running:
+Use the MCP settings page, or call the REST endpoint while the app is running:
 
 ```bash
 curl -X POST http://127.0.0.1:42819/api/mcp/set_capability \
   -H 'Content-Type: application/json' \
-  -d '{"capability_level": "advanced"}'
+  -d '{"capability_level": "operate"}'
 ```
 
 > The capability setting is **preserved** across desktop app restarts and MCP server reinstalls — it is never silently reset.
@@ -105,7 +107,7 @@ Returns `null` fields when the directory is not inside any configured workspace.
 
 ### Layer 2 — Details (Requires HTTP Transport)
 
-Requires the Worktree Manager desktop app to be running (`capability_level` = `details` or `advanced`).
+Requires the Worktree Manager desktop app to be running (`capability_level` = `read` or `operate`).
 
 | Tool | Description |
 |------|-------------|
@@ -143,7 +145,7 @@ Requires the Worktree Manager desktop app to be running (`capability_level` = `d
 
 ---
 
-### Layer 3 — Advanced (Requires HTTP Transport + `capability_level: advanced`)
+### Layer 3 — Operate (Requires HTTP Transport + `capability_level: operate`)
 
 Write tools that can trigger destructive git operations. See the [Trust Boundary](#trust-boundary) section below before enabling.
 
@@ -225,10 +227,10 @@ The MCP data backend runs at `127.0.0.1:42819` and is **bound to localhost with 
 
 This is an intentional design choice for local developer tooling. The practical implications:
 
-- `details` (read tools): low risk — read-only data, no state changes
-- `advanced` (write tools): can trigger git commits, pushes, branch switches, and merges
+- `read`: low risk — read-only data, no state changes
+- `operate`: can trigger git commits, pushes, branch switches, and merges
 
-**Only set `capability_level: advanced` in trusted, single-user local environments.** Do not expose port 42819 to a network or run with `advanced` capability on shared machines.
+**Only set `capability_level: operate` in trusted, single-user local environments.** Do not expose the MCP port to a network or run with operate permission on shared machines.
 
 ---
 
@@ -236,11 +238,13 @@ This is an intentional design choice for local developer tooling. The practical 
 
 ```
 Claude Code/Codex ←→ MCP Protocol ←→ @worktree-manager/mcp ←→ Worktree Manager App
-                              (HTTP:42819)
+                        (HTTP: port registered in mcp.json, default 42819)
 ```
 
-When Worktree Manager desktop app is running → real-time data via HTTP (details + advanced tools available).
-When app is not running → reads from config file fallback (core tools only, no write tools).
+When Worktree Manager desktop app is running → real-time data via HTTP (read + operate tools available).
+When app is not running → reads from config file fallback (read-only core tools, no write tools).
+
+The MCP process reads the registered port from `~/.config/worktree-manager/mcp.json`; if that port is not answering, it scans `42800-42900` and connects to the app it finds. If the app has to move ports, it registers the new one.
 
 ---
 

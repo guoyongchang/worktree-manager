@@ -4,7 +4,15 @@
   "description": "MCP server for Worktree Manager",
   "repository": {
     "type": "git",
-    "url": "https://github.com/guoyongchang/worktree-manager"
+    "url": "git+https://github.com/guoyongchang/worktree-manager.git",
+    "directory": "packages/mcp"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "type": "module",
   "bin": {
@@ -12,8 +20,8 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "tsc && node --test dist/tools/safety.test.js",
-    "prepublish": "npm run build"
+    "test": "tsc && node --test dist/tools/*.test.js",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

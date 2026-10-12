@@ -3,9 +3,29 @@ import type { TransportMode } from '../types.js';
 import type { Transport } from './config.js';
 
 const DEFAULT_PORT = 42819;
+const SCAN_START = 42800;
+const SCAN_END = 42900;
 const WRITE_TIMEOUT = 60000; // 写/网络操作（merge/push/pull/sync/commit）用更长超时
 const FETCH_TIMEOUT = 30000; // git fetch 真实耗时 3-6s，默认 5s 易超时
 
+export async function discoverHttpPort(preferred = DEFAULT_PORT): Promise<number> {
+  if (await isWorktreeManager(preferred)) return preferred;
+  for (let start = SCAN_START; start <= SCAN_END; start += 20) {
+    const batch = Array.from({ length: Math.min(20, SCAN_END - start + 1) }, (_, index) => start + index);
+    const found = (await Promise.all(batch.map(async (port) => (await isWorktreeManager(port) ? port : 0)))).find((port) => port > 0);
+    if (found) return found;
+  }
+  return preferred;
+}
+
+async function isWorktreeManager(port: number): Promise<boolean> {
+  try {
+    const response = await axios.post(`http://127.0.0.1:${port}/api/mcp/config`, {}, { timeout: 150 });
+    return response.status === 200 && typeof response.data?.http_port === 'number';
+  } catch {
+    return false;
+  }
+}
 export { Transport } from './config.js';
 
 export class HttpTransport implements Transport {
@@ -73,12 +93,12 @@ export class HttpTransport implements Transport {
   }
 
   async archiveWorktree(name: string): Promise<unknown> {
-    const res = await this.client.post('/archive_worktree', { name });
+    const res = await this.client.post('/mcp/archive_worktree', { name }, { timeout: 130000 });
     return res.data;
   }
 
   async deleteArchivedWorktree(name: string): Promise<unknown> {
-    const res = await this.client.post('/delete_archived_worktree', { name });
+    const res = await this.client.post('/mcp/delete_archived_worktree', { name }, { timeout: 130000 });
     return res.data;
   }
 
@@ -168,6 +188,30 @@ export class HttpTransport implements Transport {
       { path: projectPath, base_branch: baseBranch },
       { timeout: WRITE_TIMEOUT }
     );
+    return res.data;
+  }
+
+  async requestConfirm(action: string, summary: string): Promise<void> {
+    await this.client.post('/mcp/request_confirm', { action, summary }, { timeout: 130000 });
+  }
+
+  async createWorkspace(name: string, path: string): Promise<unknown> {
+    const res = await this.client.post('/create_workspace', { name, path });
+    return res.data;
+  }
+
+  async removeWorkspace(path: string): Promise<unknown> {
+    const res = await this.client.post('/remove_workspace', { path });
+    return res.data;
+  }
+
+  async restoreWorktree(name: string): Promise<unknown> {
+    const res = await this.client.post('/mcp/restore_worktree', { name }, { timeout: 130000 });
+    return res.data;
+  }
+
+  async deployToMain(worktreeName: string): Promise<unknown> {
+    const res = await this.client.post('/deploy_to_main', { worktree_name: worktreeName }, { timeout: WRITE_TIMEOUT });
     return res.data;
   }
 }

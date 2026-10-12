@@ -19,6 +19,7 @@ import {
 } from '@dnd-kit/sortable';
 
 import { openLink } from '@/lib/backend';
+import { TimeSavedHourglass } from '@/components/TimeSavedHourglass';
 import { useProcessMemory, writeMemoryWatchEnabled, writeMemoryWatchMb } from '@/hooks/useMemoryWatch';
 import { persistAndReload } from '@/lib/uiRestore';
 import { Button } from '@/components/ui/button';
@@ -334,8 +335,8 @@ export const ExpandedSidebar: FC<ExpandedSidebarProps> = ({
               </TooltipProvider>
             )}
           </div>
-        </div>
 
+        </div>
         <div className="px-4 py-3 border-b border-[var(--color-border)]">
           <div className="flex items-center justify-between">
             <h1 className="text-base font-semibold text-[var(--color-text-primary)]">Worktrees</h1>
@@ -713,10 +714,10 @@ const WorktreeList: FC<{
   }, [archivedWorktrees]);
 
   return (
-    <div className="flex-1 overflow-y-auto">
+    <div className="flex-1 overflow-x-hidden overflow-y-auto">
       <div className="px-4 py-2">
-        <div className="flex items-center justify-between">
-          <span className="shrink-0 text-[11px] font-medium text-[var(--color-text-muted)] uppercase tracking-wider">
+        <div className="relative h-7 min-w-0 overflow-hidden">
+          <span className="block truncate text-[11px] leading-7 font-medium text-[var(--color-text-muted)] uppercase tracking-wider">
             {t('sidebar.active')} ({activeWorktrees.length})
           </span>
           <Input
@@ -724,7 +725,7 @@ const WorktreeList: FC<{
             onChange={(event) => setActiveSearchQuery(event.target.value)}
             placeholder={t('sidebar.searchWorktrees')}
             aria-label={t('sidebar.searchWorktrees')}
-            className="h-7 w-[160px] text-xs"
+            className="absolute inset-y-0 right-0 z-10 h-7 w-[160px] max-w-full text-xs"
           />
         </div>
       </div>
@@ -973,6 +974,7 @@ const MemoryReloadTip: FC = () => {
   );
 };
 
+
 const SidebarBottomBar: FC<{
   appVersion: string;
   hasUpdate: boolean;
@@ -984,7 +986,6 @@ const SidebarBottomBar: FC<{
 }> = ({ appVersion, hasUpdate, isDev, isMainWin, isTauri, onCheckUpdate, onOpenLogDir }) => {
   const { t } = useTranslation();
   const [devConsoleEnabled, setDevConsoleEnabled] = useState(() => localStorage.getItem('dev-console-enabled') === 'true');
-
   useEffect(() => {
     const handler = () => {
       setDevConsoleEnabled(localStorage.getItem('dev-console-enabled') === 'true');
@@ -998,24 +999,26 @@ const SidebarBottomBar: FC<{
   }, []);
 
   return (
-    <div className="px-3 h-8 border-t border-[var(--color-border)] flex items-center justify-between shrink-0">
+    <div className="border-t border-[var(--color-border)] shrink-0">
+      <div className="relative h-8 overflow-hidden">
+        <div className="h-full px-3 flex items-center min-w-0">
       {isMainWin ? (
         isDev ? (
           <button
             onClick={() => { callBackend('open_devtools').catch(() => { /* ignore */ }); }}
-            className="text-xs text-[var(--color-warning)]/70 hover:text-[var(--color-warning)] transition-colors cursor-pointer font-mono"
+            className="text-xs text-[var(--color-warning)]/70 hover:text-[var(--color-warning)] transition-colors cursor-pointer font-mono whitespace-nowrap"
             title={t('sidebar.openDevTools')}
           >
             DEV
           </button>
         ) : (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             <TooltipProvider delayDuration={300}>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
                     onClick={onCheckUpdate}
-                    className="relative text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors cursor-pointer"
+                    className="relative text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors cursor-pointer whitespace-nowrap"
                   >
                     v{appVersion}
                     {hasUpdate && (
@@ -1031,7 +1034,7 @@ const SidebarBottomBar: FC<{
             {devConsoleEnabled && (
               <button
                 onClick={() => { callBackend('open_devtools').catch(() => { /* ignore */ }); }}
-                className="text-[10px] text-[var(--color-warning)]/70 hover:text-[var(--color-warning)] transition-colors cursor-pointer font-mono"
+                className="text-[10px] text-[var(--color-warning)]/70 hover:text-[var(--color-warning)] transition-colors cursor-pointer font-mono whitespace-nowrap"
                 title={t('sidebar.openDevTools')}
               >
                 DevTools
@@ -1042,8 +1045,9 @@ const SidebarBottomBar: FC<{
       ) : (
         <div />
       )}
-
-      <div className="flex items-center gap-1">
+        </div>
+        <div className="absolute inset-y-0 right-0 z-10 flex items-center gap-1 pl-2 pr-3 bg-[var(--color-bg-surface)]">
+        <TimeSavedHourglass />
         <TooltipProvider delayDuration={300}>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -1091,6 +1095,7 @@ const SidebarBottomBar: FC<{
             <TooltipContent side="top">GitHub</TooltipContent>
           </Tooltip>
         </TooltipProvider>
+        </div>
       </div>
     </div>
   );

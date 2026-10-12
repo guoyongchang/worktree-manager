@@ -881,6 +881,72 @@ export async function cloudGetStatus(): Promise<CloudStatus> {
   return callBackend('cloud_get_status')
 }
 
+export interface UsageReportResult {
+  skipped: boolean;
+  request: unknown;
+  status: number;
+  response: string;
+}
+
+export async function reportTimeSaved(report: {
+  todayMinutes: number;
+  totalMinutes: number;
+  counts: Record<string, number>;
+}): Promise<UsageReportResult> {
+  return callBackend('report_time_saved', { report });
+}
+
+export async function getUsageReportEnabled(): Promise<boolean> {
+  return callBackend('get_usage_report_enabled');
+}
+
+export async function setUsageReportEnabled(enabled: boolean): Promise<void> {
+  return callBackend('set_usage_report_enabled', { enabled });
+}
+
+export async function getUsageMachineId(): Promise<string> {
+  return callBackend('get_usage_machine_id');
+}
+
+export async function resetUsageMachineId(): Promise<string> {
+  return callBackend('reset_usage_machine_id');
+}
+
+export type McpCapability = 'read' | 'operate';
+export type McpClientId = 'claude' | 'claude-code' | 'claude-desktop' | 'cursor' | 'codex';
+
+export interface McpSettings {
+  capability_level: McpCapability;
+  http_port: number;
+  claude_installed: boolean;
+  claude_desktop_installed: boolean;
+  cursor_installed: boolean;
+  codex_installed: boolean;
+  claude_code_path: string;
+  claude_desktop_path: string;
+  cursor_path: string;
+  codex_path: string;
+}
+
+export async function getMcpSettings(): Promise<McpSettings> {
+  return callBackend('get_mcp_settings');
+}
+
+export async function setMcpCapability(capabilityLevel: McpCapability): Promise<void> {
+  return callBackend('set_mcp_capability', { capabilityLevel });
+}
+
+export async function setMcpPort(port: number): Promise<void> {
+  return callBackend('set_mcp_port', { port });
+}
+
+export async function installMcpClient(client: McpClientId): Promise<string> {
+  return callBackend('install_mcp_client', { client });
+}
+
+export async function resolveMcpConfirm(id: string, approved: boolean): Promise<void> {
+  return callBackend('resolve_mcp_confirm', { id, approved });
+}
 export async function cloudStartPairing(): Promise<PairingInfo> {
   return callBackend('cloud_start_pairing')
 }

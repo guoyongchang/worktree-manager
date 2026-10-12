@@ -5,6 +5,7 @@ import { callBackend, isTauri, openLink, getPlatform } from '../lib/backend';
 import { getPreferredPtyShell, getTerminalPreferenceDebugInfo, logTerminalPreferenceDebugInfo } from '../lib/terminalPreferences';
 import { getWebSocketManager } from '../lib/websocket';
 import { TERMINAL } from '../constants';
+import { copyText } from '../lib/clipboard';
 import { TerminalRegistry } from '../terminal';
 import type { TerminalAdapter, Disposable, SearchOptions } from '../terminal';
 
@@ -302,7 +303,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
     if (adapterRef.current) {
       const selection = adapterRef.current.getSelection();
       if (selection) {
-        navigator.clipboard.writeText(selection).catch(() => {});
+        void copyText(selection);
       }
     }
     handleCloseContextMenu();
@@ -406,13 +407,9 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
     const text = Object.entries(debugInfo.data)
       .map(([key, value]) => `${key}: ${value}`)
       .join('\n');
-    try {
-      await navigator.clipboard.writeText(text);
-      setDebugInfoCopied(true);
-      window.setTimeout(() => setDebugInfoCopied(false), 1500);
-    } catch {
-      setDebugInfoCopied(false);
-    }
+    const ok = await copyText(text);
+    setDebugInfoCopied(ok);
+    if (ok) window.setTimeout(() => setDebugInfoCopied(false), 1500);
   }, [debugInfo.data]);
 
   const debugInfoRows = (() => {
@@ -462,7 +459,7 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
       adapter.selectAll();
       const selection = adapter.getSelection();
       if (selection) {
-        try { await navigator.clipboard.writeText(selection); } catch { /* noop */ }
+        await copyText(selection);
       }
       adapter.clearSelection();
     },

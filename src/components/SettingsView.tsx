@@ -31,11 +31,16 @@ import type { WorkspaceRef, WorkspaceConfig, ProjectConfig, ScannedFolder, Vault
 import { getAppVersion, getAppIcon, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, getVoiceAsrModel, setVoiceAsrModel as saveVoiceAsrModel, getVoiceRefineModel, setVoiceRefineModel as saveVoiceRefineModel, voiceStart, voiceStop, voiceRefineText, isTauri, getPlatform, getRemoteBranches, openLink, callBackend, loadWorkspaceConfigByPath, saveWorkspaceConfigByPath, getVaultStatus, vaultLink, listVaultItemChildren, getCommitPrefixConfig, setCommitPrefixConfig, getGitUserGlobalConfig, setGitUserGlobalConfig, getSkipGitHooks, setSkipGitHooks as saveSkipGitHooks, getShellIntegrationEnabled, setShellIntegrationEnabled as saveShellIntegrationEnabled, cloudGetStatus, cloudStartPairing, cloudCheckPairingStatus, cloudApprovePairing, cloudRejectPairing, cloudDisconnect, getCommitAiApiKey, setCommitAiApiKey as saveCommitAiApiKey, setCommitAiEnabled as saveCommitAiEnabled, getCommitAiEnabled, getCommitAiModel, setCommitAiModel as saveCommitAiModel, listDashscopeModels, getVoiceRefineBaseUrl, setVoiceRefineBaseUrl as saveVoiceRefineBaseUrl } from '../lib/backend';
 import type { CloudStatus, PairingStatus } from '../lib/backend';
 import { readIpcTimeoutMs, writeIpcTimeoutSeconds, DEFAULT_IPC_TIMEOUT_SECONDS, MIN_IPC_TIMEOUT_SECONDS } from '../lib/backend';
-
-const isWindowsPowerShellId = (id?: string) => id === 'powershell' || id === 'pwsh';
+import { getTimeSaved, readUsageReportLog } from '../lib/timeSaved';
+import { TimeSavedBreakdown } from './TimeSavedBreakdown';
+import { getUsageReportEnabled, setUsageReportEnabled, getUsageMachineId, resetUsageMachineId } from '../lib/backend';
+import { McpSettingsSection } from './McpSettingsSection';
+import { useTerminalRenderer } from '../hooks/useTerminalRenderer';
+import { Shield, Plug } from 'lucide-react';
 
 import { TAG_PRESET_COLORS } from '../constants';
 
+const isWindowsPowerShellId = (id?: string) => id === 'powershell' || id === 'pwsh';
 const formatCloudTokenExpiryUtc = (value: string) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
@@ -48,6 +53,15 @@ interface SettingsToggleProps {
   disabled?: boolean;
   ariaLabel: string;
   onChange: (checked: boolean) => void;
+}
+
+function readHiddenEditorIds(): string[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('hidden_editors') || '[]');
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
 }
 
 export const SettingsToggle: FC<SettingsToggleProps> = ({
@@ -71,7 +85,7 @@ export const SettingsToggle: FC<SettingsToggleProps> = ({
   >
     <span
       className={`inline-block h-3 w-3 rounded-full bg-white transition-transform ${
-        checked ? 'translate-x-3.5' : 'translate-x-0.5'
+        checked ? 'translate-x-4' : 'translate-x-1'
       }`}
     />
   </button>
@@ -497,7 +511,7 @@ export const WorkspaceVaultSection: FC<{
 
 
 
-export type SettingsSection = 'workspaces' | 'appearance' | 'models' | 'tools' | 'share' | 'commit' | 'voice' | 'cloud' | 'about';
+export type SettingsSection = 'workspaces' | 'appearance' | 'models' | 'tools' | 'share' | 'commit' | 'voice' | 'cloud' | 'privacy' | 'mcp' | 'about';
 
 interface SettingsViewProps {
   workspaceConfig: WorkspaceConfig;
@@ -574,6 +588,24 @@ const AppearanceSettingsSection: FC = () => {
           );
         })}
       </div>
+    </div>
+  );
+};
+
+const TimeSavedCard: FC = () => {
+  const { t } = useTranslation();
+  const [stats, setStats] = useState(getTimeSaved);
+  useEffect(() => {
+    const sync = () => setStats(getTimeSaved());
+    window.addEventListener('time-saved-changed', sync);
+    return () => window.removeEventListener('time-saved-changed', sync);
+  }, []);
+  const minutes = Math.floor(stats.totalMinutes);
+  return (
+    <div className="mb-4 rounded-lg border border-[var(--color-border)]/50 bg-[var(--color-bg-elevated)] px-3 py-3 space-y-1">
+      <div className="text-sm text-[var(--color-text-primary)]">{t('sidebar.timeSavedTotal', { minutes })}</div>
+      <TimeSavedBreakdown stats={stats} />
+      <div className="pt-2 text-xs italic text-[var(--color-text-primary)]">{t('sidebar.timeSavedNote')}</div>
     </div>
   );
 };
@@ -772,6 +804,8 @@ export const SettingsView: FC<SettingsViewProps> = ({
   const [skipGitHooksLoaded, setSkipGitHooksLoaded] = useState(false);
   const [shellIntegrationEnabled, setShellIntegrationEnabled] = useState(true);
   const [shellIntegrationLoaded, setShellIntegrationLoaded] = useState(false);
+  const terminalRenderer = useTerminalRenderer();
+  const [hiddenEditorIds, setHiddenEditorIds] = useState<string[]>(readHiddenEditorIds);
   const [showSplitButton, setShowSplitButton] = useState(() => {
     try { return JSON.parse(localStorage.getItem('show_split_button') ?? 'true'); } catch { return true; }
   });
@@ -883,10 +917,11 @@ export const SettingsView: FC<SettingsViewProps> = ({
   const [commitAiSaving, setCommitAiSaving] = useState(false);
   const [commitAiSaved, setCommitAiSaved] = useState(false);
   const [commitAiError, setCommitAiError] = useState<string | null>(null);
-  const [commitAiModel, setCommitAiModel] = useState('');
   const [commitAiEnabled, setCommitAiEnabled] = useState(true);
-
-  // Cloud connection state
+  const [commitAiModel, setCommitAiModel] = useState('');
+  const [usageReportEnabled, setUsageReportEnabledState] = useState(false);
+  const [usageMachineId, setUsageMachineId] = useState('');
+  const [usageReportLog, setUsageReportLog] = useState(readUsageReportLog);
   const [cloudStatus, setCloudStatus] = useState<CloudStatus | null>(null)
   const [pairingCode, setPairingCode] = useState<string | null>(null)
   const [pairingStatus, setPairingStatus] = useState<PairingStatus | null>(null)
@@ -1119,9 +1154,13 @@ export const SettingsView: FC<SettingsViewProps> = ({
     }).catch(() => setVoiceRefineLoaded(true));
     getVoiceAsrModel().then(m => setVoiceAsrModel(m || '')).catch(() => {});
     getVoiceRefineModel().then(m => setVoiceRefineModel(m || '')).catch(() => {});
-    getVoiceRefineBaseUrl().then(u => setRefineBaseUrl(u || '')).catch(() => {});
+    getUsageReportEnabled().then(setUsageReportEnabledState).catch(() => {});
+    getUsageMachineId().then(setUsageMachineId).catch(() => {});
+    getVoiceRefineBaseUrl().then((u) => setRefineBaseUrl(u || '')).catch(() => {});
+    const syncLog = () => setUsageReportLog(readUsageReportLog());
+    window.addEventListener('usage-report-log-changed', syncLog);
+    return () => window.removeEventListener('usage-report-log-changed', syncLog);
   }, [loadMicDevices]);
-
   // When navigating to voice section, request mic permission to get device labels
   const micLabelsRequestedRef = useRef(false);
   useEffect(() => {
@@ -1270,6 +1309,8 @@ export const SettingsView: FC<SettingsViewProps> = ({
     { id: 'cloud' as SettingsSection, label: t('settings.cloudNav', '账号'), icon: <Link2 className="w-3.5 h-3.5" />, group: 'advanced' as const },
     // Info group
     { id: 'about' as SettingsSection, label: t('settings.about'), icon: <Info className="w-3.5 h-3.5" />, group: 'info' },
+    { id: 'privacy' as SettingsSection, label: t('settings.privacyNav'), icon: <Shield className="w-3.5 h-3.5" />, group: 'info' },
+    { id: 'mcp' as SettingsSection, label: t('settings.mcpNav'), icon: <Plug className="w-3.5 h-3.5" />, group: 'info' },
   ];
 
   // ==================== Render ====================
@@ -1888,6 +1929,22 @@ export const SettingsView: FC<SettingsViewProps> = ({
                       }}
                     />
                   </div>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-sm text-[var(--color-text-secondary)]">{t('settings.terminalGpu')}</label>
+                      <p className="text-xs text-[var(--color-text-muted)]">{t('settings.terminalGpuDesc')}</p>
+                      <p className="text-[10px] text-[var(--color-text-muted)] mt-0.5">
+                        {terminalRenderer.webglActive
+                          ? t('settings.terminalGpuActive', { detail: terminalRenderer.probeDetail })
+                          : t('settings.terminalGpuInactive')}
+                      </p>
+                    </div>
+                    <SettingsToggle
+                      checked={terminalRenderer.preference !== 'dom'}
+                      ariaLabel={t('settings.terminalGpu')}
+                      onChange={(newVal) => terminalRenderer.setPreference(newVal ? 'auto' : 'dom')}
+                    />
+                  </div>
                 </div>
 
                 {/* Shell */}
@@ -1922,10 +1979,35 @@ export const SettingsView: FC<SettingsViewProps> = ({
                 {/* Unified Editor/IDE list */}
                 <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)]/50 rounded-lg p-4 space-y-3">
                   <h3 className="text-sm font-medium text-[var(--color-text-secondary)]">{t('settings.editorTitle', '编辑器 / IDE')}</h3>
+                  <p className="text-[10px] text-[var(--color-text-muted)]">{t('settings.editorConfigHint', '点击眼睛图标可隐藏/显示编辑器。')}</p>
                   {(detectedTools?.editors || []).map((editor) => {
                     const pathKey = `editor_${editor.id}`;
+                    const isHidden = hiddenEditorIds.includes(editor.id);
                     return (
-                      <div key={editor.id} className="flex items-center gap-3 py-1.5 border-t border-[var(--color-border)]/20 first:border-0 first:pt-0">
+                      <div key={editor.id} className={`flex items-center gap-3 py-1.5 border-t border-[var(--color-border)]/20 first:border-0 first:pt-0 ${isHidden ? 'opacity-40' : ''}`}>
+                        <TooltipProvider delayDuration={300}>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                type="button"
+                                className="text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors shrink-0"
+                                onClick={() => {
+                                  const updated = isHidden
+                                    ? hiddenEditorIds.filter((hidden) => hidden !== editor.id)
+                                    : [...hiddenEditorIds, editor.id];
+                                  localStorage.setItem('hidden_editors', JSON.stringify(updated));
+                                  setHiddenEditorIds(updated);
+                                  window.dispatchEvent(new Event('editors-detected'));
+                                }}
+                              >
+                                {isHidden ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom">
+                              {isHidden ? t('settings.showEditor', '显示此编辑器') : t('settings.hideEditor', '隐藏此编辑器')}
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
                         {editor.icon ? (
                           <img src={editor.icon} width={20} height={20} alt="" className="shrink-0 rounded" style={{ imageRendering: 'auto' }} />
                         ) : (
@@ -2765,6 +2847,48 @@ export const SettingsView: FC<SettingsViewProps> = ({
               </div>
             )}
 
+            {activeSection === 'mcp' && <McpSettingsSection />}
+
+            {activeSection === 'privacy' && (
+              <div>
+                <h2 className="text-lg font-medium mb-4">{t('settings.privacyNav')}</h2>
+                <div className="bg-[var(--color-bg-surface)] border border-[var(--color-border)]/50 rounded-lg p-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <div className="text-sm text-[var(--color-text-primary)]">{t('settings.usageReport')}</div>
+                      <p className="text-xs text-[var(--color-text-secondary)] mt-1">{t('settings.usageReportDesc')}</p>
+                    </div>
+                    <SettingsToggle
+                      checked={usageReportEnabled}
+                      ariaLabel={t('settings.usageReport')}
+                      onChange={(enabled) => {
+                        setUsageReportEnabledState(enabled);
+                        setUsageReportEnabled(enabled).catch(() => setUsageReportEnabledState(!enabled));
+                      }}
+                    />
+                  </div>
+                  <div className="mt-4 pt-4 border-t border-[var(--color-border)]/50 space-y-2">
+                    <div className="text-sm text-[var(--color-text-primary)]">{t('settings.usageMachineId')}</div>
+                    <div className="font-mono text-xs break-all text-[var(--color-text-secondary)]">{usageMachineId || '—'}</div>
+                    <Button variant="secondary" size="sm" onClick={() => { resetUsageMachineId().then(setUsageMachineId).catch(() => {}); }}>
+                      {t('settings.usageMachineIdReset')}
+                    </Button>
+                  </div>
+                  <div className="mt-4 pt-4 border-t border-[var(--color-border)]/50 space-y-2">
+                    <div className="text-sm text-[var(--color-text-primary)]">{t('settings.usageReportLog')}</div>
+                    {usageReportLog.length === 0 ? (
+                      <p className="text-xs text-[var(--color-text-secondary)]">{t('settings.usageReportLogEmpty')}</p>
+                    ) : usageReportLog.map((entry) => (
+                      <div key={entry.at} className="text-xs space-y-1 border border-[var(--color-border)]/50 rounded p-2">
+                        <div className="text-[var(--color-text-secondary)]">{entry.at} · HTTP {entry.status}</div>
+                        <pre className="whitespace-pre-wrap break-all text-[var(--color-text-primary)]">{JSON.stringify(entry.request, null, 2)}</pre>
+                        <pre className="whitespace-pre-wrap break-all text-[var(--color-text-primary)]">{entry.response || '—'}</pre>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
             {/* ==================== About ==================== */}
             {activeSection === 'about' && (
               <div>
@@ -2777,6 +2901,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
                     </div>
                   </div>
                   <p className="text-sm text-[var(--color-text-secondary)] mb-4">{t('settings.appDescription')}</p>
+                  <TimeSavedCard />
                   <div className="mb-4">
                     <label className="block text-sm text-[var(--color-text-secondary)] mb-1">{t('settings.language')}</label>
                     <Select value={i18n.language} onValueChange={(lng) => { i18n.changeLanguage(lng); localStorage.setItem('i18n-lang', lng); }}>

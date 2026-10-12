@@ -1,5 +1,6 @@
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
+use std::sync::atomic::AtomicU16;
 use std::sync::Mutex;
 
 use crate::pty_manager::PtyManager;
@@ -9,6 +10,7 @@ use crate::types::{
 };
 
 pub(crate) const MCP_SERVER_PORT: u16 = 42819;
+pub(crate) static MCP_ACTIVE_PORT: AtomicU16 = AtomicU16::new(MCP_SERVER_PORT);
 
 // PTY Manager 全局实例
 pub(crate) static PTY_MANAGER: Lazy<Mutex<PtyManager>> =

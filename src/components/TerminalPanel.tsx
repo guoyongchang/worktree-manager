@@ -6,6 +6,7 @@ import { TerminalSearchBar } from './TerminalSearchBar';
 import type { TerminalHandle } from './Terminal';
 import type { SearchOptions } from '../terminal';
 import { XTERM_ADAPTER_REVISION } from '../terminal/adapters/webgl-support';
+import { useTerminalRenderer } from '../hooks/useTerminalRenderer';
 import {
   FolderIcon,
   FolderOpenIcon,
@@ -21,6 +22,7 @@ import {
 } from './Icons';
 import type { VoiceStatus, StagingState } from '../hooks/useVoiceInput';
 import type { TerminalTab } from '../types';
+import { copyText } from '../lib/clipboard';
 import { isTauri } from '@/lib/backend';
 import {
   Tooltip,
@@ -346,6 +348,7 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
   const isAnyFullscreen = isFullscreen || isVerticalFullscreen;
 
   const { t } = useTranslation();
+  const terminalRenderer = useTerminalRenderer();
   const [showError, setShowError] = useState<string | null>(null);
   const [showWarning, setShowWarning] = useState<string | null>(null);
   const [badgeCopied, setBadgeCopied] = useState(false);
@@ -620,9 +623,11 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
                     : 'text-[var(--color-accent)] bg-[var(--color-accent)]/20 border border-[var(--color-accent)]/30 hover:bg-[var(--color-accent)]/30 hover:text-[var(--color-accent)] hover:border-[var(--color-accent)]/50 active:bg-[var(--color-accent)]/40'
                 }`}
                 onClick={() => {
-                  navigator.clipboard.writeText(selectedWorktreeName);
-                  setBadgeCopied(true);
-                  setTimeout(() => setBadgeCopied(false), 1500);
+                  void copyText(selectedWorktreeName).then((ok) => {
+                    if (!ok) return;
+                    setBadgeCopied(true);
+                    setTimeout(() => setBadgeCopied(false), 1500);
+                  });
                 }}
                 title={selectedWorktreeName}
               >
@@ -814,7 +819,7 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
           <>
             {Array.from(mountedTerminals).map(path => (
               <div
-                key={`${path}::r${XTERM_ADAPTER_REVISION}`}
+                key={`${path}::r${XTERM_ADAPTER_REVISION}-${terminalRenderer.preference}`}
                 className="absolute inset-0"
                 style={{ display: path === activeTerminalTab ? 'block' : 'none' }}
               >

@@ -2,8 +2,8 @@ import axios from 'axios';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { HttpTransport } from './transport/http.js';
-import { ConfigTransport, readCapabilityLevel } from './transport/config.js';
+import { HttpTransport, discoverHttpPort } from './transport/http.js';
+import { ConfigTransport, readCapabilityLevel, readHttpPort } from './transport/config.js';
 import { buildCoreHandlers, CORE_TOOLS } from './tools/core.js';
 import { buildDetailsHandlers, DETAILS_TOOLS } from './tools/details.js';
 import { buildAdvancedHandlers, ADVANCED_TOOLS } from './tools/advanced.js';
@@ -30,14 +30,14 @@ function extractErrorMessage(e: unknown): string {
 export class WorktreeMcpServer {
   private server: Server | null = null;
   private transport: HttpTransport | ConfigTransport | null = null;
-  private capabilityLevel: CapabilityLevel = 'core';
+  private capabilityLevel: CapabilityLevel = 'read';
   private handlers: Record<string, ToolHandler> = {};
 
   constructor() {}
 
   async initialize(): Promise<void> {
-    // Try HTTP transport first
-    const httpTransport = new HttpTransport();
+    // 先读登记端口，不通再扫 42800-42900。
+    const httpTransport = new HttpTransport(await discoverHttpPort(readHttpPort()));
     if (await httpTransport.isAvailable()) {
       this.transport = httpTransport;
       console.error('[MCP] Using HTTP transport (Tauri app running)');
@@ -65,7 +65,7 @@ export class WorktreeMcpServer {
       }
     );
 
-    // 读取 mcp.json 的 capability_level（缺省 details，共享自 transport/config）
+    // 读取 mcp.json 的 capability_level（缺省 read）
     this.capabilityLevel = readCapabilityLevel();
 
     // Register tools based on capability level
@@ -81,11 +81,11 @@ export class WorktreeMcpServer {
     let handlers: Record<string, ToolHandler> = { ...buildCoreHandlers(transport) };
     let tools: any[] = [...CORE_TOOLS];
 
-    if ((this.capabilityLevel === 'details' || this.capabilityLevel === 'advanced') && httpOnly) {
+    if (httpOnly) {
       handlers = { ...handlers, ...buildDetailsHandlers(transport) };
       tools = tools.concat(DETAILS_TOOLS);
     }
-    if (this.capabilityLevel === 'advanced' && httpOnly) {
+    if (this.capabilityLevel === 'operate' && httpOnly) {
       handlers = { ...handlers, ...buildAdvancedHandlers(transport) };
       tools = tools.concat(ADVANCED_TOOLS);
     }

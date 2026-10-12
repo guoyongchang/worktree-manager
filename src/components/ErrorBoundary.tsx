@@ -1,6 +1,7 @@
 import { Component, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
+import { copyText } from '../lib/clipboard';
 
 interface Props {
   children: ReactNode;
@@ -239,12 +240,10 @@ class ErrorBoundaryInner extends Component<Props, State> {
       `Time: ${new Date().toISOString()}`,
     ].join('\n');
 
-    navigator.clipboard.writeText(fullText).then(() => {
+    void copyText(fullText).then((ok) => {
+      if (!ok) return;
       this.setState({ copied: true });
       setTimeout(() => this.setState({ copied: false }), 2000);
-    }).catch(() => {
-      const el = document.querySelector<HTMLTextAreaElement>('#error-boundary-details');
-      if (el) { el.select(); document.execCommand('copy'); }
     });
   };
 
