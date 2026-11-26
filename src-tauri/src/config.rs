@@ -98,27 +98,63 @@ pub fn load_global_config() -> GlobalConfig {
     config
 }
 
+#[cfg(unix)]
+pub(crate) fn set_owner_only_permissions(path: &std::path::Path, is_dir: bool) {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = if is_dir { 0o700 } else { 0o600 };
+    let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode));
+}
+
+#[cfg(not(unix))]
+pub(crate) fn set_owner_only_permissions(_path: &std::path::Path, _is_dir: bool) {}
+
 pub fn save_global_config_internal(config: &GlobalConfig) -> Result<(), String> {
     let config_path = get_global_config_path();
 
     if let Some(parent) = config_path.parent() {
         fs::create_dir_all(parent)
             .map_err(|e| format!("Failed to create config directory: {}", e))?;
+        set_owner_only_permissions(parent, true);
     }
 
     let content = serde_json::to_string_pretty(config)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
 
     fs::write(&config_path, content).map_err(|e| format!("Failed to write config file: {}", e))?;
-
+    set_owner_only_permissions(&config_path, false);
     {
         let mut cache = GLOBAL_CONFIG_CACHE
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         *cache = Some(config.clone());
     }
-
     Ok(())
+}
+
+// ==================== 命令超时配置 ====================
+
+pub const DEFAULT_IPC_TIMEOUT_SECONDS: u64 = 60;
+pub const MIN_IPC_TIMEOUT_SECONDS: u64 = 30;
+pub const MAX_IPC_TIMEOUT_SECONDS: u64 = 3600;
+
+/// Clamp a user-provided command timeout into `[MIN_IPC_TIMEOUT_SECONDS, MAX_IPC_TIMEOUT_SECONDS]`.
+pub fn clamp_ipc_timeout_seconds(seconds: u64) -> u64 {
+    seconds.clamp(MIN_IPC_TIMEOUT_SECONDS, MAX_IPC_TIMEOUT_SECONDS)
+}
+
+/// Resolve an optional persisted command timeout into effective seconds.
+/// Values below `MIN_IPC_TIMEOUT_SECONDS` fall back to `DEFAULT_IPC_TIMEOUT_SECONDS`,
+/// matching the frontend `readIpcTimeoutMs()` contract.
+pub fn resolve_ipc_timeout_seconds(configured: Option<u64>) -> u64 {
+    match configured {
+        Some(s) if s >= MIN_IPC_TIMEOUT_SECONDS => clamp_ipc_timeout_seconds(s),
+        _ => DEFAULT_IPC_TIMEOUT_SECONDS,
+    }
+}
+
+/// Effective configured command timeout in seconds from `GlobalConfig`.
+pub fn get_effective_ipc_timeout_seconds() -> u64 {
+    resolve_ipc_timeout_seconds(load_global_config().ipc_timeout_seconds)
 }
 
 // ==================== Workspace 配置加载/保存 ====================
@@ -565,6 +601,30 @@ mod tests {
 
         clear_occupation_state(workspace.path().to_str().unwrap()).expect("clear occupation state");
         assert!(load_occupation_state(workspace.path().to_str().unwrap()).is_none());
+    }
+
+    #[test]
+    fn resolve_ipc_timeout_seconds_clamps_and_falls_back_like_frontend() {
+        assert_eq!(
+            resolve_ipc_timeout_seconds(None),
+            DEFAULT_IPC_TIMEOUT_SECONDS
+        );
+        assert_eq!(
+            resolve_ipc_timeout_seconds(Some(0)),
+            DEFAULT_IPC_TIMEOUT_SECONDS
+        );
+        assert_eq!(
+            resolve_ipc_timeout_seconds(Some(29)),
+            DEFAULT_IPC_TIMEOUT_SECONDS
+        );
+        assert_eq!(resolve_ipc_timeout_seconds(Some(30)), 30);
+        assert_eq!(resolve_ipc_timeout_seconds(Some(90)), 90);
+        assert_eq!(resolve_ipc_timeout_seconds(Some(600)), 600);
+        assert_eq!(resolve_ipc_timeout_seconds(Some(3600)), 3600);
+        assert_eq!(
+            resolve_ipc_timeout_seconds(Some(9999)),
+            MAX_IPC_TIMEOUT_SECONDS
+        );
     }
 }
 

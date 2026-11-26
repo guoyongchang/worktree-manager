@@ -234,6 +234,8 @@ pub struct GlobalConfig {
     pub usage_machine_id: Option<String>,
     #[serde(default)]
     pub usage_report_opt_in: bool,
+    #[serde(default)]
+    pub ipc_timeout_seconds: Option<u64>,
 }
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CustomMirror {
@@ -283,6 +285,7 @@ impl Default for GlobalConfig {
             commit_ai_model: None,
             usage_machine_id: None,
             usage_report_opt_in: false,
+            ipc_timeout_seconds: None,
         }
     }
 }

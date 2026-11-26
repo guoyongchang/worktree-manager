@@ -58,7 +58,10 @@ function makeWorktree(overrides: Partial<WorktreeListItem>): WorktreeListItem {
   };
 }
 
-function renderSidebar(activeWorktrees: WorktreeListItem[]) {
+function renderSidebar(
+  activeWorktrees: WorktreeListItem[],
+  overrides?: Partial<React.ComponentProps<typeof ExpandedSidebar>>,
+) {
   const props: React.ComponentProps<typeof ExpandedSidebar> = {
     activeWorktrees,
     archivedWorktrees: [],
@@ -113,6 +116,7 @@ function renderSidebar(activeWorktrees: WorktreeListItem[]) {
     switchingWorkspace: false,
     updaterState: 'idle',
     workspaces,
+    ...overrides,
   };
 
   return render(<ExpandedSidebar {...props} />);
@@ -166,6 +170,26 @@ describe('ExpandedSidebar worktree search', () => {
   it('shows noWorktrees empty state when activeWorktrees is empty', () => {
     renderSidebar([]);
     expect(screen.getByText('sidebar.noWorktrees')).toBeInTheDocument();
+  });
+
+  it('shows clickable background deletion progress badge in archive header while deleting', () => {
+    const onToggleBatchArchiveModal = vi.fn();
+    renderSidebar([], {
+      showArchived: false,
+      onToggleBatchArchiveModal,
+      backgroundDeleteState: {
+        active: true,
+        items: [
+          { name: 'wt-1', displayName: 'WT 1', workspacePath: '/workspace', status: 'done' },
+          { name: 'wt-2', displayName: 'WT 2', workspacePath: '/workspace', status: 'deleting' },
+          { name: 'wt-3', displayName: 'WT 3', workspacePath: '/workspace', status: 'pending' },
+        ],
+      },
+    });
+
+    const badge = screen.getByRole('button', { name: 'sidebar.bgDeletingBadge' });
+    fireEvent.click(badge);
+    expect(onToggleBatchArchiveModal).toHaveBeenCalledTimes(1);
   });
 });
 

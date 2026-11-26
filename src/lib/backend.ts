@@ -77,10 +77,10 @@ function getCenterApiBase(): string {
 // Commands that may legitimately take a long time (git clone, worktree create, etc.)
 const LONG_RUNNING_COMMANDS = new Set([
   'create_worktree', 'archive_worktree', 'restore_worktree', 'delete_archived_worktree',
-  'clone_project', 'deploy_to_main', 'start_sharing', 'start_ngrok_tunnel', 'start_wms_tunnel',
+  'add_project_to_worktree', 'clone_project', 'deploy_to_main', 'start_sharing', 'start_ngrok_tunnel', 'start_wms_tunnel',
   'fetch_project_remote', 'sync_with_base_branch', 'sync_all_projects_to_base',
   'push_to_remote', 'pull_current_branch', 'push_sync_to_base_branch',
-  'merge_to_test_branch', 'merge_to_base_branch',
+  'merge_to_test_branch', 'merge_to_base_branch', 'commit_all', 'switch_branch',
   'download_update_via_mirror',
 ]);
 const GET_COMMANDS = new Set(['get_crash_report']);
@@ -88,8 +88,8 @@ const SCAN_COMMANDS = new Set(['list_worktrees', 'get_main_workspace_status']);
 export const IPC_TIMEOUT_SECONDS_KEY = 'ipc_timeout_seconds';
 export const DEFAULT_IPC_TIMEOUT_SECONDS = 60;
 export const MIN_IPC_TIMEOUT_SECONDS = 30;
-const MAX_IPC_TIMEOUT_SECONDS = 300;
-const LONG_TIMEOUT_MS = 600_000; // 10 min
+export const MAX_IPC_TIMEOUT_SECONDS = 3600;
+const LONG_TIMEOUT_MS = 600_000; // 10 min floor for clone/create_worktree
 
 function clampIpcTimeoutSeconds(value: number): number {
   return Math.min(MAX_IPC_TIMEOUT_SECONDS, Math.max(MIN_IPC_TIMEOUT_SECONDS, Math.round(value)));
@@ -107,10 +107,18 @@ export function readIpcTimeoutMs(): number {
   return clampIpcTimeoutSeconds(n) * 1000;
 }
 
+export function readIpcTimeoutSeconds(): number {
+  return Math.round(readIpcTimeoutMs() / 1000);
+}
+
 export function writeIpcTimeoutSeconds(seconds: number): number {
   const clamped = clampIpcTimeoutSeconds(seconds);
   localStorage.setItem(IPC_TIMEOUT_SECONDS_KEY, String(clamped));
   return clamped;
+}
+
+export function readLongCommandTimeoutMs(): number {
+  return Math.max(LONG_TIMEOUT_MS, readIpcTimeoutMs());
 }
 
 export async function callBackend<T = unknown>(
@@ -121,13 +129,14 @@ export async function callBackend<T = unknown>(
   const QUIET_COMMANDS = new Set(['pty_read', 'pty_write']);
   const SOFT_FAIL_COMMANDS = new Set(['fetch_project_remote']);
   const timeoutMs = LONG_RUNNING_COMMANDS.has(command)
-    ? LONG_TIMEOUT_MS
+    ? readLongCommandTimeoutMs()
     : SCAN_COMMANDS.has(command)
       ? Math.max(readIpcTimeoutMs(), DEFAULT_IPC_TIMEOUT_SECONDS * 1000)
       : readIpcTimeoutMs();
   const logResult = (result: T) => {
     const elapsed = performance.now() - t0;
-    if (!QUIET_COMMANDS.has(command) || elapsed > 100) {
+    const waitMs = command === 'pty_read' && typeof args?.waitMs === 'number' ? args.waitMs : 0;
+    if (!QUIET_COMMANDS.has(command) || elapsed > waitMs + 150) {
       console.log(`[ipc] ${command}: ${elapsed.toFixed(1)}ms`);
     }
     return result;
@@ -381,14 +390,16 @@ export async function kickClient(sessionId: string): Promise<void> {
 
 /** Browser mode: fetch info about the shared workspace from the HTTP server. */
 export async function getShareInfo(): Promise<ShareInfo> {
-  const res = await fetch(`${getCenterApiBase()}/get_share_info`);
+  const sid = getSessionId();
+  const res = await fetch(`${getCenterApiBase()}/get_share_info`, {
+    headers: sid ? { 'X-Session-Id': sid } : undefined,
+  });
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || `HTTP ${res.status}`);
   }
   return res.json() as Promise<ShareInfo>;
 }
-
 /** Browser mode: authenticate with challenge-response protocol. */
 export async function authenticate(password: string): Promise<void> {
   // Step 1: Request challenge (nonce + salt)
@@ -567,6 +578,11 @@ export async function fetchProjectRemote(path: string): Promise<void> {
   return callBackend<void>('fetch_project_remote', { path });
 }
 
+/** Cancel any queued or in-flight git operation on the given worktree/project path */
+export async function cancelGitOperation(path: string): Promise<void> {
+  return callBackend<void>('cancel_git_operation', { path });
+}
+
 /** Close all PTY sessions whose working directory matches the given path prefix. */
 export async function closePtySessionsByPath(pathPrefix: string): Promise<string[]> {
   return callBackend<string[]>('pty_close_by_path', { pathPrefix });
@@ -633,6 +649,41 @@ export async function getShellIntegrationEnabled(): Promise<boolean> {
 
 export async function setShellIntegrationEnabled(enabled: boolean): Promise<void> {
   return callBackend<void>('set_shell_integration_enabled', { enabled });
+}
+
+export async function getIpcTimeoutSeconds(): Promise<number | null> {
+  return callBackend<number | null>('get_ipc_timeout_seconds');
+}
+
+export async function setIpcTimeoutSeconds(seconds: number): Promise<number> {
+  const saved = await callBackend<number>('set_ipc_timeout_seconds', { seconds: clampIpcTimeoutSeconds(seconds) });
+  return writeIpcTimeoutSeconds(saved);
+}
+
+/**
+ * Synchronize command timeout between backend GlobalConfig and frontend localStorage.
+ * - If backend has a saved value, it is authoritative and mirrored to localStorage.
+ * - If backend is unset (first run after upgrade) and localStorage has a valid custom value,
+ *   migrate it up to GlobalConfig so backend Git operations use the same setting.
+ */
+export async function syncIpcTimeoutFromBackend(): Promise<number> {
+  const remote = await getIpcTimeoutSeconds();
+  if (typeof remote === 'number' && Number.isFinite(remote) && remote >= MIN_IPC_TIMEOUT_SECONDS) {
+    return writeIpcTimeoutSeconds(remote);
+  }
+  const rawLocal = localStorage.getItem(IPC_TIMEOUT_SECONDS_KEY);
+  if (rawLocal != null) {
+    const localNum = Number(rawLocal);
+    if (Number.isFinite(localNum) && localNum >= MIN_IPC_TIMEOUT_SECONDS) {
+      const clamped = writeIpcTimeoutSeconds(localNum);
+      try {
+        return await setIpcTimeoutSeconds(clamped);
+      } catch {
+        return clamped;
+      }
+    }
+  }
+  return readIpcTimeoutSeconds();
 }
 
 /** Generate commit message using AI */

@@ -26,11 +26,17 @@ use crate::pty_manager::bytes_to_utf8_with_pending;
 
 use crate::tls::TlsCerts;
 
+#[path = "http_server/mcp.rs"]
+mod mcp;
 #[path = "http_server/middleware.rs"]
 mod middleware;
 #[path = "http_server/routing.rs"]
 mod routing;
 
+use crate::state::{
+    redact_session_id, register_authenticated_session, revoke_authenticated_session,
+    validate_and_touch_session,
+};
 use crate::{
     // Project management
     add_existing_project_impl,
@@ -71,7 +77,6 @@ use crate::{
     SwitchBranchRequest,
     // Direct functions (no window context)
     WorkspaceConfig,
-    AUTHENTICATED_SESSIONS,
     AUTH_RATE_LIMITER,
     CONNECTED_CLIENTS,
     LOCK_BROADCAST,
@@ -81,11 +86,11 @@ use crate::{
     TERMINAL_STATE_BROADCAST,
 };
 use middleware::{
-    auth_middleware, localhost_only_middleware, no_cache_html_middleware,
-    security_headers_middleware, session_id,
+    auth_middleware, extract_client_ip, is_remote_request, localhost_only_middleware,
+    no_cache_html_middleware, remote_workspace_scope_middleware, security_headers_middleware,
+    session_id, RequestRemoteFlag,
 };
 use routing::{build_api_router, build_cors_layer, resolve_dist_path};
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -206,7 +211,17 @@ fn to_snake(s: &str) -> String {
 
 // -- Workspace management (no window context) --
 
-async fn h_list_workspaces() -> Response {
+async fn h_list_workspaces(remote: Option<Extension<RequestRemoteFlag>>) -> Response {
+    let is_remote = remote.is_some_and(|Extension(flag)| flag.0);
+    let shared_ws = if is_remote {
+        SHARE_STATE
+            .lock()
+            .ok()
+            .and_then(|s| s.active.then(|| s.workspace_path.clone()).flatten())
+            .map(|p| normalize_path(&p))
+    } else {
+        None
+    };
     let list: Vec<_> = crate::load_global_config()
         .workspaces
         .into_iter()
@@ -214,10 +229,13 @@ async fn h_list_workspaces() -> Response {
             w.path = crate::normalize_path(&w.path);
             w
         })
+        .filter(|w| match &shared_ws {
+            Some(allowed) => w.path == *allowed,
+            None => true,
+        })
         .collect();
     Json(json!(list)).into_response()
 }
-
 #[derive(Deserialize)]
 struct AddWsArgs {
     name: String,
@@ -482,7 +500,11 @@ async fn h_switch_branch(Json(args): Json<Value>) -> Response {
             return (StatusCode::BAD_REQUEST, format!("Invalid request: {}", e)).into_response()
         }
     };
-    result_ok(crate::switch_branch_internal(&request))
+    let result = tokio::task::spawn_blocking(move || crate::switch_branch_internal(&request))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))
+        .and_then(|r| r);
+    result_ok(result)
 }
 
 async fn h_get_branch_diff_stats(Json(args): Json<Value>) -> Response {
@@ -626,6 +648,13 @@ async fn h_merge_to_base_branch(Json(args): Json<Value>) -> Response {
     result_json(result)
 }
 
+async fn h_cancel_git_operation(Json(args): Json<Value>) -> Response {
+    let path = args["path"].as_str().unwrap_or("").to_string();
+    let normalized = normalize_path(&path);
+    git_ops::cancel_git_operation(std::path::Path::new(&normalized));
+    result_ok(Ok(()))
+}
+
 async fn h_create_pull_request(Json(args): Json<Value>) -> Response {
     let path = args["path"].as_str().unwrap_or("").to_string();
     let base_branch = get_param(&args, "base_branch");
@@ -754,6 +783,21 @@ async fn h_set_shell_integration_enabled(
 ) -> Response {
     result_ok(crate::commands::config::set_shell_integration_enabled(
         args.enabled,
+    ))
+}
+
+async fn h_get_ipc_timeout_seconds() -> Response {
+    result_json(crate::commands::config::get_ipc_timeout_seconds())
+}
+
+#[derive(serde::Deserialize)]
+struct SetIpcTimeoutSecondsArgs {
+    seconds: u64,
+}
+
+async fn h_set_ipc_timeout_seconds(Json(args): Json<SetIpcTimeoutSecondsArgs>) -> Response {
+    result_json(crate::commands::config::set_ipc_timeout_seconds(
+        args.seconds,
     ))
 }
 
@@ -1099,11 +1143,14 @@ async fn h_pty_close_by_path(Json(args): Json<Value>) -> Response {
 
 // -- Auth --
 
-async fn h_auth_challenge(ConnectInfo(addr): ConnectInfo<SocketAddr>) -> Response {
-    let client_ip = addr.ip().to_string();
+async fn h_auth_challenge(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Response {
+    let (client_ip, _) = extract_client_ip(&addr, &headers);
     log::info!("[auth] Challenge requested from IP: {}", client_ip);
 
-    // Rate limiting: max 5 attempts per 60 seconds per IP
+    // Rate limiting: max 5 attempts per 60 seconds per effective client IP
     let rate_ok = AUTH_RATE_LIMITER
         .lock()
         .map(|mut limiter| limiter.check_and_record(&client_ip))
@@ -1161,9 +1208,8 @@ async fn h_auth_verify(
     headers: HeaderMap,
     Json(req): Json<VerifyRequest>,
 ) -> Response {
-    let client_ip = addr.ip().to_string();
+    let (client_ip, is_forwarded) = extract_client_ip(&addr, &headers);
     log::info!("[auth] Verification attempt from IP: {}", client_ip);
-
     // Consume nonce (one-time use)
     let nonce_bytes = match NONCE_CACHE.lock() {
         Ok(mut cache) => match cache.consume(&req.nonce) {
@@ -1218,23 +1264,32 @@ async fn h_auth_verify(
         .unwrap_or("unknown")
         .to_string();
 
-    let client_ip = addr.ip().to_string();
     let client = ConnectedClient {
         session_id: sid.clone(),
         ip: client_ip.clone(),
-        user_agent,
+        user_agent: user_agent.clone(),
         authenticated_at: now.clone(),
         last_active: now,
         ws_connected: false,
     };
 
-    // Remove old sessions from the same IP that don't have an active WebSocket
+    // Remove old sessions from the same client that don't have an active WebSocket.
+    // Behind a tunnel/proxy with unknown real IP, skip IP-based eviction to avoid kicking
+    // unrelated clients; with a known proxied IP, also require matching user_agent.
     let stale_sids: Vec<String> = if let Ok(mut clients) = CONNECTED_CLIENTS.lock() {
-        let stale: Vec<String> = clients
-            .iter()
-            .filter(|(_, c)| c.ip == client_ip && !c.ws_connected)
-            .map(|(s, _)| s.clone())
-            .collect();
+        let stale: Vec<String> = if is_forwarded && client_ip == "proxy:unknown" {
+            Vec::new()
+        } else {
+            clients
+                .iter()
+                .filter(|(_, c)| {
+                    c.ip == client_ip
+                        && !c.ws_connected
+                        && (!is_forwarded || c.user_agent == user_agent)
+                })
+                .map(|(s, _)| s.clone())
+                .collect()
+        };
         for s in &stale {
             clients.remove(s);
         }
@@ -1244,16 +1299,14 @@ async fn h_auth_verify(
         vec![]
     };
 
-    if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() {
-        for s in &stale_sids {
-            sessions.remove(s);
-        }
-        sessions.insert(sid.clone());
+    for s in &stale_sids {
+        revoke_authenticated_session(s);
     }
+    register_authenticated_session(&sid);
 
     log::info!(
         "[auth] Verification successful for session: {}, IP: {}",
-        sid,
+        redact_session_id(&sid),
         client_ip
     );
     Json(json!({ "sessionId": sid })).into_response()
@@ -1298,7 +1351,7 @@ async fn h_stop_ngrok_tunnel() -> Response {
 
 // -- Share info --
 
-async fn h_get_share_info() -> Response {
+async fn h_get_share_info(headers: HeaderMap) -> Response {
     let null_response = || {
         Json(json!({
             "workspace_name": null,
@@ -1314,8 +1367,8 @@ async fn h_get_share_info() -> Response {
             Ok(s) if s.active => s,
             _ => return null_response(),
         };
-        match share_state.workspace_path {
-            Some(ref path) => {
+        match &share_state.workspace_path {
+            Some(path) => {
                 let config = load_workspace_config(path);
                 (Some(config.name), Some(path.clone()))
             }
@@ -1323,10 +1376,27 @@ async fn h_get_share_info() -> Response {
         }
     };
 
+    // Only disclose host filesystem path and active worktree to authenticated sessions;
+    // unauthenticated visitors (login screen) only receive workspace_name.
+    let is_authenticated = headers
+        .get("x-session-id")
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .is_some_and(validate_and_touch_session);
+
+    if !is_authenticated {
+        return Json(json!({
+            "workspace_name": ws_name,
+            "workspace_path": null,
+            "current_worktree": null,
+        }))
+        .into_response();
+    }
+
     // Get current locked worktree (the one the desktop user is viewing)
-    let current_worktree = if let Some(ref ws_path) = ws_path {
+    let current_worktree = if let Some(ws_path) = &ws_path {
         if let Ok(locks) = crate::WORKTREE_LOCKS.lock() {
-            // Find the first locked worktree for this workspace
             locks
                 .iter()
                 .find(|((wp, _), _)| wp == ws_path)
@@ -1538,43 +1608,53 @@ struct WsParams {
     session_id: Option<String>,
 }
 
+fn is_ws_session_active(session_id: &str) -> bool {
+    let active = {
+        let state = SHARE_STATE.lock().unwrap_or_else(|p| p.into_inner());
+        state.active && state.auth_key.is_some()
+    };
+    active && validate_and_touch_session(session_id)
+}
+
 async fn h_ws_upgrade(
     ws: WebSocketUpgrade,
     headers: HeaderMap,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Query(params): Query<WsParams>,
 ) -> Response {
-    if let Some(origin) = headers
+    let remote = is_remote_request(&addr, &headers);
+    match headers
         .get(header::ORIGIN)
         .and_then(|value| value.to_str().ok())
     {
-        if !is_allowed_origin(origin) {
-            return (StatusCode::FORBIDDEN, "Origin not allowed").into_response();
+        Some(origin) => {
+            if !is_allowed_origin(origin) {
+                return (StatusCode::FORBIDDEN, "Origin not allowed").into_response();
+            }
         }
+        None if remote => {
+            return (StatusCode::FORBIDDEN, "Origin header required").into_response();
+        }
+        None => {}
+    }
+
+    // Fail-closed: reject WS upgrades whenever sharing is not active or has no auth key.
+    let (active, has_auth_key) = {
+        let state = SHARE_STATE.lock().unwrap_or_else(|p| p.into_inner());
+        (state.active, state.auth_key.is_some())
+    };
+    if !active || !has_auth_key {
+        return (StatusCode::SERVICE_UNAVAILABLE, "Sharing is not active").into_response();
     }
 
     // Authenticate via query param
     let sid = match params.session_id {
-        Some(s) => s,
-        None => return (StatusCode::UNAUTHORIZED, "Missing session_id").into_response(),
+        Some(s) if !s.trim().is_empty() => s,
+        _ => return (StatusCode::UNAUTHORIZED, "Missing session_id").into_response(),
     };
 
-    // Recover from a poisoned lock rather than failing OPEN: on a lock error the old
-    // `.unwrap_or(false)` would treat the share as password-free and skip the auth check,
-    // exposing the WebSocket (and thus pty_write) without credentials.
-    let needs_auth = {
-        let state = SHARE_STATE.lock().unwrap_or_else(|p| p.into_inner());
-        state.active && state.auth_key.is_some()
-    };
-
-    if needs_auth {
-        let is_authenticated = AUTHENTICATED_SESSIONS
-            .lock()
-            .map(|sessions| sessions.contains(&sid))
-            .unwrap_or(false);
-        if !is_authenticated {
-            return (StatusCode::UNAUTHORIZED, "Not authenticated").into_response();
-        }
+    if !validate_and_touch_session(&sid) {
+        return (StatusCode::UNAUTHORIZED, "Not authenticated").into_response();
     }
 
     // Mark WebSocket connected
@@ -1584,7 +1664,12 @@ async fn h_ws_upgrade(
             client.last_active = chrono::Utc::now().to_rfc3339();
         }
     }
-    log::info!("WebSocket upgrade for session {} from {}", sid, addr.ip());
+    let (client_ip, _) = extract_client_ip(&addr, &headers);
+    log::info!(
+        "WebSocket upgrade for session {} from {}",
+        redact_session_id(&sid),
+        client_ip
+    );
 
     ws.on_upgrade(move |socket| handle_ws(socket, sid))
 }
@@ -1597,8 +1682,8 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
 
     // Auto-bind session to the shared workspace
     if let Ok(share_state) = SHARE_STATE.lock() {
-        if let Some(ref ws_path) = share_state.workspace_path {
-            if share_state.active {
+        if share_state.active {
+            if let Some(ws_path) = &share_state.workspace_path {
                 let _ = set_window_workspace_impl(&session_id, ws_path.clone());
             }
         }
@@ -1609,8 +1694,9 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
     let mut lock_forwarder: Option<tokio::task::JoinHandle<()>> = None;
     let mut terminal_state_forwarder: Option<tokio::task::JoinHandle<()>> = None;
     let mut voice_forwarder: Option<tokio::task::JoinHandle<()>> = None;
+    let (kick_tx, mut kick_rx) = tokio::sync::watch::channel(false);
 
-    // Always-on: subscribe to per-client notifications (kick events, etc.)
+    // Always-on: subscribe to per-client and broadcast revocation notifications
     let notification_forwarder: tokio::task::JoinHandle<()> = {
         let mut rx = crate::state::CLIENT_NOTIFICATION_BROADCAST.subscribe();
         let sender = Arc::clone(&ws_sender);
@@ -1620,8 +1706,8 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                 match rx.recv().await {
                     Ok(json_str) => {
                         if let Ok(val) = serde_json::from_str::<Value>(&json_str) {
-                            // Only forward notifications targeted at this session
-                            if val["session_id"].as_str() == Some(&sid) {
+                            let target = val["session_id"].as_str();
+                            if target == Some(sid.as_str()) || target == Some("*") {
                                 let msg_type = val["type"].as_str().unwrap_or("");
                                 let reason = val["reason"].as_str().unwrap_or("").to_string();
                                 let msg = json!({
@@ -1630,23 +1716,39 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
                                 });
                                 let mut sender = sender.lock().await;
                                 let _ = sender.send(Message::text(msg.to_string())).await;
-                                // After sending kick notification, close the connection
+                                // After sending kick notification, close & abort main recv loop
                                 if msg_type == "kicked" {
                                     let _ = sender.close().await;
+                                    let _ = kick_tx.send(true);
                                     break;
                                 }
                             }
                         }
                     }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        if !is_ws_session_active(&sid) {
+                            let mut sender = sender.lock().await;
+                            let _ = sender.close().await;
+                            let _ = kick_tx.send(true);
+                            break;
+                        }
+                    }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
         })
     };
 
-    // Process incoming messages
-    while let Some(msg) = ws_receiver.next().await {
+    // Process incoming messages until peer closes, session is revoked, or kick fires
+    loop {
+        let msg_opt = tokio::select! {
+            biased;
+            _ = kick_rx.changed() => break,
+            msg = ws_receiver.next() => msg,
+        };
+        let Some(msg) = msg_opt else {
+            break;
+        };
         let msg = match msg {
             Ok(m) => m,
             Err(_) => break,
@@ -1657,6 +1759,13 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
             Message::Close(_) => break,
             _ => continue,
         };
+
+        // Re-verify session is still active & valid before acting on any client frame
+        if !is_ws_session_active(&session_id) {
+            let mut sender = ws_sender.lock().await;
+            let _ = sender.close().await;
+            break;
+        }
 
         let parsed: Value = match serde_json::from_str(&text) {
             Ok(v) => v,
@@ -2121,7 +2230,10 @@ async fn handle_ws(socket: WebSocket, session_id: String) {
             client.ws_connected = false;
         }
     }
-    log::info!("WebSocket disconnected for session {}", session_id);
+    log::info!(
+        "WebSocket disconnected for session {}",
+        redact_session_id(&session_id)
+    );
 }
 
 // -- Voice --
@@ -2416,12 +2528,26 @@ async fn h_cert_pem(Extension(cert_pem): Extension<Arc<String>>) -> Response {
 // Router
 // ---------------------------------------------------------------------------
 
-/// Check if an origin is allowed (localhost, LAN, or active ngrok URL).
+/// Check if an origin is allowed (localhost, LAN on active share port, ngrok URL, or WMS URL).
 fn is_allowed_origin(origin: &str) -> bool {
-    let ngrok_url = SHARE_STATE.lock().ok().and_then(|s| s.ngrok_url.clone());
-    crate::http_origin_policy::is_allowed_origin(origin, ngrok_url.as_deref())
+    let (share_port, ngrok_url, wms_url) = SHARE_STATE
+        .lock()
+        .ok()
+        .map(|s| {
+            (
+                (s.active && s.port > 0).then_some(s.port),
+                s.ngrok_url.clone(),
+                s.wms_url.clone(),
+            )
+        })
+        .unwrap_or((None, None, None));
+    crate::http_origin_policy::is_allowed_origin_for_share(
+        origin,
+        share_port,
+        ngrok_url.as_deref(),
+        wms_url.as_deref(),
+    )
 }
-
 #[cfg(test)]
 mod tests {
     use super::create_router;
@@ -2820,7 +2946,8 @@ mod tests {
     #[tokio::test]
     async fn localhost_only_middleware_allows_loopback_clients() {
         let _serial = lock_test_mutex();
-        let _guard = ShareStateTestGuard::without_password();
+        let _guard = ShareStateTestGuard::with_auth_enabled();
+        crate::state::register_authenticated_session("loopback-session");
 
         let response = request_with_addr(
             SocketAddr::from(([127, 0, 0, 1], 32002)),
@@ -2828,6 +2955,7 @@ mod tests {
                 .method(Method::POST)
                 .uri("/api/get_ngrok_token")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header("x-session-id", "loopback-session")
                 .body(Body::from("{}"))
                 .unwrap(),
         )
@@ -2835,7 +2963,6 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
     }
-
     #[serial]
     #[tokio::test]
     async fn auth_challenge_requires_configured_salt() {
@@ -3088,6 +3215,7 @@ pub fn create_router(cert_pem: Option<String>) -> Router {
         .fallback(ServeFile::new(dist_path.join("index.html")));
 
     build_api_router(cert_pem)
+        .layer(axum::middleware::from_fn(remote_workspace_scope_middleware))
         .layer(axum::middleware::from_fn(auth_middleware))
         .layer(axum::middleware::from_fn(localhost_only_middleware))
         .layer(axum::middleware::from_fn(security_headers_middleware))
@@ -3096,7 +3224,6 @@ pub fn create_router(cert_pem: Option<String>) -> Router {
         .layer(axum::middleware::from_fn(no_cache_html_middleware))
         .layer(cors)
 }
-
 // ---------------------------------------------------------------------------
 // Server startup
 // ---------------------------------------------------------------------------
@@ -3168,6 +3295,7 @@ pub async fn start_server(
             tls_config.alpn_protocols = vec![b"http/1.1".to_vec()];
             let tls_acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(tls_config));
 
+            let conn_limit = Arc::new(tokio::sync::Semaphore::new(128));
             loop {
                 tokio::select! {
                     _ = shutdown_rx.changed() => {
@@ -3183,11 +3311,18 @@ pub async fn start_server(
                             }
                         };
 
+                        let Ok(permit) = conn_limit.clone().try_acquire_owned() else {
+                            log::warn!("[http-server] Connection limit reached, dropping {}", remote_addr);
+                            continue;
+                        };
+
                         let app = app.clone();
+                        let mut conn_shutdown = shutdown_rx.clone();
 
                         if remote_addr.ip().is_loopback() {
                             // Localhost → plain HTTP/1.1 (with WebSocket upgrade support)
                             tokio::spawn(async move {
+                                let _permit = permit;
                                 let io = hyper_util::rt::TokioIo::new(tcp_stream);
                                 let service = hyper::service::service_fn(move |mut req: hyper::Request<hyper::body::Incoming>| {
                                     req.extensions_mut().insert(ConnectInfo(remote_addr));
@@ -3197,27 +3332,48 @@ pub async fn start_server(
                                         app.call(req).await
                                     }
                                 });
-                                if let Err(e) = hyper::server::conn::http1::Builder::new()
+                                let conn = hyper::server::conn::http1::Builder::new()
                                     .keep_alive(true)
                                     .serve_connection(io, service)
-                                    .with_upgrades()
-                                    .await
-                                {
-                                    let msg = e.to_string();
-                                    if !msg.contains("connection closed") && !msg.contains("reset") {
-                                        log::warn!("HTTP connection error from {}: {}", remote_addr, e);
+                                    .with_upgrades();
+                                tokio::pin!(conn);
+                                tokio::select! {
+                                    res = &mut conn => {
+                                        if let Err(e) = res {
+                                            let msg = e.to_string();
+                                            if !msg.contains("connection closed") && !msg.contains("reset") {
+                                                log::warn!("HTTP connection error from {}: {}", remote_addr, e);
+                                            }
+                                        }
+                                    }
+                                    _ = conn_shutdown.changed() => {
+                                        conn.as_mut().graceful_shutdown();
+                                        let _ = tokio::time::timeout(
+                                            std::time::Duration::from_secs(2),
+                                            &mut conn,
+                                        )
+                                        .await;
                                     }
                                 }
                             });
                         } else {
-                            // LAN → TLS handshake → HTTPS (h2 or h1.1 via ALPN)
+                            // LAN → HTTPS (TLS 1.2/1.3) with handshake timeout + shutdown abort
                             let acceptor = tls_acceptor.clone();
                             tokio::spawn(async move {
-                                let tls_stream = match acceptor.accept(tcp_stream).await {
-                                    Ok(s) => s,
-                                    Err(e) => {
-                                        // Expected when LAN client tries plain HTTP
+                                let _permit = permit;
+                                let tls_stream = match tokio::time::timeout(
+                                    std::time::Duration::from_secs(10),
+                                    acceptor.accept(tcp_stream),
+                                )
+                                .await
+                                {
+                                    Ok(Ok(s)) => s,
+                                    Ok(Err(e)) => {
                                         log::debug!("TLS handshake failed from {}: {}", remote_addr, e);
+                                        return;
+                                    }
+                                    Err(_) => {
+                                        log::debug!("TLS handshake timed out from {}", remote_addr);
                                         return;
                                     }
                                 };
@@ -3230,17 +3386,27 @@ pub async fn start_server(
                                         app.call(req).await
                                     }
                                 });
-                                // HTTPS with HTTP/1.1 keep-alive + WebSocket upgrade support
-                                // (h2 doesn't support traditional WebSocket upgrade)
-                                if let Err(e) = hyper::server::conn::http1::Builder::new()
+                                let conn = hyper::server::conn::http1::Builder::new()
                                     .keep_alive(true)
                                     .serve_connection(io, service)
-                                    .with_upgrades()
-                                    .await
-                                {
-                                    let msg = e.to_string();
-                                    if !msg.contains("connection closed") && !msg.contains("reset") {
-                                        log::warn!("HTTPS connection error from {}: {}", remote_addr, e);
+                                    .with_upgrades();
+                                tokio::pin!(conn);
+                                tokio::select! {
+                                    res = &mut conn => {
+                                        if let Err(e) = res {
+                                            let msg = e.to_string();
+                                            if !msg.contains("connection closed") && !msg.contains("reset") {
+                                                log::warn!("HTTPS connection error from {}: {}", remote_addr, e);
+                                            }
+                                        }
+                                    }
+                                    _ = conn_shutdown.changed() => {
+                                        conn.as_mut().graceful_shutdown();
+                                        let _ = tokio::time::timeout(
+                                            std::time::Duration::from_secs(2),
+                                            &mut conn,
+                                        )
+                                        .await;
                                     }
                                 }
                             });
@@ -3250,7 +3416,6 @@ pub async fn start_server(
             }
         }
         None => {
-            // Pure HTTP mode
             log::info!("[http-server] HTTP server listening on http://{}", addr);
             let app = create_router(None);
 
@@ -3278,11 +3443,13 @@ pub struct McpConfig {
     pub installed_at: String,
     pub capability_level: String,
 }
-
 pub fn get_mcp_config_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_default();
-    PathBuf::from(home)
-        .join(".config")
+    let home = std::env::var_os("HOME")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .or_else(dirs::home_dir)
+        .unwrap_or_default();
+    home.join(".config")
         .join("worktree-manager")
         .join("mcp.json")
 }
@@ -3301,9 +3468,11 @@ pub fn save_mcp_config(config: &McpConfig) -> Result<(), String> {
     let path = get_mcp_config_path();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        crate::config::set_owner_only_permissions(parent, true);
     }
     let content = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
     std::fs::write(&path, content).map_err(|e| e.to_string())?;
+    crate::config::set_owner_only_permissions(&path, false);
     Ok(())
 }
 
@@ -3347,7 +3516,6 @@ pub async fn set_mcp_listening_port(port: u16) -> Result<(), String> {
     }
     Ok(())
 }
-
 const MCP_PORT_SCAN_START: u16 = 42800;
 const MCP_PORT_SCAN_END: u16 = 42900;
 
@@ -3442,7 +3610,7 @@ pub async fn start_mcp_server(port: u16) -> Result<(), String> {
     if MCP_RESTART_REQUESTED.swap(false, Ordering::SeqCst) {
         return Ok(());
     }
-    let router = build_api_router(None);
+    let router = mcp::build_mcp_router();
     serve(listener, router)
         .with_graceful_shutdown(async move {
             let _ = receiver.await;
@@ -3475,7 +3643,6 @@ mod additional_tests {
             installed_at: "2026-06-11T00:00:00+00:00".to_string(),
             capability_level: "advanced".to_string(),
         };
-
         let encoded = serde_json::to_string(&config).unwrap();
         let decoded: McpConfig = serde_json::from_str(&encoded).unwrap();
 
@@ -3579,6 +3746,7 @@ mod additional_tests {
 #[cfg(test)]
 mod http_server_coverage_tests {
     use super::*;
+    use crate::AUTHENTICATED_SESSIONS;
     use axum::body::{to_bytes, Body};
     use axum::http::{header, HeaderMap, Method, Request, StatusCode};
     use axum::response::Response;
@@ -4197,13 +4365,14 @@ mod http_server_coverage_tests {
         config.git_user_email = Some("ada@example.test".to_string());
         config.skip_git_hooks = true;
         config.shell_integration_enabled = false;
+        config.ipc_timeout_seconds = Some(90);
         config.custom_mirrors.push(crate::types::CustomMirror {
             name: "custom".to_string(),
             url: "https://mirror.example/".to_string(),
         });
         cache_global_config(config);
 
-        let (status, workspaces) = json_response(h_list_workspaces().await).await;
+        let (status, workspaces) = json_response(h_list_workspaces(None).await).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(workspaces[0]["name"], "Demo");
 
@@ -4230,6 +4399,7 @@ mod http_server_coverage_tests {
             (h_get_commit_ai_model().await, json!("commit-model")),
             (h_get_skip_git_hooks().await, json!(true)),
             (h_get_shell_integration_enabled().await, json!(false)),
+            (h_get_ipc_timeout_seconds().await, json!(90)),
         ];
         for (response, expected) in assertions {
             let (status, body) = json_response(response).await;
@@ -5204,7 +5374,7 @@ mod http_server_coverage_tests {
             .status(),
             StatusCode::NO_CONTENT
         );
-        let (status, workspaces) = json_response(h_list_workspaces().await).await;
+        let (status, workspaces) = json_response(h_list_workspaces(None).await).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(workspaces[0]["name"], "Workspace A");
         assert_eq!(
@@ -5283,6 +5453,16 @@ mod http_server_coverage_tests {
                 .await
                 .1,
             json!(true)
+        );
+        let (status, saved_timeout) = json_response(
+            h_set_ipc_timeout_seconds(Json(SetIpcTimeoutSecondsArgs { seconds: 150 })).await,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(saved_timeout, json!(150));
+        assert_eq!(
+            json_response(h_get_ipc_timeout_seconds().await).await.1,
+            json!(150)
         );
 
         assert_eq!(
@@ -5541,7 +5721,8 @@ mod http_server_coverage_tests {
         let temp = TempDir::new().unwrap();
         let workspace_path = temp.path().to_string_lossy().to_string();
 
-        let (status, inactive_share) = json_response(h_get_share_info().await).await;
+        let (status, inactive_share) =
+            json_response(h_get_share_info(HeaderMap::new()).await).await;
         assert_eq!(status, StatusCode::OK);
         assert!(inactive_share["workspace_path"].is_null());
         assert_text_contains(
@@ -5577,7 +5758,17 @@ mod http_server_coverage_tests {
                 (workspace_path.clone(), "feature-a".to_string()),
                 "desktop".to_string(),
             );
-        let (status, active_share) = json_response(h_get_share_info().await).await;
+        // Unauthenticated caller must only see workspace_name (no path or active worktree leak)
+        let (status, unauth_share) = json_response(h_get_share_info(HeaderMap::new()).await).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(unauth_share["workspace_name"], "Shared Workspace");
+        assert!(unauth_share["workspace_path"].is_null());
+        assert!(unauth_share["current_worktree"].is_null());
+
+        // Authenticated caller receives full workspace_path and current_worktree
+        crate::state::register_authenticated_session("share-info-auth");
+        let (status, active_share) =
+            json_response(h_get_share_info(auth_headers("share-info-auth")).await).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(active_share["workspace_name"], "Shared Workspace");
         assert_eq!(active_share["current_worktree"], "feature-a");
@@ -5815,7 +6006,8 @@ mod http_server_coverage_tests {
             share.auth_key = None;
         }
 
-        let (status, challenge) = json_response(h_auth_challenge(ConnectInfo(addr)).await).await;
+        let (status, challenge) =
+            json_response(h_auth_challenge(ConnectInfo(addr), HeaderMap::new()).await).await;
         assert_eq!(status, StatusCode::OK);
         let nonce = challenge["nonce"].as_str().unwrap().to_string();
 
@@ -5896,11 +6088,621 @@ mod http_server_coverage_tests {
             share.workspace_path = None;
         }
 
-        let (status, info) = json_response(h_get_share_info().await).await;
+        let (status, info) = json_response(h_get_share_info(HeaderMap::new()).await).await;
         assert_eq!(status, StatusCode::OK);
         assert!(info["workspace_path"].is_null());
         assert!(info["current_worktree"].is_null());
         assert_eq!(get_param_u64(&json!(null), "missing_number", 99), 99);
+    }
+
+    // ==================== Security Regression Tests ====================
+
+    async fn ws_handshake_status(
+        addr: SocketAddr,
+        request: tokio_tungstenite::tungstenite::handshake::client::Request,
+    ) -> StatusCode {
+        let (client_io, server_io) = tokio::io::duplex(64 * 1024);
+        let service = create_router(None)
+            .into_make_service_with_connect_info::<SocketAddr>()
+            .oneshot(addr)
+            .await
+            .unwrap();
+        let server = tokio::spawn(async move {
+            let service = hyper::service::service_fn(move |req| {
+                let service = service.clone();
+                async move { service.oneshot(req).await }
+            });
+            let _ = hyper::server::conn::http1::Builder::new()
+                .serve_connection(hyper_util::rt::TokioIo::new(server_io), service)
+                .with_upgrades()
+                .await;
+        });
+        let status = match tokio_tungstenite::client_async(request, client_io).await {
+            Ok((_, resp)) => StatusCode::from_u16(resp.status().as_u16()).unwrap(),
+            Err(tokio_tungstenite::tungstenite::Error::Http(resp)) => {
+                StatusCode::from_u16(resp.status().as_u16()).unwrap()
+            }
+            Err(other) => panic!("unexpected ws handshake error: {other}"),
+        };
+        server.abort();
+        status
+    }
+
+    #[serial]
+    #[tokio::test]
+    async fn auth_middleware_and_ws_fail_closed_when_sharing_inactive() {
+        let _serial = lock_coverage_tests();
+        let _guard = GlobalStateGuard::new();
+
+        // Simulate an attacker reusing an existing keep-alive connection after stop_sharing
+        let resp = request_with_addr(
+            SocketAddr::from(([192, 168, 1, 88], 40100)),
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/pty_create")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"sessionId":"x","cwd":"/tmp"}"#))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        // WebSocket upgrade must also fail closed when sharing is inactive
+        let mut ws_req = "ws://192.168.1.88:5000/ws?session_id=anything"
+            .into_client_request()
+            .unwrap();
+        ws_req.headers_mut().insert(
+            header::ORIGIN,
+            axum::http::HeaderValue::from_static("https://192.168.1.88:5000"),
+        );
+        let ws_status =
+            ws_handshake_status(SocketAddr::from(([192, 168, 1, 88], 40101)), ws_req).await;
+        assert_eq!(ws_status, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[serial]
+    #[tokio::test]
+    async fn remote_client_is_confined_to_shared_workspace_and_safe_shells() {
+        let _serial = lock_coverage_tests();
+        let _guard = GlobalStateGuard::new();
+        let temp = TempDir::new().unwrap();
+        let shared_ws = temp.path().join("shared-ws");
+        let other_ws = temp.path().join("other-ws");
+        std::fs::create_dir_all(&shared_ws).unwrap();
+        std::fs::create_dir_all(&other_ws).unwrap();
+        let shared_str = shared_ws.to_string_lossy().to_string();
+        let other_str = other_ws.to_string_lossy().to_string();
+
+        {
+            let mut share = SHARE_STATE.lock().unwrap();
+            share.active = true;
+            share.port = 54321;
+            share.auth_key = Some(b"secret-key".to_vec());
+            share.workspace_path = Some(shared_str.clone());
+        }
+        crate::state::register_authenticated_session("remote-sess");
+
+        let mut global = crate::types::GlobalConfig::default();
+        global.workspaces.push(crate::types::WorkspaceRef {
+            name: "Shared".to_string(),
+            path: shared_str.clone(),
+        });
+        global.workspaces.push(crate::types::WorkspaceRef {
+            name: "Private".to_string(),
+            path: other_str.clone(),
+        });
+        cache_global_config(global);
+
+        // 1. Remote list_workspaces only sees the shared workspace
+        let resp = request_with_addr(
+            SocketAddr::from(([192, 168, 1, 90], 40200)),
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/list_workspaces")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("x-session-id", "remote-sess")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await;
+        let (status, body) = json_response(resp).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body.as_array().unwrap().len(), 1);
+        assert_eq!(body[0]["name"], "Shared");
+
+        // 2. Remote SSRF/API-key leak endpoint is blocked (403)
+        let ssrf_resp = request_with_addr(
+            SocketAddr::from(([192, 168, 1, 90], 40201)),
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/set_voice_refine_base_url")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("x-session-id", "remote-sess")
+                .body(Body::from(r#"{"url":"https://attacker.example/v1"}"#))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(ssrf_resp.status(), StatusCode::FORBIDDEN);
+
+        // 3. Remote path outside shared workspace is blocked (403)
+        let escape_resp = request_with_addr(
+            SocketAddr::from(([192, 168, 1, 90], 40202)),
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/pty_create")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("x-session-id", "remote-sess")
+                .body(Body::from(
+                    json!({"sessionId": "bad", "cwd": other_str}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(escape_resp.status(), StatusCode::FORBIDDEN);
+
+        // 4. Remote custom absolute shell path is blocked (403)
+        let shell_resp = request_with_addr(
+            SocketAddr::from(([192, 168, 1, 90], 40203)),
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/pty_create")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("x-session-id", "remote-sess")
+                .body(Body::from(
+                    json!({"sessionId": "bad-shell", "cwd": shared_str, "shell": "/usr/bin/python3"})
+                        .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(shell_resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[serial]
+    #[tokio::test]
+    async fn mcp_router_blocks_dns_rebinding_csrf_non_mcp_routes_and_confirms_create_delete() {
+        let _serial = lock_coverage_tests();
+        let _guard = TempConfigRootGuard::new(crate::types::GlobalConfig::default());
+        save_mcp_config(&McpConfig {
+            version: "0.1.2".to_string(),
+            http_port: 42819,
+            installed_at: "2026-11-25T00:00:00Z".to_string(),
+            capability_level: "read".to_string(),
+        })
+        .unwrap();
+
+        let router = mcp::build_mcp_router();
+
+        // 1. DNS Rebinding Host header rejected
+        let resp = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/mcp/config")
+                    .header(header::HOST, "evil.example:42819")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
+        // 2. Browser Origin header rejected (CSRF defense)
+        let resp = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/mcp/config")
+                    .header(header::HOST, "127.0.0.1:42819")
+                    .header(header::ORIGIN, "https://evil.example")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
+        // 3. Non-JSON Content-Type rejected (415)
+        let resp = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/mcp/config")
+                    .header(header::HOST, "127.0.0.1:42819")
+                    .header(header::CONTENT_TYPE, "text/plain")
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+
+        // 4. Read/query endpoints work directly without any auth token
+        let resp = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/mcp/config")
+                    .header(header::HOST, "127.0.0.1:42819")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let (status, body) = json_response(resp).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["http_port"], 42819);
+
+        // 5. Create/delete/deploy/UAT-or-base merge endpoints require desktop confirmation
+        //    (fail closed when desktop UI absent)
+        let confirm_cases = [
+            (
+                "/api/create_workspace",
+                json!({"name": "demo", "path": "/tmp/wm-mcp-unconfirmed-ws"}).to_string(),
+            ),
+            (
+                "/api/remove_workspace",
+                json!({"path": "/tmp/wm-mcp-unconfirmed-ws"}).to_string(),
+            ),
+            (
+                "/api/create_worktree",
+                json!({"name": "feat-unconfirmed", "projects": []}).to_string(),
+            ),
+            (
+                "/api/mcp/archive_worktree",
+                json!({"name": "feat-unconfirmed"}).to_string(),
+            ),
+            (
+                "/api/mcp/delete_archived_worktree",
+                json!({"name": "feat-unconfirmed"}).to_string(),
+            ),
+            (
+                "/api/deploy_to_main",
+                json!({"worktree_name": "feat-unconfirmed"}).to_string(),
+            ),
+            (
+                "/api/merge_to_base_branch",
+                json!({"path": "/tmp/wm-mcp-nonexistent-repo", "base_branch": "uat"}).to_string(),
+            ),
+            (
+                "/api/merge_to_base_branch",
+                json!({"path": "/tmp/wm-mcp-nonexistent-repo", "base_branch": "main"}).to_string(),
+            ),
+        ];
+        for (uri, payload) in confirm_cases {
+            let resp = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri(uri)
+                        .header(header::HOST, "127.0.0.1:42819")
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(payload))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_text_contains(
+                resp,
+                StatusCode::BAD_REQUEST,
+                "桌面端未打开，无法向用户确认",
+            )
+            .await;
+        }
+
+        // 5b. merge_to_test_branch must NOT require desktop confirmation (reaches git error directly)
+        let resp = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/merge_to_test_branch")
+                    .header(header::HOST, "127.0.0.1:42819")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({"path": "/tmp/wm-mcp-nonexistent-repo", "test_branch": "test"})
+                            .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let test_merge_status = resp.status();
+        let test_merge_body = String::from_utf8(
+            axum::body::to_bytes(resp.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+        assert_eq!(test_merge_status, StatusCode::BAD_REQUEST);
+        assert!(
+            !test_merge_body.contains("桌面端未打开"),
+            "merge_to_test_branch must not trigger desktop confirmation, got: {test_merge_body}"
+        );
+
+        // 5b-2. Real repo checked out on `test`: merge_to_base_branch("uat") must be rejected
+        //       as a protected source branch BEFORE triggering desktop confirmation,
+        //       and merge_to_test_branch("test") must reject merging into itself.
+        let test_branch_dir = TempDir::new().unwrap();
+        let test_repo = git2::Repository::init(test_branch_dir.path()).unwrap();
+        let sig = git2::Signature::now("Tester", "tester@example.com").unwrap();
+        let tree_id = test_repo.index().unwrap().write_tree().unwrap();
+        let tree = test_repo.find_tree(tree_id).unwrap();
+        test_repo
+            .commit(Some("refs/heads/test"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+        test_repo.set_head("refs/heads/test").unwrap();
+        let test_repo_path = test_branch_dir.path().to_string_lossy().to_string();
+
+        let resp = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/merge_to_base_branch")
+                    .header(header::HOST, "127.0.0.1:42819")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({"path": test_repo_path, "base_branch": "uat"}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_text_contains(resp, StatusCode::BAD_REQUEST, "受保护分支").await;
+
+        let resp = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/merge_to_test_branch")
+                    .header(header::HOST, "127.0.0.1:42819")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({"path": test_repo_path, "test_branch": "test"}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_text_contains(resp, StatusCode::BAD_REQUEST, "已经是目标分支").await;
+
+        // 5c. switch_branch accepts both nested {request:{project_path,branch}} and flat {path,branch}
+        for payload in [
+            json!({"request": {"project_path": "/tmp/wm-mcp-nonexistent-repo", "branch": "feat"}}),
+            json!({"path": "/tmp/wm-mcp-nonexistent-repo", "branch": "feat"}),
+        ] {
+            let resp = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri("/api/switch_branch")
+                        .header(header::HOST, "127.0.0.1:42819")
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(payload.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let switch_body = String::from_utf8(
+                axum::body::to_bytes(resp.into_body(), usize::MAX)
+                    .await
+                    .unwrap()
+                    .to_vec(),
+            )
+            .unwrap();
+            assert!(
+                !switch_body.contains("Invalid request"),
+                "switch_branch payload should be parsed without Invalid request: {switch_body}"
+            );
+        }
+
+        // 6. High-risk non-MCP routes (PTY, sharing, secrets) are not mounted (404)
+        for dangerous in [
+            "/api/pty_create",
+            "/api/pty_write",
+            "/api/start_wms_tunnel",
+            "/api/get_last_share_password",
+            "/api/install_mcp_client",
+        ] {
+            let resp = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(Method::POST)
+                        .uri(dangerous)
+                        .header(header::HOST, "127.0.0.1:42819")
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from("{}"))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                resp.status(),
+                StatusCode::NOT_FOUND,
+                "{dangerous} must not be mounted on MCP router"
+            );
+        }
+    }
+
+    #[serial]
+    #[tokio::test]
+    async fn ws_requires_origin_when_remote_and_terminates_on_password_rotation() {
+        let _serial = lock_coverage_tests();
+        let _guard = GlobalStateGuard::new();
+        let temp = TempDir::new().unwrap();
+        let workspace_path = temp.path().to_string_lossy().to_string();
+        {
+            let mut share = SHARE_STATE.lock().unwrap();
+            share.active = true;
+            share.port = 54321;
+            share.auth_key = Some(b"initial-key".to_vec());
+            share.workspace_path = Some(workspace_path.clone());
+        }
+        crate::state::register_authenticated_session("ws-revoke-sess");
+
+        // 1. Remote/tunneled WS upgrade without Origin is rejected (403)
+        let mut missing_origin_req = "ws://localhost:54321/ws?session_id=ws-revoke-sess"
+            .into_client_request()
+            .unwrap();
+        missing_origin_req.headers_mut().insert(
+            axum::http::header::HeaderName::from_static(crate::wms_tunnel::TUNNEL_MARKER_HEADER),
+            axum::http::HeaderValue::from_static("1"),
+        );
+        let missing_origin_status = ws_handshake_status(
+            SocketAddr::from(([127, 0, 0, 1], 40300)),
+            missing_origin_req,
+        )
+        .await;
+        assert_eq!(missing_origin_status, StatusCode::FORBIDDEN);
+        // 2. Active duplex WS receives kicked notification and server closes loop on broadcast revoke
+        let (client_io, server_io) = tokio::io::duplex(64 * 1024);
+        let service = create_router(None)
+            .into_make_service_with_connect_info::<SocketAddr>()
+            .oneshot(SocketAddr::from(([127, 0, 0, 1], 40301)))
+            .await
+            .unwrap();
+        let server_task = tokio::spawn(async move {
+            let service = hyper::service::service_fn(move |request| {
+                let service = service.clone();
+                async move { service.oneshot(request).await }
+            });
+            let _ = hyper::server::conn::http1::Builder::new()
+                .serve_connection(hyper_util::rt::TokioIo::new(server_io), service)
+                .with_upgrades()
+                .await;
+        });
+
+        let mut req = "ws://localhost:54321/ws?session_id=ws-revoke-sess"
+            .into_client_request()
+            .unwrap();
+        req.headers_mut().insert(
+            header::ORIGIN,
+            axum::http::HeaderValue::from_static("http://localhost:54321"),
+        );
+        let (mut socket, response) = tokio_tungstenite::client_async(req, client_io)
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status().as_u16(),
+            StatusCode::SWITCHING_PROTOCOLS.as_u16()
+        );
+
+        // Give handle_ws a moment to subscribe to CLIENT_NOTIFICATION_BROADCAST
+        tokio::time::sleep(Duration::from_millis(30)).await;
+
+        // Simulate password rotation / stop-sharing broadcast revocation
+        crate::state::clear_authenticated_sessions();
+        let _ = crate::state::CLIENT_NOTIFICATION_BROADCAST.send(
+            json!({
+                "session_id": "*",
+                "type": "kicked",
+                "reason": "分享密码已更新，请重新登录"
+            })
+            .to_string(),
+        );
+
+        let kicked = next_ws_json(&mut socket, "kicked").await;
+        assert_eq!(kicked["type"], "kicked");
+
+        // Server-side handle_ws loop must terminate promptly without waiting for client Close
+        tokio::time::timeout(Duration::from_secs(3), server_task)
+            .await
+            .expect("handle_ws should terminate promptly after broadcast revocation")
+            .unwrap();
+    }
+
+    #[serial]
+    #[tokio::test]
+    async fn tunneled_auth_challenge_rate_limits_per_forwarded_client_ip() {
+        let _serial = lock_coverage_tests();
+        let _guard = GlobalStateGuard::new();
+        {
+            let mut share = SHARE_STATE.lock().unwrap();
+            share.active = true;
+            share.auth_key = Some(b"k".to_vec());
+            share.auth_salt = Some(b"0123456789abcdef".to_vec());
+        }
+        *AUTH_RATE_LIMITER.lock().unwrap() = crate::AuthRateLimiter::new();
+
+        // Attacker IP exhausts all 5 attempts via tunnel (loopback peer + XFF)
+        for _ in 0..5 {
+            let resp = request_with_addr(
+                SocketAddr::from(([127, 0, 0, 1], 40400)),
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/auth/challenge")
+                    .header(crate::wms_tunnel::TUNNEL_MARKER_HEADER, "1")
+                    .header("x-forwarded-for", "203.0.113.55")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await;
+            assert_eq!(resp.status(), StatusCode::OK);
+        }
+        let blocked = request_with_addr(
+            SocketAddr::from(([127, 0, 0, 1], 40401)),
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/auth/challenge")
+                .header(crate::wms_tunnel::TUNNEL_MARKER_HEADER, "1")
+                .header("x-forwarded-for", "203.0.113.55")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(blocked.status(), StatusCode::TOO_MANY_REQUESTS);
+
+        // Different legitimate client IP behind the same tunnel must NOT be blocked
+        let legit = request_with_addr(
+            SocketAddr::from(([127, 0, 0, 1], 40402)),
+            Request::builder()
+                .method(Method::POST)
+                .uri("/api/auth/challenge")
+                .header(crate::wms_tunnel::TUNNEL_MARKER_HEADER, "1")
+                .header("x-forwarded-for", "198.51.100.20")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(legit.status(), StatusCode::OK);
+    }
+
+    #[serial]
+    #[test]
+    fn session_ttl_evicts_expired_sessions_and_redacts_ids() {
+        let _serial = lock_coverage_tests();
+        let _guard = GlobalStateGuard::new();
+
+        let sid = "12345678-aaaa-bbbb-cccc-1234567890ab";
+        assert_eq!(redact_session_id(sid), "12345678...");
+        assert!(!redact_session_id(sid).contains("1234567890ab"));
+
+        crate::state::register_authenticated_session(sid);
+        assert!(validate_and_touch_session(sid));
+
+        // Force idle timestamp beyond SESSION_IDLE_TTL
+        {
+            let mut meta = crate::state::SESSION_METADATA.lock().unwrap();
+            if let Some(timing) = meta.get_mut(sid) {
+                timing.last_active = std::time::Instant::now()
+                    - crate::state::SESSION_IDLE_TTL
+                    - Duration::from_secs(1);
+            }
+        }
+        assert!(!validate_and_touch_session(sid));
     }
 
     // TODO: websocket/ngrok integration test skipped

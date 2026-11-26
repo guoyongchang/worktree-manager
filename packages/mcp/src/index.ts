@@ -1,15 +1,12 @@
 #!/usr/bin/env node
 
 import { WorktreeMcpServer } from './server.js';
-import { readCapabilityLevel, readSavedHttpPort } from './transport/config.js';
+import { MCP_CONFIG_PATH, readCapabilityLevel, readSavedHttpPort } from './transport/config.js';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { homedir } from 'os';
 
 const CLAUDE_CONFIG_PATH = join(homedir(), '.claude.json');
-const MCP_CONFIG_DIR = '.config/worktree-manager';
-const MCP_CONFIG_PATH = join(homedir(), MCP_CONFIG_DIR, 'mcp.json');
-
 async function startServer() {
   const server = new WorktreeMcpServer();
   await server.initialize();
@@ -59,14 +56,22 @@ async function uninstall() {
 
 function writeMcpConfig(): void {
   try {
-    const dir = join(homedir(), MCP_CONFIG_DIR);
+    if (existsSync(MCP_CONFIG_PATH)) {
+      // 已有合法配置时不再覆写，避免覆盖桌面端写入的 version / installed_at / http_port / capability_level
+      try {
+        const parsed = JSON.parse(readFileSync(MCP_CONFIG_PATH, 'utf-8'));
+        if (parsed && typeof parsed === 'object') return;
+      } catch {
+        // 文件损坏时重建默认配置
+      }
+    }
+    const dir = dirname(MCP_CONFIG_PATH);
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
-    // 保留已有端口和权限，避免客户端启动把桌面端改过的配置写回去。
     const capabilityLevel = readCapabilityLevel('read');
     const mcpConfig = {
-      version: '1.0.0',
+      version: '1.0.1',
       http_port: readSavedHttpPort(),
       installed_at: new Date().toISOString(),
       capability_level: capabilityLevel,

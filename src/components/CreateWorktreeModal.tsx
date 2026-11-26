@@ -22,8 +22,8 @@ import { containsNonAscii, generateFolderAlias } from '../lib/bip39-words';
 // Git branch name rules: no spaces, ~, ^, :, \, .., *, ?, [, leading/trailing dots, @{
 const WORKTREE_NAME_INVALID_CHARS = /[\s~^:*?[\\]/;
 const WORKTREE_NAME_INVALID_PATTERNS = /(?:\.\.)|(?:^\.)|(?:\.$)|(?:@\{)|(?:\.lock$)/;
-// Folder alias validation: only allow lowercase letters, digits, and hyphens
-const FOLDER_ALIAS_VALID = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+// Folder alias validation: allow ASCII letters (uppercase/lowercase), digits, and hyphens
+export const FOLDER_ALIAS_VALID = /^[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*$/;
 
 interface CreateWorktreeModalProps {
   open: boolean;

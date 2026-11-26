@@ -587,6 +587,7 @@ pub fn run() {
             get_branch_diff_stats,
             create_pull_request,
             fetch_project_remote,
+            cancel_git_operation,
             check_remote_branch_exists,
             get_remote_branches,
             get_git_diff,
@@ -684,7 +685,9 @@ pub fn run() {
             // Shell Integration 配置
             get_shell_integration_enabled,
             set_shell_integration_enabled,
-            // Git 用户本地配置
+            // 命令超时配置
+            get_ipc_timeout_seconds,
+            set_ipc_timeout_seconds,
             get_git_user_config,
             set_git_user_config,
             // 更新镜像
@@ -739,13 +742,26 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 http_server::run_mcp_server().await;
             });
-
             log::info!(
                 "=== app started, version {}, os {}/{} ===",
                 env!("CARGO_PKG_VERSION"),
                 std::env::consts::OS,
                 std::env::consts::ARCH
             );
+
+            // Dev binaries are not an .app bundle. On macOS they often start without
+            // being activated, so the window exists but never comes to the front —
+            // especially while /Applications/Worktree Manager.app is already running.
+            #[cfg(debug_assertions)]
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_title("Worktree Manager (dev)");
+                let _ = window.set_position(tauri::PhysicalPosition::new(120, 80));
+                let _ = window.set_size(tauri::PhysicalSize::new(1300, 900));
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+                log::info!("[setup] ordered dev main window front at (120, 80)");
+            }
 
             Ok(())
         })

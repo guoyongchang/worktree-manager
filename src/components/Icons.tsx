@@ -40,6 +40,7 @@ import {
   FolderOpen,
   Download,
   ChevronsUpDown,
+  Search,
 } from 'lucide-react';
 
 interface IconProps {
@@ -166,6 +167,10 @@ export const UsersIcon: FC<IconProps> = ({ className = "w-4 h-4" }) => (
 
 export const XIcon: FC<IconProps> = ({ className = "w-4 h-4" }) => (
   <X className={className} />
+);
+
+export const SearchIcon: FC<IconProps> = ({ className = "w-4 h-4" }) => (
+  <Search className={className} />
 );
 
 export const EyeIcon: FC<IconProps> = ({ className = "w-4 h-4" }) => (

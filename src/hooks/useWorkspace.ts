@@ -45,7 +45,7 @@ export interface UseWorkspaceReturn {
   }) => Promise<void>;
   archiveWorktree: (name: string) => Promise<void>;
   restoreWorktree: (name: string) => Promise<void>;
-  deleteArchivedWorktree: (name: string) => Promise<void>;
+  deleteArchivedWorktree: (name: string, options?: { reload?: boolean; silentReload?: boolean; throwOnError?: boolean; workspacePath?: string }) => Promise<void>;
   checkWorktreeStatus: (name: string) => Promise<WorktreeArchiveStatus>;
   terminateWorktreeLockingProcess: (name: string, pid: number, processStartTime: string) => Promise<void>;
   openInEditor: (path: string, editor: EditorType) => Promise<void>;
@@ -54,7 +54,7 @@ export interface UseWorkspaceReturn {
   switchBranch: (projectPath: string, branch: string) => Promise<void>;
   saveConfig: (config: WorkspaceConfig) => Promise<void>;
   scanLinkedFolders: (projectPath: string) => Promise<ScannedFolder[]>;
-  addProjectToWorktree: (request: AddProjectToWorktreeRequest) => Promise<void>;
+  addProjectToWorktree: (request: AddProjectToWorktreeRequest, options?: { reload?: boolean }) => Promise<void>;
   openWorkspaceInNewWindow: (workspacePath: string) => Promise<void>;
   lockWorktree: (workspacePath: string, worktreeName: string) => Promise<void>;
   unlockWorktree: (workspacePath: string, worktreeName: string) => Promise<void>;
@@ -267,14 +267,27 @@ export function useWorkspace(ready = true, initialWorkspacePath?: string, shellM
     }
   }, [loadData]);
 
-  const deleteArchivedWorktree = useCallback(async (name: string) => {
+  const deleteArchivedWorktree = useCallback(async (
+    name: string,
+    options?: { reload?: boolean; silentReload?: boolean; throwOnError?: boolean; workspacePath?: string },
+  ) => {
+    const reload = options?.reload ?? true;
+    const silentReload = options?.silentReload ?? false;
+    const throwOnError = options?.throwOnError ?? false;
+    const targetWorkspacePath = options?.workspacePath ?? explicitPath;
+    const extra = isTauri() && targetWorkspacePath ? { workspacePath: targetWorkspacePath } : {};
     try {
-      await callBackend("delete_archived_worktree", { name });
-      await loadData();
+      await callBackend("delete_archived_worktree", { name, ...extra });
+      if (reload) {
+        await loadData(silentReload ? { silent: true } : undefined);
+      }
     } catch (e) {
+      if (throwOnError) {
+        throw e;
+      }
       setError(String(e));
     }
-  }, [loadData]);
+  }, [explicitPath, loadData]);
 
   const checkWorktreeStatus = useCallback(async (name: string): Promise<WorktreeArchiveStatus> => {
     return callBackend<WorktreeArchiveStatus>("check_worktree_status", { name });
@@ -343,10 +356,17 @@ export function useWorkspace(ready = true, initialWorkspacePath?: string, shellM
     return callBackend<ScannedFolder[]>("scan_linked_folders", { projectPath });
   }, []);
 
-  const addProjectToWorktree = useCallback(async (request: AddProjectToWorktreeRequest): Promise<void> => {
-    await callBackend("add_project_to_worktree", { request });
-    await loadData();
-  }, [loadData]);
+  const addProjectToWorktree = useCallback(async (
+    request: AddProjectToWorktreeRequest,
+    options?: { reload?: boolean },
+  ): Promise<void> => {
+    const reload = options?.reload ?? true;
+    const extra = isTauri() && explicitPath ? { workspacePath: explicitPath } : {};
+    await callBackend("add_project_to_worktree", { request, ...extra });
+    if (reload) {
+      await loadData();
+    }
+  }, [explicitPath, loadData]);
 
   const openWorkspaceInNewWindow = useCallback(async (workspacePath: string) => {
     const result = await callBackend<string>("open_workspace_window", { workspacePath });

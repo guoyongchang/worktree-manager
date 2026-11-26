@@ -22,7 +22,7 @@ import type { SettingsSection } from './SettingsView';
 import type { UseUpdaterReturn } from '../hooks/useUpdater';
 import type { UseShareFeatureReturn } from '../hooks/useShareFeature';
 import type { WorktreeListItem } from '../types';
-import { isTauri } from '../lib/backend';
+import { getPlatform, isTauri } from '../lib/backend';
 
 interface GlobalDialogsProps {
   updater: UseUpdaterReturn;
@@ -33,6 +33,7 @@ interface GlobalDialogsProps {
   deleteConfirmWorktree: WorktreeListItem | null;
   onSetDeleteConfirmWorktree: (v: WorktreeListItem | null) => void;
   onDeleteArchivedWorktree: () => Promise<void>;
+  onBackgroundDeleteArchivedWorktree?: () => void;
   deletingArchived: boolean;
 }
 
@@ -45,6 +46,7 @@ export const GlobalDialogs: FC<GlobalDialogsProps> = ({
   deleteConfirmWorktree,
   onSetDeleteConfirmWorktree,
   onDeleteArchivedWorktree,
+  onBackgroundDeleteArchivedWorktree,
   deletingArchived,
 }) => {
   const { t } = useTranslation();
@@ -125,6 +127,7 @@ export const GlobalDialogs: FC<GlobalDialogsProps> = ({
               { keys: isTauri() ? '⌘ ,' : 'Ctrl ,', desc: t('app.shortcutOpenSettings') },
               { keys: isTauri() ? '⌘ B' : 'Ctrl B', desc: t('app.shortcutToggleSidebar') },
               { keys: isTauri() ? '⌘ [' : 'Ctrl [', desc: t('app.shortcutBack') },
+              { keys: getPlatform() === 'mac' ? '⌘ F' : 'Ctrl F', desc: t('app.shortcutSearch') },
               { keys: isTauri() ? '⌘ /' : 'Ctrl /', desc: t('app.shortcutHelp') },
               { keys: 'Alt V', desc: t('app.shortcutVoice') },
               { keys: 'Escape', desc: t('app.shortcutEscape') },
@@ -245,10 +248,20 @@ export const GlobalDialogs: FC<GlobalDialogsProps> = ({
               {t('app.deleteArchivedDesc', { name: deleteConfirmWorktree?.name })}
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter>
+          <DialogFooter className="flex flex-wrap gap-2 justify-end">
             <Button variant="secondary" onClick={() => onSetDeleteConfirmWorktree(null)}>
               {t('common.cancel')}
             </Button>
+            {onBackgroundDeleteArchivedWorktree && (
+              <Button
+                variant="outline"
+                className="border-[var(--color-error)]/40 text-[var(--color-error)] hover:bg-[var(--color-error)]/10 hover:text-[var(--color-error)]"
+                onClick={onBackgroundDeleteArchivedWorktree}
+                disabled={deletingArchived}
+              >
+                {t('app.deleteInBackground')}
+              </Button>
+            )}
             <Button variant="destructive" onClick={onDeleteArchivedWorktree} disabled={deletingArchived}>
               {deletingArchived ? t('app.deleting') : t('app.confirmDelete')}
             </Button>

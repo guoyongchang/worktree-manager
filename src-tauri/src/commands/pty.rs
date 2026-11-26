@@ -1,7 +1,7 @@
-use crate::pty_manager::requested_shell_path;
+use crate::pty_manager::{drain_desktop_buffer, requested_shell_path};
 use crate::state::PTY_MANAGER;
 use crate::utils::normalize_path;
-
+use std::time::Duration;
 #[tauri::command]
 pub(crate) fn pty_create(
     session_id: String,
@@ -63,14 +63,51 @@ pub(crate) fn pty_write(session_id: String, data: String) -> Result<(), String> 
     manager.write_to_session(&session_id, &data)
 }
 
-#[tauri::command]
-pub(crate) fn pty_read(session_id: String, client_id: Option<String>) -> Result<String, String> {
-    let manager = PTY_MANAGER
-        .lock()
-        .map_err(|e| format!("Lock error: {}", e))?;
-    manager.read_from_session(&session_id, client_id.as_deref())
-}
+const MAX_PTY_READ_WAIT_MS: u64 = 500;
 
+#[tauri::command]
+pub(crate) async fn pty_read(
+    session_id: String,
+    client_id: Option<String>,
+    wait_ms: Option<u64>,
+) -> Result<String, String> {
+    let (desktop_buffer, notify) = {
+        let manager = PTY_MANAGER
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        manager.desktop_read_handles(&session_id)?
+    };
+
+    let reader_key = client_id.as_deref().unwrap_or(session_id.as_str());
+    let wait_ms = wait_ms.unwrap_or(0).min(MAX_PTY_READ_WAIT_MS);
+
+    if wait_ms == 0 {
+        return drain_desktop_buffer(&desktop_buffer, reader_key);
+    }
+
+    // Register waiter BEFORE draining so bytes appended concurrently cannot miss the wakeup.
+    let notified = notify.notified();
+    tokio::pin!(notified);
+    notified.as_mut().enable();
+
+    let immediate = drain_desktop_buffer(&desktop_buffer, reader_key)?;
+    if !immediate.is_empty() {
+        return Ok(immediate);
+    }
+
+    let _ = tokio::time::timeout(Duration::from_millis(wait_ms), notified).await;
+    let data = drain_desktop_buffer(&desktop_buffer, reader_key)?;
+    if data.is_empty() {
+        let still_exists = PTY_MANAGER
+            .lock()
+            .map(|m| m.has_session(&session_id))
+            .unwrap_or(true);
+        if !still_exists {
+            return Err("Session not found".to_string());
+        }
+    }
+    Ok(data)
+}
 #[tauri::command]
 pub(crate) fn pty_resize(
     session_id: String,
@@ -159,18 +196,33 @@ mod tests {
         format!("pty-command-test-{}-{}-{nanos}", std::process::id(), name)
     }
 
+    fn block_on_pty_read(
+        session_id: String,
+        client_id: Option<String>,
+        wait_ms: Option<u64>,
+    ) -> Result<String, String> {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .expect("build tokio runtime for pty test");
+        rt.block_on(pty_read(session_id, client_id, wait_ms))
+    }
+
     #[cfg(not(target_os = "windows"))]
     fn wait_for_pty_output(session_id: &str, reader_id: &str, needle: &str) -> String {
         let deadline = Instant::now() + Duration::from_secs(3);
         let mut collected = String::new();
         while Instant::now() < deadline {
-            let chunk = pty_read(session_id.to_string(), Some(reader_id.to_string()))
-                .expect("read pty output");
+            let chunk = block_on_pty_read(
+                session_id.to_string(),
+                Some(reader_id.to_string()),
+                Some(50),
+            )
+            .expect("read pty output");
             collected.push_str(&chunk);
             if collected.contains(needle) {
                 return collected;
             }
-            std::thread::sleep(Duration::from_millis(25));
         }
         panic!("timed out waiting for {needle:?}; collected {collected:?}");
     }
@@ -194,8 +246,8 @@ mod tests {
 
         let write_err = pty_write(session_id.clone(), "input".to_string())
             .expect_err("write to missing session");
-        let read_err =
-            pty_read(session_id.clone(), Some("reader".to_string())).expect_err("read missing");
+        let read_err = block_on_pty_read(session_id.clone(), Some("reader".to_string()), None)
+            .expect_err("read missing");
         let resize_err = pty_resize(session_id, 120, 40, Some("reader".to_string()))
             .expect_err("resize missing");
 
@@ -204,6 +256,50 @@ mod tests {
         assert_eq!(resize_err, "Session not found");
     }
 
+    #[cfg(not(target_os = "windows"))]
+    #[serial]
+    #[tokio::test]
+    async fn pty_read_long_poll_wakes_immediately_on_output() {
+        let _serial = lock_pty_command_tests();
+        if !std::path::Path::new("/bin/sh").exists() {
+            return;
+        }
+        let cwd = tempfile::tempdir().expect("pty cwd");
+        let session_id = unique_session_id("notify-wake");
+        pty_create(
+            session_id.clone(),
+            cwd.path().to_string_lossy().to_string(),
+            80,
+            24,
+            Some("/bin/sh".to_string()),
+        )
+        .expect("create pty");
+
+        // Drain initial prompt
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        let _ = pty_read(session_id.clone(), Some("fast".to_string()), Some(0)).await;
+
+        // Start a 500ms long-poll, then write after 30ms; reader must wake well before 500ms.
+        let sid_writer = session_id.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            let _ = pty_write(sid_writer, "echo WAKE_FAST_OK\n".to_string());
+        });
+
+        let started = Instant::now();
+        let chunk = pty_read(session_id.clone(), Some("fast".to_string()), Some(500))
+            .await
+            .expect("long-poll read");
+        let elapsed = started.elapsed();
+        assert!(!chunk.is_empty(), "long-poll should wake with data");
+        assert!(
+            elapsed < Duration::from_millis(350),
+            "long-poll should wake via Notify rather than waiting full 500ms (took {:?})",
+            elapsed
+        );
+
+        let _ = pty_close(session_id);
+    }
     #[serial]
     #[test]
     fn pty_close_is_idempotent_for_missing_session() {

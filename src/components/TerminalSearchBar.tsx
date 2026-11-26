@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, type FC } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronUp, ChevronDown, X, CaseSensitive, Regex } from 'lucide-react';
 import type { SearchOptions } from '../terminal';
+import { isFindShortcut } from '../lib/searchShortcut';
 import {
   Tooltip,
   TooltipContent,
@@ -13,12 +14,14 @@ interface TerminalSearchBarProps {
   onFindNext: (query: string, options: SearchOptions) => boolean;
   onFindPrevious: (query: string, options: SearchOptions) => boolean;
   onClose: () => void;
+  focusNonce?: number;
 }
 
 export const TerminalSearchBar: FC<TerminalSearchBarProps> = ({
   onFindNext,
   onFindPrevious,
   onClose,
+  focusNonce = 0,
 }) => {
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
@@ -28,11 +31,11 @@ export const TerminalSearchBar: FC<TerminalSearchBarProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Auto-focus input on mount
+  // Auto-focus and select input on mount or repeated Ctrl/Cmd+F
   useEffect(() => {
     inputRef.current?.focus();
-  }, []);
-
+    inputRef.current?.select();
+  }, [focusNonce]);
   const options: SearchOptions = { caseSensitive, regex: useRegex };
 
   const doFindNext = useCallback((q: string, opts: SearchOptions) => {
@@ -66,6 +69,13 @@ export const TerminalSearchBar: FC<TerminalSearchBarProps> = ({
   }, [query, caseSensitive, useRegex, doFindNext]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (isFindShortcut(e.nativeEvent)) {
+      e.preventDefault();
+      e.stopPropagation();
+      inputRef.current?.focus();
+      inputRef.current?.select();
+      return;
+    }
     if (e.key === 'Escape') {
       e.stopPropagation();
       e.preventDefault();

@@ -6,6 +6,10 @@ import { SettingsToggle, WorkspaceVaultSection } from './SettingsView';
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string) => key,
+    i18n: {
+      language: 'zh-CN',
+      changeLanguage: vi.fn(),
+    },
   }),
 }));
 
@@ -22,10 +26,12 @@ vi.mock('../lib/backend', async () => {
     }),
     vaultLink: vi.fn(),
     listVaultItemChildren: vi.fn().mockResolvedValue([]),
+    setIpcTimeoutSeconds: vi.fn(async (seconds: number) => actual.writeIpcTimeoutSeconds(seconds)),
+    syncIpcTimeoutFromBackend: vi.fn(async () => actual.readIpcTimeoutSeconds()),
   };
 });
 
-import { cloudGetStatus, getVaultStatus, isTauri } from '../lib/backend';
+import { cloudGetStatus, getVaultStatus, isTauri, setIpcTimeoutSeconds, syncIpcTimeoutFromBackend } from '../lib/backend';
 import { SettingsView } from './SettingsView';
 
 const baseWorkspaceConfig = {
@@ -51,6 +57,9 @@ afterEach(() => {
     vault_path: null,
     synced_items: [],
   });
+  localStorage.removeItem('ipc_timeout_seconds');
+  vi.mocked(setIpcTimeoutSeconds).mockClear();
+  vi.mocked(syncIpcTimeoutFromBackend).mockClear();
 });
 
 describe('SettingsView browser mode', () => {
@@ -160,6 +169,19 @@ describe('SettingsView browser mode', () => {
       />,
     );
     expect(screen.getByRole('button', { name: /Alpha/ }).className).toContain('border-[var(--color-accent)]/30');
+  });
+
+  it('persists larger command timeout edits (>300s) to localStorage and backend config', async () => {
+    render(<SettingsView {...defaultSettingsProps} initialSection="about" />);
+
+    const input = await screen.findByDisplayValue('60');
+    fireEvent.change(input, { target: { value: '600' } });
+    fireEvent.blur(input);
+
+    await waitFor(() => {
+      expect(setIpcTimeoutSeconds).toHaveBeenCalledWith(600);
+    });
+    expect(localStorage.getItem('ipc_timeout_seconds')).toBe('600');
   });
 });
 

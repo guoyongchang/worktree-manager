@@ -256,4 +256,43 @@ export interface GitUserConfig {
   name?: string;
   email?: string;
 }
+
+// Multi-select add project to worktree
+export interface AddProjectSelection {
+  projectName: string;
+  baseBranch: string;
+}
+
+export interface AddProjectsResult {
+  succeeded: string[];
+  failed: Array<{ projectName: string; error: string }>;
+}
+
+export interface AddingProjectProgress {
+  current: number;
+  total: number;
+  currentProject: string;
+}
+
+// Background archived worktree deletion
+export type BackgroundDeleteStatus = 'pending' | 'deleting' | 'done' | 'failed';
+
+export interface BackgroundDeleteItem {
+  name: string;
+  displayName: string;
+  workspacePath: string;
+  status: BackgroundDeleteStatus;
+  error?: string;
+}
+
+export interface BackgroundDeleteState {
+  active: boolean;
+  items: BackgroundDeleteItem[];
+}
+
+export interface BackgroundDeleteNotice {
+  id: number;
+  type: 'info' | 'success' | 'error';
+  message: string;
+}
 // test

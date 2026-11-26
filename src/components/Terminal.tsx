@@ -200,6 +200,8 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
   // so each terminal tab gets its own PTY session
   const sessionIdRef = useRef<string>(`pty-${cwd.replace(/[/\\/#]/g, '-')}`);
   const readerIntervalRef = useRef<number | null>(null);
+  const desktopReadActiveRef = useRef(false);
+  const desktopReadTokenRef = useRef(0);
   const wsSubscribedRef = useRef(false);
   const desktopUnlistenRef = useRef<UnlistenFn | null>(null);
   const desktopListenerStartingRef = useRef(false);
@@ -570,51 +572,60 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
 
   const startReading = useCallback(() => {
     const startDesktopPolling = () => {
-      if (readerIntervalRef.current) return;
+      if (desktopReadActiveRef.current) return;
+      desktopReadActiveRef.current = true;
       desktopTransportRef.current = 'polling';
+      const loopToken = ++desktopReadTokenRef.current;
 
-      const scheduleNext = () => {
-        readerIntervalRef.current = window.setTimeout(readLoop, TERMINAL.POLL_INTERVAL_MS);
-      };
+      const sleepBackoff = (ms: number) =>
+        new Promise<void>((resolve) => {
+          readerIntervalRef.current = window.setTimeout(() => {
+            readerIntervalRef.current = null;
+            resolve();
+          }, ms);
+        });
 
-      let sessionNotFoundCount = 0;
+      void (async () => {
+        let sessionNotFoundCount = 0;
 
-      const readLoop = async () => {
-        try {
-          const data = await callBackend<string>('pty_read', {
-            sessionId: sessionIdRef.current,
-            ...(clientId ? { clientId } : {}),
-          });
-          handleIncomingData(data);
-          sessionNotFoundCount = 0;
-        } catch (err) {
-          if (typeof err === 'string' && err.includes('Session not found') ||
-              err instanceof Error && err.message.includes('Session not found')) {
-            sessionNotFoundCount++;
-            if (sessionNotFoundCount >= 3) {
-              console.warn('[terminal] PTY session lost, stopping poll and triggering re-init');
-              if (readerIntervalRef.current !== null) {
-                clearTimeout(readerIntervalRef.current);
-                readerIntervalRef.current = null;
-              }
-              desktopTransportRef.current = null;
-              // Reset initialized flag so the visibility useEffect re-triggers initPty
-              initializedRef.current = false;
-              reinitTriggerRef.current++;
-              setReinitTrigger(r => r + 1);
-              return;
+        while (desktopReadActiveRef.current && desktopReadTokenRef.current === loopToken) {
+          try {
+            const data = await callBackend<string>('pty_read', {
+              sessionId: sessionIdRef.current,
+              ...(clientId ? { clientId } : {}),
+              waitMs: TERMINAL.DESKTOP_READ_WAIT_MS,
+            });
+            if (!desktopReadActiveRef.current || desktopReadTokenRef.current !== loopToken) {
+              break;
             }
+            if (data) {
+              handleIncomingData(data);
+            }
+            sessionNotFoundCount = 0;
+          } catch (err) {
+            if (!desktopReadActiveRef.current || desktopReadTokenRef.current !== loopToken) {
+              break;
+            }
+            if (
+              (typeof err === 'string' && err.includes('Session not found')) ||
+              (err instanceof Error && err.message.includes('Session not found'))
+            ) {
+              sessionNotFoundCount++;
+              if (sessionNotFoundCount >= 3) {
+                console.warn('[terminal] PTY session lost, stopping reader and triggering re-init');
+                desktopReadActiveRef.current = false;
+                desktopTransportRef.current = null;
+                initializedRef.current = false;
+                reinitTriggerRef.current++;
+                setReinitTrigger(r => r + 1);
+                return;
+              }
+            }
+            await sleepBackoff(TERMINAL.POLL_INTERVAL_MS);
           }
         }
-
-        if (readerIntervalRef.current !== null) {
-          scheduleNext();
-        }
-      };
-
-      scheduleNext();
+      })();
     };
-
     if (!isTauri()) {
       // Browser mode: WS subscribe is idempotent
       if (wsSubscribedRef.current) return;
@@ -713,7 +724,8 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
 
         // Key handler: Ctrl/Cmd+F for search, Alt+V passthrough for voice
         const keyDisposable = adapter.onKeyEvent((e) => {
-          if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+          if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'f') {
+            e.preventDefault();
             onSearchRequestedRef.current?.();
             return false;
           }
@@ -1011,6 +1023,8 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
       wsSubscribedRef.current = false;
       getWebSocketManager().unsubscribePty(sessionIdRef.current);
     }
+    desktopReadActiveRef.current = false;
+    desktopReadTokenRef.current += 1;
     desktopListenerTokenRef.current += 1;
     desktopListenerStartingRef.current = false;
     if (desktopUnlistenRef.current) {
@@ -1024,7 +1038,6 @@ const TerminalInner = forwardRef<TerminalHandle, TerminalProps>(({ cwd, visible,
       desktopTransportRef.current = null;
     }
   }, []);
-
 
   // Resize the (shared) PTY to this client's fitted size. Several clients can view the same PTY
   // at once but it has a single size, so we only send on an actual change to avoid a SIGWINCH

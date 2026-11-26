@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useImperativeHandle, forwardRef } from 'react';
+import { useState, useEffect, useRef, useCallback, useImperativeHandle, forwardRef, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { addLog } from '@/lib/operationLog';
 import { Button } from '@/components/ui/button';
@@ -37,6 +37,7 @@ import {
   getBranchDiffStats,
   checkRemoteBranchExists,
   fetchProjectRemote,
+  cancelGitOperation,
   getGitDiff,
   commitAll,
   generateCommitMessage,
@@ -46,9 +47,17 @@ import {
   getGitUserGlobalConfig,
   setGitUserConfig,
   getSkipGitHooks,
+  readIpcTimeoutSeconds,
   isTauri,
   type BranchDiffStats,
 } from '@/lib/backend';
+import {
+  enqueueProjectGitAction,
+  getProjectGitQueueState,
+  isProjectGitBusy,
+  markProjectGitCancelling,
+  subscribeProjectGitQueue,
+} from '@/lib/gitActionQueue';
 import type { WorkspaceConfig } from '@/types';
 import { renderCommitPrefix } from '@/lib/commit-prefix';
 import { basename } from '@/lib/utils';
@@ -56,7 +65,10 @@ import { basename } from '@/lib/utils';
 const AUTO_REFRESH_INTERVAL_MS = 60_000;
 const AUTO_REFRESH_STAGGER_MS = 15_000;
 const AUTO_REFRESH_SLOTS = 4;
+const POST_OP_REFRESH_TIMEOUT_MS = 10_000;
 const OP_STEP_I18N: Record<string, string> = {
+  queued: 'git.opQueued',
+  cancelling: 'git.opCancelling',
   fetch: 'git.opFetch',
   syncFetch: 'git.opFetch',
   checkout: 'git.opCheckout',
@@ -72,7 +84,6 @@ const OP_STEP_I18N: Record<string, string> = {
   status: 'git.opStatus',
   syncLocal: 'git.opSyncLocal',
 };
-
 // Heuristic: detect merge conflict errors from git output
 function isConflictError(msg: string): boolean {
   const lower = msg.toLowerCase();
@@ -96,6 +107,30 @@ function truncateConflictMessage(msg: string, maxFiles = 5): string {
   return `Conflict in ${lines.length} files: ${shown}, and ${remaining} more. Resolve in editor or terminal.`;
 }
 
+const PROTECTED_MERGE_SOURCE_BRANCHES = new Set(['main', 'master', 'uat', 'test']);
+
+type MergeBranchBlockReason = 'detached' | 'same' | 'protected' | null;
+
+function getMergeSourceBranchBlock(
+  currentBranch: string,
+  targetBranch: string,
+  baseBranch: string,
+  testBranch: string,
+): MergeBranchBlockReason {
+  const cur = currentBranch.trim();
+  if (!cur || cur === 'HEAD' || cur === 'unknown') return 'detached';
+  const curLower = cur.toLowerCase();
+  if (curLower === targetBranch.trim().toLowerCase()) return 'same';
+  if (
+    PROTECTED_MERGE_SOURCE_BRANCHES.has(curLower) ||
+    (baseBranch.trim() && curLower === baseBranch.trim().toLowerCase()) ||
+    (testBranch.trim() && curLower === testBranch.trim().toLowerCase())
+  ) {
+    return 'protected';
+  }
+  return null;
+}
+
 interface GitOperationsProps {
   projectPath: string;
   projectName: string;
@@ -104,7 +139,7 @@ interface GitOperationsProps {
   currentBranch: string;
   worktreeDisplayName?: string;
   workspaceConfig?: WorkspaceConfig;
-  onSilentRefresh?: () => void;
+  onSilentRefresh?: () => void | Promise<void>;
   onOpenTerminal?: (path: string) => void;
   autoRefreshSlot?: number;
   onStatsChanged?: (stats: BranchDiffStats) => void;
@@ -130,6 +165,10 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
   onStatsChanged,
 }, ref) => {
   const { t } = useTranslation();
+  const queueState = useSyncExternalStore(
+    useCallback((listener) => subscribeProjectGitQueue(projectPath, listener), [projectPath]),
+    useCallback(() => getProjectGitQueueState(projectPath), [projectPath]),
+  );
   const [stats, setStats] = useState<BranchDiffStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [fetchingSyncing, setFetchingSyncing] = useState(false);
@@ -162,13 +201,17 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const fetchingSyncingRef = useRef(fetchingSyncing);
   const activeActionRef = useRef(activeAction);
+  const committingRef = useRef(committing);
   const autoRefreshInFlightRef = useRef(false);
   const loadStatsVersionRef = useRef(0);
   const onStatsChangedRef = useRef(onStatsChanged);
   const onSilentRefreshRef = useRef(onSilentRefresh);
   const mergeProgressTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const progressStartedAtRef = useRef<number | null>(null);
+  const stepStartedAtRef = useRef<number | null>(null);
+  const lastProgressStepRef = useRef<string | null>(null);
   const progressGenRef = useRef(0);
+  const hardTimeoutRejectRef = useRef<((err: Error) => void) | null>(null);
 
 
   useEffect(() => {
@@ -187,6 +230,9 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
     activeActionRef.current = activeAction;
   }, [activeAction]);
 
+  useEffect(() => {
+    committingRef.current = committing;
+  }, [committing]);
   useEffect(() => {
     if (!isTauri()) return;
     let cancelled = false;
@@ -210,7 +256,11 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
         const incoming = payload.path.replace(/\\/g, '/');
         const local = projectPath.replace(/\\/g, '/');
         if (incoming !== local) return;
-        if (!activeActionRef.current && !fetchingSyncingRef.current) return;
+        if (!activeActionRef.current && !fetchingSyncingRef.current && !committingRef.current && !isProjectGitBusy(projectPath)) return;
+        if (payload.step !== lastProgressStepRef.current) {
+          lastProgressStepRef.current = payload.step;
+          stepStartedAtRef.current = Date.now();
+        }
         setMergeStep(payload.step);
         setMergeStepTarget(payload.target);
         setMergeStepCurrentBranch(payload.currentBranch);
@@ -227,32 +277,72 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
   useEffect(() => {
     clearTimeout(mergeProgressTimerRef.current);
     progressGenRef.current += 1;
-    progressStartedAtRef.current = null;
+    const currentQueue = getProjectGitQueueState(projectPath);
+    const startedAt = currentQueue.busy ? (currentQueue.startedAt ?? Date.now()) : null;
+    progressStartedAtRef.current = startedAt;
+    stepStartedAtRef.current = startedAt;
+    lastProgressStepRef.current = null;
     activeActionRef.current = null;
     setActiveAction(null);
     setMergeStep(null);
     setProgressDone(false);
     setFetchingSyncing(false);
+    hardTimeoutRejectRef.current = null;
   }, [projectPath]);
-  const progressVisible = Boolean(mergeStep || fetchingSyncing);
+
+  const canCancelActiveOp =
+    !generatingMessage && (activeAction !== null || fetchingSyncing || committing || queueState.busy);
+  const isCancelling = queueState.cancelling;
+  const progressVisible = Boolean(mergeStep || fetchingSyncing || queueState.busy);
+
+  const handleCancelActiveOp = useCallback(() => {
+    if (!canCancelActiveOp || isCancelling) return;
+    markProjectGitCancelling(projectPath, true);
+    setMergeStep('cancelling');
+    void cancelGitOperation(projectPath).catch((err) => {
+      console.error('[GitOps] cancelGitOperation failed:', err);
+    });
+  }, [canCancelActiveOp, isCancelling, projectPath]);
+
   useEffect(() => {
     if (progressDone) {
       setDisplayPercent(100);
       return;
     }
-    if (!progressVisible) return;
-    if (progressStartedAtRef.current == null) progressStartedAtRef.current = Date.now();
+    if (!progressVisible) {
+      return;
+    }
+    if (progressStartedAtRef.current == null) {
+      progressStartedAtRef.current = queueState.startedAt ?? Date.now();
+    }
+    if (stepStartedAtRef.current == null) {
+      stepStartedAtRef.current = progressStartedAtRef.current;
+    }
     const id = window.setInterval(() => {
-      const startedAt = progressStartedAtRef.current ?? Date.now();
-      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+      const now = Date.now();
+      const startedAt = progressStartedAtRef.current ?? now;
+      const stepStartedAt = stepStartedAtRef.current ?? startedAt;
+      const elapsed = Math.floor((now - startedAt) / 1000);
+      const stepElapsed = Math.floor((now - stepStartedAt) / 1000);
+      setElapsedSeconds(elapsed);
       setDisplayPercent((prev) => {
         if (prev >= 90) return 99;
         return prev + 10;
       });
+      if (canCancelActiveOp) {
+        const timeoutSecs = readIpcTimeoutSeconds();
+        if (stepElapsed >= timeoutSecs && hardTimeoutRejectRef.current) {
+          const rejectHard = hardTimeoutRejectRef.current;
+          hardTimeoutRejectRef.current = null;
+          markProjectGitCancelling(projectPath, true);
+          void cancelGitOperation(projectPath).catch(() => {});
+          rejectHard(new Error(t('git.operationTimedOut', { seconds: timeoutSecs })));
+          return;
+        }
+      }
     }, 400);
     return () => window.clearInterval(id);
-  }, [progressVisible, progressDone]);
-
+  }, [progressVisible, progressDone, queueState.startedAt, canCancelActiveOp, projectPath, t]);
 
   const setErrorMsg = useCallback((msg: string | null, persistent = false) => {
     clearTimeout(errorTimerRef.current);
@@ -281,7 +371,10 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
   const startProgress = (step: string, target = '', current = '') => {
     clearTimeout(mergeProgressTimerRef.current);
     const gen = ++progressGenRef.current;
-    progressStartedAtRef.current = Date.now();
+    const now = Date.now();
+    progressStartedAtRef.current = now;
+    stepStartedAtRef.current = now;
+    lastProgressStepRef.current = step;
     setProgressDone(false);
     setDisplayPercent(10);
     setElapsedSeconds(0);
@@ -359,16 +452,19 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
 
   const syncRemoteState = useCallback(async () => {
     setFetchingSyncing(true);
+    fetchingSyncingRef.current = true;
     try {
-      await fetchProjectRemote(projectPath);
+      await new Promise<void>((resolve, reject) => {
+        hardTimeoutRejectRef.current = reject;
+        fetchProjectRemote(projectPath).then(resolve, reject);
+      });
       await loadLocalState();
-    } catch (err) {
-      console.error('Remote sync failed:', err);
     } finally {
+      hardTimeoutRejectRef.current = null;
       setFetchingSyncing(false);
+      fetchingSyncingRef.current = false;
     }
   }, [projectPath, loadLocalState]);
-
   useEffect(() => {
     loadLocalState();
 
@@ -389,7 +485,15 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
 
     const runAutoRefresh = async () => {
       if (document.visibilityState === 'hidden') return;
-      if (autoRefreshInFlightRef.current || fetchingSyncingRef.current || activeActionRef.current) return;
+      if (
+        autoRefreshInFlightRef.current ||
+        fetchingSyncingRef.current ||
+        activeActionRef.current ||
+        committingRef.current ||
+        isProjectGitBusy(projectPath)
+      ) {
+        return;
+      }
 
       autoRefreshInFlightRef.current = true;
       try {
@@ -413,39 +517,81 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
       clearTimeout(timeoutId);
       if (intervalId) clearInterval(intervalId);
     };
-  }, [autoRefreshSlot, loadStats]);
+  }, [autoRefreshSlot, loadStats, projectPath]);
+
+  const awaitParentRefresh = async () => {
+    const maybePromise = onSilentRefreshRef.current?.();
+    if (maybePromise && typeof (maybePromise as Promise<void>).then === 'function') {
+      let timerId: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          Promise.resolve(maybePromise).catch(() => {}),
+          new Promise<void>((resolve) => {
+            timerId = setTimeout(resolve, POST_OP_REFRESH_TIMEOUT_MS);
+          }),
+        ]);
+      } finally {
+        clearTimeout(timerId);
+      }
+    }
+  };
+
+  const runWithHardTimeout = <T,>(operation: () => Promise<T>): Promise<T> => {
+    let settled = false;
+    const opPromise = operation();
+    return new Promise<T>((resolve, reject) => {
+      const finishResolve = (val: T) => {
+        if (settled) return;
+        settled = true;
+        hardTimeoutRejectRef.current = null;
+        resolve(val);
+      };
+      const finishReject = (err: unknown) => {
+        if (settled) return;
+        settled = true;
+        hardTimeoutRejectRef.current = null;
+        reject(err);
+      };
+      hardTimeoutRejectRef.current = (err: Error) => finishReject(err);
+      opPromise.then(finishResolve, finishReject);
+    });
+  };
 
   const runGitAction = async (
-    action: typeof activeAction,
+    action: NonNullable<typeof activeAction>,
     operation: () => Promise<string>,
   ) => {
-    setActiveAction(action);
-    activeActionRef.current = action;
-    setErrorMsg(null);
-    setSuccessWithAutoDismiss(null);
-    let progressGen = progressGenRef.current;
-    if (action === 'sync') progressGen = startProgress('syncFetch', baseBranch, currentBranch);
-    else if (action === 'pull') progressGen = startProgress('pull', currentBranch, currentBranch);
-    else if (action === 'push') progressGen = startProgress('pushRemote', currentBranch, currentBranch);
-    else if (action === 'mergeTest') progressGen = startProgress('status', testBranch, currentBranch);
-    else if (action === 'mergeBase') progressGen = startProgress('status', baseBranch, currentBranch);
-    const actionName = action ?? 'unknown';
-    addLog(projectPath, { level: 'info', operation: actionName, message: `Starting ${actionName}...` });
-    try {
-      const result = await operation();
-      setSuccessWithAutoDismiss(result);
-      addLog(projectPath, { level: 'success', operation: actionName, message: result || `${actionName} completed` });
-      await loadStats();
-      onSilentRefresh?.();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      addLog(projectPath, { level: 'error', operation: actionName, message: msg, detail: msg });
-      setErrorMsg(msg, isConflictError(msg));
-    } finally {
-      setActiveAction(null);
-      activeActionRef.current = null;
-      completeProgress(progressGen);
-    }
+    return enqueueProjectGitAction(projectPath, action, async () => {
+      setActiveAction(action);
+      activeActionRef.current = action;
+      setErrorMsg(null);
+      setSuccessWithAutoDismiss(null);
+      let progressGen = progressGenRef.current;
+      if (action === 'sync') progressGen = startProgress('syncFetch', baseBranch, currentBranch);
+      else if (action === 'pull') progressGen = startProgress('pull', currentBranch, currentBranch);
+      else if (action === 'push') progressGen = startProgress('pushRemote', currentBranch, currentBranch);
+      else if (action === 'mergeTest') progressGen = startProgress('status', testBranch, currentBranch);
+      else if (action === 'mergeBase') progressGen = startProgress('status', baseBranch, currentBranch);
+      const actionName = action ?? 'unknown';
+      addLog(projectPath, { level: 'info', operation: actionName, message: `Starting ${actionName}...` });
+      try {
+        const result = await runWithHardTimeout(operation);
+        setSuccessWithAutoDismiss(result);
+        addLog(projectPath, { level: 'success', operation: actionName, message: result || `${actionName} completed` });
+        await Promise.all([loadStats(), checkBranches(), awaitParentRefresh()]);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        addLog(projectPath, { level: 'error', operation: actionName, message: msg, detail: msg });
+        setErrorMsg(msg, isConflictError(msg));
+        // Silently refresh stats/branch state after failure or cancellation so UI never acts on stale branch info.
+        await Promise.all([loadStats(true), checkBranches(), awaitParentRefresh()]);
+      } finally {
+        hardTimeoutRejectRef.current = null;
+        setActiveAction(null);
+        activeActionRef.current = null;
+        completeProgress(progressGen);
+      }
+    });
   };
 
   useImperativeHandle(ref, () => ({
@@ -455,29 +601,52 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
   }));
 
   const handleRefresh = async () => {
-    const progressGen = startProgress('syncFetch', baseBranch, currentBranch);
-    try {
-      await syncRemoteState();
-      addLog(projectPath, { level: 'success', operation: 'refresh', message: 'Remote state synced' });
-      onSilentRefresh?.();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      addLog(projectPath, { level: 'error', operation: 'refresh', message: msg, detail: msg });
-      throw err;
-    } finally {
-      completeProgress(progressGen);
-    }
+    return enqueueProjectGitAction(projectPath, 'refresh', async () => {
+      const progressGen = startProgress('syncFetch', baseBranch, currentBranch);
+      try {
+        await syncRemoteState();
+        addLog(projectPath, { level: 'success', operation: 'refresh', message: 'Remote state synced' });
+        await awaitParentRefresh();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        addLog(projectPath, { level: 'error', operation: 'refresh', message: msg, detail: msg });
+        setErrorMsg(msg);
+        await Promise.all([loadStats(true), awaitParentRefresh()]);
+      } finally {
+        hardTimeoutRejectRef.current = null;
+        completeProgress(progressGen);
+      }
+    });
+  };
+
+  const mergeTestBranchBlock = getMergeSourceBranchBlock(currentBranch, testBranch, baseBranch, testBranch);
+  const mergeBaseBranchBlock = getMergeSourceBranchBlock(currentBranch, baseBranch, baseBranch, testBranch);
+
+  const formatBranchBlockTip = (reason: MergeBranchBlockReason, target: string): string => {
+    if (reason === 'detached') return t('git.mergeBlockedDetached', { target });
+    if (reason === 'same') return t('git.mergeBlockedSameBranch', { target });
+    if (reason === 'protected') return t('git.mergeBlockedProtected', { current: currentBranch, target });
+    return '';
+  };
+
+  const handleMergeTestClick = () => {
+    if (mergeTestBranchBlock || isProjectGitBusy(projectPath)) return;
+    void runGitAction('mergeTest', () => mergeToTestBranch(projectPath, testBranch));
   };
 
   const handleMergeBaseClick = () => {
+    if (mergeBaseBranchBlock || isProjectGitBusy(projectPath)) return;
     setShowMergeBaseConfirm(true);
   };
 
   const confirmMergeBase = () => {
+    if (mergeBaseBranchBlock || isProjectGitBusy(projectPath)) {
+      setShowMergeBaseConfirm(false);
+      return;
+    }
     setShowMergeBaseConfirm(false);
-    runGitAction('mergeBase', () => mergeToBaseBranch(projectPath, baseBranch));
+    void runGitAction('mergeBase', () => mergeToBaseBranch(projectPath, baseBranch));
   };
-
   const computePrefix = useCallback((
     config: { templates: string[]; enabled: boolean },
     prefixIndex: number,
@@ -597,56 +766,61 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
 
   const handleConfirmCommit = async (withPush: boolean) => {
     const fullMessage = (prefix + content).trim();
-    if (!fullMessage) return;
-    setCommitting(true);
-    let progressGen = startProgress('commitStage');
-    try {
-      const projectConfig = workspaceConfig?.projects.find((p: { name: string }) => p.name === projectName);
-      const globalConfig = await getGitUserGlobalConfig();
-      const resolvedName = projectConfig?.git_user_name || globalConfig.name;
-      const resolvedEmail = projectConfig?.git_user_email || globalConfig.email;
-      if (resolvedName || resolvedEmail) {
-        await setGitUserConfig(projectPath, { name: resolvedName, email: resolvedEmail });
-      }
-      const skipHooks = await getSkipGitHooks();
-      await commitAll(projectPath, fullMessage, resolvedName, resolvedEmail, skipHooks);
-      setShowCommitDialog(false);
-      if (withPush) {
-        progressGen = startProgress('pushRemote', currentBranch, currentBranch);
-        try {
-          await pushToRemote(projectPath);
-          setSuccessWithAutoDismiss(t('git.commitAndPushSuccess'));
-        } catch (pushErr) {
-          setSuccessWithAutoDismiss(t('git.commitSuccess'));
-          setErrorMsg(pushErr instanceof Error ? pushErr.message : String(pushErr));
+    if (!fullMessage || isProjectGitBusy(projectPath)) return;
+    await enqueueProjectGitAction(projectPath, 'commit', async () => {
+      setCommitting(true);
+      committingRef.current = true;
+      let progressGen = startProgress('commitStage');
+      try {
+        const projectConfig = workspaceConfig?.projects.find((p: { name: string }) => p.name === projectName);
+        const globalConfig = await getGitUserGlobalConfig();
+        const resolvedName = projectConfig?.git_user_name || globalConfig.name;
+        const resolvedEmail = projectConfig?.git_user_email || globalConfig.email;
+        if (resolvedName || resolvedEmail) {
+          await setGitUserConfig(projectPath, { name: resolvedName, email: resolvedEmail });
         }
-      } else {
-        setSuccessWithAutoDismiss(t('git.commitSuccess'));
+        const skipHooks = await getSkipGitHooks();
+        await runWithHardTimeout(() => commitAll(projectPath, fullMessage, resolvedName, resolvedEmail, skipHooks));
+        setShowCommitDialog(false);
+        if (withPush) {
+          progressGen = startProgress('pushRemote', currentBranch, currentBranch);
+          try {
+            await runWithHardTimeout(() => pushToRemote(projectPath));
+            setSuccessWithAutoDismiss(t('git.commitAndPushSuccess'));
+          } catch (pushErr) {
+            setSuccessWithAutoDismiss(t('git.commitSuccess'));
+            setErrorMsg(pushErr instanceof Error ? pushErr.message : String(pushErr));
+          }
+        } else {
+          setSuccessWithAutoDismiss(t('git.commitSuccess'));
+        }
+        await Promise.all([loadStats(), checkBranches(), awaitParentRefresh()]);
+      } catch (err) {
+        setErrorMsg(err instanceof Error ? err.message : String(err));
+        await Promise.all([loadStats(true), checkBranches(), awaitParentRefresh()]);
+      } finally {
+        hardTimeoutRejectRef.current = null;
+        setCommitting(false);
+        committingRef.current = false;
+        completeProgress(progressGen);
       }
-      await loadStats();
-      onSilentRefresh?.();
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : String(err));
-    } finally {
-      setCommitting(false);
-      completeProgress(progressGen);
-    }
+    });
   };
 
   // Smart Commit & Push: if uncommitted changes → commit dialog, else just push
   const handleCommitAndPush = async () => {
+    if (isProjectGitBusy(projectPath)) return;
     if (stats && stats.changed_files > 0) {
       // Has uncommitted changes → show commit dialog (will auto-push after commit)
       handleCommitClick();
     } else {
       // No uncommitted changes → just push
-      runGitAction('push', () => pushToRemote(projectPath));
+      void runGitAction('push', () => pushToRemote(projectPath));
     }
   };
 
 
-  const actionsDisabled = fetchingSyncing || activeAction !== null;
-
+  const actionsDisabled = fetchingSyncing || activeAction !== null || committing || queueState.busy;
   return (
     <div className="space-y-3">
       {error && (
@@ -691,7 +865,7 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
           <CloseIcon className="w-3 h-3 shrink-0 text-[var(--color-success)]" />
         </div>
       )}
-      {(mergeStep || fetchingSyncing) && (
+      {progressVisible && (
         <div className="space-y-1.5">
           <div className="h-2.5 w-full rounded-full bg-[var(--color-bg-elevated)] overflow-hidden">
             <div
@@ -703,13 +877,34 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
           </div>
           <div className="flex items-center justify-between gap-2 text-xs font-mono text-[var(--color-accent)]">
             <span className="truncate min-w-0">
-              {mergeStep
-                ? t(OP_STEP_I18N[mergeStep] ?? 'git.merging', {
-                    branch: mergeStep === 'restore' ? mergeStepCurrentBranch : (mergeStepTarget || currentBranch),
-                  })
-                : t('git.syncRemote')}
+              {isCancelling
+                ? t('git.opCancelling')
+                : mergeStep
+                  ? t(OP_STEP_I18N[mergeStep] ?? 'git.merging', {
+                      branch: mergeStep === 'restore' ? mergeStepCurrentBranch : (mergeStepTarget || currentBranch),
+                    })
+                  : queueState.busy
+                    ? t('git.opQueued')
+                    : t('git.syncRemote')}
             </span>
-            <span className="tabular-nums shrink-0">{elapsedSeconds}s</span>
+            <div className="flex items-center gap-2 shrink-0">
+              {queueState.queuedCount > 0 && (
+                <span className="text-[11px] font-sans text-[var(--color-text-muted)]">
+                  {t('git.queuedCount', { count: queueState.queuedCount })}
+                </span>
+              )}
+              <span className="tabular-nums">{elapsedSeconds}s</span>
+              {canCancelActiveOp && !progressDone && (
+                <button
+                  type="button"
+                  onClick={handleCancelActiveOp}
+                  disabled={isCancelling}
+                  className="px-1.5 py-0.5 rounded text-[11px] font-sans border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:text-[var(--color-error)] hover:border-[var(--color-error)]/40 hover:bg-[var(--color-error)]/10 disabled:opacity-50 transition-colors"
+                >
+                  {isCancelling ? t('git.cancellingShort') : t('git.cancelOperation')}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -732,20 +927,19 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
         <Button
           variant="ghost"
           size="sm"
-          onClick={handleRefresh}
-          disabled={loading || fetchingSyncing}
+          onClick={() => { if (!isProjectGitBusy(projectPath)) void handleRefresh(); }}
+          disabled={loading || actionsDisabled}
           className="h-6 px-2"
         >
           <RefreshIcon className={`w-3 h-3 ${(loading || fetchingSyncing) ? 'animate-spin' : ''}`} />
         </Button>
       </div>
-
       <div className="flex flex-col gap-2">
         <div className="grid grid-cols-1 min-[420px]:grid-cols-3 gap-2">
           <Button
             variant="secondary"
             size="sm"
-            onClick={() => runGitAction('sync', () => syncWithBaseBranch(projectPath, baseBranch))}
+            onClick={() => { if (!isProjectGitBusy(projectPath)) void runGitAction('sync', () => syncWithBaseBranch(projectPath, baseBranch)); }}
             disabled={loading || baseBranchExists === false || actionsDisabled}
             className={`text-xs min-w-0${activeAction === 'sync' ? ' disabled:opacity-100' : ''}`}
             title={baseBranchExists === false ? t('git.remoteBranchNotExists', { branch: baseBranch }) : ''}
@@ -757,7 +951,7 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
           <Button
             variant="secondary"
             size="sm"
-            onClick={() => runGitAction('pull', () => pullCurrentBranch(projectPath))}
+            onClick={() => { if (!isProjectGitBusy(projectPath)) void runGitAction('pull', () => pullCurrentBranch(projectPath)); }}
             disabled={loading || actionsDisabled}
             className={`text-xs min-w-0${activeAction === 'pull' ? ' disabled:opacity-100' : ''}`}
           >
@@ -788,13 +982,15 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
         <TooltipProvider delayDuration={300}>
         <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-2">
           {(() => {
-            const mergeTestTip = testBranchExists === false ? t('git.remoteBranchNotExists', { branch: testBranch }) : (stats?.ahead_of_test ?? 0) >= 100 ? t('git.tooManyCommitsToMerge', { branch: testBranch, count: stats?.ahead_of_test ?? 0 }) : '';
+            const mergeTestTip = formatBranchBlockTip(mergeTestBranchBlock, testBranch)
+              || (testBranchExists === false ? t('git.remoteBranchNotExists', { branch: testBranch }) : '')
+              || ((stats?.ahead_of_test ?? 0) >= 100 ? t('git.tooManyCommitsToMerge', { branch: testBranch, count: stats?.ahead_of_test ?? 0 }) : '');
             const mergeTestBtn = (
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={() => runGitAction('mergeTest', () => mergeToTestBranch(projectPath, testBranch))}
-                disabled={loading || testBranchExists === false || actionsDisabled || (stats?.ahead_of_test ?? 0) >= 100}
+                onClick={handleMergeTestClick}
+                disabled={loading || !!mergeTestBranchBlock || testBranchExists === false || actionsDisabled || (stats?.ahead_of_test ?? 0) >= 100}
                 className={`text-xs min-w-0 w-full${activeAction === 'mergeTest' ? ' disabled:opacity-100' : ''}`}
               >
                 <GitMergeIcon className="w-3 h-3 mr-1 shrink-0" />
@@ -810,13 +1006,15 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
           })()}
 
           {(() => {
-            const mergeBaseTip = baseBranchExists === false ? t('git.remoteBranchNotExists', { branch: baseBranch }) : (stats?.ahead ?? 0) >= 100 ? t('git.tooManyCommitsToMerge', { branch: baseBranch, count: stats?.ahead ?? 0 }) : '';
+            const mergeBaseTip = formatBranchBlockTip(mergeBaseBranchBlock, baseBranch)
+              || (baseBranchExists === false ? t('git.remoteBranchNotExists', { branch: baseBranch }) : '')
+              || ((stats?.ahead ?? 0) >= 100 ? t('git.tooManyCommitsToMerge', { branch: baseBranch, count: stats?.ahead ?? 0 }) : '');
             const mergeBaseBtn = (
               <Button
                 variant="secondary"
                 size="sm"
                 onClick={handleMergeBaseClick}
-                disabled={loading || baseBranchExists === false || actionsDisabled || (stats?.ahead ?? 0) >= 100}
+                disabled={loading || !!mergeBaseBranchBlock || baseBranchExists === false || actionsDisabled || (stats?.ahead ?? 0) >= 100}
                 className={`text-xs min-w-0 w-full border-orange-800/40 hover:bg-orange-900/20 hover:border-orange-700/50${activeAction === 'mergeBase' ? ' disabled:opacity-100' : ''}`}
               >
                 <GitMergeIcon className="w-3 h-3 mr-1 shrink-0 text-orange-400" />
@@ -830,7 +1028,6 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
               </Tooltip>
             ) : mergeBaseBtn;
           })()}
-
         </div>
         </TooltipProvider>
       </div>
@@ -862,6 +1059,7 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
             </Button>
             <Button
               onClick={confirmMergeBase}
+              disabled={actionsDisabled || !!mergeBaseBranchBlock}
               className="bg-orange-600 hover:bg-orange-700 text-white"
             >
               {t('git.confirmMergeBase')}
@@ -992,13 +1190,13 @@ export const GitOperations = forwardRef<GitOperationsHandle, GitOperationsProps>
             <Button
               variant="secondary"
               onClick={() => handleConfirmCommit(false)}
-              disabled={!(prefix + content).trim() || committing || generatingMessage}
+              disabled={!(prefix + content).trim() || committing || generatingMessage || actionsDisabled}
             >
               {t('git.commitOnly')}
             </Button>
             <Button
               onClick={() => handleConfirmCommit(true)}
-              disabled={!(prefix + content).trim() || committing || generatingMessage}
+              disabled={!(prefix + content).trim() || committing || generatingMessage || actionsDisabled}
             >
               {committing ? t('git.committing') : t('git.commitAndPush')}
             </Button>

@@ -303,6 +303,7 @@ interface TerminalPanelProps {
   onOpenInEditor?: (path: string, editor?: string) => void;
   onRevealInFinder?: (path: string) => void;
   selectedEditor?: string;
+  searchRequestNonce?: number;
 }
 
 export const TerminalPanel: FC<TerminalPanelProps> = ({
@@ -341,6 +342,7 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
   onOpenInEditor,
   onRevealInFinder,
   selectedEditor,
+  searchRequestNonce = 0,
 }) => {
   // Derive effective fullscreen state: new fullscreenMode prop takes priority over legacy isFullscreen
   const isFullscreen = fullscreenMode ? fullscreenMode === 'full' : isFullscreenProp;
@@ -358,6 +360,8 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
   const hintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const terminalRefsMap = useRef<Map<string, TerminalHandle>>(new Map());
   const [searchOpen, setSearchOpen] = useState(false);
+  const [searchFocusNonce, setSearchFocusNonce] = useState(0);
+  const lastExternalSearchNonceRef = useRef(searchRequestNonce);
   const [showGpuFallback, setShowGpuFallback] = useState(false);
   const gpuFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -447,10 +451,25 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
     return () => { if (gpuFallbackTimerRef.current) clearTimeout(gpuFallbackTimerRef.current); };
   }, []);
 
+  const openTerminalSearch = useCallback(() => {
+    if (!visible || !activeTerminalTab) return;
+    setSearchOpen(true);
+    setSearchFocusNonce((n) => n + 1);
+  }, [visible, activeTerminalTab]);
+
+  useEffect(() => {
+    if (searchRequestNonce !== lastExternalSearchNonceRef.current) {
+      lastExternalSearchNonceRef.current = searchRequestNonce;
+      openTerminalSearch();
+    }
+  }, [searchRequestNonce, openTerminalSearch]);
+
   const handleSearchToggle = useCallback(() => {
     setSearchOpen(prev => {
       if (prev) {
         terminalRefsMap.current.get(activeTerminalTab ?? '')?.clearSearch();
+      } else {
+        setSearchFocusNonce((n) => n + 1);
       }
       return !prev;
     });
@@ -461,13 +480,12 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
     handle?.clearSearch();
     setSearchOpen(false);
   }, [activeTerminalTab]);
-
   return (
     <div
+      data-search-scope="terminal"
       className={`border-t border-[var(--color-border)] flex flex-col ${fillContainer || isVerticalFullscreen ? 'flex-1 min-h-0 border-t-0 bg-[var(--color-bg-base)]' : visible ? 'shrink' : 'shrink-0'} ${isFullscreen ? 'absolute inset-0 z-50 border-t-0 bg-[var(--color-bg-base)]' : ''}`}
       style={isAnyFullscreen || fillContainer ? undefined : { height: visible ? height : 32, minHeight: visible ? 100 : undefined }}
     >
-      {/* Resize handle - hidden in any fullscreen */}
       {visible && !isAnyFullscreen && (
         <div
           className="h-3 flex items-center justify-center cursor-ns-resize shrink-0 group touch-none"
@@ -834,7 +852,7 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
                   voiceStatus={voiceStatus}
                   onShellIntegrationDetected={() => onShellIntegrationDetected?.(path)}
                   onCwdChanged={(newCwd) => onCwdChanged?.(path, newCwd)}
-                  onSearchRequested={() => setSearchOpen(true)}
+                  onSearchRequested={openTerminalSearch}
                   onRendererFallback={handleGpuFallback}
                 />
               </div>
@@ -854,6 +872,7 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
         {/* Terminal search bar */}
         {searchOpen && activeTerminalTab && (
           <TerminalSearchBar
+            focusNonce={searchFocusNonce}
             onFindNext={(query: string, opts: SearchOptions) =>
               terminalRefsMap.current.get(activeTerminalTab)?.findNext(query, opts) ?? false
             }

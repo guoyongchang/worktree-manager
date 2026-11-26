@@ -20,7 +20,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "tsc && node --test dist/tools/*.test.js",
+    "test": "tsc && node --test dist/tools/*.test.js dist/transport/*.test.js",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {

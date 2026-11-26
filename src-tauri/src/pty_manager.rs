@@ -446,7 +446,7 @@ impl DesktopReaderState {
     }
 }
 
-struct DesktopPendingBuffer {
+pub(crate) struct DesktopPendingBuffer {
     bytes: VecDeque<u8>,
     start_offset: u64,
     end_offset: u64,
@@ -543,10 +543,28 @@ impl DesktopPendingBuffer {
     }
 }
 
-struct PtyReader {
-    desktop_buffer: Arc<Mutex<DesktopPendingBuffer>>,
+pub(crate) fn drain_desktop_buffer(
+    desktop_buffer: &Arc<Mutex<DesktopPendingBuffer>>,
+    reader_key: &str,
+) -> Result<String, String> {
+    let result = {
+        let mut pending = desktop_buffer
+            .lock()
+            .map_err(|e| format!("Lock error: {}", e))?;
+        pending.read_for_reader(reader_key)
+    };
+    let (text, utf8_pending) = bytes_to_utf8_with_pending(&result);
+    desktop_buffer
+        .lock()
+        .map_err(|e| format!("Lock error: {}", e))?
+        .store_utf8_pending(reader_key, utf8_pending);
+    Ok(text)
 }
 
+struct PtyReader {
+    desktop_buffer: Arc<Mutex<DesktopPendingBuffer>>,
+    desktop_notify: Arc<tokio::sync::Notify>,
+}
 /// Normalize a filesystem path for prefix comparison: unify separators to '/', strip any
 /// trailing separators, and drop a trailing `#<suffix>` duplicated-tab marker.
 fn normalize_path_for_match(p: &str) -> String {
@@ -745,6 +763,8 @@ impl PtyManager {
 
         let desktop_pending_buffer = Arc::new(Mutex::new(DesktopPendingBuffer::new()));
         let desktop_pending_clone = desktop_pending_buffer.clone();
+        let desktop_notify = Arc::new(tokio::sync::Notify::new());
+        let desktop_notify_clone = desktop_notify.clone();
 
         // Create broadcast channel for WebSocket subscribers
         let (broadcast_tx, _) = broadcast::channel::<Vec<u8>>(256);
@@ -760,7 +780,10 @@ impl PtyManager {
             let mut buf = [0u8; 4096];
             loop {
                 match reader.read(&mut buf) {
-                    Ok(0) => break, // EOF
+                    Ok(0) => {
+                        desktop_notify_clone.notify_waiters();
+                        break; // EOF
+                    }
                     Ok(n) => {
                         let data = buf[..n].to_vec();
                         // Append to the replay buffer and broadcast under the SAME lock. A newly
@@ -784,13 +807,14 @@ impl PtyManager {
                         if let Ok(mut pending) = desktop_pending_clone.lock() {
                             pending.append(&data);
                         }
-                        // Never emit Tauri events from this reader thread. Desktop clients poll
-                        // the buffer above (Terminal.tsx) and remote clients use the broadcast
-                        // channel, so an event push here is dead weight — and cloning/dropping
-                        // an AppHandle per chunk off the main thread races tao's non-atomic Rc
-                        // refcount on Windows (tauri-apps/tauri#15408 → native crashes).
+                        // Wake any awaiting desktop long-poll reader immediately (zero AppHandle
+                        // interaction — safe under Windows tauri-apps/tauri#15408).
+                        desktop_notify_clone.notify_waiters();
                     }
-                    Err(_) => break,
+                    Err(_) => {
+                        desktop_notify_clone.notify_waiters();
+                        break;
+                    }
                 }
             }
         });
@@ -800,6 +824,7 @@ impl PtyManager {
             writer,
             reader: PtyReader {
                 desktop_buffer: desktop_pending_buffer,
+                desktop_notify,
             },
             child,
             shell_path,
@@ -807,7 +832,6 @@ impl PtyManager {
             broadcast_tx,
             replay_buffer,
         };
-
         self.sessions
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -851,7 +875,12 @@ impl PtyManager {
         Ok(())
     }
 
-    pub fn read_from_session(&self, id: &str, reader_id: Option<&str>) -> Result<String, String> {
+    /// Return cloned handles to a session's desktop buffer and wakeup notifier so callers can
+    /// await new PTY bytes without holding any synchronous mutex across `.await`.
+    pub(crate) fn desktop_read_handles(
+        &self,
+        id: &str,
+    ) -> Result<(Arc<Mutex<DesktopPendingBuffer>>, Arc<tokio::sync::Notify>), String> {
         let sessions = self
             .sessions
             .read()
@@ -870,27 +899,17 @@ impl PtyManager {
         let session = session_arc
             .lock()
             .map_err(|e| format!("Lock error: {}", e))?;
-        let reader_key = reader_id.unwrap_or(id);
-
-        // Non-blocking: replay only this reader's unread bytes.
-        let mut pending = session
-            .reader
-            .desktop_buffer
-            .lock()
-            .map_err(|e| format!("Lock error: {}", e))?;
-        let result = pending.read_for_reader(reader_key);
-        drop(pending);
-
-        let (text, pending) = bytes_to_utf8_with_pending(&result);
-        session
-            .reader
-            .desktop_buffer
-            .lock()
-            .map_err(|e| format!("Lock error: {}", e))?
-            .store_utf8_pending(reader_key, pending);
-        Ok(text)
+        Ok((
+            Arc::clone(&session.reader.desktop_buffer),
+            Arc::clone(&session.reader.desktop_notify),
+        ))
     }
 
+    pub fn read_from_session(&self, id: &str, reader_id: Option<&str>) -> Result<String, String> {
+        let (desktop_buffer, _) = self.desktop_read_handles(id)?;
+        let reader_key = reader_id.unwrap_or(id);
+        drain_desktop_buffer(&desktop_buffer, reader_key)
+    }
     pub fn resize_session(&self, id: &str, cols: u16, rows: u16) -> Result<(), String> {
         let sessions = self
             .sessions
@@ -934,6 +953,9 @@ impl PtyManager {
                 reason,
                 remaining
             );
+            if let Ok(guard) = session.lock() {
+                guard.reader.desktop_notify.notify_waiters();
+            }
             // Spawn a background thread so the main thread never blocks on child.wait().
             std::thread::spawn(move || {
                 if let Ok(mut session) = session.lock() {

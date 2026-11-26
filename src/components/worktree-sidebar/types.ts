@@ -6,6 +6,7 @@ import type {
   MainWorkspaceStatus,
   WorktreeListItem,
   WorkspaceRef,
+  BackgroundDeleteState,
 } from '../../types';
 
 export interface WorktreeSidebarProps {
@@ -63,4 +64,6 @@ export interface WorktreeSidebarProps {
   onToggleBatchArchiveModal: () => void;
   onBatchRestore: (names: string[]) => Promise<void>;
   onBatchDelete: (names: string[]) => Promise<void>;
+  onBatchBackgroundDelete?: (names: string[]) => void;
+  backgroundDeleteState?: BackgroundDeleteState;
 }

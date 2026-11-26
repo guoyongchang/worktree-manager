@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   evaluateMergeGate,
   evaluateDiffCertainty,
+  validateMergeSourceBranch,
   gateOptsFromArgs,
   DEFAULT_MAX_AHEAD,
 } from './safety.js';
@@ -91,4 +92,39 @@ test('diff certainty: allows when any stat is non-zero (diff is real) even witho
 test('diff certainty: force bypasses the unverifiable-diff check', () => {
   const r = evaluateDiffCertainty(ZERO_STATS, { fetched: false, force: true });
   assert.equal(r.allow, true);
+});
+
+// --- validateMergeSourceBranch ---
+
+test('branch check: allows normal feature branch into test/uat/main', () => {
+  assert.equal(validateMergeSourceBranch('feat/order-sync', 'test', ['uat', 'test']).allow, true);
+  assert.equal(validateMergeSourceBranch('fix/billing-123', 'uat', ['uat', 'test']).allow, true);
+});
+
+test('branch check: blocks detached HEAD or empty branch', () => {
+  assert.equal(validateMergeSourceBranch('HEAD', 'test').allow, false);
+  assert.equal(validateMergeSourceBranch('', 'uat').allow, false);
+  assert.equal(validateMergeSourceBranch(undefined, 'uat').allow, false);
+});
+
+test('branch check: blocks merging target branch into itself (case-insensitive)', () => {
+  const r = validateMergeSourceBranch('uat', 'uat');
+  assert.equal(r.allow, false);
+  assert.match(r.reason ?? '', /已经是目标分支/);
+  assert.equal(validateMergeSourceBranch('TEST', 'test').allow, false);
+});
+
+test('branch check: always blocks protected branches including test->uat and custom configured branches', () => {
+  for (const branch of ['main', 'master', 'uat', 'test', 'MAIN']) {
+    const blocked = validateMergeSourceBranch(branch, 'release');
+    assert.equal(blocked.allow, false, `${branch} should be blocked`);
+    assert.match(blocked.reason ?? '', /受保护分支/);
+  }
+  const testToUat = validateMergeSourceBranch('test', 'uat', ['uat', 'test']);
+  assert.equal(testToUat.allow, false);
+  assert.match(testToUat.reason ?? '', /受保护分支/);
+
+  const customSitToUat = validateMergeSourceBranch('sit', 'uat', ['uat', 'sit']);
+  assert.equal(customSitToUat.allow, false);
+  assert.match(customSitToUat.reason ?? '', /受保护分支/);
 });

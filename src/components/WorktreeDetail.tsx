@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef, useMemo, type FC, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo, type FC, useCallback, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -32,6 +33,8 @@ import {
   FileIcon,
   SettingsIcon,
   DownloadIcon,
+  SearchIcon,
+  XIcon,
 } from './Icons';
 import { Badge } from '@/components/ui/badge';
 import { copyText } from '../lib/clipboard';
@@ -49,9 +52,15 @@ import {
 } from '@/lib/operationLog';
 import type { LogEntry } from '@/lib/operationLog';
 import { GitOperations, type GitOperationsHandle } from './GitOperations';
+import {
+  enqueueProjectGitAction,
+  getBusyGitProjectKeys,
+  normalizeGitProjectKey,
+  subscribeAnyProjectGitQueue,
+} from '@/lib/gitActionQueue';
 import { useToast } from './Toast';
 import { EDITORS } from '../constants';
-import { isTauri, getVaultStatus, type BranchDiffStats } from '@/lib/backend';
+import { isTauri, getPlatform, getVaultStatus, type BranchDiffStats } from '@/lib/backend';
 import type {
   WorktreeListItem,
   MainWorkspaceStatus,
@@ -65,6 +74,7 @@ import type {
 } from '../types';
 import { ProjectEditModal } from './ProjectEditModal';
 import { GIT_BATCH_CONCURRENCY, mapWithConcurrency } from '../lib/utils';
+import { matchText, matchAnyTerm, splitSearchTerms, highlightText, type TextMatchResult } from '../lib/searchMatch';
 
 const StatusBadges: FC<{ project: ProjectStatus }> = ({ project }) => {
   const { t } = useTranslation();
@@ -112,6 +122,7 @@ interface WorktreeDetailProps {
   error: string | null;
   onClearError: () => void;
   restoring?: boolean;
+  deletingArchived?: boolean;
   switching?: boolean;
   occupation?: MainWorkspaceOccupation | null;
   deploying?: boolean;
@@ -628,6 +639,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
   error,
   onClearError,
   restoring = false,
+  deletingArchived = false,
   switching = false,
   occupation,
   deploying = false,
@@ -759,11 +771,58 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
       getVaultStatus().then(setVaultStatus).catch(() => setVaultStatus(null));
     }
   }, [mainWorkspace]);
+  // Main workspace project search
+  const [mainProjectSearch, setMainProjectSearch] = useState('');
+  const mainWorkspacePath = mainWorkspace?.path ?? '';
+  useEffect(() => {
+    setMainProjectSearch('');
+  }, [mainWorkspacePath]);
 
-  // Tag grouping for main workspace
+  const trimmedMainSearch = mainProjectSearch.trim();
+
+  const isMacPlatform = getPlatform() === 'mac';
+
+  const { filteredMainProjects, mainProjectNameMatches } = useMemo(() => {
+    const projects = mainWorkspace?.projects ?? [];
+    const matches = new Map<string, TextMatchResult>();
+    const terms = splitSearchTerms(trimmedMainSearch);
+    if (terms.length === 0) {
+      return { filteredMainProjects: projects, mainProjectNameMatches: matches };
+    }
+
+    const tagNameById = new Map((workspaceConfig?.tags ?? []).map((tg) => [tg.id, tg.name]));
+    const configByName = new Map((workspaceConfig?.projects ?? []).map((pc) => [pc.name, pc]));
+
+    const filtered = projects.filter((proj) => {
+      const pc = configByName.get(proj.name);
+      const tagNames = (pc?.tags ?? [])
+        .map((tagId) => tagNameById.get(tagId))
+        .filter((name): name is string => Boolean(name));
+
+      const allTermsMatch = terms.every((term) => {
+        if (matchText(proj.name, term).matched) return true;
+        if (matchText(proj.current_branch, term).matched) return true;
+        return tagNames.some((tagName) => matchText(tagName, term).matched);
+      });
+
+      if (!allTermsMatch) return false;
+
+      const nameMatch = terms.length === 1
+        ? matchText(proj.name, terms[0])
+        : matchAnyTerm(proj.name, terms);
+      if (nameMatch.matched) {
+        matches.set(proj.name, nameMatch);
+      }
+      return true;
+    });
+
+    return { filteredMainProjects: filtered, mainProjectNameMatches: matches };
+  }, [mainWorkspace, workspaceConfig, trimmedMainSearch]);
+
+  // Tag grouping for main workspace (applies active search filter)
   const tagGroups = useMemo(() => {
     const tags = workspaceConfig?.tags ?? [];
-    const projects = mainWorkspace?.projects ?? [];
+    const projects = filteredMainProjects;
     if (tags.length === 0) return null; // No tags = flat view
 
     const groups: Array<{ tag: TagDefinition | null; projects: typeof projects }> = [];
@@ -792,8 +851,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
     }
 
     return groups;
-  }, [workspaceConfig, mainWorkspace]);
-
+  }, [workspaceConfig, filteredMainProjects]);
   const COLLAPSED_TAGS_KEY = 'main_workspace_collapsed_tags';
   const [collapsedTags, setCollapsedTags] = useState<Set<string>>(() => {
     try {
@@ -848,7 +906,13 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
     return { activeBranchTab: active as 'base' | 'test' | 'head' | null, branchCounts: counts };
   }, [wsProjects]);
 
-  // Batch switch all projects to BASE/TEST/HEAD (concurrent)
+  const busyGitKeys = useSyncExternalStore(subscribeAnyProjectGitQueue, getBusyGitProjectKeys);
+  const isProjectGitBusyNow = useCallback(
+    (path: string) => busyGitKeys.has(normalizeGitProjectKey(path)),
+    [busyGitKeys],
+  );
+
+  // Batch switch all projects to BASE/TEST/HEAD (concurrent across repos, queued per repo)
   const switchAllProjects = useCallback(async (target: 'base' | 'test' | 'head') => {
     const projs = mainWorkspace?.projects ?? [];
     if (projs.length === 0) return;
@@ -876,12 +940,12 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
 
     await mapWithConcurrency(targets, GIT_BATCH_CONCURRENCY, async ({ proj, targetBranch }) => {
       try {
-        await onSwitchBranch(proj.path, targetBranch);
-      } catch (e: any) {
-        toast('error', t('detail.switchBranchFailed', { name: proj.name, branch: targetBranch, error: String(e?.message || e) }));
+        await enqueueProjectGitAction(proj.path, 'switchBranch', () => onSwitchBranch(proj.path, targetBranch));
+      } catch (e: unknown) {
+        const errMsg = e instanceof Error ? e.message : String(e);
+        toast('error', t('detail.switchBranchFailed', { name: proj.name, branch: targetBranch, error: errMsg }));
       }
     });
-
     setSwitchingBranch([]);
     onRefresh?.();
   }, [mainWorkspace?.projects, onSwitchBranch, toast, t, onRefresh]);
@@ -1214,12 +1278,84 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
           </div>
         )}
 
-        <>
-            {occupation ? (
+        {(() => {
+          const baseVisibleProjects = occupation
+            ? mainWorkspace.projects.filter(proj => occupation.original_branches[proj.name])
+            : mainWorkspace.projects;
+          const matchedVisibleProjects = occupation
+            ? filteredMainProjects.filter(proj => occupation.original_branches[proj.name])
+            : filteredMainProjects;
+          return (
+            <>
+              {baseVisibleProjects.length > 0 && (
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div className="relative flex-1 max-w-sm">
+                    <SearchIcon className="w-3.5 h-3.5 text-[var(--color-text-muted)] pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2" />
+                    <Input
+                      data-search-input="main-projects"
+                      value={mainProjectSearch}
+                      onChange={(e) => setMainProjectSearch(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') {
+                          e.stopPropagation();
+                          if (mainProjectSearch) {
+                            setMainProjectSearch('');
+                          } else {
+                            e.currentTarget.blur();
+                          }
+                        }
+                      }}
+                      placeholder={t('detail.searchProjects')}
+                      aria-label={t('detail.searchProjects')}
+                      className={`h-8 pl-8 text-xs ${mainProjectSearch ? 'pr-7' : 'pr-14'}`}
+                    />
+                    {mainProjectSearch ? (
+                      <button
+                        type="button"
+                        onClick={() => setMainProjectSearch('')}
+                        aria-label={t('detail.clearSearch')}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+                      >
+                        <XIcon className="w-3.5 h-3.5" />
+                      </button>
+                    ) : (
+                      <kbd
+                        aria-hidden="true"
+                        className="pointer-events-none select-none absolute right-2 top-1/2 -translate-y-1/2 px-1.5 py-0.5 text-[10px] font-mono leading-none rounded bg-[var(--color-bg-elevated)] border border-[var(--color-border)] text-[var(--color-text-muted)]"
+                      >
+                        {isMacPlatform ? '⌘F' : 'Ctrl+F'}
+                      </kbd>
+                    )}
+                  </div>
+                  {trimmedMainSearch && (
+                    <span className="text-xs text-[var(--color-text-muted)] tabular-nums shrink-0">
+                      {t('detail.searchProjectsCount', {
+                        matched: matchedVisibleProjects.length,
+                        total: baseVisibleProjects.length,
+                      })}
+                    </span>
+                  )}
+                </div>
+              )}
+              {trimmedMainSearch && matchedVisibleProjects.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-bg-surface)]/50 py-10 px-4 text-center">
+                  <SearchIcon className="w-7 h-7 mx-auto mb-2 text-[var(--color-text-muted)] opacity-60" />
+                  <p className="text-sm text-[var(--color-text-secondary)]">
+                    {t('detail.noProjectsMatch', { query: trimmedMainSearch })}
+                  </p>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="mt-3"
+                    onClick={() => setMainProjectSearch('')}
+                  >
+                    {t('detail.clearSearch')}
+                  </Button>
+                </div>
+              ) : occupation ? (
               /* Deployed state: show only deployed projects in worktree-style cards */
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {mainWorkspace.projects
-                  .filter(proj => occupation.original_branches[proj.name])
+                {matchedVisibleProjects
                   .map(proj => {
                     const projectPath = proj.path;
                     const liveStats = projectStats[proj.path];
@@ -1260,7 +1396,9 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-3">
                             <div>
-                              <div className="font-medium text-[var(--color-text-primary)]">{proj.name}</div>
+                              <div className="font-medium text-[var(--color-text-primary)]">
+                                {highlightText(proj.name, mainProjectNameMatches.get(proj.name) ?? { matched: false })}
+                              </div>
                               <div className="flex items-center gap-1.5 text-[var(--color-text-secondary)] text-sm mt-0.5">
                                 <GitBranchIcon className="w-3.5 h-3.5" />
                                 <span className="select-text">{proj.current_branch}</span>
@@ -1318,21 +1456,24 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                 const renderProjectCard = (proj: typeof mainWorkspace.projects[0]) => {
                   const projectPath = proj.path;
                   const isSwitching = switchingBranch.includes(proj.name);
+                  const isGitBusy = isProjectGitBusyNow(projectPath);
 
                   const handleSwitchBranch = async (branch: string) => {
+                    if (isGitBusy) return;
                     setSwitchingBranch([proj.name]);
                     try {
-                      await onSwitchBranch(projectPath, branch);
+                      await enqueueProjectGitAction(projectPath, 'switchBranch', () => onSwitchBranch(projectPath, branch));
                     } finally {
                       setSwitchingBranch([]);
                     }
                   };
-
                   return (
                     <div key={proj.path} className="bg-[var(--color-bg-surface)] border border-[var(--color-border)] rounded-lg p-4 group hover:border-[var(--color-border)] hover:shadow-md hover:shadow-black/10 hover:-translate-y-px transition-all duration-150">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center min-w-0">
-                          <span className="font-medium text-[var(--color-text-primary)]">{proj.name}</span>
+                          <span className="font-medium text-[var(--color-text-primary)]">
+                            {highlightText(proj.name, mainProjectNameMatches.get(proj.name) ?? { matched: false })}
+                          </span>
                           {(() => {
                             const pc = workspaceConfig?.projects.find(p => p.name === proj.name);
                             const projectTags = (pc?.tags ?? [])
@@ -1436,7 +1577,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                             variant={proj.current_branch === proj.base_branch ? 'default' : 'ghost'}
                             size="sm"
                             className="h-6 px-2 text-xs"
-                            disabled={isSwitching || proj.current_branch === proj.base_branch}
+                            disabled={isSwitching || isGitBusy || proj.current_branch === proj.base_branch}
                             onClick={() => handleSwitchBranch(proj.base_branch)}
                           >
                             {proj.current_branch === proj.base_branch && <CheckIcon className="w-3 h-3 mr-1 text-[var(--color-success)]" />}
@@ -1446,7 +1587,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                             variant={proj.current_branch === proj.test_branch ? 'default' : 'ghost'}
                             size="sm"
                             className="h-6 px-2 text-xs"
-                            disabled={isSwitching || proj.current_branch === proj.test_branch}
+                            disabled={isSwitching || isGitBusy || proj.current_branch === proj.test_branch}
                             onClick={() => handleSwitchBranch(proj.test_branch)}
                           >
                             {proj.current_branch === proj.test_branch && <CheckIcon className="w-3 h-3 mr-1 text-[var(--color-success)]" />}
@@ -1459,7 +1600,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                                   variant="ghost"
                                   size="sm"
                                   className="h-6 px-2 text-xs"
-                                  disabled={isSwitching}
+                                  disabled={isSwitching || isGitBusy}
                                   onClick={() => handleSwitchBranch('HEAD')}
                                 >
                                   HEAD
@@ -1589,7 +1730,7 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                   <div className="space-y-4">
                     {tagGroups.map(({ tag, projects: groupProjects }) => {
                       const tagId = tag?.id ?? '__untagged__';
-                      const isCollapsed = collapsedTags.has(tagId);
+                      const isCollapsed = !trimmedMainSearch && collapsedTags.has(tagId);
 
                       return (
                         <div key={tagId}>
@@ -1621,12 +1762,13 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                   </div>
                 ) : (
                   // Flat view (no tags defined)
-                  projectGrid(mainWorkspace.projects)
+                  projectGrid(filteredMainProjects)
                 );
               })()
             )}
-
-          </>
+            </>
+          );
+        })()}
 
         {editingProject && workspaceConfig && onSaveConfig && (
           <ProjectEditModal
@@ -1677,15 +1819,16 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
           <div className="flex gap-2 items-center shrink-0 ml-3">
             {selectedWorktree.is_archived ? (
               <>
-                <Button variant="default" className="bg-[var(--color-success)] hover:bg-[var(--color-success)]" onClick={onRestore} disabled={restoring}>
+                <Button variant="default" className="bg-[var(--color-success)] hover:bg-[var(--color-success)]" onClick={onRestore} disabled={restoring || deletingArchived}>
                   {restoring ? t('detail.restoring') : t('detail.restore')}
                 </Button>
                 {onDelete && (
                   <Button
                     variant="outline"
                     onClick={() => setShowDeleteConfirm(true)}
+                    disabled={deletingArchived}
                     className="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] border border-[var(--color-border)] hover:border-[var(--color-text-muted)]"
-                  >{t('detail.delete')}</Button>
+                  >{deletingArchived ? t('detail.deleting') : t('detail.delete')}</Button>
                 )}
               </>
             ) : (
@@ -1892,17 +2035,19 @@ export const WorktreeDetail: FC<WorktreeDetailProps> = ({
                               <TooltipTrigger asChild>
                                 <button
                                   onClick={async () => {
+                                    if (isProjectGitBusyNow(proj.path)) return;
                                     setSwitchingBranch([proj.name]);
                                     try {
-                                      await onSwitchBranch(proj.path, targetBranch);
-                                    } catch (e: any) {
-                                      toast('error', t('detail.switchBranchFailed', { name: proj.name, branch: targetBranch, error: String(e?.message || e) }));
+                                      await enqueueProjectGitAction(proj.path, 'switchBranch', () => onSwitchBranch(proj.path, targetBranch));
+                                    } catch (e: unknown) {
+                                      const errMsg = e instanceof Error ? e.message : String(e);
+                                      toast('error', t('detail.switchBranchFailed', { name: proj.name, branch: targetBranch, error: errMsg }));
                                     } finally {
                                       setSwitchingBranch([]);
                                     }
                                   }}
-                                  disabled={switchingBranch.length > 0}
-                                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] rounded bg-[var(--color-accent)]/10 text-[var(--color-accent)] hover:bg-[var(--color-accent)]/20 transition-colors"
+                                  disabled={switchingBranch.length > 0 || isProjectGitBusyNow(proj.path)}
+                                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] rounded bg-[var(--color-accent)]/10 text-[var(--color-accent)] hover:bg-[var(--color-accent)]/20 disabled:opacity-50 transition-colors"
                                 >
                                   <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 14 4 9 9 4"></polyline><path d="M20 20v-7a4 4 0 0 0-4-4H4"></path></svg>
                                   {t('detail.returnToBranchShort')}

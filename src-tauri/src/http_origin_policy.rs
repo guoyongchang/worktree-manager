@@ -33,24 +33,49 @@ fn same_origin(left: &url::Url, right: &url::Url) -> bool {
         && left.port_or_known_default() == right.port_or_known_default()
 }
 
-pub fn is_allowed_origin(origin: &str, ngrok_url: Option<&str>) -> bool {
+pub fn is_allowed_origin_for_share(
+    origin: &str,
+    share_port: Option<u16>,
+    ngrok_url: Option<&str>,
+    wms_url: Option<&str>,
+) -> bool {
     let Some(parsed_origin) = parse_origin_url(origin) else {
         return false;
     };
 
-    if is_loopback_origin(&parsed_origin) || is_private_lan_origin(&parsed_origin) {
-        return true;
+    let active_port = share_port.filter(|&port| port > 0);
+
+    if is_loopback_origin(&parsed_origin) {
+        if cfg!(debug_assertions) {
+            return true;
+        }
+        return match active_port {
+            Some(port) => parsed_origin.port_or_known_default() == Some(port),
+            None => true,
+        };
     }
 
-    if let Some(ngrok_url) = ngrok_url {
-        if let Some(parsed_ngrok) = parse_origin_url(ngrok_url) {
-            if same_origin(&parsed_origin, &parsed_ngrok) {
+    if is_private_lan_origin(&parsed_origin) {
+        return match active_port {
+            Some(port) => parsed_origin.port_or_known_default() == Some(port),
+            None => true,
+        };
+    }
+
+    for allowed_tunnel in [ngrok_url, wms_url].into_iter().flatten() {
+        if let Some(parsed_tunnel) = parse_origin_url(allowed_tunnel) {
+            if same_origin(&parsed_origin, &parsed_tunnel) {
                 return true;
             }
         }
     }
 
     false
+}
+
+#[cfg(test)]
+pub fn is_allowed_origin(origin: &str, ngrok_url: Option<&str>) -> bool {
+    is_allowed_origin_for_share(origin, None, ngrok_url, None)
 }
 
 #[cfg(test)]
@@ -98,6 +123,37 @@ mod tests {
         assert!(!is_allowed_origin(
             "https://other.ngrok-free.app",
             Some("https://demo.ngrok-free.app/")
+        ));
+    }
+
+    #[serial]
+    #[test]
+    fn enforces_active_share_port_on_lan_and_allows_exact_wms_origin() {
+        use super::is_allowed_origin_for_share;
+
+        assert!(is_allowed_origin_for_share(
+            "https://192.168.1.8:54321",
+            Some(54321),
+            None,
+            Some("https://demo.tunnel.kirov-opensource.com/t/demo/")
+        ));
+        assert!(!is_allowed_origin_for_share(
+            "http://192.168.1.99:3000",
+            Some(54321),
+            None,
+            Some("https://demo.tunnel.kirov-opensource.com/t/demo/")
+        ));
+        assert!(is_allowed_origin_for_share(
+            "https://demo.tunnel.kirov-opensource.com",
+            Some(54321),
+            None,
+            Some("https://demo.tunnel.kirov-opensource.com/t/demo/")
+        ));
+        assert!(!is_allowed_origin_for_share(
+            "https://evil.tunnel.kirov-opensource.com",
+            Some(54321),
+            None,
+            Some("https://demo.tunnel.kirov-opensource.com/t/demo/")
         ));
     }
 }

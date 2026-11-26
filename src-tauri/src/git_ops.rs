@@ -1,13 +1,358 @@
 use git2::{Repository, StatusOptions};
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, LazyLock, Mutex};
-use std::time::Duration;
+use std::sync::{Arc, Condvar, LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
+use crate::config::get_effective_ipc_timeout_seconds;
 use crate::utils::{
-    git_command, mask_url_credentials, run_command_with_timeout, run_git_logged, truncate_log_text,
+    canonical_repo_key, git_cancel_generation, git_command, is_git_cancelled_since,
+    mask_url_credentials, request_git_cancel, run_command_with_timeout_opts, run_git_logged,
+    truncate_log_text, GIT_CANCELLED, GIT_CANCEL_POLL,
 };
+fn is_cancelled_error(err: &str) -> bool {
+    err == GIT_CANCELLED
+}
+
+// ==================== Per-Worktree FIFO Queue & Common-Dir Fetch Gate ====================
+//
+// Strict lock hierarchy — NEVER invert, NEVER nest two blocking worktree queues:
+// 1. `WORKTREE_QUEUES` map mutex (short lookup/insert, released immediately)
+// 2. Per-worktree `WorktreeQueue` FIFO slot (held across an entire mutating git operation,
+//    including mandatory branch restoration in merge flows)
+// 3. `FETCH_GATES` map mutex (short lookup/insert, released immediately)
+// 4. Per-common-dir `FetchGate` FIFO slot (held only around `git fetch`)
+//
+// Cross-worktree best-effort updates (e.g. `sync_local_target_branch`) MUST use
+// non-blocking `try_acquire_worktree_git_queue` so deadlock is impossible.
+
+struct FifoSlotState {
+    active: bool,
+    active_label: Option<String>,
+    waiters: VecDeque<u64>,
+    next_ticket: u64,
+}
+
+impl FifoSlotState {
+    fn new() -> Self {
+        Self {
+            active: false,
+            active_label: None,
+            waiters: VecDeque::new(),
+            next_ticket: 1,
+        }
+    }
+}
+
+struct FifoSlot {
+    state: Mutex<FifoSlotState>,
+    cv: Condvar,
+}
+
+impl FifoSlot {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(FifoSlotState::new()),
+            cv: Condvar::new(),
+        }
+    }
+}
+
+struct WaiterTicket<'a> {
+    slot: &'a FifoSlot,
+    ticket: u64,
+    acquired: bool,
+}
+
+impl Drop for WaiterTicket<'_> {
+    fn drop(&mut self) {
+        if !self.acquired {
+            let mut state = self
+                .slot
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(pos) = state.waiters.iter().position(|t| *t == self.ticket) {
+                state.waiters.remove(pos);
+                self.slot.cv.notify_all();
+            }
+        }
+    }
+}
+
+pub(crate) struct WorktreeGitGuard {
+    slot: Arc<FifoSlot>,
+    cancel_gen: u64,
+}
+
+impl WorktreeGitGuard {
+    fn cancel_gen(&self) -> u64 {
+        self.cancel_gen
+    }
+}
+
+impl Drop for WorktreeGitGuard {
+    fn drop(&mut self) {
+        let mut state = self
+            .slot
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.active = false;
+        state.active_label = None;
+        self.slot.cv.notify_all();
+    }
+}
+
+struct FetchGateGuard {
+    slot: Arc<FifoSlot>,
+}
+
+impl Drop for FetchGateGuard {
+    fn drop(&mut self) {
+        let mut state = self
+            .slot
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.active = false;
+        state.active_label = None;
+        self.slot.cv.notify_all();
+    }
+}
+
+static WORKTREE_QUEUES: LazyLock<Mutex<HashMap<PathBuf, Arc<FifoSlot>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+static FETCH_GATES: LazyLock<Mutex<HashMap<PathBuf, Arc<FifoSlot>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn worktree_queue_for(path: &Path) -> Arc<FifoSlot> {
+    let key = canonical_repo_key(path);
+    let mut map = WORKTREE_QUEUES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    map.entry(key)
+        .or_insert_with(|| Arc::new(FifoSlot::new()))
+        .clone()
+}
+
+fn fetch_gate_for(common_dir: PathBuf) -> Arc<FifoSlot> {
+    let mut map = FETCH_GATES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    map.entry(common_dir)
+        .or_insert_with(|| Arc::new(FifoSlot::new()))
+        .clone()
+}
+
+/// Request cancellation of any queued or in-flight git operation for `path`.
+/// Wakes queued waiters immediately without spawning any subprocesses.
+pub fn cancel_git_operation(path: &Path) {
+    request_git_cancel(path);
+    let wt_slot = worktree_queue_for(path);
+    wt_slot.cv.notify_all();
+    let gates: Vec<Arc<FifoSlot>> = FETCH_GATES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .values()
+        .cloned()
+        .collect();
+    for gate in gates {
+        gate.cv.notify_all();
+    }
+}
+
+fn acquire_worktree_git_queue(
+    path: &Path,
+    label: &str,
+    target: &str,
+) -> Result<WorktreeGitGuard, String> {
+    acquire_worktree_git_queue_with_timeout(
+        path,
+        label,
+        target,
+        Duration::from_secs(get_effective_ipc_timeout_seconds()),
+    )
+}
+
+fn acquire_worktree_git_queue_with_timeout(
+    path: &Path,
+    label: &str,
+    target: &str,
+    timeout: Duration,
+) -> Result<WorktreeGitGuard, String> {
+    let start_gen = git_cancel_generation(path);
+    let slot = worktree_queue_for(path);
+
+    let (ticket, already_busy, blocking_label) = {
+        let mut state = slot
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let ticket = state.next_ticket;
+        state.next_ticket = state.next_ticket.wrapping_add(1);
+        if !state.active && state.waiters.is_empty() {
+            state.active = true;
+            state.active_label = Some(label.to_string());
+            drop(state);
+            return Ok(WorktreeGitGuard {
+                slot,
+                cancel_gen: start_gen,
+            });
+        }
+        state.waiters.push_back(ticket);
+        (ticket, true, state.active_label.clone())
+    };
+
+    let mut waiter_guard = WaiterTicket {
+        slot: &slot,
+        ticket,
+        acquired: false,
+    };
+
+    if already_busy {
+        log::info!(
+            "[git:queue] '{}' queued for path={} (waiting on '{}')",
+            label,
+            path.display(),
+            blocking_label.as_deref().unwrap_or("active op")
+        );
+        emit_git_progress(path, target, "", "queued");
+    }
+
+    let deadline = Instant::now() + timeout;
+    let mut state = slot
+        .state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    loop {
+        if is_git_cancelled_since(path, start_gen) {
+            return Err(GIT_CANCELLED.to_string());
+        }
+        if !state.active && state.waiters.front() == Some(&ticket) {
+            state.waiters.pop_front();
+            state.active = true;
+            state.active_label = Some(label.to_string());
+            waiter_guard.acquired = true;
+            drop(state);
+            return Ok(WorktreeGitGuard {
+                slot: Arc::clone(&slot),
+                cancel_gen: start_gen,
+            });
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            let blocking = state
+                .active_label
+                .clone()
+                .unwrap_or_else(|| "其他 Git 操作".to_string());
+            log::warn!(
+                "[git:queue] '{}' timed out after {}s waiting on '{}' at {}",
+                label,
+                timeout.as_secs(),
+                blocking,
+                path.display()
+            );
+            return Err(format!(
+                "等待前一个 Git 操作（{}）完成超时（已等待 {}s），请稍后重试或取消卡住的操作",
+                blocking,
+                timeout.as_secs()
+            ));
+        }
+        let wait_slice = remaining.min(GIT_CANCEL_POLL);
+        let (next_state, _) = slot
+            .cv
+            .wait_timeout(state, wait_slice)
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state = next_state;
+    }
+}
+
+fn try_acquire_worktree_git_queue(path: &Path, label: &str) -> Option<WorktreeGitGuard> {
+    let start_gen = git_cancel_generation(path);
+    let slot = worktree_queue_for(path);
+    let mut state = slot
+        .state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if !state.active && state.waiters.is_empty() {
+        state.active = true;
+        state.active_label = Some(label.to_string());
+        drop(state);
+        Some(WorktreeGitGuard {
+            slot,
+            cancel_gen: start_gen,
+        })
+    } else {
+        None
+    }
+}
+
+fn acquire_fetch_gate_with_timeout(
+    common_dir: PathBuf,
+    cancel_path: &Path,
+    cancel_gen: u64,
+    timeout: Duration,
+) -> Result<FetchGateGuard, String> {
+    let slot = fetch_gate_for(common_dir);
+    let ticket = {
+        let mut state = slot
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !state.active && state.waiters.is_empty() {
+            state.active = true;
+            state.active_label = Some("fetch".to_string());
+            drop(state);
+            return Ok(FetchGateGuard { slot });
+        }
+        let ticket = state.next_ticket;
+        state.next_ticket = state.next_ticket.wrapping_add(1);
+        state.waiters.push_back(ticket);
+        ticket
+    };
+
+    let mut waiter_guard = WaiterTicket {
+        slot: &slot,
+        ticket,
+        acquired: false,
+    };
+    let deadline = Instant::now() + timeout;
+    let mut state = slot
+        .state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    loop {
+        if is_git_cancelled_since(cancel_path, cancel_gen) {
+            return Err(GIT_CANCELLED.to_string());
+        }
+        if !state.active && state.waiters.front() == Some(&ticket) {
+            state.waiters.pop_front();
+            state.active = true;
+            state.active_label = Some("fetch".to_string());
+            waiter_guard.acquired = true;
+            drop(state);
+            return Ok(FetchGateGuard {
+                slot: Arc::clone(&slot),
+            });
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(format!(
+                "等待同仓库其他 fetch 操作完成超时（已等待 {}s），请稍后重试",
+                timeout.as_secs()
+            ));
+        }
+        let wait_slice = remaining.min(GIT_CANCEL_POLL);
+        let (next_state, _) = slot
+            .cv
+            .wait_timeout(state, wait_slice)
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state = next_state;
+    }
+}
 
 fn emit_git_progress(path: &Path, target: &str, current_branch: &str, step: &str) {
     let payload = serde_json::json!({
@@ -339,6 +684,11 @@ pub struct BranchDiffStats {
 
 /// Sync with base branch (pull from base branch)
 pub fn sync_with_base_branch(path: &Path, base_branch: &str) -> Result<String, String> {
+    crate::utils::validate_git_ref_name(base_branch)?;
+    let queue_guard =
+        acquire_worktree_git_queue(path, &format!("同步 {}", base_branch), base_branch)?;
+    let cancel_gen = queue_guard.cancel_gen();
+
     log::info!(
         "[git] Syncing with base branch: path={}, base_branch={}",
         path.display(),
@@ -347,21 +697,40 @@ pub fn sync_with_base_branch(path: &Path, base_branch: &str) -> Result<String, S
 
     emit_git_progress(path, base_branch, "", "syncFetch");
     log::info!("[git] Step 1/2: git fetch origin {}", base_branch);
-    crate::utils::validate_git_ref_name(base_branch)?;
     let fetch_refspec = format!("+refs/heads/{0}:refs/remotes/origin/{0}", base_branch);
-    let mut fetch_cmd = git_command();
-    fetch_cmd
-        .env("GIT_LFS_SKIP_SMUDGE", "1")
-        .arg("-c")
-        .arg("protocol.version=2")
-        .arg("-C")
-        .arg(path)
-        .arg("fetch")
-        .arg("--no-tags")
-        .arg("origin")
-        .arg(&fetch_refspec);
-    let fetch_output = run_git_logged(&mut fetch_cmd, "sync fetch base branch")
-        .map_err(|e| format!("Failed to execute git fetch: {}", e))?;
+    let fetch_output = {
+        let timeout_secs = get_effective_ipc_timeout_seconds();
+        let _fetch_gate = acquire_fetch_gate_with_timeout(
+            resolve_git_common_dir(path),
+            path,
+            cancel_gen,
+            Duration::from_secs(timeout_secs),
+        )?;
+        let mut fetch_cmd = git_command();
+        fetch_cmd
+            .env("GIT_LFS_SKIP_SMUDGE", "1")
+            .arg("-c")
+            .arg("protocol.version=2")
+            .arg("-C")
+            .arg(path)
+            .arg("fetch")
+            .arg("--no-tags")
+            .arg("origin")
+            .arg(&fetch_refspec);
+        run_command_with_timeout_opts(
+            &mut fetch_cmd,
+            "sync fetch base branch",
+            Duration::from_secs(timeout_secs),
+            Some((path, cancel_gen)),
+        )
+        .map_err(|e| {
+            if is_cancelled_error(&e) {
+                e
+            } else {
+                format!("Failed to execute git fetch: {}", e)
+            }
+        })?
+    };
 
     if !fetch_output.status.success() {
         let stderr = String::from_utf8_lossy(&fetch_output.stderr);
@@ -383,8 +752,19 @@ pub fn sync_with_base_branch(path: &Path, base_branch: &str) -> Result<String, S
         .arg("merge")
         .arg("--no-edit")
         .arg(format!("origin/{}", base_branch));
-    let merge_output = run_git_logged(&mut merge_cmd, "sync merge base branch")
-        .map_err(|e| format!("Failed to execute git merge: {}", e))?;
+    let merge_output = run_command_with_timeout_opts(
+        &mut merge_cmd,
+        "sync merge base branch",
+        Duration::from_secs(get_effective_ipc_timeout_seconds()),
+        Some((path, cancel_gen)),
+    )
+    .map_err(|e| {
+        if is_cancelled_error(&e) {
+            e
+        } else {
+            format!("Failed to execute git merge: {}", e)
+        }
+    })?;
 
     if !merge_output.status.success() {
         let stderr = String::from_utf8_lossy(&merge_output.stderr);
@@ -405,17 +785,27 @@ pub fn sync_with_base_branch(path: &Path, base_branch: &str) -> Result<String, S
 
 /// Push current branch to remote
 pub fn push_to_remote(path: &Path) -> Result<String, String> {
+    let queue_guard = acquire_worktree_git_queue(path, "推送分支", "")?;
+    let cancel_gen = queue_guard.cancel_gen();
+
     log::info!("[git] Pushing to remote: path={}", path.display());
 
     // Step 1: Get current branch
-    let branch_output = git_command()
-        .arg("-C")
-        .arg(path)
-        .arg("rev-parse")
-        .arg("--abbrev-ref")
-        .arg("HEAD")
-        .output()
-        .map_err(|e| format!("Failed to get current branch: {}", e))?;
+    let timeout_secs = get_effective_ipc_timeout_seconds();
+    let branch_output = run_git_in_cancellable(
+        path,
+        &["rev-parse", "--abbrev-ref", "HEAD"],
+        "push rev-parse head",
+        timeout_secs,
+        cancel_gen,
+    )
+    .map_err(|e| {
+        if is_cancelled_error(&e) {
+            e
+        } else {
+            format!("Failed to get current branch: {}", e)
+        }
+    })?;
 
     if !branch_output.status.success() {
         log::error!("[git] Failed to get current branch at {}", path.display());
@@ -436,8 +826,19 @@ pub fn push_to_remote(path: &Path) -> Result<String, String> {
         .arg("origin")
         .arg(&current_branch)
         .arg("--no-verify");
-    let push_output = run_git_logged(&mut push_cmd, "push current branch")
-        .map_err(|e| format!("Failed to execute git push: {}", e))?;
+    let push_output = run_command_with_timeout_opts(
+        &mut push_cmd,
+        "push current branch",
+        Duration::from_secs(timeout_secs),
+        Some((path, cancel_gen)),
+    )
+    .map_err(|e| {
+        if is_cancelled_error(&e) {
+            e
+        } else {
+            format!("Failed to execute git push: {}", e)
+        }
+    })?;
 
     if !push_output.status.success() {
         let stderr = String::from_utf8_lossy(&push_output.stderr);
@@ -453,24 +854,28 @@ pub fn push_to_remote(path: &Path) -> Result<String, String> {
     Ok(format!("Successfully pushed {} to origin", current_branch))
 }
 
-/// Pull current branch from remote (`git pull --no-rebase --ff --no-edit origin <current_branch>`).
-///
-/// The merge strategy is spelled out explicitly: Git >= 2.33.1 refuses a plain `git pull` on a
-/// diverged branch ("Need to specify how to reconcile divergent branches") unless
-/// `pull.rebase` is configured, and `--ff` keeps the historical "fast-forward when possible,
-/// merge commit otherwise" behaviour even when `pull.ff=only` is set globally.
+/// Pull current branch from remote
 pub fn pull_current_branch(path: &Path) -> Result<String, String> {
+    let queue_guard = acquire_worktree_git_queue(path, "拉取分支", "")?;
+    let cancel_gen = queue_guard.cancel_gen();
+
     log::info!("[git] Pulling current branch: path={}", path.display());
 
-    // Step 1: Get current branch
-    let branch_output = git_command()
-        .arg("-C")
-        .arg(path)
-        .arg("rev-parse")
-        .arg("--abbrev-ref")
-        .arg("HEAD")
-        .output()
-        .map_err(|e| format!("Failed to get current branch: {}", e))?;
+    let timeout_secs = get_effective_ipc_timeout_seconds();
+    let branch_output = run_git_in_cancellable(
+        path,
+        &["rev-parse", "--abbrev-ref", "HEAD"],
+        "pull rev-parse head",
+        timeout_secs,
+        cancel_gen,
+    )
+    .map_err(|e| {
+        if is_cancelled_error(&e) {
+            e
+        } else {
+            format!("Failed to get current branch: {}", e)
+        }
+    })?;
 
     if !branch_output.status.success() {
         log::error!("[git] Failed to get current branch at {}", path.display());
@@ -493,8 +898,19 @@ pub fn pull_current_branch(path: &Path) -> Result<String, String> {
         .arg("--no-edit")
         .arg("origin")
         .arg(&current_branch);
-    let pull_output = run_git_logged(&mut pull_cmd, "pull current branch")
-        .map_err(|e| format!("Failed to execute git pull: {}", e))?;
+    let pull_output = run_command_with_timeout_opts(
+        &mut pull_cmd,
+        "pull current branch",
+        Duration::from_secs(timeout_secs),
+        Some((path, cancel_gen)),
+    )
+    .map_err(|e| {
+        if is_cancelled_error(&e) {
+            e
+        } else {
+            format!("Failed to execute git pull: {}", e)
+        }
+    })?;
 
     if !pull_output.status.success() {
         let stderr = String::from_utf8_lossy(&pull_output.stderr);
@@ -519,36 +935,186 @@ pub fn pull_current_branch(path: &Path) -> Result<String, String> {
     ))
 }
 
-/// Run `git -C <path> <args>` through the shared logged runner.
-/// Only spawn failures are mapped to `Err`; callers inspect `status` themselves.
-fn run_git_in(path: &Path, args: &[&str], label: &str) -> Result<std::process::Output, String> {
-    let mut cmd = git_command();
-    cmd.arg("-C").arg(path).args(args);
-    run_git_logged(&mut cmd, label).map_err(|e| format!("执行 git {} 失败: {}", args.join(" "), e))
+/// Switch branch on a worktree/repo cleanly through the per-worktree FIFO queue with bounded timeouts.
+/// Fetch and post-checkout pull failures are logged as non-critical warnings (preserving existing
+/// behavior), except user cancellation which aborts immediately.
+pub fn switch_branch(path: &Path, branch: &str) -> Result<(), String> {
+    crate::utils::validate_git_ref_name(branch)?;
+    if !path.exists() {
+        log::error!("[git] Project path does not exist: {}", path.display());
+        return Err(format!("Project path does not exist: {}", path.display()));
+    }
+    let queue_guard = acquire_worktree_git_queue(path, &format!("切换分支 {}", branch), branch)?;
+    let cancel_gen = queue_guard.cancel_gen();
+
+    log::info!(
+        "[git] Switching branch: path='{}', target='{}'",
+        path.display(),
+        branch
+    );
+
+    // Step 1: Fetch to ensure we have latest refs (non-critical unless cancelled)
+    emit_git_progress(path, branch, "", "fetch");
+    log::info!("[git] Step 1/3: git fetch origin");
+    {
+        let timeout_secs = get_effective_ipc_timeout_seconds();
+        match acquire_fetch_gate_with_timeout(
+            resolve_git_common_dir(path),
+            path,
+            cancel_gen,
+            Duration::from_secs(timeout_secs),
+        ) {
+            Ok(_fetch_gate) => {
+                let mut fetch_cmd = git_command();
+                fetch_cmd
+                    .env("GIT_LFS_SKIP_SMUDGE", "1")
+                    .arg("-C")
+                    .arg(path)
+                    .args(["fetch", "origin"]);
+                match run_command_with_timeout_opts(
+                    &mut fetch_cmd,
+                    "switch branch fetch",
+                    Duration::from_secs(timeout_secs),
+                    Some((path, cancel_gen)),
+                ) {
+                    Ok(out) if out.status.success() => {
+                        log::info!("[git] Step 1/3: git fetch origin succeeded");
+                    }
+                    Ok(out) => {
+                        let stderr_for_log =
+                            mask_url_credentials(&String::from_utf8_lossy(&out.stderr));
+                        log::warn!(
+                            "[git] Step 1/3: git fetch failed (non-critical), continuing: {}",
+                            stderr_for_log
+                        );
+                    }
+                    Err(e) if is_cancelled_error(&e) => return Err(e),
+                    Err(e) => {
+                        log::warn!(
+                            "[git] Step 1/3: git fetch error (non-critical), continuing: {}",
+                            mask_url_credentials(&e)
+                        );
+                    }
+                }
+            }
+            Err(e) if is_cancelled_error(&e) => return Err(e),
+            Err(e) => {
+                log::warn!(
+                    "[git] Step 1/3: fetch gate skipped (non-critical), continuing: {}",
+                    e
+                );
+            }
+        }
+    }
+
+    // Step 2: Checkout the branch
+    emit_git_progress(path, branch, "", "checkout");
+    log::info!("[git] Step 2/3: git checkout {}", branch);
+    let checkout_output = run_git_in_cancellable(
+        path,
+        &["checkout", branch],
+        "switch branch checkout",
+        get_effective_ipc_timeout_seconds(),
+        cancel_gen,
+    )
+    .map_err(|e| {
+        if is_cancelled_error(&e) {
+            e
+        } else {
+            format!("Failed to checkout: {}", e)
+        }
+    })?;
+
+    if !checkout_output.status.success() {
+        let stderr = String::from_utf8_lossy(&checkout_output.stderr);
+        let stderr_for_log = mask_url_credentials(&stderr);
+        log::error!(
+            "[git] Step 2/3 FAILED: git checkout {}: {}",
+            branch,
+            stderr_for_log
+        );
+        return Err(format!("Failed to checkout {}: {}", branch, stderr));
+    }
+    log::info!("[git] Step 2/3: git checkout {} succeeded", branch);
+
+    // Step 3: Pull latest changes (non-critical unless cancelled)
+    emit_git_progress(path, branch, branch, "pull");
+    log::info!(
+        "[git] Step 3/3: git pull --no-rebase --no-edit origin {}",
+        branch
+    );
+    let mut pull_cmd = git_command();
+    pull_cmd
+        .arg("-C")
+        .arg(path)
+        .args(["pull", "--no-rebase", "--no-edit", "origin", branch]);
+    match run_command_with_timeout_opts(
+        &mut pull_cmd,
+        "switch branch pull",
+        Duration::from_secs(get_effective_ipc_timeout_seconds()),
+        Some((path, cancel_gen)),
+    ) {
+        Ok(out) if out.status.success() => {
+            log::info!("[git] Step 3/3: git pull origin {} succeeded", branch);
+        }
+        Ok(out) => {
+            let stderr_for_log = mask_url_credentials(&String::from_utf8_lossy(&out.stderr));
+            log::warn!(
+                "[git] Step 3/3: git pull failed (non-critical): {}",
+                stderr_for_log
+            );
+        }
+        Err(e) if is_cancelled_error(&e) => return Err(e),
+        Err(e) => {
+            log::warn!(
+                "[git] Step 3/3: git pull error (non-critical): {}",
+                mask_url_credentials(&e)
+            );
+        }
+    }
+
+    log::info!(
+        "[git] Successfully switched to branch '{}' at '{}'",
+        branch,
+        path.display()
+    );
+    Ok(())
 }
 
-/// Timeout for `git fetch` inside the merge flow (network).
-const MERGE_FETCH_TIMEOUT_SECS: u64 = 180;
-/// Timeout for `git push` inside the merge flow (network; large pushes take a while).
-const MERGE_PUSH_TIMEOUT_SECS: u64 = 300;
-
-/// Like `run_git_in` but bounded: network steps must never leave the merge button spinning.
-/// A timeout is reported as `Err`, which the caller treats like any other failed step.
-fn run_git_in_with_timeout(
+/// Run `git -C <path> <args>` with a bounded timeout and generation-scoped cancellation.
+fn run_git_in_cancellable(
     path: &Path,
     args: &[&str],
     label: &str,
     timeout_secs: u64,
+    cancel_gen: u64,
 ) -> Result<std::process::Output, String> {
     let mut cmd = git_command();
     cmd.arg("-C").arg(path).args(args);
-    run_command_with_timeout(
+    run_command_with_timeout_opts(
         &mut cmd,
         label,
-        std::time::Duration::from_secs(timeout_secs),
+        Duration::from_secs(timeout_secs),
+        Some((path, cancel_gen)),
     )
 }
 
+/// Run mandatory cleanup `git -C <path> <args>` (`merge --abort`, `checkout <branch>`)
+/// bounded by the configured command timeout, NEVER aborted by user cancellation so branch recovery always completes.
+fn run_git_cleanup(
+    path: &Path,
+    args: &[&str],
+    label: &str,
+) -> Result<std::process::Output, String> {
+    let mut cmd = git_command();
+    cmd.arg("-C").arg(path).args(args);
+    run_command_with_timeout_opts(
+        &mut cmd,
+        label,
+        Duration::from_secs(get_effective_ipc_timeout_seconds()),
+        None,
+    )
+}
 fn output_stderr(output: &std::process::Output) -> String {
     String::from_utf8_lossy(&output.stderr).trim().to_string()
 }
@@ -604,7 +1170,7 @@ fn parse_worktree_list_porcelain(output: &str) -> Vec<(std::path::PathBuf, Optio
 }
 
 /// Read the current branch via git2; detached HEAD is an error because there is nothing to merge.
-fn current_branch_for_merge(path: &Path) -> Result<String, String> {
+pub(crate) fn current_branch_for_merge(path: &Path) -> Result<String, String> {
     let repo =
         Repository::open(path).map_err(|e| format!("无法打开仓库 ({}): {}", path.display(), e))?;
     let head = repo
@@ -617,21 +1183,108 @@ fn current_branch_for_merge(path: &Path) -> Result<String, String> {
         .map(|name| name.to_string())
         .ok_or_else(|| "无法获取当前分支名 (HEAD 可能处于 detached 状态)".to_string())
 }
+const PROTECTED_MERGE_SOURCE_BRANCHES: &[&str] = &["main", "master", "uat", "test"];
+
+/// Inspect up to 5 ancestor directories for `.worktree-manager.json` and collect
+/// workspace/project-configured protected branches (`uat_branch`, `base_branch`, `test_branch`).
+fn collect_configured_protected_branches(path: &Path) -> Vec<String> {
+    let project_name = path.file_name().and_then(|n| n.to_str());
+    let mut cursor = path.parent();
+    for _ in 0..5 {
+        let Some(dir) = cursor else { break };
+        let cfg_path = dir.join(".worktree-manager.json");
+        if cfg_path.is_file() {
+            if let Ok(content) = std::fs::read_to_string(&cfg_path) {
+                if let Ok(ws_cfg) = serde_json::from_str::<crate::types::WorkspaceConfig>(&content)
+                {
+                    let mut branches = Vec::new();
+                    if !ws_cfg.uat_branch.trim().is_empty() {
+                        branches.push(ws_cfg.uat_branch.trim().to_string());
+                    }
+                    if let Some(name) = project_name {
+                        if let Some(proj) = ws_cfg.projects.iter().find(|p| p.name == name) {
+                            if !proj.base_branch.trim().is_empty() {
+                                branches.push(proj.base_branch.trim().to_string());
+                            }
+                            if !proj.test_branch.trim().is_empty() {
+                                branches.push(proj.test_branch.trim().to_string());
+                            }
+                        }
+                    }
+                    return branches;
+                }
+            }
+            break;
+        }
+        cursor = dir.parent();
+    }
+    Vec::new()
+}
+
+/// Guard against merging from detached HEAD, target branch itself, or protected trunk/env branches
+/// (e.g. preventing merging `test` into `uat`, or `uat` into `test`).
+pub(crate) fn validate_merge_source_branch(
+    path: &Path,
+    current_branch: &str,
+    target: &str,
+) -> Result<(), String> {
+    let cur = current_branch.trim();
+    let tgt = target.trim();
+    if cur.is_empty() || cur == "HEAD" {
+        return Err(
+            "当前仓库处于 detached HEAD 状态或无法识别当前分支，请先切换到功能分支后再合并"
+                .to_string(),
+        );
+    }
+    if cur.eq_ignore_ascii_case(tgt) {
+        return Err(format!(
+            "当前分支已经是目标分支 '{}'，无需合并（请切换到功能分支后再操作）",
+            tgt
+        ));
+    }
+    let is_builtin_protected = PROTECTED_MERGE_SOURCE_BRANCHES
+        .iter()
+        .any(|b| cur.eq_ignore_ascii_case(b));
+    let is_configured_protected = !is_builtin_protected
+        && collect_configured_protected_branches(path)
+            .iter()
+            .any(|b| cur.eq_ignore_ascii_case(b));
+    if is_builtin_protected || is_configured_protected {
+        return Err(format!(
+            "当前分支 '{}' 是受保护分支，禁止直接合并到 '{}'，请先切换到功能分支",
+            cur, tgt
+        ));
+    }
+    Ok(())
+}
 
 /// `true` when `git status --porcelain --untracked-files=no` is empty (untracked files are fine).
-fn has_clean_tracked_tree(path: &Path, label: &str) -> Result<bool, String> {
-    let status = run_git_in(
-        path,
-        &["status", "--porcelain", "--untracked-files=no"],
-        &format!("{} status", label),
-    )?;
+fn has_clean_tracked_tree(
+    path: &Path,
+    label: &str,
+    cancel_gen: Option<u64>,
+) -> Result<bool, String> {
+    let status = match cancel_gen {
+        Some(gen) => run_git_in_cancellable(
+            path,
+            &["status", "--porcelain", "--untracked-files=no"],
+            &format!("{} status", label),
+            get_effective_ipc_timeout_seconds(),
+            gen,
+        )?,
+        None => run_git_cleanup(
+            path,
+            &["status", "--porcelain", "--untracked-files=no"],
+            &format!("{} status", label),
+        )?,
+    };
     if !status.status.success() {
         return Err(format!("检查工作区状态失败: {}", output_stderr(&status)));
     }
-    Ok(String::from_utf8_lossy(&status.stdout).trim().is_empty())
+    Ok(status.stdout.is_empty())
 }
 
-/// fetch origin/<target> → detach onto it → merge <current_branch> → push HEAD:<target>.
+/// Steps 2–5: fetch `origin/<target>`, detach onto it, merge `current_branch`, push back.
 /// Retries the whole sequence once when the push is rejected as non-fast-forward.
 /// Leaves the worktree detached (on success) or wherever it stopped (on failure);
 /// the caller always restores `current_branch` afterwards.
@@ -640,6 +1293,7 @@ fn fetch_merge_push_remote_target(
     current_branch: &str,
     target: &str,
     label: &str,
+    cancel_gen: u64,
 ) -> Result<(), String> {
     let remote_ref = format!("refs/remotes/origin/{}", target);
     let fetch_refspec = format!("+refs/heads/{}:{}", target, remote_ref);
@@ -659,18 +1313,28 @@ fn fetch_merge_push_remote_target(
             target,
             attempt
         );
-        let mut fetch_cmd = git_command();
-        fetch_cmd
-            .env("GIT_LFS_SKIP_SMUDGE", "1")
-            .arg("-C")
-            .arg(path)
-            .args(["-c", "protocol.version=2", "fetch", "--no-tags", "origin"])
-            .arg(&fetch_refspec);
-        let fetch = run_command_with_timeout(
-            &mut fetch_cmd,
-            &format!("{} fetch target", label),
-            std::time::Duration::from_secs(MERGE_FETCH_TIMEOUT_SECS),
-        )?;
+        let timeout_secs = get_effective_ipc_timeout_seconds();
+        let fetch = {
+            let _fetch_gate = acquire_fetch_gate_with_timeout(
+                resolve_git_common_dir(path),
+                path,
+                cancel_gen,
+                Duration::from_secs(timeout_secs),
+            )?;
+            let mut fetch_cmd = git_command();
+            fetch_cmd
+                .env("GIT_LFS_SKIP_SMUDGE", "1")
+                .arg("-C")
+                .arg(path)
+                .args(["-c", "protocol.version=2", "fetch", "--no-tags", "origin"])
+                .arg(&fetch_refspec);
+            run_command_with_timeout_opts(
+                &mut fetch_cmd,
+                &format!("{} fetch target", label),
+                Duration::from_secs(timeout_secs),
+                Some((path, cancel_gen)),
+            )?
+        };
         if !fetch.status.success() {
             let stderr = output_stderr(&fetch);
             log::error!("[{}] Step 2 FAILED: fetch => {}", label, stderr);
@@ -679,10 +1343,12 @@ fn fetch_merge_push_remote_target(
             }
             return Err(format!("拉取 {} 最新代码失败: {}", target, stderr));
         }
-        let verify = run_git_in(
+        let verify = run_git_in_cancellable(
             path,
             &["rev-parse", "--verify", "--quiet", &remote_ref],
             &format!("{} verify remote ref", label),
+            timeout_secs,
+            cancel_gen,
         )?;
         if !verify.status.success() {
             log::error!("[{}] Step 2 FAILED: {} does not exist", label, remote_ref);
@@ -692,10 +1358,12 @@ fn fetch_merge_push_remote_target(
 
         emit_git_progress(path, target, current_branch, "checkout");
         log::info!("[{}] Step 3: git checkout --detach {}", label, remote_ref);
-        let checkout = run_git_in(
+        let checkout = run_git_in_cancellable(
             path,
             &["checkout", "--detach", &remote_ref],
             &format!("{} checkout detach target", label),
+            timeout_secs,
+            cancel_gen,
         )?;
         if !checkout.status.success() {
             let stderr = output_stderr(&checkout);
@@ -706,7 +1374,7 @@ fn fetch_merge_push_remote_target(
 
         emit_git_progress(path, target, current_branch, "merge");
         log::info!("[{}] Step 4: git merge {}", label, current_branch);
-        let merge = run_git_in(
+        let merge = match run_git_in_cancellable(
             path,
             // --ff: keep "fast-forward when possible" even if the user set merge.ff=only.
             &[
@@ -718,7 +1386,19 @@ fn fetch_merge_push_remote_target(
                 &feature_ref,
             ],
             &format!("{} merge current", label),
-        )?;
+            timeout_secs,
+            cancel_gen,
+        ) {
+            Ok(output) => output,
+            Err(err) => {
+                let _ = run_git_cleanup(
+                    path,
+                    &["merge", "--abort"],
+                    &format!("{} merge abort", label),
+                );
+                return Err(err);
+            }
+        };
         if !merge.status.success() {
             let stderr = output_stderr(&merge);
             let stdout = String::from_utf8_lossy(&merge.stdout).trim().to_string();
@@ -728,7 +1408,7 @@ fn fetch_merge_push_remote_target(
                 stderr,
                 stdout
             );
-            let _ = run_git_in(
+            let _ = run_git_cleanup(
                 path,
                 &["merge", "--abort"],
                 &format!("{} merge abort", label),
@@ -754,11 +1434,12 @@ fn fetch_merge_push_remote_target(
 
         emit_git_progress(path, target, current_branch, "push");
         log::info!("[{}] Step 5: git push origin {}", label, push_refspec);
-        let push = run_git_in_with_timeout(
+        let push = run_git_in_cancellable(
             path,
             &["push", "origin", &push_refspec, "--no-verify"],
             &format!("{} push target", label),
-            MERGE_PUSH_TIMEOUT_SECS,
+            timeout_secs,
+            cancel_gen,
         )?;
         if push.status.success() {
             log::info!("[{}] Step 5 OK: pushed {}", label, target);
@@ -787,8 +1468,9 @@ fn sync_local_target_branch(path: &Path, target: &str, label: &str) -> Vec<Strin
     let mut notes = Vec::new();
     let target_ref = format!("refs/heads/{}", target);
     let remote_ref = format!("refs/remotes/origin/{}", target);
+    let self_key = canonical_repo_key(path);
 
-    let worktrees = match run_git_in(
+    let worktrees = match run_git_cleanup(
         path,
         &["worktree", "list", "--porcelain"],
         &format!("{} worktree list", label),
@@ -823,7 +1505,7 @@ fn sync_local_target_branch(path: &Path, target: &str, label: &str) -> Vec<Strin
         .collect();
 
     if holders.is_empty() {
-        let exists = run_git_in(
+        let exists = run_git_cleanup(
             path,
             &["rev-parse", "--verify", "--quiet", &target_ref],
             &format!("{} verify local target", label),
@@ -839,7 +1521,7 @@ fn sync_local_target_branch(path: &Path, target: &str, label: &str) -> Vec<Strin
             return notes;
         }
 
-        let is_ancestor = run_git_in(
+        let is_ancestor = run_git_cleanup(
             path,
             &["merge-base", "--is-ancestor", &target_ref, &remote_ref],
             &format!("{} local target is-ancestor", label),
@@ -857,7 +1539,7 @@ fn sync_local_target_branch(path: &Path, target: &str, label: &str) -> Vec<Strin
             return notes;
         }
 
-        match run_git_in(
+        match run_git_cleanup(
             path,
             &["branch", "-f", target, &remote_ref],
             &format!("{} force-update local target", label),
@@ -898,10 +1580,31 @@ fn sync_local_target_branch(path: &Path, target: &str, label: &str) -> Vec<Strin
 
     for wt_path in holders {
         let ff_label = format!("{} fast-forward worktree target", label);
-        let clean =
-            wt_path.exists() && matches!(has_clean_tracked_tree(wt_path, &ff_label), Ok(true));
+        let _other_guard = if canonical_repo_key(wt_path) != self_key {
+            match try_acquire_worktree_git_queue(wt_path, &ff_label) {
+                Some(g) => Some(g),
+                None => {
+                    log::warn!(
+                        "[{}] Step 6: {} is busy with another git op, skipping fast-forward for {}",
+                        label,
+                        wt_path.display(),
+                        target
+                    );
+                    notes.push(format!(
+                        "⚠ {}: 正在执行其他 Git 操作，本地 {} 未更新，请稍后手动同步",
+                        wt_path.display(),
+                        target
+                    ));
+                    continue;
+                }
+            }
+        } else {
+            None
+        };
+        let clean = wt_path.exists()
+            && matches!(has_clean_tracked_tree(wt_path, &ff_label, None), Ok(true));
         let fast_forwarded = clean
-            && run_git_in(wt_path, &["merge", "--ff-only", &remote_ref], &ff_label)
+            && run_git_cleanup(wt_path, &["merge", "--ff-only", &remote_ref], &ff_label)
                 .map(|output| output.status.success())
                 .unwrap_or(false);
         if fast_forwarded {
@@ -935,9 +1638,11 @@ fn sync_local_target_branch(path: &Path, target: &str, label: &str) -> Vec<Strin
 }
 
 /// `git checkout <branch> --`; returns a warning suffix for the user message when it fails.
+/// Always runs uncancellable (with a short hard timeout) so cancellation/timeout never leaves
+/// the worktree stranded in detached HEAD.
 fn restore_original_branch(path: &Path, branch: &str, label: &str) -> Option<String> {
     log::info!("[{}] Step 7: git checkout {}", label, branch);
-    let failure = match run_git_in(
+    let failure = match run_git_cleanup(
         path,
         &["checkout", branch, "--"],
         &format!("{} restore original branch", label),
@@ -968,16 +1673,25 @@ fn restore_original_branch(path: &Path, branch: &str, label: &str) -> Option<Str
 /// local `<target>`, or `<target>` being checked out in the main / another linked worktree,
 /// can neither block the merge nor leak junk merge commits into the remote. Afterwards the
 /// local `<target>` (wherever it lives) is fast-forwarded on a best-effort basis.
+///
+/// The per-worktree FIFO queue lock is held across the entire flow (including Step 7 branch
+/// restoration) so a subsequent operation (e.g. merge-to-uat after merge-to-test) can never
+/// observe the intermediate detached HEAD state.
 fn merge_current_branch_into_remote_target(
     path: &Path,
     target: &str,
     label: &str,
 ) -> Result<String, String> {
+    crate::utils::validate_git_ref_name(target)?;
+    let queue_guard = acquire_worktree_git_queue(path, &format!("合并到 {}", target), target)?;
+    let cancel_gen = queue_guard.cancel_gen();
+
     log::info!("[{}] ===== START merge into {} =====", label, target);
     log::info!("[{}] path={}, target={}", label, path.display(), target);
 
     let current_branch = current_branch_for_merge(path)?;
     log::info!("[{}] current_branch={}", label, current_branch);
+    validate_merge_source_branch(path, &current_branch, target)?;
 
     // Step 1: refuse to shuffle HEAD around on top of uncommitted tracked changes.
     emit_git_progress(path, target, &current_branch, "status");
@@ -985,7 +1699,7 @@ fn merge_current_branch_into_remote_target(
         "[{}] Step 1: checking for uncommitted tracked changes",
         label
     );
-    if !has_clean_tracked_tree(path, label)? {
+    if !has_clean_tracked_tree(path, label, Some(cancel_gen))? {
         log::warn!(
             "[{}] Step 1 FAILED: uncommitted tracked changes on {}",
             label,
@@ -999,7 +1713,7 @@ fn merge_current_branch_into_remote_target(
     log::info!("[{}] Step 1 OK: tracked working tree is clean", label);
 
     // Steps 2-5
-    let pipeline = fetch_merge_push_remote_target(path, &current_branch, target, label);
+    let pipeline = fetch_merge_push_remote_target(path, &current_branch, target, label, cancel_gen);
 
     let notes = if pipeline.is_ok() {
         emit_git_progress(path, target, &current_branch, "syncLocal");
@@ -1243,6 +1957,9 @@ pub fn create_pull_request(
     title: &str,
     body: &str,
 ) -> Result<String, String> {
+    let queue_guard = acquire_worktree_git_queue(path, "创建 PR/MR", base_branch)?;
+    let cancel_gen = queue_guard.cancel_gen();
+
     log::info!(
         "[git] Creating pull request: path={}, base_branch={}, title='{}'",
         path.display(),
@@ -1273,11 +1990,16 @@ pub fn create_pull_request(
 
             // Check if gh CLI is available
             log::info!("[git] Checking gh CLI availability");
-            let gh_available = command_without_window("gh")
-                .arg("--version")
-                .output()
-                .map(|o| o.status.success())
-                .unwrap_or(false);
+            let mut gh_ver_cmd = command_without_window("gh");
+            gh_ver_cmd.arg("--version");
+            let gh_available = run_command_with_timeout_opts(
+                &mut gh_ver_cmd,
+                "gh version",
+                Duration::from_secs(10),
+                Some((path, cancel_gen)),
+            )
+            .map(|o| o.status.success())
+            .unwrap_or(false);
 
             if !gh_available {
                 log::info!("[git] gh CLI not available, falling back to browser URL");
@@ -1298,7 +2020,8 @@ pub fn create_pull_request(
                 base_branch,
                 title
             );
-            let pr_output = command_without_window("gh")
+            let mut pr_cmd = command_without_window("gh");
+            pr_cmd
                 .arg("pr")
                 .arg("create")
                 .arg("--base")
@@ -1307,9 +2030,20 @@ pub fn create_pull_request(
                 .arg(title)
                 .arg("--body")
                 .arg(body)
-                .current_dir(path)
-                .output()
-                .map_err(|e| format!("Failed to execute gh pr create: {}", e))?;
+                .current_dir(path);
+            let pr_output = run_command_with_timeout_opts(
+                &mut pr_cmd,
+                "gh pr create",
+                Duration::from_secs(get_effective_ipc_timeout_seconds()),
+                Some((path, cancel_gen)),
+            )
+            .map_err(|e| {
+                if is_cancelled_error(&e) {
+                    e
+                } else {
+                    format!("Failed to execute gh pr create: {}", e)
+                }
+            })?;
 
             if !pr_output.status.success() {
                 let stderr = String::from_utf8_lossy(&pr_output.stderr);
@@ -1369,8 +2103,19 @@ pub fn create_pull_request(
                 .arg(format!("merge_request.title={}", title))
                 .arg("-o")
                 .arg(format!("merge_request.description={}", body));
-            let push_output = run_git_logged(&mut push_cmd, "create pull request gitlab push")
-                .map_err(|e| format!("Failed to push and create MR: {}", e))?;
+            let push_output = run_command_with_timeout_opts(
+                &mut push_cmd,
+                "create pull request gitlab push",
+                Duration::from_secs(get_effective_ipc_timeout_seconds()),
+                Some((path, cancel_gen)),
+            )
+            .map_err(|e| {
+                if is_cancelled_error(&e) {
+                    e
+                } else {
+                    format!("Failed to push and create MR: {}", e)
+                }
+            })?;
 
             if !push_output.status.success() {
                 let stderr = String::from_utf8_lossy(&push_output.stderr);
@@ -1382,7 +2127,6 @@ pub fn create_pull_request(
                 }
                 return Err(format!("Failed to create MR: {}", stderr));
             }
-
             // Extract MR URL from push stderr output
             let output_str = String::from_utf8_lossy(&push_output.stderr);
             for line in output_str.lines() {
@@ -1448,26 +2192,6 @@ pub(crate) fn resolve_git_common_dir(path: &Path) -> PathBuf {
     canonicalize_fetch_key(&abs)
 }
 
-/// Per-repo fetch serialization.
-///
-/// Lock order — never invert, never nest:
-/// 1. `GATES` map mutex: insert/clone `Arc`, then drop before any fetch.
-/// 2. per-common-dir `Mutex<()>`: only around `git fetch`, never while holding (1).
-///
-/// `fetch_remote` is not re-entrant. Callers already holding a gate must use
-/// `fetch_remote_unlocked`. Poisoned mutexes recover via `into_inner` so a
-/// panicked fetch cannot wedge later syncs.
-fn fetch_gate_for(common_dir: PathBuf) -> Arc<Mutex<()>> {
-    static GATES: LazyLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> =
-        LazyLock::new(|| Mutex::new(HashMap::new()));
-    let mut map = GATES
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    map.entry(common_dir)
-        .or_insert_with(|| Arc::new(Mutex::new(())))
-        .clone()
-}
-
 fn compact_git_stderr(stderr: &str) -> String {
     let one_line = stderr
         .lines()
@@ -1484,16 +2208,26 @@ fn is_ref_lock_race(stderr: &str) -> bool {
 }
 
 /// Fetch from remote origin (updates remote-tracking branches).
-/// Worktrees that share a git common dir are serialized so concurrent
-/// `git fetch` cannot fight over `refs/remotes/origin/*`.
+/// Serialized per worktree (FIFO queue) and across sibling worktrees sharing a git common dir
+/// so concurrent `git fetch` cannot fight over `refs/remotes/origin/*` or collide with merges.
 pub fn fetch_remote(path: &Path) -> Result<(), String> {
-    let gate = fetch_gate_for(resolve_git_common_dir(path));
-    let _guard = gate.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    match fetch_remote_unlocked(path) {
+    let queue_guard = acquire_worktree_git_queue(path, "刷新远程状态", "")?;
+    let cancel_gen = queue_guard.cancel_gen();
+    let _fetch_gate = acquire_fetch_gate_with_timeout(
+        resolve_git_common_dir(path),
+        path,
+        cancel_gen,
+        Duration::from_secs(get_effective_ipc_timeout_seconds()),
+    )?;
+    match fetch_remote_unlocked(path, cancel_gen) {
         Ok(()) => Ok(()),
+        Err(err) if is_cancelled_error(&err) => Err(err),
         Err(stderr) if is_ref_lock_race(&stderr) => {
             std::thread::sleep(Duration::from_millis(80));
-            fetch_remote_unlocked(path).map_err(|stderr| {
+            fetch_remote_unlocked(path, cancel_gen).map_err(|stderr| {
+                if is_cancelled_error(&stderr) {
+                    return stderr;
+                }
                 log::warn!(
                     "[git] fetch failed path={} {}",
                     path.display(),
@@ -1513,7 +2247,7 @@ pub fn fetch_remote(path: &Path) -> Result<(), String> {
     }
 }
 
-fn fetch_remote_unlocked(path: &Path) -> Result<(), String> {
+fn fetch_remote_unlocked(path: &Path, cancel_gen: u64) -> Result<(), String> {
     let mut fetch_cmd = git_command();
     fetch_cmd
         .env("GIT_LFS_SKIP_SMUDGE", "1")
@@ -1521,8 +2255,19 @@ fn fetch_remote_unlocked(path: &Path) -> Result<(), String> {
         .arg(path)
         .arg("fetch")
         .arg("origin");
-    let output = run_git_logged(&mut fetch_cmd, "fetch remote")
-        .map_err(|e| format!("Failed to execute git fetch: {e}"))?;
+    let output = run_command_with_timeout_opts(
+        &mut fetch_cmd,
+        "fetch remote",
+        Duration::from_secs(get_effective_ipc_timeout_seconds()),
+        Some((path, cancel_gen)),
+    )
+    .map_err(|e| {
+        if is_cancelled_error(&e) {
+            e
+        } else {
+            format!("Failed to execute git fetch: {e}")
+        }
+    })?;
 
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).into_owned());
@@ -1530,7 +2275,6 @@ fn fetch_remote_unlocked(path: &Path) -> Result<(), String> {
     log::debug!("[git] fetch ok path={}", path.display());
     Ok(())
 }
-
 /// Check if a remote branch exists
 pub fn check_remote_branch_exists(path: &Path, branch_name: &str) -> Result<bool, String> {
     log::debug!(
@@ -1713,6 +2457,9 @@ pub fn commit_all(
     author_email: Option<&str>,
     skip_hooks: bool,
 ) -> Result<String, String> {
+    let queue_guard = acquire_worktree_git_queue(path, "提交更改", "")?;
+    let cancel_gen = queue_guard.cancel_gen();
+
     log::info!(
         "[git] Committing all changes at: {}, skip_hooks={}",
         path.display(),
@@ -1720,12 +2467,21 @@ pub fn commit_all(
     );
 
     emit_git_progress(path, "", "", "commitStage");
-    let add_output = git_command()
-        .arg("-C")
-        .arg(path)
-        .args(["add", "-A"])
-        .output()
-        .map_err(|e| format!("Failed to stage changes: {}", e))?;
+    let timeout_secs = get_effective_ipc_timeout_seconds();
+    let add_output = run_git_in_cancellable(
+        path,
+        &["add", "-A"],
+        "commit stage all",
+        timeout_secs,
+        cancel_gen,
+    )
+    .map_err(|e| {
+        if is_cancelled_error(&e) {
+            e
+        } else {
+            format!("Failed to stage changes: {}", e)
+        }
+    })?;
 
     if !add_output.status.success() {
         let stderr = String::from_utf8_lossy(&add_output.stderr);
@@ -1747,10 +2503,20 @@ pub fn commit_all(
     if skip_hooks {
         args.push("--no-verify");
     }
-    let commit_output = cmd
-        .args(args)
-        .output()
-        .map_err(|e| format!("Failed to commit: {}", e))?;
+    cmd.args(args);
+    let commit_output = run_command_with_timeout_opts(
+        &mut cmd,
+        "commit all",
+        Duration::from_secs(timeout_secs),
+        Some((path, cancel_gen)),
+    )
+    .map_err(|e| {
+        if is_cancelled_error(&e) {
+            e
+        } else {
+            format!("Failed to commit: {}", e)
+        }
+    })?;
 
     if !commit_output.status.success() {
         let stderr = String::from_utf8_lossy(&commit_output.stderr);
@@ -2889,6 +3655,68 @@ mod tests {
 
     #[serial]
     #[test]
+    fn merge_blocks_protected_and_same_source_branches_including_test_to_uat() {
+        let repo = make_test_repo();
+        let path = repo.path();
+
+        // Checkout `test`: must refuse both merge_to_base_branch("uat") and merge_to_test_branch("test")
+        run_git(path, &["checkout", "test"]);
+        let err_test_to_uat = merge_to_base_branch(path, "uat").unwrap_err();
+        assert!(
+            err_test_to_uat.contains("受保护分支") && err_test_to_uat.contains("test"),
+            "{err_test_to_uat}"
+        );
+        let err_test_to_test = merge_to_test_branch(path, "test").unwrap_err();
+        assert!(
+            err_test_to_test.contains("已经是目标分支"),
+            "{err_test_to_test}"
+        );
+
+        // Checkout `main`: must refuse merging into `test` or `main`
+        run_git(path, &["checkout", "main"]);
+        let err_main_to_test = merge_to_test_branch(path, "test").unwrap_err();
+        assert!(
+            err_main_to_test.contains("受保护分支") && err_main_to_test.contains("main"),
+            "{err_main_to_test}"
+        );
+        let err_main_to_main = merge_to_base_branch(path, "main").unwrap_err();
+        assert!(
+            err_main_to_main.contains("已经是目标分支"),
+            "{err_main_to_main}"
+        );
+
+        // Custom configured test_branch (`sit`) in `.worktree-manager.json` is also protected
+        let ws_root = tempfile::tempdir().expect("create temp workspace");
+        let proj_dir = ws_root.path().join("projects").join("billing-api");
+        std::fs::create_dir_all(&proj_dir).expect("create project dir");
+        std::fs::write(
+            ws_root.path().join(".worktree-manager.json"),
+            serde_json::json!({
+                "name": "demo-ws",
+                "worktrees_dir": "worktrees",
+                "uat_branch": "release-uat",
+                "projects": [{
+                    "name": "billing-api",
+                    "base_branch": "release-uat",
+                    "test_branch": "sit",
+                    "merge_strategy": "merge"
+                }]
+            })
+            .to_string(),
+        )
+        .expect("write workspace config");
+        let err_custom_sit =
+            validate_merge_source_branch(&proj_dir, "sit", "release-uat").unwrap_err();
+        assert!(err_custom_sit.contains("受保护分支"), "{err_custom_sit}");
+        let err_custom_uat =
+            validate_merge_source_branch(&proj_dir, "release-uat", "sit").unwrap_err();
+        assert!(err_custom_uat.contains("受保护分支"), "{err_custom_uat}");
+        assert!(validate_merge_source_branch(&proj_dir, "feat/invoice-1", "release-uat").is_ok());
+        assert!(validate_merge_source_branch(&proj_dir, "feat/invoice-1", "sit").is_ok());
+    }
+
+    #[serial]
+    #[test]
     fn get_changed_files_parses_rename_staged_modified_and_unstaged_delete() {
         let repo = make_test_repo();
         let path = repo.path();
@@ -3374,29 +4202,15 @@ mod tests {
 
     #[serial]
     #[test]
-    fn merge_to_test_branch_from_test_itself_syncs_local_test_and_stays_on_it() {
+    fn merge_to_test_branch_from_test_itself_is_blocked() {
         let repo = make_test_repo();
         let path = repo.path();
         run_git(path, &["checkout", "test"]);
-        let other = clone_origin_on_branch(path, "test");
-        let origin_side = commit_file(
-            other.path(),
-            "origin-side.txt",
-            "origin\n",
-            "origin-side test commit",
-        );
-        run_git(other.path(), &["push", "origin", "test"]);
 
-        let result = merge_to_test_branch(path, "test").expect("merge test into itself");
+        let err = merge_to_test_branch(path, "test").unwrap_err();
 
-        assert!(result.contains("成功将 test 合并到 test"), "{result}");
-        assert!(
-            result.contains("✓ 本地 test 分支已同步到 origin/test"),
-            "{result}"
-        );
+        assert!(err.contains("已经是目标分支"), "{err}");
         assert_eq!(git_output(path, &["branch", "--show-current"]), "test");
-        assert_eq!(git_output(path, &["rev-parse", "HEAD"]), origin_side);
-        assert!(path.join("origin-side.txt").exists());
     }
 
     #[serial]
@@ -3499,5 +4313,139 @@ mod tests {
         run_git(path, &["checkout", "-b", "feature/never-pushed"]);
         let err = pull_current_branch(path).unwrap_err();
         assert_eq!(err, "远程 origin 不存在分支 feature/never-pushed，无法拉取");
+    }
+
+    #[serial]
+    #[test]
+    fn worktree_git_queue_enforces_fifo_and_times_out_when_blocked() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let path = temp.path().to_path_buf();
+
+        let holder = acquire_worktree_git_queue_with_timeout(
+            &path,
+            "合并到 test",
+            "test",
+            Duration::from_secs(2),
+        )
+        .expect("holder acquires queue");
+
+        // Timed-out waiter fails cleanly and reports the blocking op label.
+        let timeout_err = match acquire_worktree_git_queue_with_timeout(
+            &path,
+            "合并到 uat",
+            "uat",
+            Duration::from_millis(120),
+        ) {
+            Ok(_) => panic!("expected queue wait timeout"),
+            Err(err) => err,
+        };
+        assert!(timeout_err.contains("合并到 test"), "{timeout_err}");
+        assert!(timeout_err.contains("超时"), "{timeout_err}");
+
+        // Non-blocking try_acquire sees the busy worktree and returns None.
+        assert!(try_acquire_worktree_git_queue(&path, "probe").is_none());
+
+        // Two waiters acquire strictly in FIFO order once holder drops.
+        let order = Arc::new(Mutex::new(Vec::<&'static str>::new()));
+        let (enq1_tx, enq1_rx) = std::sync::mpsc::channel();
+        let (enq2_tx, enq2_rx) = std::sync::mpsc::channel();
+
+        let p1 = path.clone();
+        let o1 = Arc::clone(&order);
+        let t1 = std::thread::spawn(move || {
+            let _ = enq1_tx.send(());
+            let _g =
+                acquire_worktree_git_queue_with_timeout(&p1, "first", "", Duration::from_secs(5))
+                    .expect("first waiter acquires");
+            o1.lock().unwrap().push("first");
+            std::thread::sleep(Duration::from_millis(60));
+        });
+        enq1_rx.recv().unwrap();
+        std::thread::sleep(Duration::from_millis(80));
+
+        let p2 = path.clone();
+        let o2 = Arc::clone(&order);
+        let t2 = std::thread::spawn(move || {
+            let _ = enq2_tx.send(());
+            let _g =
+                acquire_worktree_git_queue_with_timeout(&p2, "second", "", Duration::from_secs(5))
+                    .expect("second waiter acquires");
+            o2.lock().unwrap().push("second");
+        });
+        enq2_rx.recv().unwrap();
+        std::thread::sleep(Duration::from_millis(80));
+
+        drop(holder);
+        t1.join().unwrap();
+        t2.join().unwrap();
+
+        assert_eq!(*order.lock().unwrap(), vec!["first", "second"]);
+    }
+
+    #[serial]
+    #[test]
+    fn worktree_git_queue_cancel_wakes_queued_waiter_immediately() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let path = temp.path().to_path_buf();
+        let _holder =
+            acquire_worktree_git_queue_with_timeout(&path, "长操作", "", Duration::from_secs(2))
+                .expect("holder acquires");
+
+        let waiter_path = path.clone();
+        let waiter = std::thread::spawn(move || {
+            let started = Instant::now();
+            let err = match acquire_worktree_git_queue_with_timeout(
+                &waiter_path,
+                "queued-op",
+                "",
+                Duration::from_secs(10),
+            ) {
+                Ok(_) => panic!("expected queued waiter to cancel"),
+                Err(err) => err,
+            };
+            (err, started.elapsed())
+        });
+
+        std::thread::sleep(Duration::from_millis(100));
+        cancel_git_operation(&path);
+
+        let (err, elapsed) = waiter.join().unwrap();
+        assert_eq!(err, GIT_CANCELLED);
+        assert!(elapsed < Duration::from_secs(2), "cancel took {elapsed:?}");
+    }
+
+    #[serial]
+    #[test]
+    fn concurrent_merge_to_test_and_merge_to_base_serialize_without_detached_head_race() {
+        let repo = make_test_repo();
+        let path = repo.path().to_path_buf();
+        commit_file(&path, "queued-feature.txt", "ready\n", "feature work");
+
+        // Spawn merge_to_test and merge_to_base concurrently on the same worktree.
+        // Without the per-worktree FIFO queue, the second merge races against the first's
+        // detached HEAD window (before Step 7 restores feature/demo) and fails.
+        std::thread::scope(|s| {
+            let p1 = path.clone();
+            let p2 = path.clone();
+            let h1 = s.spawn(move || merge_to_test_branch(&p1, "test"));
+            let h2 = s.spawn(move || merge_to_base_branch(&p2, "main"));
+            let r1 = h1
+                .join()
+                .expect("join merge test")
+                .expect("merge to test succeeds");
+            let r2 = h2
+                .join()
+                .expect("join merge base")
+                .expect("merge to main succeeds");
+            assert!(r1.contains("成功将 feature/demo 合并到 test"), "{r1}");
+            assert!(r2.contains("成功将 feature/demo 合并到 main"), "{r2}");
+        });
+
+        assert_eq!(
+            git_output(&path, &["branch", "--show-current"]),
+            "feature/demo"
+        );
+        assert!(is_ancestor(&path, "feature/demo", "origin/test"));
+        assert!(is_ancestor(&path, "feature/demo", "origin/main"));
     }
 }

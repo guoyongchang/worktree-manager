@@ -30,7 +30,7 @@ import { BranchCombobox } from './BranchCombobox';
 import type { WorkspaceRef, WorkspaceConfig, ProjectConfig, ScannedFolder, VaultStatus, VaultItemChild, FailedVaultItem, TagDefinition } from '../types';
 import { getAppVersion, getAppIcon, getNgrokToken, setNgrokToken as saveNgrokToken, getDashscopeApiKey, setDashscopeApiKey as saveDashscopeApiKey, getDashscopeBaseUrl, setDashscopeBaseUrl as saveDashscopeBaseUrl, getVoiceRefineEnabled, setVoiceRefineEnabled as saveVoiceRefineEnabled, getVoiceAsrModel, setVoiceAsrModel as saveVoiceAsrModel, getVoiceRefineModel, setVoiceRefineModel as saveVoiceRefineModel, voiceStart, voiceStop, voiceRefineText, isTauri, getPlatform, getRemoteBranches, openLink, callBackend, loadWorkspaceConfigByPath, saveWorkspaceConfigByPath, getVaultStatus, vaultLink, listVaultItemChildren, getCommitPrefixConfig, setCommitPrefixConfig, getGitUserGlobalConfig, setGitUserGlobalConfig, getSkipGitHooks, setSkipGitHooks as saveSkipGitHooks, getShellIntegrationEnabled, setShellIntegrationEnabled as saveShellIntegrationEnabled, cloudGetStatus, cloudStartPairing, cloudCheckPairingStatus, cloudApprovePairing, cloudRejectPairing, cloudDisconnect, getCommitAiApiKey, setCommitAiApiKey as saveCommitAiApiKey, setCommitAiEnabled as saveCommitAiEnabled, getCommitAiEnabled, getCommitAiModel, setCommitAiModel as saveCommitAiModel, listDashscopeModels, getVoiceRefineBaseUrl, setVoiceRefineBaseUrl as saveVoiceRefineBaseUrl } from '../lib/backend';
 import type { CloudStatus, PairingStatus } from '../lib/backend';
-import { readIpcTimeoutMs, writeIpcTimeoutSeconds, DEFAULT_IPC_TIMEOUT_SECONDS, MIN_IPC_TIMEOUT_SECONDS } from '../lib/backend';
+import { readIpcTimeoutSeconds, writeIpcTimeoutSeconds, setIpcTimeoutSeconds as saveIpcTimeoutSeconds, syncIpcTimeoutFromBackend, DEFAULT_IPC_TIMEOUT_SECONDS, MIN_IPC_TIMEOUT_SECONDS, MAX_IPC_TIMEOUT_SECONDS } from '../lib/backend';
 import { getTimeSaved, readUsageReportLog } from '../lib/timeSaved';
 import { TimeSavedBreakdown } from './TimeSavedBreakdown';
 import { getUsageReportEnabled, setUsageReportEnabled, getUsageMachineId, resetUsageMachineId } from '../lib/backend';
@@ -929,7 +929,7 @@ export const SettingsView: FC<SettingsViewProps> = ({
 
   // DEV settings
   const [devConsoleEnabled, setDevConsoleEnabled] = useState(() => localStorage.getItem('dev-console-enabled') === 'true');
-  const [ipcTimeoutSeconds, setIpcTimeoutSeconds] = useState(() => Math.round(readIpcTimeoutMs() / 1000));
+  const [ipcTimeoutSeconds, setIpcTimeoutSeconds] = useState(() => readIpcTimeoutSeconds());
 
   // Microphone
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
@@ -1224,6 +1224,10 @@ export const SettingsView: FC<SettingsViewProps> = ({
         setShellIntegrationLoaded(true);
       })
       .catch(() => setShellIntegrationLoaded(true));
+
+    syncIpcTimeoutFromBackend()
+      .then(v => setIpcTimeoutSeconds(v))
+      .catch(() => {});
 
     getCommitAiApiKey()
       .then(key => {
@@ -2944,17 +2948,25 @@ export const SettingsView: FC<SettingsViewProps> = ({
                       <Input
                         type="number"
                         min={MIN_IPC_TIMEOUT_SECONDS}
-                        max={300}
+                        max={MAX_IPC_TIMEOUT_SECONDS}
                         step={1}
                         value={ipcTimeoutSeconds}
                         onChange={(e) => setIpcTimeoutSeconds(Number(e.target.value))}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.currentTarget.blur();
+                          }
+                        }}
                         onBlur={() => {
                           const saved = writeIpcTimeoutSeconds(
                             Number.isFinite(ipcTimeoutSeconds) ? ipcTimeoutSeconds : DEFAULT_IPC_TIMEOUT_SECONDS,
                           );
                           setIpcTimeoutSeconds(saved);
+                          saveIpcTimeoutSeconds(saved)
+                            .then((persisted) => setIpcTimeoutSeconds(persisted))
+                            .catch(() => {});
                         }}
-                        className="w-20 h-8 text-sm text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        className="w-24 h-8 text-sm text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                       />
                       <span className="text-xs text-[var(--color-text-muted)]">{t('settings.ipcTimeoutUnit')}</span>
                     </div>

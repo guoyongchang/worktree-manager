@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type FC, type MutableRefObject, type TouchEvent } from 'react';
-import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { pinyin } from 'pinyin-pro';
+import {
+  matchText as matchWorktreeName,
+  highlightText as highlightWorktreeName,
+} from '../../lib/searchMatch';
 import {
   DndContext,
   DragOverlay,
@@ -46,7 +48,7 @@ import {
 } from '@/components/ui/tooltip';
 
 import { callBackend, getAppVersion, isMainWindow as checkIsMainWindow } from '../../lib/backend';
-import type { WorktreeListItem } from '../../types';
+import type { WorktreeListItem, BackgroundDeleteState } from '../../types';
 import {
   ArchiveIcon,
   ChevronDownIcon,
@@ -61,6 +63,7 @@ import {
   SidebarCollapseIcon,
   WarningIcon,
   WorkspaceIcon,
+  XIcon,
 } from '../Icons';
 import { GitBranch } from 'lucide-react';
 import type { WorktreeSidebarProps } from './types';
@@ -68,61 +71,8 @@ import { ShareBar } from './ShareBar';
 import { SortableWorktreeItem } from './SortableWorktreeItem';
 import { BatchArchiveModal } from '../BatchArchiveModal';
 
-// --- Search utilities ---
-
-type MatchResult =
-  | { matched: false }
-  | { matched: true; type: 'substring'; index: number; length: number }
-  | { matched: true; type: 'pinyin' };
-
-export function matchWorktreeName(name: string, query: string): MatchResult {
-  if (!query) return { matched: false };
-  const lowerName = name.toLowerCase();
-  const lowerQuery = query.toLowerCase();
-
-  // 1. English substring
-  const idx = lowerName.indexOf(lowerQuery);
-  if (idx !== -1) {
-    return { matched: true, type: 'substring', index: idx, length: lowerQuery.length };
-  }
-
-  // 2. Full pinyin
-  try {
-    const fullPy = pinyin(name, { toneType: 'none', type: 'array' }).join('').toLowerCase();
-    if (fullPy.includes(lowerQuery)) {
-      return { matched: true, type: 'pinyin' };
-    }
-    // 3. Initials
-    const initials = pinyin(name, { pattern: 'initial', type: 'array' }).join('').toLowerCase();
-    if (initials.includes(lowerQuery)) {
-      return { matched: true, type: 'pinyin' };
-    }
-  } catch {
-    // pinyin conversion failed for non-Chinese text, skip
-  }
-
-  return { matched: false };
-}
-
-export function highlightWorktreeName(name: string, result: MatchResult): ReactNode {
-  if (!result.matched) return name;
-  if (result.type === 'pinyin') {
-    return (
-      <span className="text-[var(--color-warning)] bg-[var(--color-warning)]/30 rounded-sm px-px">{name}</span>
-    );
-  }
-  // substring
-  const { index, length } = result;
-  return (
-    <>
-      {name.slice(0, index)}
-      <span className="text-[var(--color-warning)] bg-[var(--color-warning)]/30 rounded-sm px-px">
-        {name.slice(index, index + length)}
-      </span>
-      {name.slice(index + length)}
-    </>
-  );
-}
+// Re-export shared search utilities under existing sidebar names
+export { matchWorktreeName, highlightWorktreeName };
 
 interface ExpandedSidebarProps extends Omit<WorktreeSidebarProps, 'worktrees'> {
   activeWorktrees: WorktreeListItem[];
@@ -141,6 +91,8 @@ interface ExpandedSidebarProps extends Omit<WorktreeSidebarProps, 'worktrees'> {
   onToggleBatchArchiveModal: () => void;
   onBatchRestore: (names: string[]) => Promise<void>;
   onBatchDelete: (names: string[]) => Promise<void>;
+  onBatchBackgroundDelete?: (names: string[]) => void;
+  backgroundDeleteState?: BackgroundDeleteState;
 }
 
 export const ExpandedSidebar: FC<ExpandedSidebarProps> = ({
@@ -205,6 +157,8 @@ export const ExpandedSidebar: FC<ExpandedSidebarProps> = ({
   onToggleBatchArchiveModal,
   onBatchRestore,
   onBatchDelete,
+  onBatchBackgroundDelete,
+  backgroundDeleteState,
 }) => {
   const { t } = useTranslation();
   const [appVersion, setAppVersion] = useState('');
@@ -288,6 +242,7 @@ export const ExpandedSidebar: FC<ExpandedSidebarProps> = ({
       />
       <div
         ref={sidebarRef}
+        data-search-scope="sidebar"
         style={{ width: `${sidebarWidth}px` }}
         className="bg-[var(--color-bg-surface)] border-r border-[var(--color-border)] flex flex-col shrink-0 relative max-sm:fixed max-sm:inset-y-0 max-sm:left-0 max-sm:z-50 max-sm:w-[85vw] max-sm:max-w-[320px] max-sm:bg-[var(--color-bg-surface)]"
       >
@@ -390,6 +345,7 @@ export const ExpandedSidebar: FC<ExpandedSidebarProps> = ({
         <WorktreeList
           activeWorktrees={activeWorktrees}
           archivedWorktrees={archivedWorktrees}
+          backgroundDeleteState={backgroundDeleteState}
           currentWindowLabel={currentWindowLabel}
           isTauri={isTauri}
           lockedWorktrees={lockedWorktrees}
@@ -477,6 +433,8 @@ export const ExpandedSidebar: FC<ExpandedSidebarProps> = ({
           onClose={onToggleBatchArchiveModal}
           onRestore={onBatchRestore}
           onDelete={onBatchDelete}
+          onBackgroundDelete={onBatchBackgroundDelete}
+          backgroundDeleteState={backgroundDeleteState}
         />
 
         <Dialog open={!!switchConfirmPath} onOpenChange={(open) => !open && setSwitchConfirmPath(null)}>
@@ -622,6 +580,7 @@ const MainWorkspaceCard: FC<{
 const WorktreeList: FC<{
   activeWorktrees: WorktreeListItem[];
   archivedWorktrees: WorktreeListItem[];
+  backgroundDeleteState?: BackgroundDeleteState;
   currentWindowLabel: string;
   isTauri: boolean;
   lockedWorktrees: Record<string, string>;
@@ -641,6 +600,7 @@ const WorktreeList: FC<{
 }> = ({
   activeWorktrees,
   archivedWorktrees,
+  backgroundDeleteState,
   currentWindowLabel,
   isTauri,
   lockedWorktrees,
@@ -713,6 +673,25 @@ const WorktreeList: FC<{
     });
   }, [archivedWorktrees]);
 
+  const bgDeleteStatusMap = useMemo(() => {
+    const map = new Map<string, BackgroundDeleteState['items'][number]['status']>();
+    for (const item of backgroundDeleteState?.items ?? []) {
+      if (item.status === 'pending' || item.status === 'deleting') {
+        map.set(item.name, item.status);
+      }
+    }
+    return map;
+  }, [backgroundDeleteState?.items]);
+
+  const bgDeleteProgress = useMemo(() => {
+    if (!backgroundDeleteState?.active) return null;
+    const total = backgroundDeleteState.items.length;
+    if (total === 0) return null;
+    const done = backgroundDeleteState.items.filter(
+      (it) => it.status === 'done' || it.status === 'failed',
+    ).length;
+    return { done, total };
+  }, [backgroundDeleteState]);
   return (
     <div className="flex-1 overflow-x-hidden overflow-y-auto">
       <div className="px-4 py-2">
@@ -720,13 +699,36 @@ const WorktreeList: FC<{
           <span className="block truncate text-[11px] leading-7 font-medium text-[var(--color-text-muted)] uppercase tracking-wider">
             {t('sidebar.active')} ({activeWorktrees.length})
           </span>
-          <Input
-            value={activeSearchQuery}
-            onChange={(event) => setActiveSearchQuery(event.target.value)}
-            placeholder={t('sidebar.searchWorktrees')}
-            aria-label={t('sidebar.searchWorktrees')}
-            className="absolute inset-y-0 right-0 z-10 h-7 w-[160px] max-w-full text-xs"
-          />
+          <div className="absolute inset-y-0 right-0 z-10 w-[160px] max-w-full">
+            <Input
+              data-search-input="sidebar"
+              value={activeSearchQuery}
+              onChange={(event) => setActiveSearchQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  event.stopPropagation();
+                  if (activeSearchQuery) {
+                    setActiveSearchQuery('');
+                  } else {
+                    event.currentTarget.blur();
+                  }
+                }
+              }}
+              placeholder={t('sidebar.searchWorktrees')}
+              aria-label={t('sidebar.searchWorktrees')}
+              className={`h-7 w-full text-xs ${activeSearchQuery ? 'pr-6' : ''}`}
+            />
+            {activeSearchQuery && (
+              <button
+                type="button"
+                onClick={() => setActiveSearchQuery('')}
+                aria-label={t('detail.clearSearch')}
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+              >
+                <XIcon className="w-3 h-3" />
+              </button>
+            )}
+          </div>
         </div>
       </div>
       {activeWorktrees.length === 0 ? (
@@ -858,6 +860,19 @@ const WorktreeList: FC<{
           {t('sidebar.archive')} ({archivedWorktrees.length})
         </span>
         <div className="flex items-center gap-1">
+          {bgDeleteProgress && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleBatchArchiveModal();
+              }}
+              className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-error)]/15 text-[var(--color-error)] hover:bg-[var(--color-error)]/25 transition-colors tabular-nums"
+              title={t('batchArchive.title')}
+            >
+              <RefreshIcon className="w-2.5 h-2.5 animate-spin shrink-0" />
+              {t('sidebar.bgDeletingBadge', { done: bgDeleteProgress.done, total: bgDeleteProgress.total })}
+            </button>
+          )}
           {showArchived && archivedWorktrees.length > 0 && (
             <button
               onClick={(e) => {
@@ -873,25 +888,39 @@ const WorktreeList: FC<{
         </div>
       </div>
 
-      {showArchived && sortedArchivedWorktrees.map((worktree) => (
-        <div
-          key={worktree.name}
-          className={`px-3 py-2.5 cursor-pointer transition-colors opacity-60 ${selectedWorktree?.name === worktree.name ? 'bg-[var(--color-bg-elevated)]' : 'hover:bg-[var(--color-bg-elevated)]'}`}
-          onClick={() => onSelectWorktree(worktree)}
-        >
-          <div className="flex items-center gap-2.5">
-            <ArchiveIcon className="w-4 h-4 text-[var(--color-text-muted)]" />
-            <TooltipProvider delayDuration={300}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="font-medium text-sm line-clamp-2 break-words flex-1">{worktree.display_name || worktree.name}</span>
-                </TooltipTrigger>
-                <TooltipContent side="right">{worktree.display_name ? `${worktree.display_name} (${worktree.name})` : worktree.name}</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+      {showArchived && sortedArchivedWorktrees.map((worktree) => {
+        const deleteStatus = bgDeleteStatusMap.get(worktree.name);
+        return (
+          <div
+            key={worktree.name}
+            className={`px-3 py-2.5 cursor-pointer transition-colors opacity-60 ${selectedWorktree?.name === worktree.name ? 'bg-[var(--color-bg-elevated)]' : 'hover:bg-[var(--color-bg-elevated)]'}`}
+            onClick={() => onSelectWorktree(worktree)}
+          >
+            <div className="flex items-center gap-2.5">
+              <ArchiveIcon className="w-4 h-4 text-[var(--color-text-muted)] shrink-0" />
+              <TooltipProvider delayDuration={300}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="font-medium text-sm line-clamp-2 break-words flex-1">{worktree.display_name || worktree.name}</span>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">{worktree.display_name ? `${worktree.display_name} (${worktree.name})` : worktree.name}</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              {deleteStatus === 'deleting' && (
+                <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-error)]/15 text-[var(--color-error)] shrink-0">
+                  <RefreshIcon className="w-2.5 h-2.5 animate-spin" />
+                  {t('batchArchive.statusDeleting')}
+                </span>
+              )}
+              {deleteStatus === 'pending' && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-bg-elevated)] text-[var(--color-text-muted)] shrink-0">
+                  {t('batchArchive.statusPending')}
+                </span>
+              )}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 };

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { addLog } from '@/lib/operationLog';
 import type { UseWorkspaceReturn } from './useWorkspace';
@@ -12,6 +12,11 @@ import type {
   ArchiveModalState,
   CreateProjectRequest,
   EditorType,
+  AddProjectSelection,
+  AddProjectsResult,
+  AddingProjectProgress,
+  BackgroundDeleteState,
+  BackgroundDeleteNotice,
 } from '../types';
 import { isTauri, getWindowLabel, removeProjectFromConfig, callBackend, syncAllProjectsToBase } from '../lib/backend';
 import { recordWorkspaceSwitch } from '../lib/timeSaved';
@@ -35,6 +40,7 @@ export interface UseWorkspaceActionsReturn {
   cloningProject: boolean;
   creating: boolean;
   addingProjectToWorktree: boolean;
+  addingProjectProgress: AddingProjectProgress | null;
 
   // Workspace handlers
   handleSwitchWorkspace: (path: string) => Promise<void>;
@@ -76,7 +82,7 @@ export interface UseWorkspaceActionsReturn {
     linked_folders: string[];
   }) => Promise<void>;
   handleUpdateLinkedFolders: (projectName: string, folders: string[]) => Promise<void>;
-  handleAddProjectToWorktree: (projectName: string, baseBranch: string) => Promise<void>;
+  handleAddProjectToWorktree: (projects: AddProjectSelection[]) => Promise<AddProjectsResult>;
   handleRemoveProject: (name: string) => Promise<void>;
 
   // Archive / Delete / Restore
@@ -94,14 +100,18 @@ export interface UseWorkspaceActionsReturn {
   deleteConfirmWorktree: WorktreeListItem | null;
   setDeleteConfirmWorktree: (v: WorktreeListItem | null) => void;
   handleDeleteArchivedWorktree: () => Promise<void>;
+  handleBackgroundDeleteArchivedWorktree: () => void;
   handleRestoreWorktree: () => Promise<void>;
 
-  // Batch archive
+  // Batch archive & background delete
   batchArchiveModalOpen: boolean;
   setBatchArchiveModalOpen: (v: boolean) => void;
   handleBatchRestore: (names: string[]) => Promise<void>;
   handleBatchDelete: (names: string[]) => Promise<void>;
-
+  handleBatchBackgroundDelete: (names: string[]) => void;
+  backgroundDeleteState: BackgroundDeleteState;
+  backgroundDeleteNotice: BackgroundDeleteNotice | null;
+  deletingWorktreeNames: Set<string>;
   // Editor
   selectedEditor: EditorType;
   setSelectedEditor: (v: EditorType) => void;
@@ -143,7 +153,7 @@ export function useWorkspaceActions(
   const [cloningProject, setCloningProject] = useState(false);
   const [creating, setCreating] = useState(false);
   const [addingProjectToWorktree, setAddingProjectToWorktree] = useState(false);
-
+  const [addingProjectProgress, setAddingProjectProgress] = useState<AddingProjectProgress | null>(null);
   // Create worktree form state
   const [newWorktreeName, setNewWorktreeName] = useState('');
   const [folderAlias, setFolderAlias] = useState('');
@@ -163,7 +173,49 @@ export function useWorkspaceActions(
   const [terminatingArchiveLockPid, setTerminatingArchiveLockPid] = useState<number | null>(null);
   const [deleteConfirmWorktree, setDeleteConfirmWorktree] = useState<WorktreeListItem | null>(null);
   const [batchArchiveModalOpen, setBatchArchiveModalOpen] = useState(false);
+  const [backgroundDeleteState, setBackgroundDeleteState] = useState<BackgroundDeleteState>({
+    active: false,
+    items: [],
+  });
+  const [backgroundDeleteNotice, setBackgroundDeleteNotice] = useState<BackgroundDeleteNotice | null>(null);
 
+  // Refs for background delete queue safety across workspace switches / unmount
+  const unmountedRef = useRef(false);
+  const currentWorkspacePathRef = useRef(workspace.currentWorkspace?.path ?? '');
+  currentWorkspacePathRef.current = workspace.currentWorkspace?.path ?? '';
+  const selectedWorktreeRef = useRef(selectedWorktree);
+  selectedWorktreeRef.current = selectedWorktree;
+  const worktreesRef = useRef(workspace.worktrees);
+  worktreesRef.current = workspace.worktrees;
+  const backgroundDeleteStateRef = useRef(backgroundDeleteState);
+  backgroundDeleteStateRef.current = backgroundDeleteState;
+  const deleteQueueRef = useRef<Array<{ name: string; displayName: string; path?: string; workspacePath: string }>>([]);
+  const deleteWorkerRunningRef = useRef(false);
+  const deleteWorkerPromiseRef = useRef<Promise<void> | null>(null);
+  const deleteBatchResultsRef = useRef<{ done: number; failed: Array<{ displayName: string; error: string }> }>({
+    done: 0,
+    failed: [],
+  });
+  const deleteNoticeIdRef = useRef(0);
+  useEffect(() => {
+    unmountedRef.current = false;
+    return () => {
+      unmountedRef.current = true;
+    };
+  }, []);
+
+  const deletingWorktreeNames = useMemo(() => {
+    const wsPath = workspace.currentWorkspace?.path ?? '';
+    return new Set(
+      backgroundDeleteState.items
+        .filter(
+          (it) =>
+            (it.status === 'pending' || it.status === 'deleting') &&
+            (!wsPath || !it.workspacePath || it.workspacePath === wsPath),
+        )
+        .map((it) => it.name),
+    );
+  }, [backgroundDeleteState.items, workspace.currentWorkspace?.path]);
   // Editor selection — prefer user's saved preference, fallback to first detected (non-hidden) editor
   const [selectedEditor, setSelectedEditor] = useState<EditorType>(() => {
     const saved = localStorage.getItem('preferred_editor') as EditorType | null;
@@ -435,19 +487,50 @@ export function useWorkspaceActions(
     }
   }, [workspace]);
 
-  const handleAddProjectToWorktree = useCallback(async (projectName: string, baseBranch: string) => {
-    if (!selectedWorktree) return;
+  const handleAddProjectToWorktree = useCallback(async (projects: AddProjectSelection[]): Promise<AddProjectsResult> => {
+    if (!selectedWorktree || projects.length === 0) {
+      return { succeeded: [], failed: [] };
+    }
     setAddingProjectToWorktree(true);
+    const succeeded: string[] = [];
+    const failed: Array<{ projectName: string; error: string }> = [];
     try {
-      await workspace.addProjectToWorktree({
-        worktree_name: selectedWorktree.name,
-        project_name: projectName,
-        base_branch: baseBranch,
-      });
-      modals.setModal('showAddProjectToWorktreeModal', false);
-    } catch (e) {
-      workspace.setError(String(e));
+      for (let i = 0; i < projects.length; i++) {
+        const { projectName, baseBranch } = projects[i];
+        setAddingProjectProgress({
+          current: i + 1,
+          total: projects.length,
+          currentProject: projectName,
+        });
+        try {
+          await workspace.addProjectToWorktree(
+            {
+              worktree_name: selectedWorktree.name,
+              project_name: projectName,
+              base_branch: baseBranch,
+            },
+            { reload: false },
+          );
+          succeeded.push(projectName);
+        } catch (e) {
+          failed.push({ projectName, error: String(e) });
+        }
+      }
+
+      if (succeeded.length > 0) {
+        await workspace.loadData();
+      }
+
+      if (failed.length === 0) {
+        modals.setModal('showAddProjectToWorktreeModal', false);
+      } else {
+        workspace.setError(
+          failed.map((f) => `${f.projectName}: ${f.error}`).join('\n'),
+        );
+      }
+      return { succeeded, failed };
     } finally {
+      setAddingProjectProgress(null);
       setAddingProjectToWorktree(false);
     }
   }, [workspace, selectedWorktree, modals]);
@@ -559,6 +642,175 @@ export function useWorkspaceActions(
     }
   }, [workspace, archiveModal, selectedWorktree, cleanupTerminalsForPath]);
 
+  const runDeleteQueue = useCallback(async () => {
+    if (deleteWorkerRunningRef.current) return;
+    deleteWorkerRunningRef.current = true;
+    try {
+      while (deleteQueueRef.current.length > 0) {
+        const next = deleteQueueRef.current.shift()!;
+        if (!unmountedRef.current) {
+          setBackgroundDeleteState((prev) => ({
+            ...prev,
+            active: true,
+            items: prev.items.map((it) =>
+              it.name === next.name &&
+              it.workspacePath === next.workspacePath &&
+              it.status === 'pending'
+                ? { ...it, status: 'deleting' }
+                : it,
+            ),
+          }));
+        }
+        try {
+          if (next.path) {
+            await cleanupTerminalsForPath(next.path).catch(() => {});
+          }
+          await workspace.deleteArchivedWorktree(next.name, {
+            reload: false,
+            throwOnError: true,
+            workspacePath: next.workspacePath || undefined,
+          });
+          deleteBatchResultsRef.current.done += 1;
+          if (!unmountedRef.current) {
+            setBackgroundDeleteState((prev) => ({
+              ...prev,
+              items: prev.items.map((it) =>
+                it.name === next.name &&
+                it.workspacePath === next.workspacePath &&
+                it.status === 'deleting'
+                  ? { ...it, status: 'done' }
+                  : it,
+              ),
+            }));
+            if (!next.workspacePath || currentWorkspacePathRef.current === next.workspacePath) {
+              await workspace.loadData({ silent: true });
+            }
+          }
+        } catch (e) {
+          const errMsg = String(e);
+          deleteBatchResultsRef.current.failed.push({
+            displayName: next.displayName,
+            error: errMsg,
+          });
+          if (!unmountedRef.current) {
+            setBackgroundDeleteState((prev) => ({
+              ...prev,
+              items: prev.items.map((it) =>
+                it.name === next.name &&
+                it.workspacePath === next.workspacePath &&
+                it.status === 'deleting'
+                  ? { ...it, status: 'failed', error: errMsg }
+                  : it,
+              ),
+            }));
+          }
+        }
+      }
+    } finally {
+      deleteWorkerRunningRef.current = false;
+      deleteWorkerPromiseRef.current = null;
+      if (!unmountedRef.current) {
+        setBackgroundDeleteState((prev) => ({ ...prev, active: false }));
+        const { done, failed } = deleteBatchResultsRef.current;
+        if (failed.length === 0 && done > 0) {
+          setBackgroundDeleteNotice({
+            id: ++deleteNoticeIdRef.current,
+            type: 'success',
+            message: tFn('batchArchive.bgDeleteSuccess', { count: done }),
+          });
+        } else if (failed.length > 0) {
+          const details = failed.map((f) => `${f.displayName}: ${f.error}`).join('; ');
+          setBackgroundDeleteNotice({
+            id: ++deleteNoticeIdRef.current,
+            type: 'error',
+            message:
+              done > 0
+                ? tFn('batchArchive.bgDeletePartialFailed', {
+                    succeeded: done,
+                    failed: failed.length,
+                    details,
+                  })
+                : tFn('batchArchive.bgDeleteAllFailed', {
+                    failed: failed.length,
+                    details,
+                  }),
+          });
+        }
+      }
+    }
+  }, [workspace, cleanupTerminalsForPath, tFn]);
+
+  const enqueueArchivedDeletes = useCallback(
+    (
+      targets: Array<{ name: string; displayName?: string; path?: string }>,
+      options?: { showStartToast?: boolean; closeBatchModal?: boolean },
+    ): Promise<void> => {
+      const wsPath = currentWorkspacePathRef.current;
+      const inFlightKeys = new Set(
+        backgroundDeleteStateRef.current.items
+          .filter((it) => it.status === 'pending' || it.status === 'deleting')
+          .map((it) => `${it.workspacePath}::${it.name}`),
+      );
+      for (const queued of deleteQueueRef.current) {
+        inFlightKeys.add(`${queued.workspacePath}::${queued.name}`);
+      }
+
+      const newItems = targets
+        .filter((t) => !inFlightKeys.has(`${wsPath}::${t.name}`))
+        .map((t) => ({
+          name: t.name,
+          displayName: t.displayName || t.name,
+          path: t.path,
+          workspacePath: wsPath,
+        }));
+
+      if (options?.closeBatchModal) {
+        setBatchArchiveModalOpen(false);
+      }
+
+      if (newItems.length === 0) {
+        return deleteWorkerPromiseRef.current ?? Promise.resolve();
+      }
+
+      // Clear selection immediately if the currently selected worktree is queued for deletion
+      const selectedName = selectedWorktreeRef.current?.name;
+      if (selectedName && newItems.some((it) => it.name === selectedName)) {
+        setSelectedWorktree(null);
+      }
+
+      const isFreshBatch = !deleteWorkerRunningRef.current;
+      if (isFreshBatch) {
+        deleteBatchResultsRef.current = { done: 0, failed: [] };
+      }
+
+      deleteQueueRef.current.push(...newItems);
+      const stateEntries = newItems.map((it) => ({
+        name: it.name,
+        displayName: it.displayName,
+        workspacePath: it.workspacePath,
+        status: 'pending' as const,
+      }));
+      setBackgroundDeleteState((prev) => ({
+        active: true,
+        items: isFreshBatch ? stateEntries : [...prev.items, ...stateEntries],
+      }));
+
+      if (options?.showStartToast) {
+        setBackgroundDeleteNotice({
+          id: ++deleteNoticeIdRef.current,
+          type: 'info',
+          message: tFn('batchArchive.bgDeleteStarted', { count: newItems.length }),
+        });
+      }
+
+      if (!deleteWorkerPromiseRef.current) {
+        deleteWorkerPromiseRef.current = runDeleteQueue();
+      }
+      return deleteWorkerPromiseRef.current;
+    },
+    [runDeleteQueue, setSelectedWorktree, tFn],
+  );
+
   const handleDeleteArchivedWorktree = useCallback(async () => {
     if (!deleteConfirmWorktree) return;
     setDeletingArchived(true);
@@ -566,7 +818,9 @@ export function useWorkspaceActions(
       if (deleteConfirmWorktree.path) {
         await cleanupTerminalsForPath(deleteConfirmWorktree.path);
       }
-      await workspace.deleteArchivedWorktree(deleteConfirmWorktree.name);
+      await workspace.deleteArchivedWorktree(deleteConfirmWorktree.name, {
+        throwOnError: true,
+      });
       if (selectedWorktree?.name === deleteConfirmWorktree.name) {
         setSelectedWorktree(null);
       }
@@ -576,10 +830,21 @@ export function useWorkspaceActions(
     } finally {
       setDeletingArchived(false);
     }
-  }, [workspace, deleteConfirmWorktree, selectedWorktree]);
+  }, [workspace, deleteConfirmWorktree, selectedWorktree, cleanupTerminalsForPath, setSelectedWorktree]);
+
+  const handleBackgroundDeleteArchivedWorktree = useCallback(() => {
+    if (!deleteConfirmWorktree) return;
+    const target = deleteConfirmWorktree;
+    setDeleteConfirmWorktree(null);
+    void enqueueArchivedDeletes(
+      [{ name: target.name, displayName: target.display_name || target.name, path: target.path }],
+      { showStartToast: true },
+    );
+  }, [deleteConfirmWorktree, enqueueArchivedDeletes]);
 
   const handleRestoreWorktree = useCallback(async () => {
     if (!selectedWorktree) return;
+    if (deletingWorktreeNames.has(selectedWorktree.name)) return;
     setRestoringWorktree(true);
     try {
       await workspace.restoreWorktree(selectedWorktree.name);
@@ -588,13 +853,15 @@ export function useWorkspaceActions(
     } finally {
       setRestoringWorktree(false);
     }
-  }, [workspace, selectedWorktree]);
+  }, [workspace, selectedWorktree, deletingWorktreeNames]);
 
   // Batch archive operations
   const handleBatchRestore = useCallback(async (names: string[]) => {
+    const restorable = names.filter((name) => !deletingWorktreeNames.has(name));
+    if (restorable.length === 0) return;
     setRestoringWorktree(true);
     try {
-      for (const name of names) {
+      for (const name of restorable) {
         try {
           await workspace.restoreWorktree(name);
         } catch (e) {
@@ -605,24 +872,45 @@ export function useWorkspaceActions(
     } finally {
       setRestoringWorktree(false);
     }
-  }, [workspace]);
+  }, [workspace, deletingWorktreeNames]);
+
+  const resolveArchivedTargets = useCallback((names: string[]) => {
+    const wtByName = new Map(worktreesRef.current.map((w) => [w.name, w]));
+    return names.map((name) => {
+      const wt = wtByName.get(name);
+      return {
+        name,
+        displayName: wt?.display_name || name,
+        path: wt?.path,
+      };
+    });
+  }, []);
 
   const handleBatchDelete = useCallback(async (names: string[]) => {
+    if (names.length === 0) return;
     setDeletingArchived(true);
     try {
-      for (const name of names) {
-        try {
-          await workspace.deleteArchivedWorktree(name);
-        } catch (e) {
-          workspace.setError(`${name}: ${String(e)}`);
-        }
+      await enqueueArchivedDeletes(resolveArchivedTargets(names), {
+        closeBatchModal: false,
+        showStartToast: false,
+      });
+      if (!unmountedRef.current && deleteBatchResultsRef.current.failed.length === 0) {
+        setBatchArchiveModalOpen(false);
       }
-      setBatchArchiveModalOpen(false);
     } finally {
-      setDeletingArchived(false);
+      if (!unmountedRef.current) {
+        setDeletingArchived(false);
+      }
     }
-  }, [workspace]);
+  }, [enqueueArchivedDeletes, resolveArchivedTargets]);
 
+  const handleBatchBackgroundDelete = useCallback((names: string[]) => {
+    if (names.length === 0) return;
+    void enqueueArchivedDeletes(resolveArchivedTargets(names), {
+      closeBatchModal: true,
+      showStartToast: true,
+    });
+  }, [enqueueArchivedDeletes, resolveArchivedTargets]);
   // Editor
   const handleOpenInEditor = useCallback((path: string, editor?: EditorType) => {
     const editorId = editor || selectedEditor;
@@ -697,6 +985,7 @@ export function useWorkspaceActions(
     cloningProject,
     creating,
     addingProjectToWorktree,
+    addingProjectProgress,
 
     handleSwitchWorkspace,
     handleAddWorkspace,
@@ -744,13 +1033,17 @@ export function useWorkspaceActions(
     deleteConfirmWorktree,
     setDeleteConfirmWorktree,
     handleDeleteArchivedWorktree,
+    handleBackgroundDeleteArchivedWorktree,
     handleRestoreWorktree,
 
     batchArchiveModalOpen,
     setBatchArchiveModalOpen,
     handleBatchRestore,
     handleBatchDelete,
-
+    handleBatchBackgroundDelete,
+    backgroundDeleteState,
+    backgroundDeleteNotice,
+    deletingWorktreeNames,
     selectedEditor,
     setSelectedEditor,
     handleOpenInEditor,

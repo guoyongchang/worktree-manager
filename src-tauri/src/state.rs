@@ -79,10 +79,145 @@ pub(crate) static SHARE_STATE: Lazy<Mutex<ShareState>> =
 pub(crate) static AUTHENTICATED_SESSIONS: Lazy<Mutex<std::collections::HashSet<String>>> =
     Lazy::new(|| Mutex::new(std::collections::HashSet::new()));
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SessionTiming {
+    pub(crate) created_at: std::time::Instant,
+    pub(crate) last_active: std::time::Instant,
+}
+
+/// Absolute maximum lifetime of an authenticated sharing session (24 hours).
+pub(crate) const SESSION_ABSOLUTE_TTL: std::time::Duration =
+    std::time::Duration::from_secs(24 * 60 * 60);
+/// Maximum idle lifetime of an authenticated sharing session (4 hours).
+pub(crate) const SESSION_IDLE_TTL: std::time::Duration =
+    std::time::Duration::from_secs(4 * 60 * 60);
+
+// 会话创建与最近活跃时间戳（用于绝对过期与空闲过期校验）
+pub(crate) static SESSION_METADATA: Lazy<Mutex<HashMap<String, SessionTiming>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
 // 已连接的客户端追踪
 pub(crate) static CONNECTED_CLIENTS: Lazy<Mutex<HashMap<String, ConnectedClient>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
+/// Redact a bearer session ID before writing it to logs.
+pub(crate) fn redact_session_id(sid: &str) -> String {
+    let mut chars = sid.chars();
+    let prefix: String = chars.by_ref().take(8).collect();
+    if chars.next().is_some() {
+        format!("{}...", prefix)
+    } else {
+        "***".to_string()
+    }
+}
+
+/// Register a newly authenticated session in both the active session set and TTL tracker.
+pub(crate) fn register_authenticated_session(sid: &str) {
+    let now = std::time::Instant::now();
+    {
+        let mut sessions = AUTHENTICATED_SESSIONS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        sessions.insert(sid.to_string());
+    }
+    {
+        let mut meta = SESSION_METADATA
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        meta.insert(
+            sid.to_string(),
+            SessionTiming {
+                created_at: now,
+                last_active: now,
+            },
+        );
+    }
+}
+
+/// Remove a single session from active sessions and TTL metadata.
+pub(crate) fn revoke_authenticated_session(sid: &str) -> bool {
+    let removed = {
+        let mut sessions = AUTHENTICATED_SESSIONS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        sessions.remove(sid)
+    };
+    {
+        let mut meta = SESSION_METADATA
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        meta.remove(sid);
+    }
+    removed
+}
+
+/// Clear all authenticated sessions and TTL metadata. Returns the number cleared.
+pub(crate) fn clear_authenticated_sessions() -> usize {
+    let count = {
+        let mut sessions = AUTHENTICATED_SESSIONS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let len = sessions.len();
+        sessions.clear();
+        len
+    };
+    {
+        let mut meta = SESSION_METADATA
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        meta.clear();
+    }
+    count
+}
+
+/// Check whether `sid` is authenticated and within both absolute and idle TTLs.
+/// Expired sessions are evicted immediately; valid sessions have `last_active` refreshed.
+pub(crate) fn validate_and_touch_session(sid: &str) -> bool {
+    let in_set = {
+        let sessions = AUTHENTICATED_SESSIONS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        sessions.contains(sid)
+    };
+    if !in_set {
+        return false;
+    }
+
+    let now = std::time::Instant::now();
+    let expired = {
+        let mut meta = SESSION_METADATA
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(timing) = meta.get_mut(sid) {
+            if now.duration_since(timing.created_at) >= SESSION_ABSOLUTE_TTL
+                || now.duration_since(timing.last_active) >= SESSION_IDLE_TTL
+            {
+                meta.remove(sid);
+                true
+            } else {
+                timing.last_active = now;
+                false
+            }
+        } else {
+            false
+        }
+    };
+
+    if expired {
+        {
+            let mut sessions = AUTHENTICATED_SESSIONS
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            sessions.remove(sid);
+        }
+        if let Ok(mut clients) = CONNECTED_CLIENTS.lock() {
+            clients.remove(sid);
+        }
+        return false;
+    }
+
+    true
+}
 pub(crate) static TOKIO_RT: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
     tokio::runtime::Runtime::new().expect("Failed to create tokio runtime for sharing")
 });

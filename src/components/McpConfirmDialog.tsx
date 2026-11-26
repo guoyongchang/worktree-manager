@@ -17,7 +17,8 @@ type PortNotice =
 
 export const McpConfirmDialog: FC = () => {
   const { t } = useTranslation();
-  const [request, setRequest] = useState<ConfirmRequest | null>(null);
+  const [queue, setQueue] = useState<ConfirmRequest[]>([]);
+  const request = queue[0] ?? null;
   const [portNotice, setPortNotice] = useState<PortNotice | null>(null);
 
   useEffect(() => {
@@ -25,7 +26,9 @@ export const McpConfirmDialog: FC = () => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     listen<ConfirmRequest>('mcp-confirm-required', (event) => {
-      setRequest(event.payload);
+      setQueue((prev) =>
+        prev.some((item) => item.id === event.payload.id) ? prev : [...prev, event.payload]
+      );
     }).then((stop) => {
       if (cancelled) stop();
       else unlisten = stop;
@@ -49,7 +52,7 @@ export const McpConfirmDialog: FC = () => {
   const answer = (approved: boolean) => {
     if (!request) return;
     const id = request.id;
-    setRequest(null);
+    setQueue((prev) => prev.filter((item) => item.id !== id));
     resolveMcpConfirm(id, approved).catch(() => {});
   };
 
@@ -58,9 +61,18 @@ export const McpConfirmDialog: FC = () => {
     <Dialog open={!!request} onOpenChange={(open) => { if (!open) answer(false); }}>
       <DialogContent className="max-w-[420px]">
         <DialogHeader>
-          <DialogTitle>{request?.action || t('settings.mcpConfirmTitle')}</DialogTitle>
+          <DialogTitle className="flex items-center justify-between gap-2">
+            <span>{request?.action || t('settings.mcpConfirmTitle')}</span>
+            {queue.length > 1 && (
+              <span className="text-xs font-normal text-[var(--color-text-secondary)]">
+                1 / {queue.length}
+              </span>
+            )}
+          </DialogTitle>
         </DialogHeader>
-        <p className="text-sm text-[var(--color-text-secondary)]">{request?.summary}</p>
+        <p className="text-sm whitespace-pre-line break-words text-[var(--color-text-secondary)]">
+          {request?.summary}
+        </p>
         <DialogFooter>
           <Button variant="secondary" onClick={() => answer(false)}>{t('settings.mcpConfirmCancel')}</Button>
           <Button onClick={() => answer(true)}>{t('settings.mcpConfirmAccept')}</Button>

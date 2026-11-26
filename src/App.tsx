@@ -13,6 +13,7 @@ import {
   TerminalTabContextMenu,
   RefreshIcon,
   ToastProvider,
+  ToastNoticeBridge,
   GlobalDialogs,
   MobileWorktreeList,
   MobileWorktreeDetail,
@@ -23,7 +24,7 @@ import {
 import { useAppShellState } from "./hooks/useAppShellState";
 import { useMemoryWatch } from "./hooks/useMemoryWatch";
 import { Input } from "@/components/ui/input";
-import { isTauri, callBackend } from "./lib/backend";
+import { isTauri, callBackend, syncIpcTimeoutFromBackend } from "./lib/backend";
 import { shouldUseTunnelRouteSelection } from "./lib/tunnelRoute";
 import type { CrashReport } from "./types";
 import "./index.css";
@@ -107,6 +108,11 @@ function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!isTauri() && !browserAuth.browserAuthenticated) return;
+    void syncIpcTimeoutFromBackend().catch(() => {});
+  }, [browserAuth.browserAuthenticated]);
 
   // Browser mode: kicked screen
   if (!isTauri() && wasKicked) {
@@ -217,6 +223,7 @@ function App() {
   return (
     <ToastProvider>
       <MemoryWatch />
+      <ToastNoticeBridge notice={actions.backgroundDeleteNotice} />
       <>
         {/* Loading overlay */}
         {workspace.loading && (
@@ -364,6 +371,7 @@ function App() {
               worktree={actions.selectedWorktree}
               onSubmit={actions.handleAddProjectToWorktree}
               adding={actions.addingProjectToWorktree}
+              addingProgress={actions.addingProjectProgress}
             />
 
             {/* Context Menus */}
@@ -423,6 +431,7 @@ function App() {
               deleteConfirmWorktree={actions.deleteConfirmWorktree}
               onSetDeleteConfirmWorktree={actions.setDeleteConfirmWorktree}
               onDeleteArchivedWorktree={actions.handleDeleteArchivedWorktree}
+              onBackgroundDeleteArchivedWorktree={actions.handleBackgroundDeleteArchivedWorktree}
               deletingArchived={actions.deletingArchived}
             />
           </>

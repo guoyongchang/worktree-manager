@@ -42,104 +42,9 @@ fn log_git_command_error<T>(
 // ==================== Tauri 命令：Git 操作 ====================
 
 fn switch_branch_sync(request: SwitchBranchRequest) -> Result<(), String> {
-    log::info!(
-        "[git] Switching branch: path='{}', target='{}'",
-        request.project_path,
-        request.branch
-    );
-    let path = PathBuf::from(&request.project_path);
-
-    if !path.exists() {
-        log::error!(
-            "[git] Project path does not exist: {}",
-            request.project_path
-        );
-        return Err(format!(
-            "Project path does not exist: {}",
-            request.project_path
-        ));
-    }
-
-    // Step 1: Fetch to ensure we have latest refs
-    log::info!("[git] Step 1/3: git fetch origin");
-    let fetch_output = git_command()
-        .args(["fetch", "origin"])
-        .current_dir(&path)
-        .output()
-        .map_err(|e| format!("Failed to fetch: {}", e))?;
-
-    if !fetch_output.status.success() {
-        let stderr_for_log = mask_url_credentials(&String::from_utf8_lossy(&fetch_output.stderr));
-        // Fetch failure is not critical, continue with checkout
-        log::warn!(
-            "[git] Step 1/3: git fetch failed (non-critical), continuing: {}",
-            stderr_for_log
-        );
-    } else {
-        log::info!("[git] Step 1/3: git fetch origin succeeded");
-    }
-
-    // Step 2: Checkout the branch
-    log::info!("[git] Step 2/3: git checkout {}", request.branch);
-    let checkout_output = git_command()
-        .args(["checkout", &request.branch])
-        .current_dir(&path)
-        .output()
-        .map_err(|e| format!("Failed to checkout: {}", e))?;
-
-    if !checkout_output.status.success() {
-        let stderr = String::from_utf8_lossy(&checkout_output.stderr);
-        let stderr_for_log = mask_url_credentials(&stderr);
-        log::error!(
-            "[git] Step 2/3 FAILED: git checkout {}: {}",
-            request.branch,
-            stderr_for_log
-        );
-        return Err(format!("Failed to checkout {}: {}", request.branch, stderr));
-    }
-    log::info!("[git] Step 2/3: git checkout {} succeeded", request.branch);
-
-    // Step 3: Pull latest changes
-    // Explicit merge strategy: Git >= 2.33.1 aborts a plain `git pull` on a diverged branch
-    // ("Need to specify how to reconcile divergent branches") when pull.rebase is unset.
-    log::info!(
-        "[git] Step 3/3: git pull --no-rebase --no-edit origin {}",
-        request.branch
-    );
-    let pull_output = git_command()
-        .args([
-            "pull",
-            "--no-rebase",
-            "--no-edit",
-            "origin",
-            &request.branch,
-        ])
-        .current_dir(&path)
-        .output()
-        .map_err(|e| format!("Failed to pull: {}", e))?;
-
-    if !pull_output.status.success() {
-        let stderr = String::from_utf8_lossy(&pull_output.stderr);
-        let stderr_for_log = mask_url_credentials(&stderr);
-        log::warn!(
-            "[git] Step 3/3: git pull failed (non-critical): {}",
-            stderr_for_log
-        );
-    } else {
-        log::info!(
-            "[git] Step 3/3: git pull origin {} succeeded",
-            request.branch
-        );
-    }
-
-    log::info!(
-        "[git] Successfully switched to branch '{}' at '{}'",
-        request.branch,
-        request.project_path
-    );
-    Ok(())
+    let normalized = normalize_path(&request.project_path);
+    git_ops::switch_branch(Path::new(&normalized), &request.branch)
 }
-
 #[tauri::command]
 pub(crate) async fn switch_branch(request: SwitchBranchRequest) -> Result<(), String> {
     validate_git_ref_name(&request.branch)?;
@@ -771,6 +676,13 @@ pub(crate) async fn fetch_project_remote(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub(crate) async fn cancel_git_operation(path: String) -> Result<(), String> {
+    let normalized = normalize_path(&path);
+    git_ops::cancel_git_operation(Path::new(&normalized));
+    Ok(())
+}
+
+#[tauri::command]
 pub(crate) async fn check_remote_branch_exists(
     path: String,
     branch_name: String,
@@ -886,61 +798,8 @@ pub(crate) async fn get_file_diff(
 // ==================== HTTP Server 共享接口 ====================
 
 pub fn switch_branch_internal(request: &SwitchBranchRequest) -> Result<(), String> {
-    validate_git_ref_name(&request.branch)?;
-
-    log::info!(
-        "[git] switch_branch_internal: path='{}', target='{}'",
-        request.project_path,
-        request.branch
-    );
-    let path = PathBuf::from(&request.project_path);
-    if !path.exists() {
-        log::error!(
-            "[git] Project path does not exist: {}",
-            request.project_path
-        );
-        return Err(format!(
-            "Project path does not exist: {}",
-            request.project_path
-        ));
-    }
-    log::info!("[git] Step 1/3: git fetch origin");
-    let _ = git_command()
-        .args(["fetch", "origin"])
-        .current_dir(&path)
-        .output();
-    log::info!("[git] Step 2/3: git checkout {}", request.branch);
-    let checkout_output = git_command()
-        .args(["checkout", &request.branch])
-        .current_dir(&path)
-        .output()
-        .map_err(|e| format!("Failed to checkout: {}", e))?;
-    if !checkout_output.status.success() {
-        let stderr = String::from_utf8_lossy(&checkout_output.stderr);
-        let stderr_for_log = mask_url_credentials(&stderr);
-        log::error!(
-            "[git] Step 2/3 FAILED: git checkout {}: {}",
-            request.branch,
-            stderr_for_log
-        );
-        return Err(format!("Failed to checkout {}: {}", request.branch, stderr));
-    }
-    log::info!(
-        "[git] Step 3/3: git pull --no-rebase --no-edit origin {}",
-        request.branch
-    );
-    let _ = git_command()
-        .args([
-            "pull",
-            "--no-rebase",
-            "--no-edit",
-            "origin",
-            &request.branch,
-        ])
-        .current_dir(&path)
-        .output();
-    log::info!("[git] Successfully switched to branch '{}'", request.branch);
-    Ok(())
+    let normalized = normalize_path(&request.project_path);
+    git_ops::switch_branch(Path::new(&normalized), &request.branch)
 }
 
 // ==================== Sync All Projects to BASE ====================

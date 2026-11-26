@@ -1366,8 +1366,8 @@ pub fn create_worktree_impl(
     Ok(normalize_path(&worktree_path.to_string_lossy()))
 }
 
-/// Worktree creation timeout: 10 minutes (for large repos with slow fetch)
-const CREATE_WORKTREE_TIMEOUT_SECS: u64 = 600;
+/// Minimum outer timeout for multi-project worktree creation: 10 minutes
+const CREATE_WORKTREE_MIN_TIMEOUT_SECS: u64 = 600;
 
 #[tauri::command]
 pub(crate) async fn create_worktree(
@@ -1375,16 +1375,18 @@ pub(crate) async fn create_worktree(
     request: CreateWorktreeRequest,
 ) -> Result<String, String> {
     let label = window_label.clone();
+    let timeout_secs =
+        CREATE_WORKTREE_MIN_TIMEOUT_SECS.max(crate::config::get_effective_ipc_timeout_seconds());
     match tokio::time::timeout(
-        std::time::Duration::from_secs(CREATE_WORKTREE_TIMEOUT_SECS),
+        std::time::Duration::from_secs(timeout_secs),
         tokio::task::spawn_blocking(move || create_worktree_impl(&label, request)),
     )
     .await
     {
         Ok(join_result) => join_result.map_err(|e| format!("Task join error: {}", e))?,
         Err(_) => Err(format!(
-            "Worktree creation timed out after {} minutes",
-            CREATE_WORKTREE_TIMEOUT_SECS / 60
+            "Worktree creation timed out after {} seconds",
+            timeout_secs
         )),
     }
 }
@@ -2043,22 +2045,21 @@ const DELETE_GIT_TIMEOUT_SECS: u64 = 120;
 
 /// Delete an archived worktree. This is the only place where git worktree registrations, the
 /// directory and the local branches are removed (archiving itself is a pure config change).
-pub fn delete_archived_worktree_impl(window_label: &str, name: String) -> Result<(), String> {
-    let workspace_path =
-        crate::config::get_window_workspace_path(window_label).ok_or("No workspace selected")?;
-
+pub fn delete_archived_worktree_in_workspace(
+    workspace_path: &str,
+    name: String,
+) -> Result<(), String> {
     // 串行化同一 workspace 的生命周期操作，防止 delete vs restore TOCTOU、double-delete 竞态。
-    let lifecycle_lock = crate::state::workspace_lifecycle_lock(&workspace_path);
+    let lifecycle_lock = crate::state::workspace_lifecycle_lock(workspace_path);
     let _lifecycle_guard = crate::state::lock_lifecycle_with_timeout(
         &lifecycle_lock,
         crate::state::LIFECYCLE_LOCK_TIMEOUT,
     )?;
     // 锁内读取最新配置，防止并发丢更新。
-    let config = crate::config::load_workspace_config(&workspace_path);
+    let config = crate::config::load_workspace_config(workspace_path);
 
-    let root = PathBuf::from(&workspace_path);
+    let root = PathBuf::from(workspace_path);
     let worktree_path = root.join(&config.worktrees_dir).join(&name);
-
     // Validate it's an archived worktree
     if !config.archived_worktrees.contains(&name) {
         return Err("Can only delete archived worktrees".to_string());
@@ -2274,7 +2275,7 @@ pub fn delete_archived_worktree_impl(window_label: &str, name: String) -> Result
     // Remove from archived list in config
     let mut config = config;
     config.archived_worktrees.retain(|n| n != &name);
-    save_workspace_config_internal(&workspace_path, &config)?;
+    save_workspace_config_internal(workspace_path, &config)?;
 
     log::info!(
         "[worktree] Successfully deleted archived worktree '{}' ({} ms)",
@@ -2283,39 +2284,48 @@ pub fn delete_archived_worktree_impl(window_label: &str, name: String) -> Result
     );
     Ok(())
 }
+pub fn delete_archived_worktree_impl(window_label: &str, name: String) -> Result<(), String> {
+    let workspace_path =
+        crate::config::get_window_workspace_path(window_label).ok_or("No workspace selected")?;
+    delete_archived_worktree_in_workspace(&workspace_path, name)
+}
 
 #[tauri::command]
 pub(crate) async fn delete_archived_worktree(
     window_label: String,
     name: String,
+    workspace_path: Option<String>,
 ) -> Result<(), String> {
-    let label = window_label.clone();
-    tokio::task::spawn_blocking(move || delete_archived_worktree_impl(&label, name))
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
+    if let Some(path) = workspace_path {
+        tokio::task::spawn_blocking(move || delete_archived_worktree_in_workspace(&path, name))
+            .await
+            .map_err(|e| format!("Task join error: {}", e))?
+    } else {
+        let label = window_label.clone();
+        tokio::task::spawn_blocking(move || delete_archived_worktree_impl(&label, name))
+            .await
+            .map_err(|e| format!("Task join error: {}", e))?
+    }
 }
 
 // ==================== 向已有 Worktree 添加项目 ====================
 
-pub fn add_project_to_worktree_impl(
-    window_label: &str,
+pub fn add_project_to_worktree_in_workspace(
+    workspace_path: &str,
     request: AddProjectToWorktreeRequest,
 ) -> Result<(), String> {
     validate_git_ref_name(&request.base_branch)?;
 
-    let workspace_path =
-        crate::config::get_window_workspace_path(window_label).ok_or("No workspace selected")?;
-
     // 串行化同一 workspace 的生命周期操作，避免与 archive/delete 同一 worktree 交叉竞态。
-    let lifecycle_lock = crate::state::workspace_lifecycle_lock(&workspace_path);
+    let lifecycle_lock = crate::state::workspace_lifecycle_lock(workspace_path);
     let _lifecycle_guard = crate::state::lock_lifecycle_with_timeout(
         &lifecycle_lock,
         crate::state::LIFECYCLE_LOCK_TIMEOUT,
     )?;
     // 锁内读取最新配置，防止并发丢更新。
-    let config = crate::config::load_workspace_config(&workspace_path);
+    let config = crate::config::load_workspace_config(workspace_path);
 
-    let root = PathBuf::from(&workspace_path);
+    let root = PathBuf::from(workspace_path);
     let worktree_path = root
         .join(&config.worktrees_dir)
         .join(&request.worktree_name);
@@ -2571,7 +2581,7 @@ pub fn add_project_to_worktree_impl(
     }
 
     let _ = write_worktree_local(
-        &workspace_path,
+        workspace_path,
         &config,
         &request.worktree_name,
         mapping.get(&request.worktree_name).map(String::as_str),
@@ -2583,16 +2593,32 @@ pub fn add_project_to_worktree_impl(
     );
     Ok(())
 }
+pub fn add_project_to_worktree_impl(
+    window_label: &str,
+    request: AddProjectToWorktreeRequest,
+) -> Result<(), String> {
+    validate_git_ref_name(&request.base_branch)?;
+    let workspace_path =
+        crate::config::get_window_workspace_path(window_label).ok_or("No workspace selected")?;
+    add_project_to_worktree_in_workspace(&workspace_path, request)
+}
 
 #[tauri::command]
 pub(crate) async fn add_project_to_worktree(
     window_label: String,
     request: AddProjectToWorktreeRequest,
+    workspace_path: Option<String>,
 ) -> Result<(), String> {
-    let label = window_label.clone();
-    tokio::task::spawn_blocking(move || add_project_to_worktree_impl(&label, request))
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
+    if let Some(path) = workspace_path {
+        tokio::task::spawn_blocking(move || add_project_to_worktree_in_workspace(&path, request))
+            .await
+            .map_err(|e| format!("Task join error: {}", e))?
+    } else {
+        let label = window_label.clone();
+        tokio::task::spawn_blocking(move || add_project_to_worktree_impl(&label, request))
+            .await
+            .map_err(|e| format!("Task join error: {}", e))?
+    }
 }
 
 // ==================== 智能扫描 ====================
@@ -4907,5 +4933,139 @@ mod tests {
         assert!(!load_workspace_config(&workspace_path)
             .archived_worktrees
             .contains(&"lost_registration".to_string()));
+    }
+
+    #[serial]
+    #[test]
+    fn uppercase_folder_alias_round_trips_through_create_list_add_archive_and_delete() {
+        let workspace = tempfile::tempdir().expect("create workspace");
+        make_origin_backed_project(workspace.path(), "demo");
+        make_origin_backed_project(workspace.path(), "api");
+        let label = bind_workspace(
+            workspace.path(),
+            &workspace_config(vec![project_config("demo"), project_config("api")]),
+        );
+
+        let folder_alias = "ERP-31212-Fin-hawk-floor-rescue";
+        let display_name = "ERP-31212-Finance_应收管理-网上支付查询升级";
+        let created_path = create_worktree_impl(
+            &label,
+            CreateWorktreeRequest {
+                name: display_name.to_string(),
+                folder_name: Some(folder_alias.to_string()),
+                projects: vec![CreateProjectRequest {
+                    name: "demo".to_string(),
+                    base_branch: "main".to_string(),
+                }],
+            },
+        )
+        .expect("create worktree with uppercase folder alias");
+        let worktree_path = PathBuf::from(&created_path);
+        assert!(worktree_path.exists());
+        assert_eq!(
+            worktree_path.file_name().and_then(|n| n.to_str()),
+            Some(folder_alias)
+        );
+
+        let listed = list_worktrees_impl(&label, false).expect("list worktrees");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].name, folder_alias);
+        assert_eq!(listed[0].display_name.as_deref(), Some(display_name));
+
+        add_project_to_worktree_impl(
+            &label,
+            AddProjectToWorktreeRequest {
+                worktree_name: folder_alias.to_string(),
+                project_name: "api".to_string(),
+                base_branch: "main".to_string(),
+            },
+        )
+        .expect("add second project to uppercase aliased worktree");
+
+        let api_wt = worktree_path.join("projects").join("api");
+        assert!(api_wt.exists());
+        assert_eq!(
+            git_output(&api_wt, &["branch", "--show-current"]),
+            display_name
+        );
+
+        archive_worktree_impl(&label, folder_alias.to_string()).expect("archive uppercase alias");
+        let workspace_path = workspace.path().to_string_lossy().to_string();
+        delete_archived_worktree_in_workspace(&workspace_path, folder_alias.to_string())
+            .expect("delete uppercase alias via pinned workspace path");
+
+        assert!(!worktree_path.exists());
+        let saved = load_workspace_config(&workspace_path);
+        assert!(!saved.archived_worktrees.contains(&folder_alias.to_string()));
+        let mapping =
+            load_worktree_mapping(&workspace.path().join("worktrees").join("mapping.json"));
+        assert!(!mapping.contains_key(folder_alias));
+    }
+
+    #[serial]
+    #[test]
+    fn delete_archived_worktree_in_workspace_targets_pinned_workspace_after_window_switches() {
+        let ws_a = tempfile::tempdir().expect("create workspace A");
+        let ws_b = tempfile::tempdir().expect("create workspace B");
+        make_origin_backed_project(ws_a.path(), "demo");
+        make_origin_backed_project(ws_b.path(), "demo");
+
+        let label = bind_workspace(ws_a.path(), &workspace_config(vec![project_config("demo")]));
+        let created_a = create_worktree_impl(
+            &label,
+            CreateWorktreeRequest {
+                name: "shared-feature".to_string(),
+                folder_name: None,
+                projects: vec![CreateProjectRequest {
+                    name: "demo".to_string(),
+                    base_branch: "main".to_string(),
+                }],
+            },
+        )
+        .expect("create worktree in workspace A");
+        archive_worktree_impl(&label, "shared-feature".to_string())
+            .expect("archive worktree in workspace A");
+
+        // Switch the same window to workspace B which also has an archived worktree of the same name.
+        let ws_b_str = ws_b.path().to_string_lossy().to_string();
+        save_workspace_config_internal(&ws_b_str, &workspace_config(vec![project_config("demo")]))
+            .expect("save config B");
+        WINDOW_WORKSPACES
+            .lock()
+            .expect("lock window workspaces")
+            .insert(label.clone(), ws_b_str.clone());
+        let created_b = create_worktree_impl(
+            &label,
+            CreateWorktreeRequest {
+                name: "shared-feature".to_string(),
+                folder_name: None,
+                projects: vec![CreateProjectRequest {
+                    name: "demo".to_string(),
+                    base_branch: "main".to_string(),
+                }],
+            },
+        )
+        .expect("create worktree in workspace B");
+        archive_worktree_impl(&label, "shared-feature".to_string())
+            .expect("archive worktree in workspace B");
+
+        let ws_a_str = ws_a.path().to_string_lossy().to_string();
+        delete_archived_worktree_in_workspace(&ws_a_str, "shared-feature".to_string())
+            .expect("delete in pinned workspace A");
+
+        assert!(
+            !PathBuf::from(created_a).exists(),
+            "workspace A worktree should be deleted"
+        );
+        assert!(
+            PathBuf::from(created_b).exists(),
+            "workspace B worktree must stay untouched"
+        );
+        assert!(!load_workspace_config(&ws_a_str)
+            .archived_worktrees
+            .contains(&"shared-feature".to_string()));
+        assert!(load_workspace_config(&ws_b_str)
+            .archived_worktrees
+            .contains(&"shared-feature".to_string()));
     }
 }

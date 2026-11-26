@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useCellContext } from "../contexts/CellContext";
 import {
@@ -14,10 +14,17 @@ import {
   WorktreeContextMenu,
   TerminalTabContextMenu,
   ToastProvider,
+  ToastNoticeBridge,
   GlobalDialogs,
 } from "./index";
 import { useAppShellState } from "../hooks/useAppShellState";
 import { isTauri } from "../lib/backend";
+import {
+  focusSearchInput,
+  isBlockingFindShortcut,
+  isFindShortcut,
+  resolveAdaptiveSearchTarget,
+} from "../lib/searchShortcut";
 import {
   Tooltip,
   TooltipContent,
@@ -34,6 +41,8 @@ export interface WorkspaceCellProps {
 export function WorkspaceCell({ initialWorkspacePath, closable, onClose }: WorkspaceCellProps) {
   const { t } = useTranslation();
   const { isPrimary } = useCellContext();
+  const cellRootRef = useRef<HTMLDivElement>(null);
+  const [terminalSearchRequestNonce, setTerminalSearchRequestNonce] = useState(0);
 
   const {
     cellId,
@@ -88,10 +97,75 @@ export function WorkspaceCell({ initialWorkspacePath, closable, onClose }: Works
     };
   }, []);
 
+  // Adaptive Ctrl+F / Cmd+F: route to terminal, sidebar, or main workspace project search
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || !isFindShortcut(e)) return;
+      if (viewMode !== 'main') return;
+      const root = cellRootRef.current;
+      if (!root) return;
+
+      const activeEl = document.activeElement;
+      const inThisCell = !!(activeEl && root.contains(activeEl));
+      if (!inThisCell) {
+        const inAnyCell = !!activeEl?.closest?.('[data-workspace-cell]');
+        if (inAnyCell || !isPrimary) return;
+      }
+
+      const extraModalOpen =
+        actions.batchArchiveModalOpen ||
+        Boolean(actions.archiveModal) ||
+        Boolean(actions.deleteConfirmWorktree) ||
+        showShortcutHelp;
+      if (isBlockingFindShortcut(activeEl, extraModalOpen)) return;
+
+      const target = resolveAdaptiveSearchTarget({
+        root,
+        activeEl,
+        terminalVisible: terminalHook.terminalVisible,
+        hasActiveTerminal: Boolean(terminalHook.activeTerminalTab),
+        terminalFullscreen,
+        sidebarCollapsed,
+        isMainWorkspace: !actions.selectedWorktree,
+      });
+      if (!target) return;
+
+      e.preventDefault();
+      if (target === 'terminal') {
+        setTerminalSearchRequestNonce((n) => n + 1);
+      } else if (target === 'main-projects' || target === 'sidebar') {
+        focusSearchInput(root, target);
+      } else if (target === 'expand-sidebar') {
+        setSidebarCollapsed(false);
+        requestAnimationFrame(() => {
+          if (cellRootRef.current) {
+            focusSearchInput(cellRootRef.current, 'sidebar');
+          }
+        });
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    isPrimary,
+    viewMode,
+    actions.batchArchiveModalOpen,
+    actions.archiveModal,
+    actions.deleteConfirmWorktree,
+    actions.selectedWorktree,
+    showShortcutHelp,
+    terminalHook.terminalVisible,
+    terminalHook.activeTerminalTab,
+    terminalFullscreen,
+    sidebarCollapsed,
+    setSidebarCollapsed,
+  ]);
+
   return (
     <ToastProvider>
-      <div className="relative h-full w-full flex flex-col overflow-hidden" style={{ containerType: 'inline-size' }}>
-        {/* Close button */}
+      <ToastNoticeBridge notice={actions.backgroundDeleteNotice} />
+      <div ref={cellRootRef} data-workspace-cell={cellId} className="relative h-full w-full flex flex-col overflow-hidden" style={{ containerType: 'inline-size' }}>
         {closable && onClose && (
           <TooltipProvider delayDuration={300}>
             <Tooltip>
@@ -196,6 +270,8 @@ export function WorkspaceCell({ initialWorkspacePath, closable, onClose }: Works
               onToggleBatchArchiveModal={() => actions.setBatchArchiveModalOpen(!actions.batchArchiveModalOpen)}
               onBatchRestore={actions.handleBatchRestore}
               onBatchDelete={actions.handleBatchDelete}
+              onBatchBackgroundDelete={actions.handleBatchBackgroundDelete}
+              backgroundDeleteState={actions.backgroundDeleteState}
             />
           )}
 
@@ -216,9 +292,9 @@ export function WorkspaceCell({ initialWorkspacePath, closable, onClose }: Works
                   onArchive={() => actions.selectedWorktree && actions.openArchiveModal(actions.selectedWorktree)}
                   onRestore={actions.handleRestoreWorktree}
                   restoring={actions.restoringWorktree}
+                  deletingArchived={!!actions.selectedWorktree && actions.deletingWorktreeNames.has(actions.selectedWorktree.name)}
                   switching={actions.switchingWorktree}
                   onDelete={actions.selectedWorktree?.is_archived ? () => actions.setDeleteConfirmWorktree(actions.selectedWorktree) : undefined}
-                  onAddProject={() => modals.setModal('showAddProjectModal', true)}
                   onRemoveProject={!actions.selectedWorktree ? actions.handleRemoveProject : undefined}
                   onAddProjectToWorktree={() => modals.setModal('showAddProjectToWorktreeModal', true)}
                   error={workspace.error}
@@ -276,6 +352,7 @@ export function WorkspaceCell({ initialWorkspacePath, closable, onClose }: Works
               onOpenInEditor={actions.handleOpenInEditor}
               onRevealInFinder={workspace.revealInFinder}
               selectedEditor={actions.selectedEditor}
+              searchRequestNonce={terminalSearchRequestNonce}
             />
 
           </div>
@@ -338,6 +415,7 @@ export function WorkspaceCell({ initialWorkspacePath, closable, onClose }: Works
           worktree={actions.selectedWorktree}
           onSubmit={actions.handleAddProjectToWorktree}
           adding={actions.addingProjectToWorktree}
+          addingProgress={actions.addingProjectProgress}
         />
 
         {/* Context Menus */}
@@ -399,6 +477,7 @@ export function WorkspaceCell({ initialWorkspacePath, closable, onClose }: Works
           deleteConfirmWorktree={actions.deleteConfirmWorktree}
           onSetDeleteConfirmWorktree={actions.setDeleteConfirmWorktree}
           onDeleteArchivedWorktree={actions.handleDeleteArchivedWorktree}
+          onBackgroundDeleteArchivedWorktree={actions.handleBackgroundDeleteArchivedWorktree}
           deletingArchived={actions.deletingArchived}
         />
 

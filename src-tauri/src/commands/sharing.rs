@@ -8,11 +8,11 @@ use crate::config::{get_window_workspace_path, load_global_config, save_global_c
 use crate::http_server;
 
 use crate::state::{
-    AUTHENTICATED_SESSIONS, CLIENT_NOTIFICATION_BROADCAST, CONNECTED_CLIENTS, SHARE_STATE, TOKIO_RT,
+    clear_authenticated_sessions, redact_session_id, revoke_authenticated_session,
+    CLIENT_NOTIFICATION_BROADCAST, CONNECTED_CLIENTS, SHARE_STATE, TOKIO_RT,
 };
 use crate::tls;
 use crate::types::{ConnectedClient, ShareStateInfo};
-
 // ==================== 分享功能命令 ====================
 
 #[tauri::command]
@@ -186,9 +186,7 @@ pub async fn start_sharing_internal(
     }
 
     // Clear any previous authenticated sessions
-    if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() {
-        sessions.clear();
-    }
+    clear_authenticated_sessions();
     log::info!("[sharing] Previous authenticated sessions cleared");
 
     // Spawn HTTP (port) + HTTPS (port+1) servers on the shared tokio runtime
@@ -389,19 +387,23 @@ pub fn stop_sharing_internal() -> Result<(), String> {
         log::info!("[sharing] HTTP server shutdown signal sent");
     }
 
+    // Broadcast revocation so any open LAN/tunnel WebSocket sessions terminate immediately
+    let stop_notification = serde_json::json!({
+        "session_id": "*",
+        "type": "kicked",
+        "reason": "分享已停止"
+    })
+    .to_string();
+    let _ = CLIENT_NOTIFICATION_BROADCAST.send(stop_notification);
+
     // Clear authenticated sessions and connected clients
-    if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() {
-        let count = sessions.len();
-        sessions.clear();
-        log::info!("[sharing] Cleared {} authenticated sessions", count);
-    }
+    let count = clear_authenticated_sessions();
+    log::info!("[sharing] Cleared {} authenticated sessions", count);
     if let Ok(mut clients) = CONNECTED_CLIENTS.lock() {
         let count = clients.len();
         clients.clear();
         log::info!("[sharing] Cleared {} connected clients", count);
     }
-
-    log::info!("[sharing] LAN sharing stopped");
     Ok(())
 }
 
@@ -519,14 +521,11 @@ pub(crate) async fn update_share_password(password: String) -> Result<(), String
     save_last_share_credentials(None, &password)?;
 
     // Clear authenticated sessions and connected clients so everyone must re-auth with the new password
-    if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() {
-        let count = sessions.len();
-        sessions.clear();
-        log::info!(
-            "[sharing] Cleared {} authenticated sessions after password change",
-            count
-        );
-    }
+    let count = clear_authenticated_sessions();
+    log::info!(
+        "[sharing] Cleared {} authenticated sessions after password change",
+        count
+    );
     if let Ok(mut clients) = CONNECTED_CLIENTS.lock() {
         let count = clients.len();
         clients.clear();
@@ -536,7 +535,14 @@ pub(crate) async fn update_share_password(password: String) -> Result<(), String
         );
     }
 
-    log::info!("[sharing] Share password updated successfully");
+    // Force-disconnect all existing WebSocket sessions immediately
+    let pw_notification = serde_json::json!({
+        "session_id": "*",
+        "type": "kicked",
+        "reason": "分享密码已更新，请重新登录"
+    })
+    .to_string();
+    let _ = CLIENT_NOTIFICATION_BROADCAST.send(pw_notification);
     Ok(())
 }
 
@@ -1721,9 +1727,32 @@ mod tests {
 
 /// Kick a client by session ID: send WebSocket notification, then disconnect and remove session.
 pub fn kick_client_internal(session_id: &str) -> Result<(), String> {
-    log::info!("[sharing] Kicking client: session_id={}", session_id);
+    let sid_redacted = redact_session_id(session_id);
+    log::info!("[sharing] Kicking client: session_id={}", sid_redacted);
 
-    // Send kick notification via WebSocket broadcast before removing session
+    // Remove from authenticated sessions first so subsequent WS writes fail immediately
+    let removed_session = revoke_authenticated_session(session_id);
+    log::info!(
+        "[sharing] Session {} {} from authenticated sessions",
+        sid_redacted,
+        if removed_session {
+            "removed"
+        } else {
+            "not found"
+        }
+    );
+
+    // Remove from connected clients
+    if let Ok(mut clients) = CONNECTED_CLIENTS.lock() {
+        let removed = clients.remove(session_id).is_some();
+        log::info!(
+            "[sharing] Session {} {} from connected clients",
+            sid_redacted,
+            if removed { "removed" } else { "not found" }
+        );
+    }
+
+    // Send kick notification via WebSocket broadcast to close live WS immediately
     let notification = serde_json::json!({
         "session_id": session_id,
         "type": "kicked",
@@ -1733,28 +1762,8 @@ pub fn kick_client_internal(session_id: &str) -> Result<(), String> {
     let _ = CLIENT_NOTIFICATION_BROADCAST.send(notification);
     log::info!(
         "[sharing] Kick notification broadcast sent for session {}",
-        session_id
+        sid_redacted
     );
-
-    // Remove from authenticated sessions
-    if let Ok(mut sessions) = AUTHENTICATED_SESSIONS.lock() {
-        let removed = sessions.remove(session_id);
-        log::info!(
-            "[sharing] Session {} {} from authenticated sessions",
-            session_id,
-            if removed { "removed" } else { "not found" }
-        );
-    }
-
-    // Remove from connected clients
-    if let Ok(mut clients) = CONNECTED_CLIENTS.lock() {
-        let removed = clients.remove(session_id).is_some();
-        log::info!(
-            "[sharing] Session {} {} from connected clients",
-            session_id,
-            if removed { "removed" } else { "not found" }
-        );
-    }
 
     Ok(())
 }

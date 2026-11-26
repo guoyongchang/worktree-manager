@@ -15,8 +15,8 @@ export const TERMINAL = {
   MAX_HEIGHT: 1200,
   MAX_VIEWPORT_MARGIN: 140,
   POLL_INTERVAL_MS: 100,
+  DESKTOP_READ_WAIT_MS: 250,
   SCROLLBACK_LINES: 5000,
-  // Terminal state broadcast settings
   BROADCAST_RATE_LIMIT_MS: 100,
   // Terminal resize settings
   RESIZE_TRIGGER_OFFSET: 5,

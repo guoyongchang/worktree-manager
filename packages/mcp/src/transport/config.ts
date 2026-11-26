@@ -6,6 +6,45 @@ import type { CapabilityLevel, TransportMode, WorkspaceRef } from '../types.js';
 
 const GLOBAL_CONFIG_PATH = '.config/worktree-manager/global.json';
 
+export function resolveGlobalConfigPath(): string {
+  if (process.platform === 'win32' && process.env.APPDATA) {
+    const appDataPath = join(process.env.APPDATA, 'worktree-manager', 'global.json');
+    const dotConfigPath = join(homedir(), GLOBAL_CONFIG_PATH);
+    return existsSync(appDataPath) || !existsSync(dotConfigPath) ? appDataPath : dotConfigPath;
+  }
+  return join(homedir(), GLOBAL_CONFIG_PATH);
+}
+
+export const DEFAULT_IPC_TIMEOUT_SECONDS = 60;
+export const MIN_IPC_TIMEOUT_SECONDS = 30;
+export const MAX_IPC_TIMEOUT_SECONDS = 3600;
+const DESKTOP_CONFIRM_HEADROOM_SECS = 120;
+
+export function clampIpcTimeoutSeconds(value: number): number {
+  return Math.min(MAX_IPC_TIMEOUT_SECONDS, Math.max(MIN_IPC_TIMEOUT_SECONDS, Math.round(value)));
+}
+
+export function readIpcTimeoutSeconds(configPath = resolveGlobalConfigPath()): number {
+  try {
+    if (existsSync(configPath)) {
+      const cfg = JSON.parse(readFileSync(configPath, 'utf-8'));
+      const raw = Number(cfg?.ipc_timeout_seconds);
+      if (Number.isFinite(raw) && raw >= MIN_IPC_TIMEOUT_SECONDS) {
+        return clampIpcTimeoutSeconds(raw);
+      }
+    }
+  } catch {}
+  return DEFAULT_IPC_TIMEOUT_SECONDS;
+}
+
+export function getHttpTransportTimeouts(baseSeconds = readIpcTimeoutSeconds()) {
+  const base = clampIpcTimeoutSeconds(baseSeconds);
+  return {
+    commandMs: base * 1000,
+    confirmMs: (DESKTOP_CONFIRM_HEADROOM_SECS + base) * 1000,
+  };
+}
+
 // mcp.json 路径 + capability_level / http_port 的读取（server.ts 与 index.ts 共用）
 export const MCP_CONFIG_PATH = join(homedir(), '.config', 'worktree-manager', 'mcp.json');
 const DEFAULT_HTTP_PORT = 42819;
@@ -61,6 +100,7 @@ export interface BaseTransport {
 
 // Extended transport interface for HTTP transport operations
 export interface Transport extends BaseTransport {
+  switchWorkspace(path: string): Promise<unknown>;
   createWorktree(request: {
     name: string;
     folder_name?: string;
@@ -98,7 +138,7 @@ export class ConfigTransport implements BaseTransport {
   private watcher: ReturnType<typeof watch> | null = null;
 
   constructor() {
-    this.configPath = join(homedir(), GLOBAL_CONFIG_PATH);
+    this.configPath = resolveGlobalConfigPath();
   }
 
   async isAvailable(): Promise<boolean> {

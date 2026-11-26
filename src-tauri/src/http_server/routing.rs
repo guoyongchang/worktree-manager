@@ -8,8 +8,8 @@ use tower_http::cors::CorsLayer;
 
 use super::{
     h_add_existing_project, h_add_project_to_worktree, h_add_workspace, h_archive_worktree,
-    h_auth_challenge, h_auth_verify, h_broadcast_terminal_state, h_cert_pem,
-    h_check_commit_ai_api_key, h_check_dashscope_api_key, h_check_mirror_update,
+    h_auth_challenge, h_auth_verify, h_broadcast_terminal_state, h_cancel_git_operation,
+    h_cert_pem, h_check_commit_ai_api_key, h_check_dashscope_api_key, h_check_mirror_update,
     h_check_remote_branch_exists, h_check_worktree_status, h_clone_project,
     h_cloud_approve_pairing, h_cloud_check_pairing_status, h_cloud_disconnect, h_cloud_get_status,
     h_cloud_reject_pairing, h_cloud_start_pairing, h_commit_all, h_create_pull_request,
@@ -20,26 +20,27 @@ use super::{
     h_get_commit_ai_model, h_get_commit_prefix_config, h_get_config_path_info,
     h_get_connected_clients, h_get_crash_report, h_get_current_workspace, h_get_dashscope_api_key,
     h_get_dashscope_base_url, h_get_file_diff, h_get_git_diff, h_get_git_user_config,
-    h_get_git_user_global_config, h_get_last_share_password, h_get_last_share_port,
-    h_get_locked_worktrees, h_get_main_occupation, h_get_main_workspace_status, h_get_mcp_settings,
-    h_get_mirror_sources, h_get_ngrok_token, h_get_opened_workspaces, h_get_process_memory,
-    h_get_remote_branches, h_get_share_info, h_get_share_state, h_get_shell_integration_enabled,
-    h_get_skip_git_hooks, h_get_terminal_state, h_get_usage_machine_id, h_get_usage_report_enabled,
-    h_get_voice_asr_model, h_get_voice_refine_base_url, h_get_voice_refine_enabled,
-    h_get_voice_refine_model, h_get_workspace_config, h_import_external_project,
-    h_install_mcp_client, h_kick_client, h_list_dashscope_models, h_list_vault_item_children,
-    h_list_workspaces, h_list_worktrees, h_load_workspace_config_by_path, h_lock_worktree,
-    h_mcp_archive_worktree, h_mcp_delete_archived_worktree, h_mcp_restore_worktree,
-    h_merge_to_base_branch, h_merge_to_test_branch, h_open_devtools, h_open_in_editor,
-    h_open_in_terminal, h_open_log_dir, h_open_workspace_window, h_pty_close, h_pty_close_by_path,
-    h_pty_create, h_pty_exists, h_pty_read, h_pty_resize, h_pty_write, h_pull_current_branch,
-    h_push_to_remote, h_remove_project_from_config, h_remove_workspace, h_report_time_saved,
-    h_request_mcp_confirm, h_reset_usage_machine_id, h_resolve_mcp_confirm, h_restore_worktree,
-    h_reveal_in_finder, h_save_custom_mirrors, h_save_workspace_config,
-    h_save_workspace_config_by_path, h_scan_existing_projects, h_scan_linked_folders,
-    h_set_commit_ai_api_key, h_set_commit_ai_enabled, h_set_commit_ai_model,
-    h_set_commit_prefix_config, h_set_dashscope_api_key, h_set_dashscope_base_url, h_set_git_path,
-    h_set_git_user_config, h_set_git_user_global_config, h_set_mcp_capability_level,
+    h_get_git_user_global_config, h_get_ipc_timeout_seconds, h_get_last_share_password,
+    h_get_last_share_port, h_get_locked_worktrees, h_get_main_occupation,
+    h_get_main_workspace_status, h_get_mcp_settings, h_get_mirror_sources, h_get_ngrok_token,
+    h_get_opened_workspaces, h_get_process_memory, h_get_remote_branches, h_get_share_info,
+    h_get_share_state, h_get_shell_integration_enabled, h_get_skip_git_hooks, h_get_terminal_state,
+    h_get_usage_machine_id, h_get_usage_report_enabled, h_get_voice_asr_model,
+    h_get_voice_refine_base_url, h_get_voice_refine_enabled, h_get_voice_refine_model,
+    h_get_workspace_config, h_import_external_project, h_install_mcp_client, h_kick_client,
+    h_list_dashscope_models, h_list_vault_item_children, h_list_workspaces, h_list_worktrees,
+    h_load_workspace_config_by_path, h_lock_worktree, h_mcp_archive_worktree,
+    h_mcp_delete_archived_worktree, h_mcp_restore_worktree, h_merge_to_base_branch,
+    h_merge_to_test_branch, h_open_devtools, h_open_in_editor, h_open_in_terminal, h_open_log_dir,
+    h_open_workspace_window, h_pty_close, h_pty_close_by_path, h_pty_create, h_pty_exists,
+    h_pty_read, h_pty_resize, h_pty_write, h_pull_current_branch, h_push_to_remote,
+    h_remove_project_from_config, h_remove_workspace, h_report_time_saved, h_request_mcp_confirm,
+    h_reset_usage_machine_id, h_resolve_mcp_confirm, h_restore_worktree, h_reveal_in_finder,
+    h_save_custom_mirrors, h_save_workspace_config, h_save_workspace_config_by_path,
+    h_scan_existing_projects, h_scan_linked_folders, h_set_commit_ai_api_key,
+    h_set_commit_ai_enabled, h_set_commit_ai_model, h_set_commit_prefix_config,
+    h_set_dashscope_api_key, h_set_dashscope_base_url, h_set_git_path, h_set_git_user_config,
+    h_set_git_user_global_config, h_set_ipc_timeout_seconds, h_set_mcp_capability_level,
     h_set_mcp_port, h_set_ngrok_token, h_set_shell_integration_enabled, h_set_skip_git_hooks,
     h_set_usage_report_enabled, h_set_voice_asr_model, h_set_voice_refine_base_url,
     h_set_voice_refine_enabled, h_set_voice_refine_model, h_set_window_workspace,
@@ -110,7 +111,16 @@ use serde_json::json;
 
 pub async fn h_mcp_config() -> Response {
     match load_mcp_config() {
-        Some(config) => (StatusCode::OK, Json(json!(config))).into_response(),
+        Some(config) => (
+            StatusCode::OK,
+            Json(json!({
+                "version": config.version,
+                "http_port": config.http_port,
+                "installed_at": config.installed_at,
+                "capability_level": config.capability_level,
+            })),
+        )
+            .into_response(),
         None => (
             StatusCode::NOT_FOUND,
             Json(json!({"error": "MCP not configured"})),
@@ -135,7 +145,6 @@ pub async fn h_set_mcp_capability(Json(payload): Json<serde_json::Value>) -> Res
         installed_at: chrono::Utc::now().to_rfc3339(),
         capability_level: "read".to_string(),
     });
-
     config.capability_level = level.to_string();
 
     match save_mcp_config(&config) {
@@ -219,6 +228,7 @@ pub(super) fn build_api_router(cert_pem: Option<String>) -> Router {
         .route("/api/pull_current_branch", post(h_pull_current_branch))
         .route("/api/merge_to_test_branch", post(h_merge_to_test_branch))
         .route("/api/merge_to_base_branch", post(h_merge_to_base_branch))
+        .route("/api/cancel_git_operation", post(h_cancel_git_operation))
         .route("/api/create_pull_request", post(h_create_pull_request))
         .route("/api/get_remote_branches", post(h_get_remote_branches))
         .route("/api/get_git_diff", post(h_get_git_diff))
@@ -359,6 +369,14 @@ pub(super) fn build_api_router(cert_pem: Option<String>) -> Router {
         .route(
             "/api/set_shell_integration_enabled",
             post(h_set_shell_integration_enabled),
+        )
+        .route(
+            "/api/get_ipc_timeout_seconds",
+            post(h_get_ipc_timeout_seconds),
+        )
+        .route(
+            "/api/set_ipc_timeout_seconds",
+            post(h_set_ipc_timeout_seconds),
         )
         .route("/api/get_git_user_config", post(h_get_git_user_config))
         .route("/api/set_git_user_config", post(h_set_git_user_config))

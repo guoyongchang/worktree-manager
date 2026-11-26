@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useRef, type FC, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useRef, type FC, type ReactNode } from 'react';
 import { CheckCircle, AlertTriangle, Info, X, XCircle } from 'lucide-react';
 
 type ToastType = 'success' | 'error' | 'info' | 'warning';
@@ -130,4 +130,18 @@ export const ToastProvider: FC<{ children: ReactNode }> = ({ children }) => {
       </div>
     </ToastContext.Provider>
   );
+};
+
+export const ToastNoticeBridge: FC<{
+  notice: { id: number; type: ToastType; message: string } | null;
+}> = ({ notice }) => {
+  const { toast } = useToast();
+  const lastIdRef = useRef(0);
+  useEffect(() => {
+    if (notice && notice.id !== lastIdRef.current) {
+      lastIdRef.current = notice.id;
+      toast(notice.type, notice.message);
+    }
+  }, [notice, toast]);
+  return null;
 };

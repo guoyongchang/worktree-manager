@@ -1,6 +1,7 @@
 import type { BranchDiffStats, MergeGateOpts } from '../types.js';
 
 export const DEFAULT_MAX_AHEAD = 50;
+export const PROTECTED_SOURCE_BRANCHES = new Set(['main', 'master', 'uat', 'test']);
 
 export interface MergeGateInput {
   ahead: number;          // 领先目标分支的提交数（merge_to_test 用 ahead_of_test，merge_to_base 用 ahead）
@@ -55,6 +56,40 @@ export function evaluateDiffCertainty(
       allow: false,
       reason:
         '无法确认分支差异：所有 diff 统计均为 0，可能是目标分支/base 的 ref 未 fetch 或不存在（后端无法区分「算不出」与「确实无差异」）。请带 fetch_first:true 重试，或先手动 fetch/sync 后再合并（确属预期可传 force:true 跳过）',
+    };
+  }
+  return { allow: true };
+}
+
+// 纯函数：合并前源分支校验（防止 detached HEAD、合入自身、或误从受保护主干/环境分支如 test 合并到 uat）
+// 该护栏不可通过 force 跳过，避免误将 test/uat/main 跨环境合并。
+export function validateMergeSourceBranch(
+  currentBranch: string | null | undefined,
+  targetBranch: string,
+  extraProtectedBranches: Array<string | null | undefined> = []
+): MergeGateResult {
+  const cur = (currentBranch ?? '').trim();
+  const target = targetBranch.trim();
+  if (!cur || cur === 'HEAD') {
+    return {
+      allow: false,
+      reason: '当前仓库处于 detached HEAD 状态或无法识别当前分支，请先切换到功能分支后再合并',
+    };
+  }
+  if (cur.toLowerCase() === target.toLowerCase()) {
+    return {
+      allow: false,
+      reason: `当前分支已经是目标分支「${target}」，无需合并（请确认是否选错了项目或工作区）`,
+    };
+  }
+  const curLower = cur.toLowerCase();
+  const isProtected =
+    PROTECTED_SOURCE_BRANCHES.has(curLower) ||
+    extraProtectedBranches.some((b) => typeof b === 'string' && b.trim().toLowerCase() === curLower);
+  if (isProtected) {
+    return {
+      allow: false,
+      reason: `当前分支「${cur}」是受保护分支，禁止直接合并到「${target}」，请先切换到功能分支`,
     };
   }
   return { allow: true };

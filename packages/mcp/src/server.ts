@@ -1,37 +1,22 @@
-import axios from 'axios';
+import { watch, type FSWatcher } from 'chokidar';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { HttpTransport, discoverHttpPort } from './transport/http.js';
-import { ConfigTransport, readCapabilityLevel, readHttpPort } from './transport/config.js';
+import { ConfigTransport, MCP_CONFIG_PATH, readCapabilityLevel, readHttpPort } from './transport/config.js';
 import { buildCoreHandlers, CORE_TOOLS } from './tools/core.js';
 import { buildDetailsHandlers, DETAILS_TOOLS } from './tools/details.js';
 import { buildAdvancedHandlers, ADVANCED_TOOLS } from './tools/advanced.js';
-import { type ToolHandler, errorResult } from './tools/shared.js';
+import { type ToolHandler, errorResult, extractErrorMessage } from './tools/shared.js';
 import type { CapabilityLevel } from './types.js';
-
-// 从错误里提取给用户看的信息。axios 错误优先透传后端响应体（后端 400 里的真实 git 报错），
-// 否则回退到 error.message。
-function extractErrorMessage(e: unknown): string {
-  if (axios.isAxiosError(e)) {
-    const data = e.response?.data;
-    if (typeof data === 'string' && data) return data;
-    if (data && typeof data === 'object') {
-      const obj = data as Record<string, unknown>;
-      const msg = obj.error ?? obj.message;
-      if (typeof msg === 'string' && msg) return msg;
-      return JSON.stringify(data);
-    }
-    return e.message;
-  }
-  return e instanceof Error ? e.message : String(e);
-}
 
 export class WorktreeMcpServer {
   private server: Server | null = null;
   private transport: HttpTransport | ConfigTransport | null = null;
   private capabilityLevel: CapabilityLevel = 'read';
   private handlers: Record<string, ToolHandler> = {};
+  private configWatcher: FSWatcher | null = null;
+  private connected = false;
 
   constructor() {}
 
@@ -60,7 +45,7 @@ export class WorktreeMcpServer {
       },
       {
         capabilities: {
-          tools: {},
+          tools: { listChanged: true },
         },
       }
     );
@@ -111,7 +96,29 @@ export class WorktreeMcpServer {
     if (level === this.capabilityLevel) return;
     this.capabilityLevel = level;
     // 重新注册工具，让 capability 切换真正生效（否则 handlers/tools 仍是旧集合，setter 形同死代码）
-    if (this.server && this.transport) this.registerTools();
+    if (this.server && this.transport) {
+      this.registerTools();
+      if (this.connected) {
+        void this.server.sendToolListChanged().catch(() => {});
+      }
+    }
+  }
+
+  private watchCapabilityConfig(): void {
+    if (this.configWatcher) return;
+    // persistent: false 确保 stdio 关闭后 watcher 不会阻止 Node 进程退出
+    const watcher = watch(MCP_CONFIG_PATH, { persistent: false, ignoreInitial: true });
+    const reload = () => {
+      const next = readCapabilityLevel(this.capabilityLevel);
+      if (next !== this.capabilityLevel) {
+        console.error(`[MCP] capability_level updated: ${this.capabilityLevel} -> ${next}`);
+        this.setCapabilityLevel(next);
+      }
+    };
+    watcher.on('change', reload);
+    watcher.on('add', reload);
+    watcher.on('error', () => {});
+    this.configWatcher = watcher;
   }
 
   async run(): Promise<void> {
@@ -120,6 +127,13 @@ export class WorktreeMcpServer {
     }
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
+    this.connected = true;
+    this.watchCapabilityConfig();
+    this.server.onclose = () => {
+      this.connected = false;
+      void this.configWatcher?.close();
+      this.configWatcher = null;
+    };
     console.error('[MCP] Server running on stdio');
   }
 }

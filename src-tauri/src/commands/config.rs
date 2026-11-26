@@ -1,4 +1,7 @@
-use crate::config::{load_global_config, save_global_config_internal};
+use crate::config::{
+    clamp_ipc_timeout_seconds, load_global_config, save_global_config_internal,
+    MIN_IPC_TIMEOUT_SECONDS,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -93,6 +96,24 @@ pub(crate) fn set_shell_integration_enabled(enabled: bool) -> Result<(), String>
     let mut config = load_global_config();
     config.shell_integration_enabled = enabled;
     save_global_config_internal(&config)
+}
+
+#[tauri::command]
+pub(crate) fn get_ipc_timeout_seconds() -> Result<Option<u64>, String> {
+    let config = load_global_config();
+    Ok(config
+        .ipc_timeout_seconds
+        .filter(|seconds| *seconds >= MIN_IPC_TIMEOUT_SECONDS)
+        .map(clamp_ipc_timeout_seconds))
+}
+
+#[tauri::command]
+pub(crate) fn set_ipc_timeout_seconds(seconds: u64) -> Result<u64, String> {
+    let clamped = clamp_ipc_timeout_seconds(seconds);
+    let mut config = load_global_config();
+    config.ipc_timeout_seconds = Some(clamped);
+    save_global_config_internal(&config)?;
+    Ok(clamped)
 }
 
 #[cfg(test)]
@@ -311,6 +332,35 @@ mod tests {
 
         assert!(saved.skip_git_hooks);
         assert!(!saved.shell_integration_enabled);
+    }
+
+    #[serial]
+    #[test]
+    fn ipc_timeout_seconds_clamps_persists_and_drives_git_timeouts() {
+        let _guard = ConfigCommandStateGuard::with_temp_config(GlobalConfig::default());
+        let config_path = crate::config::get_global_config_path();
+
+        assert_eq!(get_ipc_timeout_seconds().expect("read unset"), None);
+        assert_eq!(crate::config::get_effective_ipc_timeout_seconds(), 60);
+
+        let saved_low = set_ipc_timeout_seconds(10).expect("clamp low");
+        assert_eq!(saved_low, 30);
+        assert_eq!(get_ipc_timeout_seconds().expect("read low"), Some(30));
+        assert_eq!(crate::config::get_effective_ipc_timeout_seconds(), 30);
+
+        let saved_high = set_ipc_timeout_seconds(9999).expect("clamp high");
+        assert_eq!(saved_high, 3600);
+        assert_eq!(get_ipc_timeout_seconds().expect("read high"), Some(3600));
+        assert_eq!(crate::config::get_effective_ipc_timeout_seconds(), 3600);
+
+        let saved_custom = set_ipc_timeout_seconds(600).expect("save custom");
+        assert_eq!(saved_custom, 600);
+        assert_eq!(crate::config::get_effective_ipc_timeout_seconds(), 600);
+        let persisted: GlobalConfig = serde_json::from_str(
+            &std::fs::read_to_string(config_path).expect("read saved global config"),
+        )
+        .expect("parse saved global config");
+        assert_eq!(persisted.ipc_timeout_seconds, Some(600));
     }
 
     #[serial]

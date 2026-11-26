@@ -1,7 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, LazyLock, Mutex, OnceLock};
@@ -10,24 +10,52 @@ use wait_timeout::ChildExt;
 
 use crate::types::ScannedFolder;
 
-// Git command timeout (30 seconds)
-pub(crate) const GIT_COMMAND_TIMEOUT_SECS: u64 = 30;
-
 // Custom git path set by user (empty = auto-detect)
 static CUSTOM_GIT_PATH: Mutex<String> = Mutex::new(String::new());
 
 pub(crate) const GIT_CANCELLED: &str = "已取消";
-const GIT_CANCEL_POLL: Duration = Duration::from_millis(200);
+pub(crate) const GIT_CANCEL_POLL: Duration = Duration::from_millis(200);
 
-static GIT_CANCEL: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
+/// Monotonically increasing cancellation generation per canonical repo/worktree path.
+/// Each queued/running operation snapshots the generation at entry (`start_gen`); requesting
+/// cancellation increments the counter so only already-queued/in-flight operations abort,
+/// never a subsequent operation started after the cancel click.
+static GIT_CANCEL_GEN: LazyLock<Mutex<HashMap<PathBuf, u64>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
-fn git_cancel_guard() -> std::sync::MutexGuard<'static, HashSet<String>> {
-    GIT_CANCEL.lock().unwrap_or_else(|p| p.into_inner())
+pub(crate) fn canonical_repo_key(path: &Path) -> PathBuf {
+    let normalized = normalize_path(&path.to_string_lossy());
+    let normalized_path = PathBuf::from(&normalized);
+    std::fs::canonicalize(&normalized_path).unwrap_or(normalized_path)
 }
 
-fn git_cancel_requested(key: &str) -> bool {
-    git_cancel_guard().contains(key)
+pub(crate) fn git_cancel_generation(path: &Path) -> u64 {
+    let key = canonical_repo_key(path);
+    *GIT_CANCEL_GEN
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(&key)
+        .unwrap_or(&0)
 }
+
+pub(crate) fn request_git_cancel(path: &Path) -> u64 {
+    let key = canonical_repo_key(path);
+    let mut guard = GIT_CANCEL_GEN.lock().unwrap_or_else(|p| p.into_inner());
+    let entry = guard.entry(key.clone()).or_insert(0);
+    *entry = entry.saturating_add(1);
+    let next_gen = *entry;
+    log::info!(
+        "[git:cancel] requested for path='{}', gen={}",
+        key.display(),
+        next_gen
+    );
+    next_gen
+}
+
+pub(crate) fn is_git_cancelled_since(path: &Path, start_gen: u64) -> bool {
+    git_cancel_generation(path) > start_gen
+}
+
 /// Set a custom git executable path. Empty string reverts to auto-detect.
 pub(crate) fn set_custom_git_path(path: &str) {
     if let Ok(mut p) = CUSTOM_GIT_PATH.lock() {
@@ -280,7 +308,8 @@ fn exit_code_for_log(status: &std::process::ExitStatus) -> String {
 }
 
 pub(crate) fn run_git_logged(cmd: &mut Command, label: &str) -> std::io::Result<Output> {
-    run_command_with_timeout(cmd, label, Duration::from_secs(3600)).map_err(|e| {
+    let timeout_secs = crate::config::get_effective_ipc_timeout_seconds();
+    run_command_with_timeout(cmd, label, Duration::from_secs(timeout_secs)).map_err(|e| {
         let kind = if e == GIT_CANCELLED {
             std::io::ErrorKind::Interrupted
         } else if e.contains("timed out") {
@@ -367,21 +396,28 @@ pub(crate) fn run_command_with_timeout(
     label: &str,
     timeout: Duration,
 ) -> Result<Output, String> {
+    run_command_with_timeout_opts(cmd, label, timeout, None)
+}
+
+/// Run `cmd` with a wall-clock timeout and optional generation-scoped cancellation.
+/// Pass `cancel_since = None` for mandatory cleanup steps (e.g. `git merge --abort`,
+/// `git checkout <orig_branch>`) so user cancellation never skips branch recovery.
+pub(crate) fn run_command_with_timeout_opts(
+    cmd: &mut Command,
+    label: &str,
+    timeout: Duration,
+    cancel_since: Option<(&Path, u64)>,
+) -> Result<Output, String> {
     let start = Instant::now();
     let args_for_log: Vec<String> = cmd
         .get_args()
         .map(|arg| mask_url_credentials(&arg.to_string_lossy()))
         .collect();
     let cwd = command_cwd_for_log(cmd);
-    let repo_key = {
-        let args: Vec<String> = cmd
-            .get_args()
-            .map(|arg| arg.to_string_lossy().into_owned())
-            .collect();
-        args.windows(2)
-            .find(|pair| pair[0] == "-C")
-            .map(|pair| normalize_path(&pair[1]))
-            .unwrap_or_else(|| normalize_path(&cwd))
+    let is_cancelled = || -> bool {
+        cancel_since
+            .map(|(repo_path, start_gen)| is_git_cancelled_since(repo_path, start_gen))
+            .unwrap_or(false)
     };
     log::info!(
         "[git:{}] starting: args={:?}, cwd='{}'",
@@ -390,7 +426,7 @@ pub(crate) fn run_command_with_timeout(
         cwd
     );
 
-    if git_cancel_requested(&repo_key) {
+    if is_cancelled() {
         return Err(GIT_CANCELLED.to_string());
     }
 
@@ -416,7 +452,7 @@ pub(crate) fn run_command_with_timeout(
     let deadline = start + timeout;
 
     loop {
-        if git_cancel_requested(&repo_key) {
+        if is_cancelled() {
             let _ = child.kill();
             let _ = child.wait();
             drop(stdout_reader);
@@ -431,7 +467,6 @@ pub(crate) fn run_command_with_timeout(
             );
             return Err(GIT_CANCELLED.to_string());
         }
-
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             let _ = child.kill();
@@ -516,9 +551,13 @@ pub(crate) fn run_git_command_with_timeout_secs(
     run_command_with_timeout(&mut cmd, "timeout", Duration::from_secs(timeout_secs))
 }
 
-/// Run a git command in `cwd` with the default `GIT_COMMAND_TIMEOUT_SECS` timeout.
+/// Run a git command in `cwd` using the configured system command timeout.
 pub(crate) fn run_git_command_with_timeout(args: &[&str], cwd: &str) -> Result<Output, String> {
-    run_git_command_with_timeout_secs(args, cwd, GIT_COMMAND_TIMEOUT_SECS)
+    run_git_command_with_timeout_secs(
+        args,
+        cwd,
+        crate::config::get_effective_ipc_timeout_seconds(),
+    )
 }
 
 /// Normalize path separators for the current platform.
@@ -1246,5 +1285,61 @@ mod tests {
         let missing_cwd = temp.path().join("missing").to_string_lossy().to_string();
         let err = run_git_command_with_timeout(&["--version"], &missing_cwd).unwrap_err();
         assert!(err.starts_with("Failed to spawn git command"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[serial]
+    #[test]
+    fn run_command_with_timeout_opts_cancels_by_generation_and_allows_cleanup() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let repo_path = temp.path().to_path_buf();
+        let start_gen = git_cancel_generation(&repo_path);
+
+        let cancel_target = repo_path.clone();
+        let cancel_thread = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(150));
+            request_git_cancel(&cancel_target);
+        });
+
+        let mut sleep_cmd = Command::new("sh");
+        sleep_cmd.args(["-c", "sleep 20"]);
+        let started = Instant::now();
+        let err = run_command_with_timeout_opts(
+            &mut sleep_cmd,
+            "cancel-test",
+            Duration::from_secs(15),
+            Some((&repo_path, start_gen)),
+        )
+        .unwrap_err();
+        cancel_thread.join().expect("cancel thread");
+
+        assert_eq!(err, GIT_CANCELLED);
+        assert!(started.elapsed() < Duration::from_secs(3));
+
+        // Uncancellable cleanup command still succeeds immediately after cancel.
+        let mut cleanup_cmd = Command::new("sh");
+        cleanup_cmd.args(["-c", "echo restored"]);
+        let cleanup_out = run_command_with_timeout_opts(
+            &mut cleanup_cmd,
+            "cleanup-test",
+            Duration::from_secs(5),
+            None,
+        )
+        .expect("uncancellable cleanup should succeed");
+        assert!(cleanup_out.status.success());
+
+        // A subsequent operation snapshotting the new generation is NOT affected by the old cancel.
+        let next_gen = git_cancel_generation(&repo_path);
+        assert!(next_gen > start_gen);
+        let mut next_cmd = Command::new("sh");
+        next_cmd.args(["-c", "echo next-ok"]);
+        let next_out = run_command_with_timeout_opts(
+            &mut next_cmd,
+            "next-op-test",
+            Duration::from_secs(5),
+            Some((&repo_path, next_gen)),
+        )
+        .expect("new generation should not be cancelled");
+        assert!(next_out.status.success());
     }
 }

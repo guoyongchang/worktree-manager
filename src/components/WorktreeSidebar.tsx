@@ -71,6 +71,8 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
   onToggleBatchArchiveModal,
   onBatchRestore,
   onBatchDelete,
+  onBatchBackgroundDelete,
+  backgroundDeleteState,
 }) => {
   const _isTauri = isTauri();
   const activeWorktrees = useMemo(() => worktrees.filter((worktree) => !worktree.is_archived), [worktrees]);
@@ -224,6 +226,8 @@ export const WorktreeSidebar: FC<WorktreeSidebarProps> = ({
       onToggleBatchArchiveModal={onToggleBatchArchiveModal}
       onBatchRestore={onBatchRestore}
       onBatchDelete={onBatchDelete}
+      onBatchBackgroundDelete={onBatchBackgroundDelete}
+      backgroundDeleteState={backgroundDeleteState}
     />
   );
 };

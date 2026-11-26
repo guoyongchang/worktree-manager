@@ -494,11 +494,18 @@ async fn proxy_http(
 /// `session_cancel_rx` is a per-session watch channel: when the owning tunnel session
 /// ends (disconnect or shutdown) it flips to `true`, so both bridge tasks terminate
 /// and release the local WebSocket connection instead of leaking across reconnects.
+fn redact_ws_path(path: &str) -> String {
+    match path.split_once('?') {
+        Some((base, _)) => format!("{}?***", base),
+        None => path.to_string(),
+    }
+}
+
 async fn handle_ws_open(
     local_port: u16,
     stream_id: String,
     path: String,
-    _headers: Vec<(String, String)>,
+    headers: Vec<(String, String)>,
     send_tx: mpsc::UnboundedSender<ClientMessage>,
     ws_streams: Arc<tokio::sync::Mutex<HashMap<String, mpsc::UnboundedSender<String>>>>,
     session_cancel_rx: tokio::sync::watch::Receiver<bool>,
@@ -508,7 +515,7 @@ async fn handle_ws_open(
         log::warn!(
             "[wms-tunnel] Rejected WS open with unsafe path: stream_id={}, path={}",
             stream_id,
-            path
+            redact_ws_path(&path)
         );
         let _ = send_tx.send(ClientMessage::WsError {
             stream_id,
@@ -521,10 +528,49 @@ async fn handle_ws_open(
     log::info!(
         "[wms-tunnel] Opening WS bridge: stream_id={}, path={}",
         stream_id,
-        path
+        redact_ws_path(&path)
     );
 
-    match tokio_tungstenite::connect_async(&url).await {
+    let mut ws_request =
+        match tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(&url) {
+            Ok(req) => req,
+            Err(e) => {
+                log::error!(
+                    "[wms-tunnel] Failed to build WS bridge request: stream_id={}, error={}",
+                    stream_id,
+                    e
+                );
+                let _ = send_tx.send(ClientMessage::WsError {
+                    stream_id,
+                    error: format!("Invalid WS request: {}", e),
+                });
+                return;
+            }
+        };
+    // Forward Origin and real-IP headers (if provided by the tunnel server) and always stamp
+    // TUNNEL_MARKER_HEADER so h_ws_upgrade enforces remote Origin policy & real-IP attribution.
+    for (name, value) in &headers {
+        let lower = name.to_ascii_lowercase();
+        if matches!(
+            lower.as_str(),
+            "origin" | "x-forwarded-for" | "x-real-ip" | "forwarded"
+        ) {
+            if let (Ok(hn), Ok(hv)) = (
+                tokio_tungstenite::tungstenite::http::header::HeaderName::from_bytes(
+                    name.as_bytes(),
+                ),
+                tokio_tungstenite::tungstenite::http::header::HeaderValue::from_str(value),
+            ) {
+                ws_request.headers_mut().insert(hn, hv);
+            }
+        }
+    }
+    ws_request.headers_mut().insert(
+        tokio_tungstenite::tungstenite::http::header::HeaderName::from_static(TUNNEL_MARKER_HEADER),
+        tokio_tungstenite::tungstenite::http::header::HeaderValue::from_static("1"),
+    );
+
+    match tokio_tungstenite::connect_async(ws_request).await {
         Ok((ws_stream, _)) => {
             log::info!("[wms-tunnel] WS bridge connected: stream_id={}", stream_id);
             let _ = send_tx.send(ClientMessage::WsOpened {
@@ -532,7 +578,6 @@ async fn handle_ws_open(
             });
 
             let (mut ws_sink, mut ws_source) = ws_stream.split();
-
             // Channel for frames from tunnel → local WS
             let (frame_tx, mut frame_rx) = mpsc::unbounded_channel::<String>();
 
